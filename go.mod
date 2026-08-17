@@ -2,7 +2,11 @@ module github.com/vm75/message-sync
 
 go 1.25.0
 
-require modernc.org/sqlite v1.54.0
+require (
+	github.com/mdp/qrterminal/v3 v3.2.1
+	go.mau.fi/whatsmeow v0.0.0-20260816113502-fb386f152837
+	modernc.org/sqlite v1.54.0
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

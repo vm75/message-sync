@@ -12,6 +12,8 @@ import (
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/transport"
+	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 )
 
 const (
@@ -19,9 +21,18 @@ const (
 	SyncDBName     = "sync.db"
 )
 
-// Run is the MVP process supervisor. Phase 0 owns only sync.db; whatsapp.db is
-// reserved for whatsmeow protocol/session state in Phase 1 and is never queried
-// for application identity or routing state.
+type whatsappTransport interface {
+	Events() <-chan transport.Incoming
+	Close() error
+}
+
+var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+	return whatsapp.Open(ctx, opts)
+}
+
+// Run supervises application persistence and the Phase 1 WhatsApp transport.
+// Raw WhatsApp protocol identity and content must be normalized before crossing
+// the transport boundary. whatsapp.db remains an isolated protocol-state store.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if cfg == nil {
 		return errors.New("config is required")
@@ -31,7 +42,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	secret := strings.TrimSpace(os.Getenv("IDENTITY_SECRET"))
-	if _, err := identity.New([]byte(secret)); err != nil {
+	hasher, err := identity.New([]byte(secret))
+	if err != nil {
 		return err
 	}
 
@@ -49,14 +61,45 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer syncStore.Close()
 
+	groupJIDs := make(map[string]string, len(cfg.Groups))
+	for alias, group := range cfg.Groups {
+		groupJIDs[alias] = group.JID
+	}
+
+	wa, err := openWhatsApp(ctx, whatsapp.Options{
+		DatabasePath: filepath.Join(dataDir, WhatsAppDBName),
+		GroupJIDs:    groupJIDs,
+		Hasher:       hasher,
+		UsernameMode: cfg.Identity.UsernameMode,
+		Logger:       logger,
+		QROut:        os.Stdout,
+	})
+	if err != nil {
+		return fmt.Errorf("start WhatsApp transport: %w", err)
+	}
+	defer wa.Close()
+
 	logger.Info("message-sync started",
 		"groups", len(cfg.Groups),
 		"sync_sets", len(cfg.SyncSets),
 		"sync_schema", store.SchemaVersion,
+		"phase", 1,
 	)
-	logger.Info("WhatsApp transport is not enabled in phase 0")
 
-	<-ctx.Done()
-	logger.Info("message-sync stopping")
-	return nil
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("message-sync stopping")
+			return nil
+		case incoming, ok := <-wa.Events():
+			if !ok {
+				return errors.New("WhatsApp event stream closed")
+			}
+			logger.Info("WhatsApp message normalized",
+				"event", "message_received",
+				"endpoint", string(incoming.Endpoint),
+				"kind", incoming.Kind,
+			)
+		}
+	}
 }

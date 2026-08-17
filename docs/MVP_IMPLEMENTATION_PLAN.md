@@ -31,6 +31,8 @@ No `VERSION` file exists until these criteria pass.
 
 ## Phase 1 — whatsmeow session lifecycle and event normalization
 
+**Implementation status:** code complete on the MVP branch. The adapter owns `/data/whatsapp.db`, implements first-session QR pairing and persisted reconnect, disables whatsmeow plaintext decrypted-event/retry persistence, normalizes configured-group messages, ignores DMs/unconfigured groups, and suppresses whatsmeow/sqlstore protocol logging. Live pairing, restart, and real-message behavior remain environment-level acceptance checks.
+
 ### Deliverables
 
 - pin a tested `go.mau.fi/whatsmeow` commit/version;

@@ -4,7 +4,9 @@ Privacy-first message synchronization service implemented in Go. The MVP uses `t
 
 ## Status
 
-Phase 0 of the Go MVP is implemented: strict JSON config loading/defaults/validation, HMAC identity, the PII/PHI-free `sync.db` schema and repositories, privacy-safe structured error logging, and the rootless container baseline are in place. WhatsApp connectivity begins in Phase 1.
+Phase 0 of the Go MVP is implemented: strict JSON config loading/defaults/validation, HMAC identity, the PII/PHI-free `sync.db` schema and repositories, privacy-safe structured error logging, and the rootless container baseline are in place.
+
+Phase 1 code is implemented on the MVP branch: whatsmeow uses a dedicated `/data/whatsapp.db` session store, first login has terminal QR pairing, normal restarts reuse the stored linked-device session, plaintext decrypted-event/retry persistence is disabled, and configured group messages are normalized before they reach application code. Live pairing/restart validation remains an environment-level acceptance step.
 
 There is deliberately **no `VERSION` file** during MVP development. Builds report `development`. Adding or changing `VERSION` on `main` is the sole trigger for the container publication workflow.
 
@@ -33,7 +35,11 @@ Two SQLite databases have different trust boundaries:
 - `/data/whatsapp.db` is owned by `whatsmeow`. It contains linked-device/protocol state and may contain WhatsApp identifiers/contact metadata required by the protocol library. Treat it as sensitive protocol state.
 - `/data/sync.db` is owned by message-sync. It must remain PII/PHI-free and stores only canonical IDs, endpoint aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, timestamps, and recovery cursors.
 
-The WhatsApp adapter must explicitly keep whatsmeow decrypted-event and retry plaintext persistence disabled. Media is handled transiently and discarded after fan-out. Raw events, JIDs, phone numbers, push names, message bodies/captions, and media must never enter application logs.
+The WhatsApp adapter explicitly keeps whatsmeow decrypted-event and retry plaintext persistence disabled and supplies no whatsmeow/sqlstore logger, so raw protocol objects and identifiers do not enter application logs through the library. The adapter drops DMs and unconfigured groups before normalization. Application logs may contain only configured aliases, normalized event kinds, connection state, and stable error classes.
+
+The first-login QR is sensitive transient pairing material shown directly as terminal UI. Do not copy, persist, or upload the QR. Once pairing succeeds, the QR flow is not started on normal restarts.
+
+Media is handled transiently and discarded after fan-out. Raw events, JIDs, phone numbers, push names, message bodies/captions, and media must never enter application logs.
 
 `IDENTITY_SECRET` is required, stable across restarts, and supplied through environment/container secret handling rather than `config.json`.
 
@@ -58,12 +64,27 @@ For MVP, a group may belong to only one sync set.
 
 ## Rootless Podman
 
-Build and run:
+Build:
 
 ```sh
 podman build -f Containerfile -t message-sync:dev .
+```
+
+For first login, run attached so the QR can be scanned from the terminal:
+
+```sh
+podman compose run --rm message-sync run
+```
+
+In WhatsApp, open **Linked devices**, choose **Link a device**, and scan the terminal QR. After the pairing-complete message appears, stop the attached process with Ctrl-C. Do not capture or upload the QR output.
+
+Start normally after pairing:
+
+```sh
 podman compose up -d
 ```
+
+The persisted `/data/whatsapp.db` in the Compose volume reconnects the linked session without another QR on a normal restart.
 
 The runtime user is UID/GID 10001, all capabilities are dropped in Compose, `no-new-privileges` is enabled, the root filesystem is read-only, and only `/data` is writable persistently.
 
@@ -75,11 +96,11 @@ podman run --rm message-sync:dev version
 
 It prints `development` until the first MVP release.
 
-> Phase 0 validates configuration, derives the HMAC identity boundary, creates/migrates `/data/sync.db`, and stays running. It deliberately does not create `/data/whatsapp.db` or connect to WhatsApp until Phase 1.
+> Phase 1 receives and safely normalizes configured-group messages, but does not fan them out yet. Text synchronization starts in Phase 2.
 
 ## Local development
 
-Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer. `sync.db` uses the CGO-free `modernc.org/sqlite` driver so the runtime image can remain a static `CGO_ENABLED=0` build.
+Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer. `sync.db` and `whatsapp.db` use the CGO-free `modernc.org/sqlite` driver so the runtime image can remain a static `CGO_ENABLED=0` build.
 
 ```sh
 make fmt
@@ -94,21 +115,27 @@ Validate configuration:
 CONFIG_PATH=./config.json go run ./cmd/message-sync validate-config
 ```
 
-Run:
+Run attached for first pairing or local event inspection:
 
 ```sh
 IDENTITY_SECRET="$(openssl rand -hex 32)" CONFIG_PATH=./config.json DATA_DIR=./data go run ./cmd/message-sync run
 ```
 
+Use a stable `IDENTITY_SECRET` for any real deployment; the one-liner above is only convenient for isolated local development.
+
 ## Restart contract
 
-After MVP implementation:
+Phase 1 establishes the transport half of the restart contract:
 
 1. `whatsapp.db` restores the linked WhatsApp session; normal restarts do not require another QR scan.
-2. `sync.db` restores canonical message/copy and reaction state.
-3. recent offline/history events are replayed through the same router;
-4. persisted message-copy rows make fan-out idempotent so only missing destination copies are retried;
-5. mappings expire under the configured retention policy, after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
+2. configured group messages are normalized through the same safe adapter boundary after reconnect.
+
+Later MVP phases add the application-routing half:
+
+3. `sync.db` restores canonical message/copy and reaction state.
+4. recent offline/history events are replayed through the same router.
+5. persisted message-copy rows make fan-out idempotent so only missing destination copies are retried.
+6. mappings expire under the configured retention policy, after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
 
 The default planned mapping retention is 90 days.
 
