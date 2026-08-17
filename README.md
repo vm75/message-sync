@@ -6,7 +6,7 @@ Privacy-first message synchronization service implemented in Go. The MVP uses `t
 
 Phase 0 of the Go MVP is implemented: strict JSON config loading/defaults/validation, HMAC identity, the PII/PHI-free `sync.db` schema and repositories, privacy-safe structured error logging, and the rootless container baseline are in place.
 
-Phase 1 code is implemented on the MVP branch: whatsmeow uses a dedicated `/data/whatsapp.db` session store, first login has terminal QR pairing, normal restarts reuse the stored linked-device session, plaintext decrypted-event/retry persistence is disabled, and configured group messages are normalized before they reach application code. Live pairing/restart validation remains an environment-level acceptance step.
+Phase 1 is complete and acceptance-verified on the MVP branch: whatsmeow uses a dedicated `/data/whatsapp.db` session store, first login QR pairing works, normal restarts reuse the stored linked-device session without re-pairing, plaintext decrypted-event/retry persistence is disabled, configured group messages normalize to safe internal events, DMs/unconfigured groups are ignored, and live privacy checks confirm application logs and `sync.db` remain free of tested message/JID plaintext.
 
 There is deliberately **no `VERSION` file** during MVP development. Builds report `development`. Adding or changing `VERSION` on `main` is the sole trigger for the container publication workflow.
 
