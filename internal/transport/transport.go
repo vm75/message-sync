@@ -22,6 +22,7 @@ type Incoming struct {
 	Endpoint  EndpointID
 	RemoteID  string
 	Sender    Sender
+	FromSelf  bool
 	Kind      string
 	Text      string // transient only; never persist
 	ReplyTo   *MessageRef

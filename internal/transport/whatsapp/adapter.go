@@ -17,8 +17,10 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	_ "modernc.org/sqlite"
 )
@@ -38,6 +40,7 @@ type Adapter struct {
 	client     *whatsmeow.Client
 	container  *sqlstore.Container
 	normalizer *Normalizer
+	targets    map[transport.EndpointID]types.JID
 	events     chan transport.Incoming
 	logger     *slog.Logger
 	qrOut      io.Writer
@@ -61,6 +64,10 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err != nil {
 		return nil, err
 	}
+	targets, err := outgoingTargets(opts.GroupJIDs)
+	if err != nil {
+		return nil, err
+	}
 	container, device, err := openSessionStore(ctx, opts.DatabasePath)
 	if err != nil {
 		return nil, err
@@ -73,6 +80,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		client:     client,
 		container:  container,
 		normalizer: normalizer,
+		targets:    targets,
 		events:     make(chan transport.Incoming, eventBufferSize),
 		logger:     opts.Logger,
 		qrOut:      opts.QROut,
@@ -100,6 +108,32 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 
 func (a *Adapter) Events() <-chan transport.Incoming {
 	return a.events
+}
+
+func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	if a == nil || a.client == nil {
+		return transport.MessageRef{}, errors.New("WhatsApp transport is not initialized")
+	}
+	if outgoing.Kind != "text" || outgoing.Media != nil || outgoing.ReplyTo != nil {
+		return transport.MessageRef{}, errors.New("WhatsApp Phase 2 sender supports plain text only")
+	}
+	target, ok := a.targets[outgoing.Endpoint]
+	if !ok {
+		return transport.MessageRef{}, errors.New("unknown WhatsApp endpoint")
+	}
+	if outgoing.Text == "" {
+		return transport.MessageRef{}, errors.New("outgoing text is required")
+	}
+
+	text := outgoing.Text
+	response, err := a.client.SendMessage(ctx, target, &waE2E.Message{Conversation: &text})
+	if err != nil {
+		return transport.MessageRef{}, fmt.Errorf("send WhatsApp text: %w", err)
+	}
+	return transport.MessageRef{
+		Endpoint:        outgoing.Endpoint,
+		RemoteMessageID: string(response.ID),
+	}, nil
 }
 
 func (a *Adapter) Close() error {
@@ -162,6 +196,24 @@ func (a *Adapter) consumeQR(items <-chan whatsmeow.QRChannelItem) {
 			)
 		}
 	}
+}
+
+func outgoingTargets(groupJIDs map[string]string) (map[transport.EndpointID]types.JID, error) {
+	targets := make(map[transport.EndpointID]types.JID, len(groupJIDs))
+	seen := make(map[string]struct{}, len(groupJIDs))
+	for alias, rawJID := range groupJIDs {
+		jid, err := types.ParseJID(strings.TrimSpace(rawJID))
+		if err != nil || jid.Server != types.GroupServer || jid.User == "" {
+			return nil, fmt.Errorf("group %q has invalid WhatsApp group JID", alias)
+		}
+		jid = jid.ToNonAD()
+		if _, duplicate := seen[jid.String()]; duplicate {
+			return nil, fmt.Errorf("group %q duplicates a configured WhatsApp group", alias)
+		}
+		seen[jid.String()] = struct{}{}
+		targets[transport.EndpointID(alias)] = jid
+	}
+	return targets, nil
 }
 
 func disablePlaintextPersistence(client *whatsmeow.Client) {

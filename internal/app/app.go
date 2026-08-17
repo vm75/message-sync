@@ -11,6 +11,8 @@ import (
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/router"
+	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
@@ -23,6 +25,7 @@ const (
 
 type whatsappTransport interface {
 	Events() <-chan transport.Incoming
+	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
 	Close() error
 }
 
@@ -30,9 +33,8 @@ var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTra
 	return whatsapp.Open(ctx, opts)
 }
 
-// Run supervises application persistence and the Phase 1 WhatsApp transport.
-// Raw WhatsApp protocol identity and content must be normalized before crossing
-// the transport boundary. whatsapp.db remains an isolated protocol-state store.
+// Run supervises persistence, the WhatsApp adapter, and the single ordered
+// Phase 2 router worker. Message bodies and participant identity are transient.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if cfg == nil {
 		return errors.New("config is required")
@@ -79,11 +81,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer wa.Close()
 
+	mesh, err := router.New(cfg, syncStore, wa)
+	if err != nil {
+		return fmt.Errorf("create canonical router: %w", err)
+	}
+
 	logger.Info("message-sync started",
 		"groups", len(cfg.Groups),
 		"sync_sets", len(cfg.SyncSets),
 		"sync_schema", store.SchemaVersion,
-		"phase", 1,
+		"phase", 2,
 	)
 
 	for {
@@ -95,8 +102,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if !ok {
 				return errors.New("WhatsApp event stream closed")
 			}
-			logger.Info("WhatsApp message normalized",
-				"event", "message_received",
+			if err := mesh.Handle(ctx, incoming); err != nil {
+				safelog.Error(logger, "message routing failed", "route_message", err)
+				continue
+			}
+			logger.Info("WhatsApp message routed",
+				"event", "message_routed",
 				"endpoint", string(incoming.Endpoint),
 				"kind", incoming.Kind,
 			)
