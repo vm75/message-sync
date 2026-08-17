@@ -98,6 +98,8 @@ Replies/reactions remain coherent across a process restart without storing raw p
 
 ## Phase 5 — Edits, deletes and bounded offline recovery
 
+**Implementation status:** complete on the MVP branch. Incoming edit and revoke/delete events normalize to safe internal representations, propagate idempotently to destination copies, tombstone canonical messages to prevent resurrection during recovery/replay, and route history sync/recovery through normal router bounds with cursor updates.
+
 ### Deliverables
 
 - incoming whatsmeow edit detection;

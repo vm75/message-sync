@@ -80,7 +80,32 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	var replyTo *transport.MessageRef
 	var quotedText string
 
-	if kind == "reaction" {
+	if kind == "delete" {
+		protoMsg := evt.Message.GetProtocolMessage()
+		var targetID string
+		if protoMsg != nil && protoMsg.GetKey() != nil {
+			targetID = protoMsg.GetKey().GetID()
+		}
+		if targetID == "" {
+			return transport.Incoming{}, false
+		}
+		replyTo = &transport.MessageRef{
+			Endpoint:        endpoint,
+			RemoteMessageID: targetID,
+		}
+	} else if kind == "edit" {
+		var targetID string
+		if protoMsg := evt.Message.GetProtocolMessage(); protoMsg != nil && protoMsg.GetKey() != nil {
+			targetID = protoMsg.GetKey().GetID()
+		}
+		if targetID == "" {
+			targetID = string(evt.Info.ID)
+		}
+		replyTo = &transport.MessageRef{
+			Endpoint:        endpoint,
+			RemoteMessageID: targetID,
+		}
+	} else if kind == "reaction" {
 		reactionMsg := evt.Message.GetReactionMessage()
 		if reactionMsg != nil && reactionMsg.GetKey() != nil && reactionMsg.GetKey().GetID() != "" {
 			replyTo = &transport.MessageRef{
@@ -161,6 +186,24 @@ func normalizedPayload(msg *waE2E.Message) (kind, text string, dl whatsmeow.Down
 	}
 	if content := msg.GetStickerMessage(); content != nil {
 		return "sticker", "", content, content.GetFileLength()
+	}
+	if protoMsg := msg.GetProtocolMessage(); protoMsg != nil {
+		if protoMsg.GetType() == waE2E.ProtocolMessage_REVOKE {
+			return "delete", "", nil, 0
+		}
+		if protoMsg.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {
+			if edited := protoMsg.GetEditedMessage(); edited != nil {
+				_, t, d, l := normalizedPayload(edited)
+				return "edit", t, d, l
+			}
+			return "edit", "", nil, 0
+		}
+	}
+	if editedMsg := msg.GetEditedMessage(); editedMsg != nil {
+		if inner := editedMsg.GetMessage(); inner != nil {
+			_, t, d, l := normalizedPayload(inner)
+			return "edit", t, d, l
+		}
 	}
 	return "other", "", nil, 0
 }
