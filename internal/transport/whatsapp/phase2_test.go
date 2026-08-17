@@ -43,7 +43,7 @@ func TestNormalizerMarksBridgeOriginMessage(t *testing.T) {
 			ID: "bridge-copy-id",
 		},
 		Message: &waE2E.Message{Conversation: &body},
-	})
+	}, true, 100*1024*1024, nil)
 	if !ok {
 		t.Fatal("bridge-origin group message was not normalized")
 	}

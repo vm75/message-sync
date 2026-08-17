@@ -17,6 +17,7 @@ import (
 
 type sender interface {
 	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
+	React(context.Context, transport.Reaction) error
 }
 
 type copyKey struct {
@@ -73,7 +74,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 }
 
 func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error {
-	if incoming.Kind != "text" {
+	if incoming.Kind == "other" {
 		return nil
 	}
 	members, configured := r.routes[incoming.Endpoint]
@@ -82,6 +83,70 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	if strings.TrimSpace(incoming.RemoteID) == "" {
 		return errors.New("incoming remote message id is required")
+	}
+
+	if incoming.Kind == "reaction" {
+		if incoming.FromSelf {
+			return nil
+		}
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+			return errors.New("reaction target is required")
+		}
+		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // Target unknown
+			}
+			return fmt.Errorf("resolve reaction target: %w", err)
+		}
+
+		emoji := strings.TrimSpace(incoming.Text)
+		if emoji == "" {
+			err = r.store.DeleteReaction(ctx, targetCanonical, string(incoming.Endpoint), incoming.Sender.OpaqueID)
+		} else {
+			err = r.store.UpsertReaction(ctx, store.Reaction{
+				CanonicalID:      targetCanonical,
+				SourceEndpointID: string(incoming.Endpoint),
+				ActorHash:        incoming.Sender.OpaqueID,
+				Emoji:            emoji,
+				UpdatedAt:        incoming.Timestamp,
+			})
+		}
+		if err != nil {
+			return err
+		}
+
+		username := incoming.Sender.OpaqueID
+		if r.usernameMode == "push_name" {
+			if displayName := normalizeDisplayName(incoming.Sender.DisplayName); displayName != "" {
+				username = displayName
+			}
+		}
+		fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
+		if emoji != "" {
+			fallbackText = fmt.Sprintf("%s/%s reacted %s to a message", incoming.Endpoint, username, emoji)
+		}
+
+		for _, destination := range members {
+			if destination == incoming.Endpoint {
+				continue
+			}
+			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
+			if err != nil {
+				continue // Don't forward reaction if target copy missing
+			}
+
+			if err := r.sender.React(ctx, transport.Reaction{
+				Endpoint:       destination,
+				TargetRemoteID: targetCopy.RemoteMessageID,
+				IsTargetFromMe: targetCopy.FromSelf,
+				Emoji:          emoji,
+				FallbackText:   fallbackText,
+			}); err != nil {
+				return fmt.Errorf("send reaction copy: %w", err)
+			}
+		}
+		return nil
 	}
 
 	canonicalID, created, err := r.resolveCanonical(ctx, incoming)
@@ -94,6 +159,23 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	forwardedText, err := r.forwardedText(incoming)
 	if err != nil {
 		return err
+	}
+
+	var replyToCanonical string
+	if incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+		rc, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err == nil {
+			replyToCanonical = rc
+		}
+	}
+
+	var mediaBytes []byte
+	if incoming.MediaLoader != nil {
+		b, err := incoming.MediaLoader(ctx)
+		if err != nil {
+			return fmt.Errorf("load incoming media: %w", err)
+		}
+		mediaBytes = b
 	}
 
 	for _, destination := range members {
@@ -109,10 +191,42 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return fmt.Errorf("look up destination copy: %w", err)
 		}
 
+		var outgoingReplyTo *transport.MessageRef
+		if replyToCanonical != "" {
+			if targetCopy, err := r.store.MessageCopyForEndpoint(ctx, replyToCanonical, string(destination)); err == nil {
+				outgoingReplyTo = &transport.MessageRef{
+					Endpoint:        destination,
+					RemoteMessageID: targetCopy.RemoteMessageID,
+					IsTargetFromMe:  targetCopy.FromSelf,
+				}
+			}
+		}
+
+		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
+			_, err := r.sender.Send(ctx, transport.Outgoing{
+				Endpoint:   destination,
+				Kind:       "text",
+				Text:       forwardedText,
+				ReplyTo:    outgoingReplyTo,
+				QuotedText: incoming.QuotedText,
+			})
+			if err != nil {
+				return fmt.Errorf("send companion attribution: %w", err)
+			}
+		}
+
+		var outgoingText string
+		if incoming.Kind == "text" || incoming.Kind == "image" || incoming.Kind == "video" || incoming.Kind == "document" {
+			outgoingText = forwardedText
+		}
+
 		ref, err := r.sender.Send(ctx, transport.Outgoing{
-			Endpoint: destination,
-			Kind:     "text",
-			Text:     forwardedText,
+			Endpoint:   destination,
+			Kind:       incoming.Kind,
+			Text:       outgoingText,
+			MediaBytes: mediaBytes,
+			ReplyTo:    outgoingReplyTo,
+			QuotedText: incoming.QuotedText,
 		})
 		if err != nil {
 			return fmt.Errorf("send destination copy: %w", err)

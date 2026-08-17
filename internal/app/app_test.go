@@ -34,6 +34,10 @@ func (f *fakeWhatsAppTransport) Send(_ context.Context, outgoing transport.Outgo
 	}, nil
 }
 
+func (f *fakeWhatsAppTransport) React(ctx context.Context, r transport.Reaction) error {
+	return nil
+}
+
 func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)

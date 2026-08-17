@@ -38,6 +38,10 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 	return ref, nil
 }
 
+func (f *fakeSender) React(_ context.Context, r transport.Reaction) error {
+	return nil
+}
+
 func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 	ctx := context.Background()
 	r, _, fake := newTestRouter(t, "push_name")

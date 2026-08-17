@@ -1,12 +1,14 @@
 package whatsapp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
+	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -17,6 +19,8 @@ type Normalizer struct {
 	hasher       *identity.Hasher
 	usernameMode string
 }
+
+type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 
 func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode string) (*Normalizer, error) {
 	if hasher == nil {
@@ -41,7 +45,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 	return &Normalizer{endpoints: endpoints, hasher: hasher, usernameMode: usernameMode}, nil
 }
 
-func (n *Normalizer) NormalizeMessage(evt *events.Message) (transport.Incoming, bool) {
+func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader) (transport.Incoming, bool) {
 	if n == nil || evt == nil || evt.Message == nil || !evt.Info.IsGroup || evt.Info.Chat.Server != types.GroupServer {
 		return transport.Incoming{}, false
 	}
@@ -54,7 +58,64 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message) (transport.Incoming, 
 	if n.usernameMode == "push_name" {
 		displayName = strings.TrimSpace(evt.Info.PushName)
 	}
-	kind, text := normalizedPayload(evt.Message)
+	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)
+
+	if kind != "text" && kind != "other" && kind != "reaction" {
+		if !mediaEnabled {
+			return transport.Incoming{}, false
+		}
+		if fileLength > mediaMaxBytes {
+			// Skip oversized media
+			return transport.Incoming{}, false
+		}
+	}
+
+	var loader func(context.Context) ([]byte, error)
+	if downloadable != nil && downloader != nil {
+		loader = func(ctx context.Context) ([]byte, error) {
+			return downloader(ctx, downloadable)
+		}
+	}
+
+	var replyTo *transport.MessageRef
+	var quotedText string
+
+	if kind == "reaction" {
+		reactionMsg := evt.Message.GetReactionMessage()
+		if reactionMsg != nil && reactionMsg.GetKey() != nil && reactionMsg.GetKey().GetID() != "" {
+			replyTo = &transport.MessageRef{
+				Endpoint:        endpoint,
+				RemoteMessageID: reactionMsg.GetKey().GetID(),
+			}
+		}
+	} else {
+		// Look for standard replies
+		var contextInfo *waE2E.ContextInfo
+		if evt.Message.GetExtendedTextMessage() != nil {
+			contextInfo = evt.Message.GetExtendedTextMessage().GetContextInfo()
+		} else if evt.Message.GetImageMessage() != nil {
+			contextInfo = evt.Message.GetImageMessage().GetContextInfo()
+		} else if evt.Message.GetVideoMessage() != nil {
+			contextInfo = evt.Message.GetVideoMessage().GetContextInfo()
+		} else if evt.Message.GetDocumentMessage() != nil {
+			contextInfo = evt.Message.GetDocumentMessage().GetContextInfo()
+		} else if evt.Message.GetAudioMessage() != nil {
+			contextInfo = evt.Message.GetAudioMessage().GetContextInfo()
+		} else if evt.Message.GetStickerMessage() != nil {
+			contextInfo = evt.Message.GetStickerMessage().GetContextInfo()
+		}
+
+		if contextInfo != nil && contextInfo.GetStanzaID() != "" {
+			replyTo = &transport.MessageRef{
+				Endpoint:        endpoint,
+				RemoteMessageID: contextInfo.GetStanzaID(),
+			}
+			if qm := contextInfo.GetQuotedMessage(); qm != nil {
+				_, qText, _, _ := normalizedPayload(qm)
+				quotedText = qText
+			}
+		}
+	}
 
 	return transport.Incoming{
 		Endpoint: endpoint,
@@ -63,37 +124,43 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message) (transport.Incoming, 
 			DisplayName: displayName,
 			OpaqueID:    n.hasher.UserID(evt.Info.Sender.ToNonAD().String()),
 		},
-		FromSelf:  evt.Info.IsFromMe,
-		Kind:      kind,
-		Text:      text,
-		Timestamp: evt.Info.Timestamp,
+		FromSelf:    evt.Info.IsFromMe,
+		Kind:        kind,
+		Text:        text,
+		ReplyTo:     replyTo,
+		QuotedText:  quotedText,
+		Timestamp:   evt.Info.Timestamp,
+		MediaLoader: loader,
 	}, true
 }
 
-func normalizedPayload(msg *waE2E.Message) (kind, text string) {
+func normalizedPayload(msg *waE2E.Message) (kind, text string, dl whatsmeow.DownloadableMessage, length uint64) {
 	if msg == nil {
-		return "other", ""
+		return "other", "", nil, 0
 	}
 	if msg.Conversation != nil {
-		return "text", msg.GetConversation()
+		return "text", msg.GetConversation(), nil, 0
 	}
 	if content := msg.GetExtendedTextMessage(); content != nil {
-		return "text", content.GetText()
+		return "text", content.GetText(), nil, 0
+	}
+	if content := msg.GetReactionMessage(); content != nil {
+		return "reaction", content.GetText(), nil, 0
 	}
 	if content := msg.GetImageMessage(); content != nil {
-		return "image", content.GetCaption()
+		return "image", content.GetCaption(), content, content.GetFileLength()
 	}
 	if content := msg.GetVideoMessage(); content != nil {
-		return "video", content.GetCaption()
+		return "video", content.GetCaption(), content, content.GetFileLength()
 	}
 	if content := msg.GetDocumentMessage(); content != nil {
-		return "document", content.GetCaption()
+		return "document", content.GetCaption(), content, content.GetFileLength()
 	}
-	if msg.GetAudioMessage() != nil {
-		return "audio", ""
+	if content := msg.GetAudioMessage(); content != nil {
+		return "audio", "", content, content.GetFileLength()
 	}
-	if msg.GetStickerMessage() != nil {
-		return "sticker", ""
+	if content := msg.GetStickerMessage(); content != nil {
+		return "sticker", "", content, content.GetFileLength()
 	}
-	return "other", ""
+	return "other", "", nil, 0
 }
