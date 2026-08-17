@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 )
@@ -152,5 +153,100 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 		if !strings.Contains(string(databaseBytes), required) {
 			t.Fatalf("sync.db missing expected opaque routing value %q", required)
 		}
+	}
+}
+
+func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "123456789@g.us"},
+			"c1g2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: "push_name"},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+
+	// Pre-create sync.db with an expired canonical message (100 days old)
+	syncPath := filepath.Join(dataDir, SyncDBName)
+	preStore, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expiredTime := time.Now().UTC().AddDate(0, 0, -100)
+	if err := preStore.CreateCanonical(context.Background(), "expired-canonical", expiredTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := preStore.AddMessageCopy(context.Background(), store.MessageCopy{
+		CanonicalID:     "expired-canonical",
+		EndpointID:      "c1g1",
+		RemoteMessageID: "expired-remote-1",
+		CreatedAt:       expiredTime,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := preStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	originalOpen := openWhatsApp
+	defer func() { openWhatsApp = originalOpen }()
+	fake := &fakeWhatsAppTransport{events: make(chan transport.Incoming)}
+	openWhatsApp = func(_ context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+
+	var out bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&out, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, cfg, logger)
+	}()
+
+	// Wait briefly for startup retention prune and metrics logging
+	for i := 0; i < 50; i++ {
+		if strings.Contains(out.String(), "retention prune completed") && strings.Contains(out.String(), "storage metrics") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error on graceful shutdown: %v", err)
+	}
+
+	logged := out.String()
+	if !strings.Contains(logged, "retention prune completed") {
+		t.Fatalf("expected log to contain retention prune completed: %s", logged)
+	}
+	if !strings.Contains(logged, "storage metrics") {
+		t.Fatalf("expected log to contain storage metrics: %s", logged)
+	}
+	if !strings.Contains(logged, "message-sync stopping") {
+		t.Fatalf("expected log to contain message-sync stopping: %s", logged)
+	}
+
+	// Verify that the expired message was deleted from sync.db during startup prune
+	verifyStore, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verifyStore.Close()
+	metrics, err := verifyStore.Metrics(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metrics.CanonicalMessages != 0 || metrics.MessageCopies != 0 {
+		t.Fatalf("expected 0 canonical messages after startup prune, got %+v", metrics)
 	}
 }

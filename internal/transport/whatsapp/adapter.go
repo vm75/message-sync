@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/mdp/qrterminal/v3"
 	"github.com/vm75/message-sync/internal/identity"
@@ -126,6 +127,12 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		return transport.MessageRef{}, errors.New("unknown WhatsApp endpoint")
 	}
 
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+	}
+
 	var contextInfo *waE2E.ContextInfo
 	if outgoing.ReplyTo != nil {
 		if outgoing.ReplyTo.IsTargetFromMe {
@@ -197,6 +204,12 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 	target, ok := a.targets[r.Endpoint]
 	if !ok {
 		return errors.New("unknown WhatsApp endpoint")
+	}
+
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 	}
 
 	if r.IsTargetFromMe {
@@ -411,7 +424,12 @@ func openSessionStore(ctx context.Context, rawPath string) (*sqlstore.Container,
 		return nil, nil, fmt.Errorf("open WhatsApp database: %w", err)
 	}
 	db.SetMaxOpenConns(1)
-	for _, pragma := range []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000"} {
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA synchronous = NORMAL",
+	} {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {
 			_ = db.Close()
 			return nil, nil, fmt.Errorf("configure WhatsApp database: %w", err)

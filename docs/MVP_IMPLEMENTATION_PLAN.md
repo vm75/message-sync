@@ -115,6 +115,8 @@ Edits/deletes/recovery are idempotent across redelivery and restart, and deleted
 
 ## Phase 6 — Hardening and release readiness
 
+**Implementation status:** complete on the MVP branch. Configurable/default 90-day retention pruning in bounded batches, WAL pragmas and graceful shutdown checkpointing, bounded queues and operation timeouts, non-sensitive storage metrics logging, privacy audits, multi-platform container build configurations, and Compose validation are in place.
+
 ### Deliverables
 
 - configurable/default 90-day mapping retention;
