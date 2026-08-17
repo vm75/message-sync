@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
@@ -84,6 +85,24 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer wa.Close()
 
+	syncDBPath := filepath.Join(dataDir, SyncDBName)
+	if deleted, err := syncStore.PruneRetention(ctx, cfg.Storage.MessageRetentionDays, 1000); err != nil {
+		safelog.Error(logger, "initial retention prune failed", "retention_prune", err)
+	} else if deleted > 0 {
+		logger.Info("retention prune completed", "deleted_messages", deleted)
+	}
+
+	if metrics, err := syncStore.Metrics(ctx, syncDBPath); err != nil {
+		safelog.Error(logger, "fetch storage metrics failed", "storage_metrics", err)
+	} else {
+		logger.Info("storage metrics",
+			"canonical_messages", metrics.CanonicalMessages,
+			"message_copies", metrics.MessageCopies,
+			"reactions", metrics.Reactions,
+			"sync_db_bytes", metrics.DatabaseSizeBytes,
+		)
+	}
+
 	mesh, err := router.New(cfg, syncStore, wa)
 	if err != nil {
 		return fmt.Errorf("create canonical router: %w", err)
@@ -93,14 +112,30 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		"groups", len(cfg.Groups),
 		"sync_sets", len(cfg.SyncSets),
 		"sync_schema", store.SchemaVersion,
-		"phase", 2,
 	)
+
+	pruneTicker := time.NewTicker(24 * time.Hour)
+	defer pruneTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.Info("message-sync stopping")
 			return nil
+		case <-pruneTicker.C:
+			if deleted, err := syncStore.PruneRetention(ctx, cfg.Storage.MessageRetentionDays, 1000); err != nil {
+				safelog.Error(logger, "periodic retention prune failed", "retention_prune", err)
+			} else if deleted > 0 {
+				logger.Info("retention prune completed", "deleted_messages", deleted)
+			}
+			if metrics, err := syncStore.Metrics(ctx, syncDBPath); err == nil {
+				logger.Info("storage metrics",
+					"canonical_messages", metrics.CanonicalMessages,
+					"message_copies", metrics.MessageCopies,
+					"reactions", metrics.Reactions,
+					"sync_db_bytes", metrics.DatabaseSizeBytes,
+				)
+			}
 		case incoming, ok := <-wa.Events():
 			if !ok {
 				return errors.New("WhatsApp event stream closed")

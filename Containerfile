@@ -1,12 +1,17 @@
-FROM docker.io/library/golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26-alpine AS build
 WORKDIR /src
 
-COPY go.mod ./
-RUN go mod download
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 COPY . .
 
+ARG TARGETOS
+ARG TARGETARCH
 ARG VERSION=development
-RUN CGO_ENABLED=0 go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -trimpath \
     -ldflags "-s -w -X github.com/vm75/message-sync/internal/version.Build=${VERSION}" \
     -o /out/message-sync ./cmd/message-sync

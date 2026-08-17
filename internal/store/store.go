@@ -52,6 +52,13 @@ type RecoveryCursor struct {
 	UpdatedAt        time.Time
 }
 
+type StorageMetrics struct {
+	CanonicalMessages int64
+	MessageCopies     int64
+	Reactions         int64
+	DatabaseSizeBytes int64
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -67,7 +74,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 
-	for _, pragma := range []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000"} {
+	for _, pragma := range []string{
+		"PRAGMA foreign_keys = ON",
+		"PRAGMA busy_timeout = 5000",
+		"PRAGMA journal_mode = WAL",
+		"PRAGMA synchronous = NORMAL",
+	} {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("configure sync database: %w", err)
@@ -127,7 +139,82 @@ func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	_, _ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	_, _ = s.db.Exec("PRAGMA optimize")
 	return s.db.Close()
+}
+
+// PruneOlderThan deletes canonical messages created before the given cutoff timestamp in bounded batches.
+// Cascades to associated message_copies and reactions.
+func (s *Store) PruneOlderThan(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("sync store is required")
+	}
+	if batchSize <= 0 {
+		batchSize = 1000
+	}
+	cutoffMillis := unixMillis(cutoff)
+	var totalDeleted int64
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return totalDeleted, err
+		}
+
+		res, err := s.db.ExecContext(ctx, `
+			DELETE FROM canonical_messages
+			WHERE canonical_id IN (
+				SELECT canonical_id FROM canonical_messages
+				WHERE created_at < ?
+				ORDER BY created_at ASC
+				LIMIT ?
+			)`, cutoffMillis, batchSize)
+		if err != nil {
+			return totalDeleted, wrapDB("prune retention", err)
+		}
+
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return totalDeleted, fmt.Errorf("prune retention rows affected: %w", err)
+		}
+		totalDeleted += affected
+		if affected < int64(batchSize) {
+			break
+		}
+	}
+	return totalDeleted, nil
+}
+
+// PruneRetention deletes canonical messages older than retentionDays.
+func (s *Store) PruneRetention(ctx context.Context, retentionDays int, batchSize int) (int64, error) {
+	if retentionDays <= 0 {
+		return 0, errors.New("retention days must be positive")
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+	return s.PruneOlderThan(ctx, cutoff, batchSize)
+}
+
+// Metrics computes non-sensitive storage size metrics.
+func (s *Store) Metrics(ctx context.Context, dbPath string) (StorageMetrics, error) {
+	if s == nil || s.db == nil {
+		return StorageMetrics{}, errors.New("sync store is required")
+	}
+	var metrics StorageMetrics
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM canonical_messages`).Scan(&metrics.CanonicalMessages); err != nil {
+		return StorageMetrics{}, wrapDB("count canonical messages", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM message_copies`).Scan(&metrics.MessageCopies); err != nil {
+		return StorageMetrics{}, wrapDB("count message copies", err)
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM reactions`).Scan(&metrics.Reactions); err != nil {
+		return StorageMetrics{}, wrapDB("count reactions", err)
+	}
+	if dbPath != "" {
+		if fi, err := os.Stat(dbPath); err == nil {
+			metrics.DatabaseSizeBytes = fi.Size()
+		}
+	}
+	return metrics, nil
 }
 
 func (s *Store) CreateCanonical(ctx context.Context, canonicalID string, createdAt time.Time) error {
