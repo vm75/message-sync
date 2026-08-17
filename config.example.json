@@ -1,0 +1,28 @@
+{
+  "groups": {
+    "c1g1": { "jid": "120363001111111111@g.us" },
+    "c1g2": { "jid": "120363002222222222@g.us" },
+    "c1g3": { "jid": "120363003333333333@g.us" }
+  },
+  "syncSets": [
+    {
+      "id": "community1",
+      "groups": ["c1g1", "c1g2", "c1g3"]
+    }
+  ],
+  "identity": {
+    "usernameMode": "push_name"
+  },
+  "media": {
+    "enabled": true,
+    "maxSizeMB": 100
+  },
+  "recovery": {
+    "enabled": true,
+    "maxAgeHours": 24,
+    "maxMessagesPerGroup": 200
+  },
+  "storage": {
+    "messageRetentionDays": 90
+  }
+}

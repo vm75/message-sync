@@ -1,0 +1,29 @@
+services:
+  message-sync:
+    image: message-sync:dev
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        VERSION: development
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    env_file:
+      - .env
+    environment:
+      CONFIG_PATH: /config/config.json
+      DATA_DIR: /data
+    volumes:
+      - ./config.json:/config/config.json:ro
+      - message_sync_data:/data
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  message_sync_data:

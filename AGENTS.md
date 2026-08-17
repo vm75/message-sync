@@ -1,0 +1,159 @@
+# AGENTS.md
+
+## Purpose
+
+`message-sync` is a privacy-first message synchronization service written in Go. The MVP synchronizes WhatsApp groups using `tulir/whatsmeow`; future transports such as Discord must plug into the same canonical router rather than becoming the application’s central identity.
+
+Use **KISS** and **YAGNI** aggressively. Prefer standard-library Go, explicit data flow, small packages, and simple SQLite transactions. Do not port legacy functionality merely because it existed before.
+
+## Read order
+
+Keep context lean. Read only what the current task requires:
+
+1. `README.md` for product scope and commands.
+2. `ARCHITECTURE.md` for invariants and data flow.
+3. `docs/MVP_IMPLEMENTATION_PLAN.md` for phase boundaries.
+4. The package(s) being changed and their tests.
+5. `docs/POST_MVP.md` only for deferred functionality.
+
+The previous implementation in `vm75/whatsappdiscordsync` may be consulted as a behavioral reference for a specific feature. Do not copy its architecture wholesale.
+
+## Non-negotiable privacy invariants
+
+Application persistence (`sync.db`) and application logs must contain **no PII/PHI**.
+
+Never persist or log:
+
+- participant phone numbers;
+- participant WhatsApp JIDs/LIDs;
+- push names, contact names, profile names, or designations;
+- message bodies, quoted text, captions, polls, contact cards, or location payloads;
+- media bytes, thumbnails, filenames that may contain personal information, or external media URLs;
+- raw WhatsApp/whatsmeow event objects;
+- `IDENTITY_SECRET` or any credential/key material.
+
+Allowed in `sync.db`:
+
+- random canonical message IDs;
+- configured endpoint/group aliases;
+- opaque remote message IDs;
+- HMAC-derived actor IDs;
+- emoji values needed for reaction state;
+- non-content timestamps and recovery cursors.
+
+`whatsapp.db` is a separate sensitive protocol-state exception owned by whatsmeow. Do not query it for application features. Keep whatsmeow decrypted-event and retry plaintext persistence disabled. Never expose `whatsapp.db` through an API or admin UI.
+
+If a proposed feature cannot satisfy these rules, design it as an explicit optional PII subsystem rather than weakening the core.
+
+## Architecture rules
+
+- The canonical router owns cross-endpoint synchronization semantics.
+- Transport adapters own platform protocol details.
+- MVP implements only the WhatsApp adapter.
+- Never use a Discord or WhatsApp message ID as the global canonical ID.
+- `message_copies` must make fan-out retryable and idempotent.
+- Process ingress deterministically; start with one router worker.
+- Download media only long enough to forward it. Do not add media persistence for convenience.
+- Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
+- Configuration is JSON. Secrets come from environment variables or secret mounts, never JSON.
+
+## SQLite rules
+
+Use two databases:
+
+- `/data/whatsapp.db`: whatsmeow protocol/session store.
+- `/data/sync.db`: application routing state.
+
+For `sync.db`:
+
+- enable foreign keys;
+- use committed migrations;
+- use transactions for canonical message + copy updates;
+- use uniqueness constraints to make duplicate delivery harmless;
+- enforce retention in batches;
+- do not store raw transport identity to simplify rare features.
+
+## Go style
+
+- Keep packages small and responsibility-oriented.
+- Prefer interfaces only at real boundaries.
+- Pass `context.Context` through blocking/network/database operations.
+- Wrap errors with useful operation context but never sensitive values.
+- Use `log/slog` with explicit safe fields; never log complete protocol structs.
+- Make ownership/lifetime of large media buffers obvious.
+- Validate inputs at config and transport boundaries.
+- Prefer table-driven tests when they improve clarity.
+
+## Testing
+
+Every feature must add tests for its invariants. As implementation lands, cover at least:
+
+- JSON config validation;
+- HMAC stability and non-disclosure;
+- SQLite migrations and uniqueness constraints;
+- canonical lookup in both directions;
+- duplicate/loop prevention;
+- partial fan-out followed by restart/retry;
+- reply mapping and fallback behavior;
+- reaction add/remove and actor separation;
+- edit/delete propagation;
+- media size limits and absence of persistent media;
+- offline recovery bounds;
+- PII-safe logging where feasible.
+
+Run before completing changes:
+
+```sh
+make fmt
+make test
+make vet
+```
+
+For container/runtime changes also run:
+
+```sh
+podman build -f Containerfile -t message-sync:dev .
+podman compose config
+```
+
+## Rootless/container rules
+
+The runtime container must:
+
+- run as a non-root user;
+- work with rootless Podman;
+- use `/data` as its only persistent writable location;
+- use a read-only root filesystem in Compose;
+- require no privileged mode, host networking, host PID namespace, or extra Linux capabilities;
+- use `Containerfile`, `.containerignore`, and `compose.yml`;
+- avoid runtime-specific behavior unless isolated and documented.
+
+## Version/release rules
+
+**Do not create `VERSION` until the MVP is complete and ready to publish.**
+
+`.github/workflows/release-images.yml` must trigger only when `VERSION` changes on `main`. Normal development builds identify as `development`. Release builds inject `VERSION` with linker flags.
+
+Do not add image-publishing triggers for ordinary pushes, pull requests, tags, schedules, or manual dispatch unless the project owner explicitly changes this policy.
+
+## Scope discipline
+
+MVP scope is defined in `README.md` and `docs/MVP_IMPLEMENTATION_PLAN.md`. Deferred features are recorded in `docs/POST_MVP.md`.
+
+For a post-MVP feature:
+
+1. state whether it changes the privacy model;
+2. keep optional integrations behind narrow interfaces;
+3. avoid adding cloud/web dependencies merely because the previous implementation used them;
+4. extend the canonical transport model instead of special-casing a platform.
+
+## Documentation maintenance
+
+At the end of every feature add/delete/modify:
+
+- update `README.md` for user-visible behavior/configuration/deployment changes;
+- update `ARCHITECTURE.md` for data flow/schema/privacy/component changes;
+- update `AGENTS.md` when contributor guidance or invariants change;
+- update the relevant implementation-plan/post-MVP document when scope or phase status changes.
+
+Keep context and docs lean; avoid duplicating large authoritative sections.
