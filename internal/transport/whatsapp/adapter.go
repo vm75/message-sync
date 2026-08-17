@@ -30,29 +30,35 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
-	DatabasePath  string
-	GroupJIDs     map[string]string
-	Hasher        *identity.Hasher
-	UsernameMode  string
-	Logger        *slog.Logger
-	QROut         io.Writer
-	MediaEnabled  bool
-	MediaMaxBytes uint64
+	DatabasePath     string
+	GroupJIDs        map[string]string
+	Hasher           *identity.Hasher
+	UsernameMode     string
+	Logger           *slog.Logger
+	QROut            io.Writer
+	MediaEnabled     bool
+	MediaMaxBytes    uint64
+	RecoveryEnabled  bool
+	RecoveryMaxAge   time.Duration
+	RecoveryMaxCount int
 }
 
 type Adapter struct {
-	client        *whatsmeow.Client
-	container     *sqlstore.Container
-	normalizer    *Normalizer
-	targets       map[transport.EndpointID]types.JID
-	events        chan transport.Incoming
-	logger        *slog.Logger
-	qrOut         io.Writer
-	qrCancel      context.CancelFunc
-	closeOnce     sync.Once
-	closeErr      error
-	mediaEnabled  bool
-	mediaMaxBytes uint64
+	client           *whatsmeow.Client
+	container        *sqlstore.Container
+	normalizer       *Normalizer
+	targets          map[transport.EndpointID]types.JID
+	events           chan transport.Incoming
+	logger           *slog.Logger
+	qrOut            io.Writer
+	qrCancel         context.CancelFunc
+	closeOnce        sync.Once
+	closeErr         error
+	mediaEnabled     bool
+	mediaMaxBytes    uint64
+	recoveryEnabled  bool
+	recoveryMaxAge   time.Duration
+	recoveryMaxCount int
 }
 
 func Open(ctx context.Context, opts Options) (*Adapter, error) {
@@ -83,15 +89,18 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	disablePlaintextPersistence(client)
 
 	adapter := &Adapter{
-		client:        client,
-		container:     container,
-		normalizer:    normalizer,
-		targets:       targets,
-		events:        make(chan transport.Incoming, eventBufferSize),
-		logger:        opts.Logger,
-		qrOut:         opts.QROut,
-		mediaEnabled:  opts.MediaEnabled,
-		mediaMaxBytes: opts.MediaMaxBytes,
+		client:           client,
+		container:        container,
+		normalizer:       normalizer,
+		targets:          targets,
+		events:           make(chan transport.Incoming, eventBufferSize),
+		logger:           opts.Logger,
+		qrOut:            opts.QROut,
+		mediaEnabled:     opts.MediaEnabled,
+		mediaMaxBytes:    opts.MediaMaxBytes,
+		recoveryEnabled:  opts.RecoveryEnabled,
+		recoveryMaxAge:   opts.RecoveryMaxAge,
+		recoveryMaxCount: opts.RecoveryMaxCount,
 	}
 	client.AddEventHandler(adapter.handleEvent)
 
@@ -231,11 +240,50 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 }
 
 func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
-	return errors.New("WhatsApp edit not implemented yet")
+	if a == nil || a.client == nil {
+		return errors.New("WhatsApp transport is not initialized")
+	}
+	target, ok := a.targets[ref.Endpoint]
+	if !ok {
+		return errors.New("unknown WhatsApp endpoint")
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	editContent := &waE2E.Message{
+		Conversation: proto.String(text),
+	}
+	editMsg := a.client.BuildEdit(target, types.MessageID(ref.RemoteMessageID), editContent)
+	_, err := a.client.SendMessage(ctx, target, editMsg)
+	if err != nil {
+		return fmt.Errorf("send WhatsApp edit: %w", err)
+	}
+	return nil
 }
 
 func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
-	return errors.New("WhatsApp delete not implemented yet")
+	if a == nil || a.client == nil {
+		return errors.New("WhatsApp transport is not initialized")
+	}
+	target, ok := a.targets[ref.Endpoint]
+	if !ok {
+		return errors.New("unknown WhatsApp endpoint")
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
+
+	revokeMsg := a.client.BuildRevoke(target, types.EmptyJID, types.MessageID(ref.RemoteMessageID))
+	_, err := a.client.SendMessage(ctx, target, revokeMsg)
+	if err != nil {
+		return fmt.Errorf("send WhatsApp delete: %w", err)
+	}
+	return nil
 }
 
 func getMediaType(kind string) (whatsmeow.MediaType, error) {
@@ -346,6 +394,9 @@ func (a *Adapter) Close() error {
 func (a *Adapter) handleEvent(raw any) {
 	switch evt := raw.(type) {
 	case *events.Message:
+		if a.recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > a.recoveryMaxAge {
+			return
+		}
 		incoming, ok := a.normalizer.NormalizeMessage(evt, a.mediaEnabled, a.mediaMaxBytes, a.client.Download)
 		if !ok {
 			return
@@ -358,6 +409,51 @@ func (a *Adapter) handleEvent(raw any) {
 				"endpoint", string(incoming.Endpoint),
 				"kind", incoming.Kind,
 			)
+		}
+	case *events.HistorySync:
+		if !a.recoveryEnabled || evt.Data == nil {
+			return
+		}
+		for _, conv := range evt.Data.GetConversations() {
+			chatJID, err := types.ParseJID(conv.GetID())
+			if err != nil || chatJID.Server != types.GroupServer {
+				continue
+			}
+			chatJID = chatJID.ToNonAD()
+			if _, ok := a.normalizer.endpoints[chatJID.String()]; !ok {
+				continue
+			}
+			count := 0
+			for _, historyMsg := range conv.GetMessages() {
+				if a.recoveryMaxCount > 0 && count >= a.recoveryMaxCount {
+					break
+				}
+				webMsg := historyMsg.GetMessage()
+				if webMsg == nil {
+					continue
+				}
+				parsed, err := a.client.ParseWebMessage(chatJID, webMsg)
+				if err != nil || parsed == nil {
+					continue
+				}
+				if a.recoveryMaxAge > 0 && !parsed.Info.Timestamp.IsZero() && time.Since(parsed.Info.Timestamp) > a.recoveryMaxAge {
+					continue
+				}
+				incoming, ok := a.normalizer.NormalizeMessage(parsed, a.mediaEnabled, a.mediaMaxBytes, a.client.Download)
+				if !ok {
+					continue
+				}
+				select {
+				case a.events <- incoming:
+					count++
+				default:
+					a.logger.Warn("WhatsApp ingress queue full",
+						"event", "message_dropped",
+						"endpoint", string(incoming.Endpoint),
+						"kind", incoming.Kind,
+					)
+				}
+			}
 		}
 	case *events.Connected:
 		a.logger.Info("WhatsApp connected", "event", "whatsapp_connected")

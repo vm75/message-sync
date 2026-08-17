@@ -21,8 +21,13 @@ type sentMessage struct {
 }
 
 type fakeSender struct {
-	sent []sentMessage
-	next map[transport.EndpointID]int
+	sent   []sentMessage
+	edited []struct {
+		ref  transport.MessageRef
+		text string
+	}
+	deleted []transport.MessageRef
+	next    map[transport.EndpointID]int
 }
 
 func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
@@ -39,6 +44,19 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 }
 
 func (f *fakeSender) React(_ context.Context, r transport.Reaction) error {
+	return nil
+}
+
+func (f *fakeSender) Edit(_ context.Context, ref transport.MessageRef, text string) error {
+	f.edited = append(f.edited, struct {
+		ref  transport.MessageRef
+		text string
+	}{ref: ref, text: text})
+	return nil
+}
+
+func (f *fakeSender) Delete(_ context.Context, ref transport.MessageRef) error {
+	f.deleted = append(f.deleted, ref)
 	return nil
 }
 
@@ -209,6 +227,144 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 	}
 	if len(second.sent) != 0 {
 		t.Fatalf("restart duplicated destination copies: %#v", second.sent)
+	}
+}
+
+func TestEditPropagationToDestinationCopies(t *testing.T) {
+	ctx := context.Background()
+	r, syncStore, fake := newTestRouter(t, "push_name")
+
+	// 1. Send original text message
+	orig := testIncoming("c1g1", "orig-msg-1")
+	orig.Text = "original message text"
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(fake.sent))
+	}
+
+	// 2. Send edit event
+	editEvt := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "edit-event-id",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "edit",
+		Text: "edited message text",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-1",
+		},
+		Timestamp: time.Unix(1_700_000_100, 0).UTC(),
+	}
+	if err := r.Handle(ctx, editEvt); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.edited) != 2 {
+		t.Fatalf("edited %d messages, want 2", len(fake.edited))
+	}
+	for _, ed := range fake.edited {
+		if !strings.Contains(ed.text, "edited message text") {
+			t.Fatalf("unexpected edit text: %s", ed.text)
+		}
+	}
+
+	// 3. Redelivery is idempotent
+	if err := r.Handle(ctx, editEvt); err != nil {
+		t.Fatal(err)
+	}
+
+	// 4. Verify recovery cursor updated
+	cursor, err := syncStore.RecoveryCursor(ctx, "c1g1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.RemoteMessageID != "edit-event-id" {
+		t.Fatalf("recovery cursor remoteID = %q, want edit-event-id", cursor.RemoteMessageID)
+	}
+}
+
+func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
+	ctx := context.Background()
+	r, syncStore, fake := newTestRouter(t, "push_name")
+
+	// 1. Send original text message
+	orig := testIncoming("c1g1", "orig-msg-2")
+	orig.Text = "will be deleted"
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(fake.sent))
+	}
+
+	// 2. Send delete event
+	delEvt := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "del-event-id",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "delete",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-2",
+		},
+		Timestamp: time.Unix(1_700_000_200, 0).UTC(),
+	}
+	if err := r.Handle(ctx, delEvt); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.deleted) != 2 {
+		t.Fatalf("deleted %d messages, want 2", len(fake.deleted))
+	}
+
+	// 3. Verify canonical message is tombstoned in syncStore
+	canonID, err := syncStore.CanonicalForRemote(ctx, "c1g1", "orig-msg-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	isTomb, err := syncStore.IsTombstoned(ctx, canonID)
+	if err != nil || !isTomb {
+		t.Fatalf("isTombstoned = %v, err = %v, want true", isTomb, err)
+	}
+
+	// 4. Attempting to edit a deleted message is ignored
+	editAfterDel := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "edit-after-del",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "edit",
+		Text: "attempt edit after delete",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-2",
+		},
+	}
+	fake.edited = nil
+	if err := r.Handle(ctx, editAfterDel); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.edited) != 0 {
+		t.Fatalf("edited %d messages after delete, want 0", len(fake.edited))
+	}
+
+	// 5. Replaying / recovering the deleted message does not resurrect it
+	sentBefore := len(fake.sent)
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != sentBefore {
+		t.Fatalf("deleted message was resurrected! sent count before=%d, after=%d", sentBefore, len(fake.sent))
 	}
 }
 

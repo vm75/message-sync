@@ -18,6 +18,8 @@ import (
 type sender interface {
 	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
 	React(context.Context, transport.Reaction) error
+	Edit(context.Context, transport.MessageRef, string) error
+	Delete(context.Context, transport.MessageRef) error
 }
 
 type copyKey struct {
@@ -85,6 +87,97 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		return errors.New("incoming remote message id is required")
 	}
 
+	if incoming.Kind == "delete" || incoming.Kind == "revoke" {
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+			return nil
+		}
+		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // Target unknown
+			}
+			return fmt.Errorf("resolve delete target: %w", err)
+		}
+
+		if err := r.store.TombstoneCanonical(ctx, targetCanonical, incoming.Timestamp); err != nil {
+			return fmt.Errorf("tombstone canonical: %w", err)
+		}
+
+		for _, destination := range members {
+			if destination == incoming.Endpoint {
+				continue
+			}
+			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
+			if err != nil {
+				continue
+			}
+			if err := r.sender.Delete(ctx, transport.MessageRef{
+				Endpoint:        destination,
+				RemoteMessageID: targetCopy.RemoteMessageID,
+				IsTargetFromMe:  targetCopy.FromSelf,
+			}); err != nil {
+				return fmt.Errorf("send destination delete: %w", err)
+			}
+		}
+		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+			EndpointID:       string(incoming.Endpoint),
+			RemoteMessageID:  incoming.RemoteID,
+			MessageTimestamp: incoming.Timestamp,
+			UpdatedAt:        time.Now().UTC(),
+		})
+		return nil
+	}
+
+	if incoming.Kind == "edit" {
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+			return nil
+		}
+		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // Target unknown
+			}
+			return fmt.Errorf("resolve edit target: %w", err)
+		}
+
+		isTombstoned, err := r.store.IsTombstoned(ctx, targetCanonical)
+		if err != nil {
+			return fmt.Errorf("check edit target tombstone: %w", err)
+		}
+		if isTombstoned {
+			return nil // Cannot edit a deleted message
+		}
+
+		forwardedText, err := r.forwardedText(incoming)
+		if err != nil {
+			return err
+		}
+
+		for _, destination := range members {
+			if destination == incoming.Endpoint {
+				continue
+			}
+			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
+			if err != nil {
+				continue
+			}
+			if err := r.sender.Edit(ctx, transport.MessageRef{
+				Endpoint:        destination,
+				RemoteMessageID: targetCopy.RemoteMessageID,
+				IsTargetFromMe:  targetCopy.FromSelf,
+			}, forwardedText); err != nil {
+				return fmt.Errorf("send destination edit: %w", err)
+			}
+		}
+		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+			EndpointID:       string(incoming.Endpoint),
+			RemoteMessageID:  incoming.RemoteID,
+			MessageTimestamp: incoming.Timestamp,
+			UpdatedAt:        time.Now().UTC(),
+		})
+		return nil
+	}
+
 	if incoming.Kind == "reaction" {
 		if incoming.FromSelf {
 			return nil
@@ -98,6 +191,14 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				return nil // Target unknown
 			}
 			return fmt.Errorf("resolve reaction target: %w", err)
+		}
+
+		isTombstoned, err := r.store.IsTombstoned(ctx, targetCanonical)
+		if err != nil {
+			return fmt.Errorf("check reaction target tombstone: %w", err)
+		}
+		if isTombstoned {
+			return nil
 		}
 
 		emoji := strings.TrimSpace(incoming.Text)
@@ -146,12 +247,25 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				return fmt.Errorf("send reaction copy: %w", err)
 			}
 		}
+		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+			EndpointID:       string(incoming.Endpoint),
+			RemoteMessageID:  incoming.RemoteID,
+			MessageTimestamp: incoming.Timestamp,
+			UpdatedAt:        time.Now().UTC(),
+		})
 		return nil
 	}
 
 	canonicalID, created, err := r.resolveCanonical(ctx, incoming)
 	if err != nil {
 		return err
+	}
+	isTombstoned, err := r.store.IsTombstoned(ctx, canonicalID)
+	if err != nil {
+		return fmt.Errorf("check canonical tombstone: %w", err)
+	}
+	if isTombstoned {
+		return nil
 	}
 	if incoming.FromSelf && !created {
 		return nil
@@ -250,6 +364,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 	}
+	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+		EndpointID:       string(incoming.Endpoint),
+		RemoteMessageID:  incoming.RemoteID,
+		MessageTimestamp: incoming.Timestamp,
+		UpdatedAt:        time.Now().UTC(),
+	})
 	return nil
 }
 

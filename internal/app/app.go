@@ -28,6 +28,8 @@ type whatsappTransport interface {
 	Events() <-chan transport.Incoming
 	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
 	React(context.Context, transport.Reaction) error
+	Edit(context.Context, transport.MessageRef, string) error
+	Delete(context.Context, transport.MessageRef) error
 	Close() error
 }
 
@@ -36,7 +38,7 @@ var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTra
 }
 
 // Run supervises persistence, the WhatsApp adapter, and the single ordered
-// Phase 2 router worker. Message bodies and participant identity are transient.
+// router worker. Message bodies and participant identity are transient.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if cfg == nil {
 		return errors.New("config is required")
@@ -71,14 +73,17 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	wa, err := openWhatsApp(ctx, whatsapp.Options{
-		DatabasePath:  filepath.Join(dataDir, WhatsAppDBName),
-		GroupJIDs:     groupJIDs,
-		Hasher:        hasher,
-		UsernameMode:  cfg.Identity.UsernameMode,
-		Logger:        logger,
-		QROut:         os.Stdout,
-		MediaEnabled:  cfg.Media.Enabled,
-		MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+		DatabasePath:     filepath.Join(dataDir, WhatsAppDBName),
+		GroupJIDs:        groupJIDs,
+		Hasher:           hasher,
+		UsernameMode:     cfg.Identity.UsernameMode,
+		Logger:           logger,
+		QROut:            os.Stdout,
+		MediaEnabled:     cfg.Media.Enabled,
+		MediaMaxBytes:    uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+		RecoveryEnabled:  cfg.Recovery.Enabled,
+		RecoveryMaxAge:   time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour,
+		RecoveryMaxCount: cfg.Recovery.MaxMessagesPerGroup,
 	})
 	if err != nil {
 		return fmt.Errorf("start WhatsApp transport: %w", err)

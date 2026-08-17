@@ -242,6 +242,18 @@ func (s *Store) TombstoneCanonical(ctx context.Context, canonicalID string, at t
 	return requireRow("tombstone canonical message", res)
 }
 
+func (s *Store) IsTombstoned(ctx context.Context, canonicalID string) (bool, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return false, err
+	}
+	var tombstonedAt sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT tombstoned_at FROM canonical_messages WHERE canonical_id = ?`, canonicalID).Scan(&tombstonedAt)
+	if err != nil {
+		return false, wrapDB("check tombstone", err)
+	}
+	return tombstonedAt.Valid, nil
+}
+
 func (s *Store) AddMessageCopy(ctx context.Context, copy MessageCopy) error {
 	if err := validateCopy(copy); err != nil {
 		return err
