@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 var (
 	//go:embed schema.sql
@@ -34,6 +34,7 @@ type MessageCopy struct {
 	EndpointID      string
 	RemoteMessageID string
 	CreatedAt       time.Time
+	FromSelf        bool
 }
 
 type Reaction struct {
@@ -104,6 +105,15 @@ func migrate(ctx context.Context, db *sql.DB) error {
 	if err := tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
 		return fmt.Errorf("read sync schema version: %w", err)
 	}
+	if version == 1 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE message_copies ADD COLUMN from_self BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("migrate schema v1 to v2: add from_self: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v1 to v2: update version: %w", err)
+		}
+		version = 2
+	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)
 	}
@@ -150,8 +160,8 @@ func (s *Store) AddMessageCopy(ctx context.Context, copy MessageCopy) error {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO message_copies(canonical_id, endpoint_id, remote_message_id, created_at) VALUES (?, ?, ?, ?)`,
-		copy.CanonicalID, copy.EndpointID, copy.RemoteMessageID, unixMillis(copy.CreatedAt),
+		`INSERT INTO message_copies(canonical_id, endpoint_id, remote_message_id, created_at, from_self) VALUES (?, ?, ?, ?, ?)`,
+		copy.CanonicalID, copy.EndpointID, copy.RemoteMessageID, unixMillis(copy.CreatedAt), copy.FromSelf,
 	)
 	return wrapDB("add message copy", err)
 }
@@ -184,9 +194,9 @@ func (s *Store) MessageCopyForEndpoint(ctx context.Context, canonicalID, endpoin
 	var copy MessageCopy
 	var createdAt int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT canonical_id, endpoint_id, remote_message_id, created_at FROM message_copies WHERE canonical_id = ? AND endpoint_id = ?`,
+		`SELECT canonical_id, endpoint_id, remote_message_id, created_at, from_self FROM message_copies WHERE canonical_id = ? AND endpoint_id = ?`,
 		canonicalID, endpointID,
-	).Scan(&copy.CanonicalID, &copy.EndpointID, &copy.RemoteMessageID, &createdAt)
+	).Scan(&copy.CanonicalID, &copy.EndpointID, &copy.RemoteMessageID, &createdAt, &copy.FromSelf)
 	if err != nil {
 		return MessageCopy{}, wrapDB("find message copy", err)
 	}

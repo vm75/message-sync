@@ -53,8 +53,8 @@ func (s *Store) ResolveOrCreateCanonical(ctx context.Context, candidateCanonical
 		return "", false, fmt.Errorf("create canonical message: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO message_copies(canonical_id, endpoint_id, remote_message_id, created_at) VALUES (?, ?, ?, ?)`,
-		candidateCanonicalID, source.EndpointID, source.RemoteMessageID, unixMillis(createdAt),
+		`INSERT INTO message_copies(canonical_id, endpoint_id, remote_message_id, created_at, from_self) VALUES (?, ?, ?, ?, ?)`,
+		candidateCanonicalID, source.EndpointID, source.RemoteMessageID, unixMillis(createdAt), source.FromSelf,
 	); err != nil {
 		return "", false, fmt.Errorf("add source message copy: %w", err)
 	}

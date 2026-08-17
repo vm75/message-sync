@@ -26,6 +26,7 @@ const (
 type whatsappTransport interface {
 	Events() <-chan transport.Incoming
 	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
+	React(context.Context, transport.Reaction) error
 	Close() error
 }
 
@@ -69,12 +70,14 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	wa, err := openWhatsApp(ctx, whatsapp.Options{
-		DatabasePath: filepath.Join(dataDir, WhatsAppDBName),
-		GroupJIDs:    groupJIDs,
-		Hasher:       hasher,
-		UsernameMode: cfg.Identity.UsernameMode,
-		Logger:       logger,
-		QROut:        os.Stdout,
+		DatabasePath:  filepath.Join(dataDir, WhatsAppDBName),
+		GroupJIDs:     groupJIDs,
+		Hasher:        hasher,
+		UsernameMode:  cfg.Identity.UsernameMode,
+		Logger:        logger,
+		QROut:         os.Stdout,
+		MediaEnabled:  cfg.Media.Enabled,
+		MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 	})
 	if err != nil {
 		return fmt.Errorf("start WhatsApp transport: %w", err)

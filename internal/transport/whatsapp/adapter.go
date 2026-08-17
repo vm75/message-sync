@@ -22,31 +22,36 @@ import (
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 )
 
 const eventBufferSize = 128
 
 type Options struct {
-	DatabasePath string
-	GroupJIDs    map[string]string
-	Hasher       *identity.Hasher
-	UsernameMode string
-	Logger       *slog.Logger
-	QROut        io.Writer
+	DatabasePath  string
+	GroupJIDs     map[string]string
+	Hasher        *identity.Hasher
+	UsernameMode  string
+	Logger        *slog.Logger
+	QROut         io.Writer
+	MediaEnabled  bool
+	MediaMaxBytes uint64
 }
 
 type Adapter struct {
-	client     *whatsmeow.Client
-	container  *sqlstore.Container
-	normalizer *Normalizer
-	targets    map[transport.EndpointID]types.JID
-	events     chan transport.Incoming
-	logger     *slog.Logger
-	qrOut      io.Writer
-	qrCancel   context.CancelFunc
-	closeOnce  sync.Once
-	closeErr   error
+	client        *whatsmeow.Client
+	container     *sqlstore.Container
+	normalizer    *Normalizer
+	targets       map[transport.EndpointID]types.JID
+	events        chan transport.Incoming
+	logger        *slog.Logger
+	qrOut         io.Writer
+	qrCancel      context.CancelFunc
+	closeOnce     sync.Once
+	closeErr      error
+	mediaEnabled  bool
+	mediaMaxBytes uint64
 }
 
 func Open(ctx context.Context, opts Options) (*Adapter, error) {
@@ -77,13 +82,15 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	disablePlaintextPersistence(client)
 
 	adapter := &Adapter{
-		client:     client,
-		container:  container,
-		normalizer: normalizer,
-		targets:    targets,
-		events:     make(chan transport.Incoming, eventBufferSize),
-		logger:     opts.Logger,
-		qrOut:      opts.QROut,
+		client:        client,
+		container:     container,
+		normalizer:    normalizer,
+		targets:       targets,
+		events:        make(chan transport.Incoming, eventBufferSize),
+		logger:        opts.Logger,
+		qrOut:         opts.QROut,
+		mediaEnabled:  opts.MediaEnabled,
+		mediaMaxBytes: opts.MediaMaxBytes,
 	}
 	client.AddEventHandler(adapter.handleEvent)
 
@@ -114,26 +121,195 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if a == nil || a.client == nil {
 		return transport.MessageRef{}, errors.New("WhatsApp transport is not initialized")
 	}
-	if outgoing.Kind != "text" || outgoing.Media != nil || outgoing.ReplyTo != nil {
-		return transport.MessageRef{}, errors.New("WhatsApp Phase 2 sender supports plain text only")
-	}
 	target, ok := a.targets[outgoing.Endpoint]
 	if !ok {
 		return transport.MessageRef{}, errors.New("unknown WhatsApp endpoint")
 	}
-	if outgoing.Text == "" {
-		return transport.MessageRef{}, errors.New("outgoing text is required")
+
+	var contextInfo *waE2E.ContextInfo
+	if outgoing.ReplyTo != nil {
+		if outgoing.ReplyTo.IsTargetFromMe {
+			participant := a.client.Store.ID.ToNonAD().String()
+			contextInfo = &waE2E.ContextInfo{
+				StanzaID:    proto.String(outgoing.ReplyTo.RemoteMessageID),
+				Participant: proto.String(participant),
+			}
+		} else {
+			// Fallback: prepend quoted text
+			quote := strings.TrimSpace(outgoing.QuotedText)
+			if quote == "" {
+				quote = "message"
+			}
+			outgoing.Text = fmt.Sprintf("> %s\n\n%s", quote, outgoing.Text)
+		}
 	}
 
-	text := outgoing.Text
-	response, err := a.client.SendMessage(ctx, target, &waE2E.Message{Conversation: &text})
+	var msg waE2E.Message
+	if outgoing.Kind == "text" || outgoing.Kind == "other" {
+		if outgoing.Text == "" {
+			return transport.MessageRef{}, errors.New("outgoing text is required")
+		}
+		text := outgoing.Text
+		if contextInfo != nil {
+			msg.ExtendedTextMessage = &waE2E.ExtendedTextMessage{
+				Text:        &text,
+				ContextInfo: contextInfo,
+			}
+		} else {
+			msg.Conversation = &text
+		}
+	} else {
+		if !a.mediaEnabled {
+			return transport.MessageRef{}, errors.New("WhatsApp sender supports text only when media is disabled")
+		}
+		if len(outgoing.MediaBytes) == 0 {
+			return transport.MessageRef{}, errors.New("outgoing media bytes are required")
+		}
+		mediaType, err := getMediaType(outgoing.Kind)
+		if err != nil {
+			return transport.MessageRef{}, err
+		}
+
+		uploadResp, err := a.client.Upload(ctx, outgoing.MediaBytes, mediaType)
+		if err != nil {
+			return transport.MessageRef{}, fmt.Errorf("upload WhatsApp media: %w", err)
+		}
+
+		if err := populateMediaMessage(&msg, outgoing, uploadResp, contextInfo); err != nil {
+			return transport.MessageRef{}, err
+		}
+	}
+
+	response, err := a.client.SendMessage(ctx, target, &msg)
 	if err != nil {
-		return transport.MessageRef{}, fmt.Errorf("send WhatsApp text: %w", err)
+		return transport.MessageRef{}, fmt.Errorf("send WhatsApp %s: %w", outgoing.Kind, err)
 	}
 	return transport.MessageRef{
 		Endpoint:        outgoing.Endpoint,
 		RemoteMessageID: string(response.ID),
 	}, nil
+}
+
+func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
+	if a == nil || a.client == nil {
+		return errors.New("WhatsApp transport is not initialized")
+	}
+	target, ok := a.targets[r.Endpoint]
+	if !ok {
+		return errors.New("unknown WhatsApp endpoint")
+	}
+
+	if r.IsTargetFromMe {
+		msg := a.client.BuildReaction(target, a.client.Store.ID.ToNonAD(), r.TargetRemoteID, r.Emoji)
+		_, err := a.client.SendMessage(ctx, target, msg)
+		if err != nil {
+			return fmt.Errorf("send WhatsApp native reaction: %w", err)
+		}
+		return nil
+	}
+
+	if r.FallbackText != "" {
+		_, err := a.client.SendMessage(ctx, target, &waE2E.Message{Conversation: proto.String(r.FallbackText)})
+		if err != nil {
+			return fmt.Errorf("send WhatsApp reaction fallback: %w", err)
+		}
+	}
+	return nil
+}
+
+func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	return errors.New("WhatsApp edit not implemented yet")
+}
+
+func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
+	return errors.New("WhatsApp delete not implemented yet")
+}
+
+func getMediaType(kind string) (whatsmeow.MediaType, error) {
+	switch kind {
+	case "image", "sticker":
+		return whatsmeow.MediaImage, nil
+	case "video":
+		return whatsmeow.MediaVideo, nil
+	case "document":
+		return whatsmeow.MediaDocument, nil
+	case "audio":
+		return whatsmeow.MediaAudio, nil
+	default:
+		return "", fmt.Errorf("unsupported media kind: %s", kind)
+	}
+}
+
+func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploadResp whatsmeow.UploadResponse, contextInfo *waE2E.ContextInfo) error {
+	var caption *string
+	if outgoing.Text != "" {
+		caption = proto.String(outgoing.Text)
+	}
+
+	switch outgoing.Kind {
+	case "image":
+		msg.ImageMessage = &waE2E.ImageMessage{
+			Caption:       caption,
+			Mimetype:      proto.String("image/jpeg"), // Best-effort fallback; real mime depends on content, but whatsmeow often infers it internally or clients ignore it.
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			ContextInfo:   contextInfo,
+		}
+	case "video":
+		msg.VideoMessage = &waE2E.VideoMessage{
+			Caption:       caption,
+			Mimetype:      proto.String("video/mp4"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			ContextInfo:   contextInfo,
+		}
+	case "document":
+		msg.DocumentMessage = &waE2E.DocumentMessage{
+			Caption:       caption,
+			Mimetype:      proto.String("application/octet-stream"),
+			FileName:      proto.String("document"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			ContextInfo:   contextInfo,
+		}
+	case "audio":
+		msg.AudioMessage = &waE2E.AudioMessage{
+			Mimetype:      proto.String("audio/ogg; codecs=opus"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			ContextInfo:   contextInfo,
+		}
+	case "sticker":
+		msg.StickerMessage = &waE2E.StickerMessage{
+			Mimetype:      proto.String("image/webp"),
+			URL:           &uploadResp.URL,
+			DirectPath:    &uploadResp.DirectPath,
+			MediaKey:      uploadResp.MediaKey,
+			FileEncSHA256: uploadResp.FileEncSHA256,
+			FileSHA256:    uploadResp.FileSHA256,
+			FileLength:    &uploadResp.FileLength,
+			ContextInfo:   contextInfo,
+		}
+	default:
+		return fmt.Errorf("unsupported media population for kind: %s", outgoing.Kind)
+	}
+	return nil
 }
 
 func (a *Adapter) Close() error {
@@ -157,7 +333,7 @@ func (a *Adapter) Close() error {
 func (a *Adapter) handleEvent(raw any) {
 	switch evt := raw.(type) {
 	case *events.Message:
-		incoming, ok := a.normalizer.NormalizeMessage(evt)
+		incoming, ok := a.normalizer.NormalizeMessage(evt, a.mediaEnabled, a.mediaMaxBytes, a.client.Download)
 		if !ok {
 			return
 		}

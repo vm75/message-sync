@@ -39,7 +39,7 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 		Message: &waE2E.Message{Conversation: &body},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(evt)
+	incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil)
 	if !ok {
 		t.Fatal("configured group message was ignored")
 	}
@@ -86,7 +86,7 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}); ok {
+			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}, true, 100*1024*1024, nil); ok {
 				t.Fatalf("unexpected normalized event: %+v", got)
 			}
 		})
@@ -108,11 +108,11 @@ func TestHashModeDropsPushName(t *testing.T) {
 			MessageSource: types.MessageSource{
 				Chat: types.NewJID("123456789", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), IsGroup: true,
 			},
-			ID:       "id",
-			PushName: "Must Not Escape",
+			ID:       "hash-id",
+			PushName: "Should Be Dropped",
 		},
 		Message: &waE2E.Message{Conversation: &body},
-	})
+	}, true, 100*1024*1024, nil)
 	if !ok {
 		t.Fatal("message was ignored")
 	}

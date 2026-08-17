@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS message_copies (
     endpoint_id TEXT NOT NULL,
     remote_message_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
+    from_self BOOLEAN NOT NULL DEFAULT 0,
     PRIMARY KEY (endpoint_id, remote_message_id),
     UNIQUE (canonical_id, endpoint_id)
 );
@@ -36,4 +37,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '1');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '2');
