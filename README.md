@@ -4,7 +4,7 @@ Privacy-first message synchronization service implemented in Go. The MVP uses `t
 
 ## Status
 
-This repository contains the Go MVP scaffold and implementation plan. WhatsApp connectivity and SQLite repositories are delivered phase-by-phase through the MVP issues.
+Phase 0 of the Go MVP is implemented: strict JSON config loading/defaults/validation, HMAC identity, the PII/PHI-free `sync.db` schema and repositories, privacy-safe structured error logging, and the rootless container baseline are in place. WhatsApp connectivity begins in Phase 1.
 
 There is deliberately **no `VERSION` file** during MVP development. Builds report `development`. Adding or changing `VERSION` on `main` is the sole trigger for the container publication workflow.
 
@@ -47,6 +47,8 @@ openssl rand -hex 32
 
 Put the generated secret in `.env` as `IDENTITY_SECRET=...`, then edit `config.json` with your WhatsApp group JIDs and aliases.
 
+Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`. Do not use a phone number, JID, person name, or group subject as an alias. Every configured group must belong to exactly one MVP sync set.
+
 `identity.usernameMode` supports:
 
 - `push_name`: use transient `<alias>/<push name>` when available, with HMAC ID fallback;
@@ -73,11 +75,11 @@ podman run --rm message-sync:dev version
 
 It prints `development` until the first MVP release.
 
-> The foundation scaffold validates configuration and stays running. It does not connect to WhatsApp until the corresponding MVP phase is implemented.
+> Phase 0 validates configuration, derives the HMAC identity boundary, creates/migrates `/data/sync.db`, and stays running. It deliberately does not create `/data/whatsapp.db` or connect to WhatsApp until Phase 1.
 
 ## Local development
 
-Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer.
+Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer. `sync.db` uses the CGO-free `modernc.org/sqlite` driver so the runtime image can remain a static `CGO_ENABLED=0` build.
 
 ```sh
 make fmt

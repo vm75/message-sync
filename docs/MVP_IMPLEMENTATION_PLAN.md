@@ -10,6 +10,8 @@ No `VERSION` file exists until these criteria pass.
 
 ## Phase 0 — Foundation, privacy boundaries, SQLite application store
 
+**Implementation status:** code complete on the MVP branch. The repository now has strict config validation, HMAC identity, `sync.db` migration/repositories, privacy-safe error logging, startup integration, and privacy/uniqueness tests. Rootless Podman commands remain part of environment-level validation.
+
 ### Deliverables
 
 - Go package layout and commands.

@@ -10,6 +10,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/app"
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/version"
 )
 
@@ -22,7 +23,7 @@ func main() {
 		case "validate-config":
 			cfg, err := config.Load(config.PathFromEnv())
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "invalid configuration: %v\n", err)
+				fmt.Fprintln(os.Stderr, "invalid configuration")
 				os.Exit(1)
 			}
 			fmt.Printf("configuration valid: %d groups, %d sync sets\n", len(cfg.Groups), len(cfg.SyncSets))
@@ -35,18 +36,18 @@ func main() {
 		}
 	}
 
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	cfg, err := config.Load(config.PathFromEnv())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "load configuration: %v\n", err)
+		safelog.Error(logger, "configuration load failed", "config_load", err)
 		os.Exit(1)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := app.Run(ctx, cfg, logger); err != nil {
-		logger.Error("service stopped", "error", err.Error())
+		safelog.Error(logger, "service stopped", "run", err)
 		os.Exit(1)
 	}
 }

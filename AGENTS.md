@@ -56,6 +56,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - Download media only long enough to forward it. Do not add media persistence for convenience.
 - Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
 - Configuration is JSON. Secrets come from environment variables or secret mounts, never JSON.
+- Group aliases are application-safe endpoint IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group subject, and every configured group must belong to exactly one MVP sync set.
 
 ## SQLite rules
 
@@ -80,6 +81,7 @@ For `sync.db`:
 - Pass `context.Context` through blocking/network/database operations.
 - Wrap errors with useful operation context but never sensitive values.
 - Use `log/slog` with explicit safe fields; never log complete protocol structs.
+- Route arbitrary errors through the safe logging helper so raw error text cannot enter application logs.
 - Make ownership/lifetime of large media buffers obvious.
 - Validate inputs at config and transport boundaries.
 - Prefer table-driven tests when they improve clarity.
