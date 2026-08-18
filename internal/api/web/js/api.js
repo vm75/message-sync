@@ -161,6 +161,10 @@
       });
     },
 
+    async getWhatsAppJoinedGroups() {
+      return this.request('/api/whatsapp/groups');
+    },
+
     /**
      * Groups CRUD Endpoints
      */

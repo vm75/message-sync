@@ -12,7 +12,9 @@ import (
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/types"
 )
 
 func TestDisablePlaintextPersistence(t *testing.T) {
@@ -160,5 +162,83 @@ func TestAdapterConsumeQREventsAndLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(logBuf.String(), "whatsapp_pairing_cancelled") {
 		t.Fatalf("expected safe log whatsapp_pairing_cancelled: %s", logBuf.String())
+	}
+}
+
+func TestAdapterUpdateConfig(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	norm, err := NewNormalizer(map[string]string{}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := &Adapter{
+		normalizer: norm,
+		targets:    make(map[transport.EndpointID]types.JID),
+		events:     make(chan transport.Incoming, 10),
+		logger:     slog.Default(),
+	}
+
+	// Update config with 2 new groups
+	newCfg := &config.Config{
+		Groups: map[string]config.Group{
+			"t1": {JID: "123456789@g.us"},
+			"t2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{
+			{ID: "ss", Groups: []string{"t1", "t2"}},
+		},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 50, Enabled: true},
+		Recovery: config.Recovery{MaxAgeHours: 12, MaxMessagesPerGroup: 100},
+	}
+
+	if err := adapter.UpdateConfig(newCfg); err != nil {
+		t.Fatalf("UpdateConfig failed: %v", err)
+	}
+
+	adapter.mu.Lock()
+	if len(adapter.targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(adapter.targets))
+	}
+	if adapter.mediaMaxBytes != 50*1024*1024 {
+		t.Fatalf("expected mediaMaxBytes 50MB, got %d", adapter.mediaMaxBytes)
+	}
+	if adapter.recoveryMaxCount != 100 {
+		t.Fatalf("expected recoveryMaxCount 100, got %d", adapter.recoveryMaxCount)
+	}
+	adapter.mu.Unlock()
+}
+
+func TestAdapterReact(t *testing.T) {
+	adapter := &Adapter{
+		targets: map[transport.EndpointID]types.JID{
+			"t1": types.NewJID("123456789", types.GroupServer),
+		},
+		logger: slog.Default(),
+	}
+
+	// Unknown endpoint returns error
+	err := adapter.React(context.Background(), transport.Reaction{
+		Endpoint:       "unknown",
+		TargetRemoteID: "msg-1",
+		Emoji:          "👍",
+	})
+	if err == nil {
+		t.Fatal("expected error for unknown endpoint")
+	}
+
+	// Uninitialized client returns error
+	err = adapter.React(context.Background(), transport.Reaction{
+		Endpoint:       "t1",
+		TargetRemoteID: "msg-1",
+		Emoji:          "👍",
+	})
+	if err == nil {
+		t.Fatal("expected error for uninitialized client")
 	}
 }

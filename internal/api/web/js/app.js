@@ -75,6 +75,8 @@
   const modalGroupTitle = document.getElementById('modal-group-title');
   const formGroup = document.getElementById('form-group');
   const modalGroupAlert = document.getElementById('modal-group-alert');
+  const selectGroupWA = document.getElementById('select-group-wa');
+  const selectGroupWAHint = document.getElementById('select-group-wa-hint');
   const inputGroupAlias = document.getElementById('input-group-alias');
   const inputGroupJid = document.getElementById('input-group-jid');
   const selectGroupSyncSet = document.getElementById('select-group-sync-set');
@@ -485,8 +487,9 @@
       if (dashWaStatus) {
         if (waStatus.status === 'fulfilled' && waStatus.value) {
           const s = waStatus.value;
-          dashWaStatus.textContent = s.isConnected ? 'Connected' : s.isLoggedIn ? 'Logged In (Idle)' : s.status === 'pairing' ? 'Pairing' : 'Unlinked';
-          dashWaStatus.className = s.isConnected ? 'stat-value text-success' : s.status === 'pairing' ? 'stat-value text-warning' : 'stat-value';
+          const isFullyConnected = s.status === 'connected' || (s.isConnected && s.isLoggedIn);
+          dashWaStatus.textContent = isFullyConnected ? 'Connected' : s.isLoggedIn ? 'Logged In (Idle)' : s.status === 'pairing' ? 'Pairing' : 'Unlinked';
+          dashWaStatus.className = isFullyConnected ? 'stat-value text-success' : s.status === 'pairing' ? 'stat-value text-warning' : 'stat-value';
         } else {
           dashWaStatus.textContent = 'Standby';
         }
@@ -578,8 +581,8 @@
   function renderWhatsAppStatus(data) {
     if (!data) return;
 
-    if (data.isConnected) {
-      // Fully connected
+    if (data.status === 'connected' || (data.isConnected && data.isLoggedIn)) {
+      // Fully connected & authenticated
       waStatusIndicator.className = 'status-indicator indicator-success';
       waStatusText.className = 'status-badge badge-success';
       waStatusText.textContent = 'Connected & Active';
@@ -590,17 +593,6 @@
       waQrSection.classList.add('hidden');
       stopQrCountdown();
       stopWhatsAppPolling();
-    } else if (data.isLoggedIn) {
-      // Logged in but not actively connected
-      waStatusIndicator.className = 'status-indicator indicator-success';
-      waStatusText.className = 'status-badge badge-success';
-      waStatusText.textContent = 'Authenticated (Standby)';
-      waStatusDesc.textContent = 'Device is authenticated with WhatsApp servers. Connecting transport stream...';
-
-      btnWaPair.classList.add('hidden');
-      btnWaCancel.classList.add('hidden');
-      waQrSection.classList.add('hidden');
-      stopQrCountdown();
     } else if (data.status === 'pairing' || (data.qrCode && data.qrCode.length > 0)) {
       // Active pairing
       waStatusIndicator.className = 'status-indicator indicator-warning';
@@ -618,6 +610,17 @@
       }
 
       startWhatsAppPolling(3000);
+    } else if (data.status === 'disconnected' || data.isLoggedIn) {
+      // Logged in but not actively connected
+      waStatusIndicator.className = 'status-indicator indicator-warning';
+      waStatusText.className = 'status-badge badge-warning';
+      waStatusText.textContent = 'Authenticated (Standby)';
+      waStatusDesc.textContent = 'Device is authenticated with WhatsApp servers. Connecting transport stream...';
+
+      btnWaPair.classList.add('hidden');
+      btnWaCancel.classList.add('hidden');
+      waQrSection.classList.add('hidden');
+      stopQrCountdown();
     } else {
       // Unpaired / Disconnected
       waStatusIndicator.className = 'status-indicator indicator-neutral';
@@ -785,7 +788,15 @@
     });
   }
 
-  function openAddGroupModal() {
+  function sanitizeAlias(name) {
+    if (!name) return '';
+    let s = name.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+    if (s.length > 64) s = s.substring(0, 64);
+    if (!/^[a-z0-9]/.test(s)) s = 'grp_' + s;
+    return s.slice(0, 64);
+  }
+
+  async function openAddGroupModal() {
     editingGroupAlias = null;
     modalGroupTitle.textContent = 'Add Configured Group';
     modalGroupAlert.classList.add('hidden');
@@ -793,8 +804,68 @@
     inputGroupAlias.disabled = false;
     inputGroupJid.value = '';
     populateSyncSetSelect('');
+
+    if (selectGroupWA) {
+      selectGroupWA.disabled = true;
+      selectGroupWA.innerHTML = '<option value="">Fetching WhatsApp groups...</option>';
+    }
+    if (selectGroupWAHint) {
+      selectGroupWAHint.textContent = 'Fetching joined groups from active WhatsApp session...';
+    }
+
     openModal(modalGroup);
-    inputGroupAlias.focus();
+
+    try {
+      const [waGroupsRes, groupsRes] = await Promise.all([
+        window.API.getWhatsAppJoinedGroups().catch(() => []),
+        window.API.getGroups().catch(() => [])
+      ]);
+      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
+
+      if (!selectGroupWA) return;
+      selectGroupWA.disabled = false;
+
+      if (waGroups.length === 0) {
+        selectGroupWA.innerHTML = '<option value="">No joined WhatsApp groups found</option>';
+        if (selectGroupWAHint) selectGroupWAHint.textContent = 'WhatsApp is not connected or no groups have been joined.';
+        return;
+      }
+
+      selectGroupWA.innerHTML = '<option value="">-- Select a WhatsApp Group --</option>' +
+        waGroups.map((g) => {
+          const existing = cachedGroups.find((cg) => cg.jid === g.jid);
+          if (existing) {
+            return `<option value="${escapeHtml(g.jid)}" disabled>${escapeHtml(g.name || g.jid)} (Configured as: ${escapeHtml(existing.alias)})</option>`;
+          }
+          return `<option value="${escapeHtml(g.jid)}" data-name="${escapeHtml(g.name || '')}">${escapeHtml(g.name || g.jid)}</option>`;
+        }).join('');
+
+      if (selectGroupWAHint) selectGroupWAHint.textContent = 'Select an active WhatsApp group to assign an alias.';
+    } catch (err) {
+      if (selectGroupWA) {
+        selectGroupWA.disabled = false;
+        selectGroupWA.innerHTML = '<option value="">Failed to load WhatsApp groups</option>';
+      }
+      if (selectGroupWAHint) selectGroupWAHint.textContent = err.message || 'Error fetching WhatsApp groups.';
+    }
+  }
+
+  if (selectGroupWA) {
+    selectGroupWA.addEventListener('change', () => {
+      const selectedJid = selectGroupWA.value;
+      inputGroupJid.value = selectedJid;
+      const selectedOpt = selectGroupWA.options[selectGroupWA.selectedIndex];
+      if (selectedOpt && selectedOpt.dataset.name) {
+        const groupName = selectedOpt.dataset.name;
+        if (!inputGroupAlias.value) {
+          const suggested = sanitizeAlias(groupName);
+          if (suggested && !cachedGroups.some((g) => g.alias === suggested)) {
+            inputGroupAlias.value = suggested;
+          }
+        }
+      }
+    });
   }
 
   function openEditGroupModal(alias) {
@@ -807,9 +878,17 @@
     inputGroupAlias.value = group.alias;
     inputGroupAlias.disabled = true; // Alias is primary key in path
     inputGroupJid.value = group.jid;
+
+    if (selectGroupWA) {
+      selectGroupWA.innerHTML = `<option value="${escapeHtml(group.jid)}" selected>${escapeHtml(group.alias)} (${escapeHtml(group.jid)})</option>`;
+      selectGroupWA.disabled = true;
+    }
+    if (selectGroupWAHint) {
+      selectGroupWAHint.textContent = 'WhatsApp group assignment is locked for existing alias.';
+    }
+
     populateSyncSetSelect(group.syncSetId || '');
     openModal(modalGroup);
-    inputGroupJid.focus();
   }
 
   async function handleGroupFormSubmit(e) {
@@ -820,17 +899,17 @@
     const jid = inputGroupJid.value.trim();
     const syncSetId = selectGroupSyncSet.value.trim() || null;
 
+    if (!jid || !GROUP_JID_REGEX.test(jid)) {
+      modalGroupAlert.textContent = 'Please select a valid WhatsApp group.';
+      modalGroupAlert.classList.remove('hidden');
+      if (selectGroupWA) selectGroupWA.focus();
+      return;
+    }
+
     if (!ALIAS_REGEX.test(alias)) {
       modalGroupAlert.textContent = 'Alias must start with alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.';
       modalGroupAlert.classList.remove('hidden');
       inputGroupAlias.focus();
-      return;
-    }
-
-    if (!GROUP_JID_REGEX.test(jid)) {
-      modalGroupAlert.textContent = 'Group JID must match standard WhatsApp format (e.g. 120363045678901234@g.us).';
-      modalGroupAlert.classList.remove('hidden');
-      inputGroupJid.focus();
       return;
     }
 
@@ -978,59 +1057,203 @@
     });
   }
 
-  function renderGroupChecklist(selectedGroupAliases = [], currentSetId = '') {
+  function renderSyncSetGroupChecklist(waGroups = [], groups = [], selectedGroupAliases = [], currentSetId = '') {
     if (!syncSetGroupsChecklist) return;
 
-    if (cachedGroups.length === 0) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No groups available. Please add groups first.</div>';
+    // Combine WA groups and configured groups
+    const jidMap = new Map();
+
+    // 1. Add configured groups first
+    groups.forEach((g) => {
+      jidMap.set(g.jid, {
+        jid: g.jid,
+        name: '',
+        alias: g.alias,
+        syncSetId: g.syncSetId || null
+      });
+    });
+
+    // 2. Add or enrich with ephemeral WhatsApp groups
+    waGroups.forEach((wg) => {
+      if (jidMap.has(wg.jid)) {
+        jidMap.get(wg.jid).name = wg.name;
+      } else {
+        jidMap.set(wg.jid, {
+          jid: wg.jid,
+          name: wg.name,
+          alias: null,
+          syncSetId: null
+        });
+      }
+    });
+
+    const items = Array.from(jidMap.values());
+
+    if (items.length === 0) {
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No WhatsApp groups found. Join groups in WhatsApp first.</div>';
       return;
     }
 
-    syncSetGroupsChecklist.innerHTML = cachedGroups.map((g) => {
-      const isSelected = selectedGroupAliases.includes(g.alias);
-      const isAssignedOther = g.syncSetId && g.syncSetId !== currentSetId;
-      const assignedBadge = isAssignedOther ? `<span class="checklist-assigned-tag">In '${escapeHtml(g.syncSetId)}'</span>` : '';
+    syncSetGroupsChecklist.innerHTML = items.map((item) => {
+      const hasAlias = Boolean(item.alias);
+      const isSelected = hasAlias && selectedGroupAliases.includes(item.alias);
+      const isAssignedOther = hasAlias && item.syncSetId && item.syncSetId !== currentSetId;
+      const isAssignedThis = hasAlias && item.syncSetId === currentSetId;
+
+      const isDisabled = !hasAlias || isAssignedOther;
+
+      let statusBadge = '';
+      if (!hasAlias) {
+        statusBadge = '<span class="checklist-no-alias-tag">Needs Alias</span>';
+      } else if (isAssignedOther) {
+        statusBadge = `<span class="checklist-assigned-tag">In Set '${escapeHtml(item.syncSetId)}'</span>`;
+      } else if (isAssignedThis) {
+        statusBadge = `<span class="badge badge-success font-mono" style="font-size:0.72rem;">Current Member</span>`;
+      }
+
+      const aliasBadge = hasAlias
+        ? `<span class="checklist-alias">${escapeHtml(item.alias)}</span>`
+        : '';
+
+      const defineAliasBtn = !hasAlias
+        ? `<button type="button" class="btn-inline-alias" data-jid="${escapeHtml(item.jid)}" data-name="${escapeHtml(item.name || '')}">+ Define Alias</button>`
+        : '';
+
+      const displayName = item.name ? escapeHtml(item.name) : (hasAlias ? escapeHtml(item.alias) : escapeHtml(item.jid));
 
       return `
-        <label class="checklist-item ${isSelected ? 'selected' : ''}">
-          <div class="checklist-item-main">
-            <input 
-              type="checkbox" 
-              class="checklist-checkbox" 
-              value="${escapeHtml(g.alias)}" 
-              ${isSelected ? 'checked' : ''}
-            >
-            <span class="checklist-alias">${escapeHtml(g.alias)}</span>
+        <div class="checklist-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-jid="${escapeHtml(item.jid)}" data-alias="${escapeHtml(item.alias || '')}">
+          <div class="checklist-item-row">
+            <label class="checklist-item-main">
+              <input 
+                type="checkbox" 
+                class="checklist-checkbox" 
+                value="${escapeHtml(item.alias || '')}" 
+                ${isSelected ? 'checked' : ''}
+                ${isDisabled ? 'disabled' : ''}
+              >
+              <div class="checklist-info">
+                <div class="checklist-group-name">${displayName}</div>
+                <div class="checklist-group-meta">
+                  ${aliasBadge}
+                  ${statusBadge}
+                </div>
+              </div>
+            </label>
+            <div class="checklist-action">
+              ${defineAliasBtn}
+            </div>
           </div>
-          ${assignedBadge}
-        </label>
+          <div class="inline-alias-box hidden" id="alias-box-${escapeHtml(item.jid.replace(/[^a-zA-Z0-9]/g, '_'))}">
+            <input type="text" class="inline-alias-input" placeholder="e.g. team_a" value="${escapeHtml(sanitizeAlias(item.name))}">
+            <button type="button" class="btn btn-primary btn-sm btn-save-inline-alias" data-jid="${escapeHtml(item.jid)}">Save</button>
+            <button type="button" class="btn btn-ghost btn-sm btn-cancel-inline-alias">Cancel</button>
+          </div>
+        </div>
       `;
     }).join('');
 
-    syncSetGroupsChecklist.querySelectorAll('.checklist-item').forEach((item) => {
-      const cb = item.querySelector('.checklist-checkbox');
+    // Attach checkbox listeners
+    syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox').forEach((cb) => {
       cb.addEventListener('change', () => {
+        const parent = cb.closest('.checklist-item');
         if (cb.checked) {
-          item.classList.add('selected');
+          parent.classList.add('selected');
         } else {
-          item.classList.remove('selected');
+          parent.classList.remove('selected');
+        }
+      });
+    });
+
+    // Attach inline alias button listeners
+    syncSetGroupsChecklist.querySelectorAll('.btn-inline-alias').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const jid = btn.getAttribute('data-jid');
+        const boxId = 'alias-box-' + jid.replace(/[^a-zA-Z0-9]/g, '_');
+        const box = document.getElementById(boxId);
+        if (box) {
+          box.classList.toggle('hidden');
+          const input = box.querySelector('.inline-alias-input');
+          if (input) input.focus();
+        }
+      });
+    });
+
+    // Attach cancel inline alias
+    syncSetGroupsChecklist.querySelectorAll('.btn-cancel-inline-alias').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const box = btn.closest('.inline-alias-box');
+        if (box) box.classList.add('hidden');
+      });
+    });
+
+    // Attach save inline alias
+    syncSetGroupsChecklist.querySelectorAll('.btn-save-inline-alias').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const jid = btn.getAttribute('data-jid');
+        const box = btn.closest('.inline-alias-box');
+        const input = box.querySelector('.inline-alias-input');
+        const alias = input.value.trim();
+
+        if (!ALIAS_REGEX.test(alias)) {
+          showToast('Alias must start with alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.', 'warning');
+          input.focus();
+          return;
+        }
+
+        btn.disabled = true;
+        try {
+          await window.API.createGroup({ alias, jid });
+          showToast(`Group alias '${alias}' saved.`, 'success');
+          // Reload groups and re-render checklist
+          const [waGroupsRes, groupsRes] = await Promise.all([
+            window.API.getWhatsAppJoinedGroups().catch(() => []),
+            window.API.getGroups()
+          ]);
+          cachedGroups = groupsRes;
+          // Retain current selection + add newly aliased group
+          const currentSelected = Array.from(syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox:checked')).map((c) => c.value);
+          currentSelected.push(alias);
+          renderSyncSetGroupChecklist(waGroupsRes, cachedGroups, currentSelected, currentSetId);
+        } catch (err) {
+          showToast(err.message || 'Failed to save alias', 'danger');
+        } finally {
+          btn.disabled = false;
         }
       });
     });
   }
 
-  function openAddSyncSetModal() {
+  async function openAddSyncSetModal() {
     editingSyncSetId = null;
     modalSyncSetTitle.textContent = 'Add Sync Set';
     modalSyncSetAlert.classList.add('hidden');
     inputSyncSetId.value = '';
     inputSyncSetId.disabled = false;
-    renderGroupChecklist([], '');
+
+    if (syncSetGroupsChecklist) {
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching WhatsApp groups...</div>';
+    }
     openModal(modalSyncSet);
     inputSyncSetId.focus();
+
+    try {
+      const [waGroupsRes, groupsRes] = await Promise.all([
+        window.API.getWhatsAppJoinedGroups().catch(() => []),
+        window.API.getGroups().catch(() => [])
+      ]);
+      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
+      renderSyncSetGroupChecklist(waGroups, cachedGroups, [], '');
+    } catch (err) {
+      if (syncSetGroupsChecklist) {
+        syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
+      }
+    }
   }
 
-  function openEditSyncSetModal(id) {
+  async function openEditSyncSetModal(id) {
     const set = cachedSyncSets.find((s) => s.id === id);
     if (!set) return;
 
@@ -1039,8 +1262,25 @@
     modalSyncSetAlert.classList.add('hidden');
     inputSyncSetId.value = set.id;
     inputSyncSetId.disabled = true;
-    renderGroupChecklist(set.groups || [], id);
+
+    if (syncSetGroupsChecklist) {
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching WhatsApp groups...</div>';
+    }
     openModal(modalSyncSet);
+
+    try {
+      const [waGroupsRes, groupsRes] = await Promise.all([
+        window.API.getWhatsAppJoinedGroups().catch(() => []),
+        window.API.getGroups().catch(() => [])
+      ]);
+      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
+      renderSyncSetGroupChecklist(waGroups, cachedGroups, set.groups || [], id);
+    } catch (err) {
+      if (syncSetGroupsChecklist) {
+        syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
+      }
+    }
   }
 
   async function handleSyncSetFormSubmit(e) {

@@ -16,6 +16,8 @@ type mockWhatsAppService struct {
 	pairResp    WhatsAppPairResponse
 	pairErr     error
 	cancelErr   error
+	groups      []WhatsAppGroup
+	groupsErr   error
 	pairCalled  int
 	cancelCalls int
 }
@@ -41,6 +43,15 @@ func (m *mockWhatsAppService) CancelPair(_ context.Context) error {
 	defer m.mu.Unlock()
 	m.cancelCalls++
 	return m.cancelErr
+}
+
+func (m *mockWhatsAppService) GetJoinedGroups(_ context.Context) ([]WhatsAppGroup, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.groupsErr != nil {
+		return nil, m.groupsErr
+	}
+	return m.groups, nil
 }
 
 func TestWhatsAppEndpoints_Unauthorized(t *testing.T) {
@@ -218,6 +229,59 @@ func TestWhatsAppEndpoints_PairError(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
+	mockWA := &mockWhatsAppService{
+		groups: []WhatsAppGroup{
+			{JID: "120363012345678901@g.us", Name: "Team Alpha"},
+			{JID: "120363098765432100@g.us", Name: "Team Beta"},
+		},
+	}
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: mockWA,
+	})
+	token, _ := srv.sessions.CreateToken()
+
+	// Unauthorized test
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	unauthRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(unauthRec, unauthReq)
+	if unauthRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", unauthRec.Code)
+	}
+
+	// Authorized success test
+	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var res []WhatsAppGroup
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to unmarshal groups: %v", err)
+	}
+	if len(res) != 2 || res[0].Name != "Team Alpha" || res[1].JID != "120363098765432100@g.us" {
+		t.Fatalf("unexpected groups response: %+v", res)
+	}
+
+	// Error test
+	mockWA.mu.Lock()
+	mockWA.groupsErr = errors.New("client disconnected")
+	mockWA.mu.Unlock()
+
+	req = httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
 	}

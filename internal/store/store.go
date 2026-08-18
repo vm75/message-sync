@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 8
 
 var (
 	//go:embed schema.sql
@@ -202,6 +202,32 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v5 to v6: update version: %w", err)
 		}
 		version = 6
+	}
+	if version == 6 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
+		`); err != nil {
+			return fmt.Errorf("migrate schema v6 to v7: add unique groups jid index: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v6 to v7: update version: %w", err)
+		}
+		version = 7
+	}
+	if version == 7 {
+		hasCol, err := tableHasColumn(ctx, tx, "global_config", "poll_aggregation_trigger")
+		if err != nil {
+			return fmt.Errorf("check global_config column: %w", err)
+		}
+		if !hasCol {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response'`); err != nil {
+				return fmt.Errorf("migrate schema v7 to v8: add poll_aggregation_trigger: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '8' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v7 to v8: update version: %w", err)
+		}
+		version = 8
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)

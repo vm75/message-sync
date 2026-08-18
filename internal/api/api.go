@@ -27,10 +27,16 @@ type WhatsAppPairResponse struct {
 	IsLoggedIn     bool   `json:"isLoggedIn,omitempty"`
 }
 
+type WhatsAppGroup struct {
+	JID  string `json:"jid"`
+	Name string `json:"name"`
+}
+
 type WhatsAppService interface {
 	Status(ctx context.Context) WhatsAppStatus
 	Pair(ctx context.Context) (WhatsAppPairResponse, error)
 	CancelPair(ctx context.Context) error
+	GetJoinedGroups(ctx context.Context) ([]WhatsAppGroup, error)
 }
 
 type Options struct {
@@ -105,6 +111,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
 	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
+	s.mux.HandleFunc("GET /api/whatsapp/groups", s.handleWhatsAppGroups)
 
 	s.mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	s.mux.HandleFunc("GET /api/groups/{alias}", s.handleGetGroup)

@@ -46,6 +46,7 @@ type Router struct {
 	sender        sender
 	routes        map[transport.EndpointID][]transport.EndpointID
 	usernameMode  config.UsernameMode
+	aggTrigger    string
 	knownCopies   map[copyKey]string
 	sentReactions map[sentReactionKey]struct{}
 	pollCache     map[string]pollMeta
@@ -84,6 +85,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		sender:        transportSender,
 		routes:        routes,
 		usernameMode:  cfg.Identity.UsernameMode,
+		aggTrigger:    cfg.Polls.AggregationTrigger,
 		knownCopies:   make(map[copyKey]string),
 		sentReactions: make(map[sentReactionKey]struct{}),
 		pollCache:     make(map[string]pollMeta),
@@ -114,6 +116,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	defer r.mu.Unlock()
 	r.routes = routes
 	r.usernameMode = cfg.Identity.UsernameMode
+	r.aggTrigger = cfg.Polls.AggregationTrigger
 	return nil
 }
 
@@ -164,7 +167,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		return nil
 	}
 
-	if strings.TrimSpace(incoming.Text) == "aggregate-response" && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+	triggerPhrase := r.aggTrigger
+	if triggerPhrase == "" {
+		triggerPhrase = "aggregate-response"
+	}
+
+	if strings.TrimSpace(incoming.Text) == triggerPhrase && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
 		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
 		if err == nil && targetCanonical != "" {
 			isPoll, err := r.store.IsPoll(ctx, targetCanonical)

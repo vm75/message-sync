@@ -58,6 +58,7 @@ type Config struct {
 	Media    Media            `json:"media"`
 	Recovery Recovery         `json:"recovery"`
 	Storage  Storage          `json:"storage"`
+	Polls    Polls            `json:"polls"`
 }
 
 type Group struct {
@@ -88,6 +89,10 @@ type Storage struct {
 	MessageRetentionDays int `json:"messageRetentionDays"`
 }
 
+type Polls struct {
+	AggregationTrigger string `json:"aggregationTrigger"`
+}
+
 func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	if db == nil {
 		return nil, errors.New("database connection is required")
@@ -106,12 +111,13 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		maxAgeHours  int
 		maxPerGroup  int
 		retention    int
+		aggTrigger   string
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -123,6 +129,7 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		cfg.Recovery.MaxAgeHours = maxAgeHours
 		cfg.Recovery.MaxMessagesPerGroup = maxPerGroup
 		cfg.Storage.MessageRetentionDays = retention
+		cfg.Polls.AggregationTrigger = aggTrigger
 	}
 
 	applyDefaults(cfg)
@@ -208,8 +215,8 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -217,8 +224,9 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			recovery_enabled = excluded.recovery_enabled,
 			recovery_max_age_hours = excluded.recovery_max_age_hours,
 			recovery_max_messages_per_group = excluded.recovery_max_messages_per_group,
-			storage_message_retention_days = excluded.storage_message_retention_days
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays)
+			storage_message_retention_days = excluded.storage_message_retention_days,
+			poll_aggregation_trigger = excluded.poll_aggregation_trigger
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger)
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
 	}
@@ -275,6 +283,9 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Storage.MessageRetentionDays == 0 {
 		cfg.Storage.MessageRetentionDays = 90
+	}
+	if cfg.Polls.AggregationTrigger == "" {
+		cfg.Polls.AggregationTrigger = "aggregate-response"
 	}
 }
 

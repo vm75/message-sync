@@ -32,6 +32,7 @@ type whatsappTransport interface {
 	Edit(context.Context, transport.MessageRef, string) error
 	Delete(context.Context, transport.MessageRef) error
 	Close() error
+	UpdateConfig(*config.Config) error
 }
 
 var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
@@ -114,6 +115,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 		if err := mesh.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update router config: %w", err)
+		}
+		if err := wa.UpdateConfig(updatedCfg); err != nil {
+			return fmt.Errorf("update whatsapp config: %w", err)
 		}
 		logger.Info("configuration reloaded",
 			"groups", len(updatedCfg.Groups),

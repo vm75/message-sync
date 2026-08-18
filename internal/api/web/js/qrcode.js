@@ -180,7 +180,7 @@
       }
 
       for (let col = 0; col < moduleCount; col++) {
-        for (let row = 0; row < moduleCount; row++) {
+        for (let row = 0; row < moduleCount - 6; row++) {
           if (
             qrCode.isDark(row, col) &&
             !qrCode.isDark(row + 1, col) &&
