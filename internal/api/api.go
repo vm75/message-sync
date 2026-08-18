@@ -120,6 +120,8 @@ func (s *Server) registerRoutes() {
 
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("PUT /api/config", s.handleUpdateConfig)
+
+	s.mux.Handle("GET /", StaticHandler())
 }
 
 func (s *Server) notifyConfigChange(ctx context.Context) {

@@ -59,10 +59,11 @@ Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za
 - `push_name`: use transient `<alias>/<push name>` when available, with HMAC ID fallback;
 - `hash`: always use `<alias>/u_xxxxxxxxxx`.
 
-### REST API
- 
-The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR`):
- 
+### REST API & Web UI
+
+The daemon serves an embedded, zero-dependency Web UI console and REST API on port 8080 (configurable via `API_ADDR`):
+
+- `/`: Serves the responsive dark-mode Web UI console (self-contained Vanilla HTML/CSS/JS embedded in binary).
 - `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
 - `GET /api/auth/status`: Returns whether admin password setup is complete (`{"isSetup": false}` or `true`).
 - `POST /api/auth/setup`: Sets initial admin password, hashes with bcrypt into `sync.db`, and returns a session token and cookie.
@@ -76,7 +77,7 @@ The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR
 - `GET /api/sync-sets`, `POST /api/sync-sets`: List and create sync sets (`id`, list of `groups`).
 - `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Read, update memberships, and delete sync sets.
 - `GET /api/config`, `PUT /api/config`: Retrieve and update global runtime settings (`usernameMode`, `media`, `recovery`, `storage`).
-- Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie.
+- Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie. Client routes (`/setup`, `/login`, `/dashboard`) automatically handle SPA navigation.
 
 ## Rootless Podman
 
