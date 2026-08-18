@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 var (
 	//go:embed schema.sql
@@ -229,6 +229,23 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		version = 8
 	}
+	if version == 8 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS suppressed_reactions (
+				endpoint_id TEXT NOT NULL,
+				remote_message_id TEXT NOT NULL,
+				emoji TEXT NOT NULL,
+				created_at INTEGER NOT NULL,
+				PRIMARY KEY (endpoint_id, remote_message_id, emoji)
+			);
+		`); err != nil {
+			return fmt.Errorf("migrate schema v8 to v9: add suppressed_reactions table: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '9' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v8 to v9: update version: %w", err)
+		}
+		version = 9
+	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)
 	}
@@ -279,6 +296,10 @@ func (s *Store) PruneOlderThan(ctx context.Context, cutoff time.Time, batchSize 
 	}
 	cutoffMillis := unixMillis(cutoff)
 	var totalDeleted int64
+
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM suppressed_reactions WHERE created_at < ?`, cutoffMillis); err != nil {
+		return 0, wrapDB("prune suppressed reactions", err)
+	}
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -387,6 +408,62 @@ func (s *Store) AddMessageCopy(ctx context.Context, copy MessageCopy) error {
 		copy.CanonicalID, copy.EndpointID, copy.RemoteMessageID, unixMillis(copy.CreatedAt), copy.FromSelf,
 	)
 	return wrapDB("add message copy", err)
+}
+
+// ResolveOrCreateCanonical atomically resolves an existing source copy or
+// creates a new canonical message and its source copy in one transaction.
+func (s *Store) ResolveOrCreateCanonical(ctx context.Context, candidateCanonicalID string, source MessageCopy) (string, bool, error) {
+	if s == nil || s.db == nil {
+		return "", false, errors.New("sync store is required")
+	}
+	if err := requireOpaque("canonical id", candidateCanonicalID); err != nil {
+		return "", false, err
+	}
+	if err := validateEndpoint(source.EndpointID); err != nil {
+		return "", false, err
+	}
+	if err := requireOpaque("remote message id", source.RemoteMessageID); err != nil {
+		return "", false, err
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, fmt.Errorf("begin canonical resolution: %w", err)
+	}
+	defer tx.Rollback()
+
+	var existing string
+	err = tx.QueryRowContext(ctx,
+		`SELECT canonical_id FROM message_copies WHERE endpoint_id = ? AND remote_message_id = ?`,
+		source.EndpointID, source.RemoteMessageID,
+	).Scan(&existing)
+	if err == nil {
+		return existing, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, fmt.Errorf("resolve source canonical: %w", err)
+	}
+
+	createdAt := source.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO canonical_messages(canonical_id, created_at) VALUES (?, ?)`,
+		candidateCanonicalID, unixMillis(createdAt),
+	); err != nil {
+		return "", false, fmt.Errorf("create canonical message: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO message_copies(canonical_id, endpoint_id, remote_message_id, created_at, from_self) VALUES (?, ?, ?, ?, ?)`,
+		candidateCanonicalID, source.EndpointID, source.RemoteMessageID, unixMillis(createdAt), source.FromSelf,
+	); err != nil {
+		return "", false, fmt.Errorf("add source message copy: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, fmt.Errorf("commit canonical resolution: %w", err)
+	}
+	return candidateCanonicalID, true, nil
 }
 
 func (s *Store) CanonicalForRemote(ctx context.Context, endpointID, remoteMessageID string) (string, error) {
@@ -573,6 +650,38 @@ func (s *Store) IsPoll(ctx context.Context, canonicalID string) (bool, error) {
 		return false, wrapDB("check is poll", err)
 	}
 	return count > 0, nil
+}
+
+// RecordSuppressedReaction records a reaction that was sent by the bridge to prevent echoing.
+func (s *Store) RecordSuppressedReaction(ctx context.Context, endpointID, remoteMessageID, emoji string, createdAt time.Time) error {
+	if s == nil || s.db == nil {
+		return errors.New("sync store is required")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO suppressed_reactions(endpoint_id, remote_message_id, emoji, created_at) VALUES (?, ?, ?, ?)`,
+		endpointID, remoteMessageID, emoji, unixMillis(createdAt),
+	)
+	return wrapDB("record suppressed reaction", err)
+}
+
+// CheckAndClearSuppressedReaction checks if a reaction echo suppression marker exists, and deletes it atomically.
+// Returns true if the reaction was found and deleted (meaning it should be suppressed).
+func (s *Store) CheckAndClearSuppressedReaction(ctx context.Context, endpointID, remoteMessageID, emoji string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, errors.New("sync store is required")
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM suppressed_reactions WHERE endpoint_id = ? AND remote_message_id = ? AND emoji = ?`,
+		endpointID, remoteMessageID, emoji,
+	)
+	if err != nil {
+		return false, wrapDB("check suppressed reaction", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check suppressed reaction rows affected: %w", err)
+	}
+	return affected > 0, nil
 }
 
 func (s *Store) RecordPollVote(ctx context.Context, canonicalID, endpointID, actorHash string, optionHashes []string, updatedAt time.Time) error {

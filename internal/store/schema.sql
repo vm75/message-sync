@@ -76,8 +76,16 @@ CREATE TABLE IF NOT EXISTS poll_votes (
 );
 CREATE INDEX IF NOT EXISTS idx_poll_votes_canonical ON poll_votes(canonical_id);
 
+CREATE TABLE IF NOT EXISTS suppressed_reactions (
+    endpoint_id TEXT NOT NULL,
+    remote_message_id TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (endpoint_id, remote_message_id, emoji)
+);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '8');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '9');

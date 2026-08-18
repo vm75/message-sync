@@ -64,11 +64,11 @@ Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in 
 It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and recovery cursors. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
- 
+
 Configuration is stored in SQLite (`sync.db`) and managed programmatically via Go packages and the REST API.
- 
+
 ### SQLite Configuration Tables
- 
+
 - `global_config`: Single-row table (`id = 1`) storing global behavior settings:
 - `username_mode`: typed enum (`push_name` or `hash`, default `push_name`);
 - `media_enabled`: boolean (default `1`);
@@ -308,4 +308,4 @@ The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only
 
 ## 19. Deliberate MVP exclusions
 
-Discord, events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/POST_MVP.md`.
+Discord, events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/ASPIRATIONAL_FEATURES.md`.

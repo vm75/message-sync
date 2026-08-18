@@ -1,5 +1,13 @@
 # message-sync
 
+[![Build & Publish](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/release-images.yml?branch=main&label=build&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions)
+[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/vm75/message-sync?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
+[![Docker Image Size](https://img.shields.io/docker/image-size/vm75/message-sync/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
+[![Platforms](https://img.shields.io/badge/platforms-linux%2Famd64%20%7C%20linux%2Farm64-326CE5?style=flat-square&logo=linux)](https://github.com/vm75/message-sync)
+[![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
+[![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
+
 Privacy-first message synchronization service implemented in Go. The MVP uses `tulir/whatsmeow` for WhatsApp transport, JSON configuration, SQLite runtime state, and a transport-neutral canonical message model that can support Discord and other adapters after MVP.
 
 ## Status
@@ -62,7 +70,7 @@ Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za
 
 ### REST API & Web UI
 
-The daemon serves an embedded, zero-dependency Web UI console and REST API on port 8080 (configurable via `API_ADDR`):
+The daemon serves an embedded, zero-dependency Web UI console and REST API on port 8080 (configurable via `PORT` or `API_ADDR`):
 
 - `/`: Serves the responsive dark-mode Web UI console (self-contained Vanilla HTML/CSS/JS embedded in binary).
 - `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
@@ -170,9 +178,10 @@ Docker Hub publication requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repos
 ## Documentation
 
 - `ARCHITECTURE.md` — architecture, data boundaries, event flows, restart semantics.
-- `docs/POST_MVP.md` — features from the previous implementation intentionally deferred until after MVP.
+- `DOCKERHUB.md` — Docker Hub overview, container features, and deployment guide.
+- `docs/ASPIRATIONAL_FEATURES.md` — aspirational feature backlog and tracking from the inspiration project.
 - `AGENTS.md` — contributor/AI-agent operating instructions.
 
-## Post-MVP
+## Future and Aspirational Features
 
-The core is intentionally designed so Discord, multiple WhatsApp accounts, richer WhatsApp types, management UI, membership workflows, cloud storage, provider integrations, and historical import can be added without making any one transport the canonical identity. See `docs/POST_MVP.md`.
+The core is intentionally designed so Discord, multiple WhatsApp accounts, richer WhatsApp types, membership workflows, cloud storage, provider integrations, and historical import can be added without making any one transport the canonical identity. See [docs/ASPIRATIONAL_FEATURES.md](docs/ASPIRATIONAL_FEATURES.md).
