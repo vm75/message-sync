@@ -69,7 +69,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("Serves js scripts", func(t *testing.T) {
-		scripts := []string{"/js/api.js", "/js/router.js", "/js/app.js"}
+		scripts := []string{"/js/qrcode.js", "/js/api.js", "/js/router.js", "/js/app.js"}
 		for _, s := range scripts {
 			resp, err := client.Get(ts.URL + s)
 			if err != nil {
@@ -91,7 +91,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("SPA route fallback to index.html", func(t *testing.T) {
-		routes := []string{"/setup", "/login", "/dashboard", "/sync-sets", "/settings"}
+		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/groups", "/sync-sets", "/settings"}
 		for _, route := range routes {
 			resp, err := client.Get(ts.URL + route)
 			if err != nil {
