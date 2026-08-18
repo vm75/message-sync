@@ -27,6 +27,7 @@ type fakeSender struct {
 		text string
 	}
 	deleted []transport.MessageRef
+	reacted []transport.Reaction
 	next    map[transport.EndpointID]int
 }
 
@@ -44,6 +45,7 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 }
 
 func (f *fakeSender) React(_ context.Context, r transport.Reaction) error {
+	f.reacted = append(f.reacted, r)
 	return nil
 }
 
@@ -79,11 +81,31 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		t.Fatalf("destinations = %v, want %v", gotEndpoints, wantEndpoints)
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "c1g2/Alice Example: hello" {
+		if sent.outgoing.Text != "c1g2/15551234567 (Alice Example): hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 		if strings.Contains(sent.outgoing.Text, "@g.us") {
 			t.Fatalf("forwarded attribution exposed a JID: %q", sent.outgoing.Text)
+		}
+	}
+}
+
+func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
+	ctx := context.Background()
+	r, _, fake := newTestRouter(t, "push_name")
+
+	incoming := testIncoming("c1g2", "source-1")
+	incoming.Sender.DisplayName = "   " // Empty after trim
+	if err := r.Handle(ctx, incoming); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.sent) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(fake.sent))
+	}
+	for _, sent := range fake.sent {
+		if sent.outgoing.Text != "c1g2/15551234567: hello" {
+			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 	}
 }
@@ -368,6 +390,162 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	}
 }
 
+func TestReactionPropagationAndEchoSuppression(t *testing.T) {
+	ctx := context.Background()
+	r, syncStore, fake := newTestRouter(t, "push_name")
+
+	// 1. Ingest original message in c1g1
+	orig := testIncoming("c1g1", "orig-msg-reaction")
+	orig.Text = "original message"
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(fake.sent))
+	}
+
+	// 2. Incoming reaction from another user in c1g1
+	reaction := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "reaction-event-1",
+		Sender: transport.Sender{
+			DisplayName: "Bob",
+			OpaqueID:    "u_bcdefghijk",
+		},
+		Kind: "reaction",
+		Text: "👍",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-reaction",
+		},
+		Timestamp: time.Unix(1_700_000_100, 0).UTC(),
+	}
+	if err := r.Handle(ctx, reaction); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.reacted) != 2 {
+		t.Fatalf("reacted %d times, want 2", len(fake.reacted))
+	}
+	for _, rct := range fake.reacted {
+		if rct.Emoji != "👍" {
+			t.Fatalf("reaction emoji = %q, want 👍", rct.Emoji)
+		}
+		if !rct.IsTargetFromMe {
+			t.Fatalf("destination reaction IsTargetFromMe = false, want true")
+		}
+	}
+
+	// 3. User reaction (FromSelf = true) originating from the paired bridge account on phone
+	userReaction := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "reaction-event-self",
+		Sender: transport.Sender{
+			DisplayName: "Myself",
+			OpaqueID:    "u_cdefghijkl",
+		},
+		FromSelf: true,
+		Kind:     "reaction",
+		Text:     "❤️",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-reaction",
+		},
+		Timestamp: time.Unix(1_700_000_200, 0).UTC(),
+	}
+	fake.reacted = nil
+	if err := r.Handle(ctx, userReaction); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reacted) != 2 {
+		t.Fatalf("user self-reaction propagated %d times, want 2", len(fake.reacted))
+	}
+
+	// 4. Bridge echo arriving back for one of the destinations (c1g2) with FromSelf = true
+	echoTargetID := fake.reacted[0].TargetRemoteID
+	echoReaction := transport.Incoming{
+		Endpoint: fake.reacted[0].Endpoint,
+		RemoteID: "echo-reaction-event",
+		FromSelf: true,
+		Kind:     "reaction",
+		Text:     "❤️",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        fake.reacted[0].Endpoint,
+			RemoteMessageID: echoTargetID,
+		},
+		Timestamp: time.Unix(1_700_000_205, 0).UTC(),
+	}
+	fake.reacted = nil
+	if err := r.Handle(ctx, echoReaction); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reacted) != 0 {
+		t.Fatalf("reaction echo was not suppressed, produced %d reactions", len(fake.reacted))
+	}
+
+	// 5. Verify recovery cursor is maintained
+	cursor, err := syncStore.RecoveryCursor(ctx, "c1g1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.RemoteMessageID != "reaction-event-self" {
+		t.Fatalf("recovery cursor remoteID = %q, want reaction-event-self", cursor.RemoteMessageID)
+	}
+}
+
+func TestNativeReplyDestinationTargetResolution(t *testing.T) {
+	ctx := context.Background()
+	r, _, fake := newTestRouter(t, "push_name")
+
+	// 1. Send original text message in c1g1
+	orig := testIncoming("c1g1", "orig-msg-reply")
+	orig.Text = "original message to reply to"
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("sent %d messages, want 2", len(fake.sent))
+	}
+
+	// 2. Incoming reply in c1g1 quoting the original message
+	reply := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "reply-msg-1",
+		Sender: transport.Sender{
+			DisplayName: "Bob",
+			PhoneNumber: "15559876543",
+			OpaqueID:    "u_bcdefghijk",
+		},
+		Kind: "text",
+		Text: "reply to original",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "c1g1",
+			RemoteMessageID: "orig-msg-reply",
+		},
+		QuotedText: "original message to reply to",
+		Timestamp:  time.Unix(1_700_000_300, 0).UTC(),
+	}
+	fake.sent = nil
+	if err := r.Handle(ctx, reply); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fake.sent) != 2 {
+		t.Fatalf("reply sent %d destination copies, want 2", len(fake.sent))
+	}
+	for _, sent := range fake.sent {
+		if sent.outgoing.ReplyTo == nil {
+			t.Fatalf("outgoing reply in %s has nil ReplyTo", sent.outgoing.Endpoint)
+		}
+		if !sent.outgoing.ReplyTo.IsTargetFromMe {
+			t.Fatalf("outgoing reply in %s has IsTargetFromMe = false, want true for destination copy", sent.outgoing.Endpoint)
+		}
+		if !strings.HasPrefix(sent.outgoing.ReplyTo.RemoteMessageID, string(sent.outgoing.Endpoint)+"-sent-") {
+			t.Fatalf("outgoing reply in %s targeted wrong remote ID %s", sent.outgoing.Endpoint, sent.outgoing.ReplyTo.RemoteMessageID)
+		}
+	}
+}
+
 func newTestRouter(t *testing.T, usernameMode string) (*Router, *store.Store, *fakeSender) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sync.db")
@@ -402,6 +580,7 @@ func testIncoming(endpoint transport.EndpointID, remoteID string) transport.Inco
 		RemoteID: remoteID,
 		Sender: transport.Sender{
 			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
 			OpaqueID:    "u_abcdefghij",
 		},
 		Kind:      "text",

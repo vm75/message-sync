@@ -4,9 +4,7 @@ Privacy-first message synchronization service implemented in Go. The MVP uses `t
 
 ## Status
 
-Phase 0 of the Go MVP is implemented: strict JSON config loading/defaults/validation, HMAC identity, the PII/PHI-free `sync.db` schema and repositories, privacy-safe structured error logging, and the rootless container baseline are in place.
-
-Phase 1 is complete and acceptance-verified on the MVP branch: whatsmeow uses a dedicated `/data/whatsapp.db` session store, first login QR pairing works, normal restarts reuse the stored linked-device session without re-pairing, plaintext decrypted-event/retry persistence is disabled, configured group messages normalize to safe internal events, DMs/unconfigured groups are ignored, and live privacy checks confirm application logs and `sync.db` remain free of tested message/JID plaintext.
+`message-sync` is fully implemented and operational: strict JSON config validation, HMAC identity, PII/PHI-free `sync.db` state, whatsmeow session lifecycle with QR pairing and automatic reconnect, all-to-all text and media synchronization, native reactions and clickable replies, edits and deletes with canonical tombstones, bounded offline recovery, 90-day retention pruning, and rootless container deployment.
 
 There is deliberately **no `VERSION` file** during MVP development. Builds report `development`. Adding or changing `VERSION` on `main` is the sole trigger for the container publication workflow.
 
@@ -96,7 +94,6 @@ podman run --rm message-sync:dev version
 
 It prints `development` until the first MVP release.
 
-> Phase 1 receives and safely normalizes configured-group messages, but does not fan them out yet. Text synchronization starts in Phase 2.
 
 ## Local development
 
@@ -125,19 +122,12 @@ Use a stable `IDENTITY_SECRET` for any real deployment; the one-liner above is o
 
 ## Restart contract
 
-Phase 1 establishes the transport half of the restart contract:
-
 1. `whatsapp.db` restores the linked WhatsApp session; normal restarts do not require another QR scan.
-2. configured group messages are normalized through the same safe adapter boundary after reconnect.
-
-Later MVP phases add the application-routing half:
-
+2. Configured group messages are normalized through the safe adapter boundary after reconnect.
 3. `sync.db` restores canonical message/copy and reaction state.
-4. recent offline/history events are replayed through the same router.
-5. persisted message-copy rows make fan-out idempotent so only missing destination copies are retried.
-6. mappings expire under the configured retention policy, after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
-
-The default planned mapping retention is 90 days.
+4. Recent offline/history events are replayed through the same router.
+5. Persisted message-copy rows make fan-out idempotent so only missing destination copies are retried.
+6. Mappings expire under the configured retention policy (default 90 days), after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
 
 ## Versioning and images
 
@@ -159,7 +149,6 @@ Docker Hub publication requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repos
 ## Documentation
 
 - `ARCHITECTURE.md` — architecture, data boundaries, event flows, restart semantics.
-- `docs/MVP_IMPLEMENTATION_PLAN.md` — detailed phased implementation plan and acceptance criteria.
 - `docs/POST_MVP.md` — features from the previous implementation intentionally deferred until after MVP.
 - `AGENTS.md` — contributor/AI-agent operating instructions.
 

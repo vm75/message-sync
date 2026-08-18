@@ -37,4 +37,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '2');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '3');

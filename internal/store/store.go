@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 var (
 	//go:embed schema.sql
@@ -125,6 +125,22 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v1 to v2: update version: %w", err)
 		}
 		version = 2
+	}
+	if version == 2 {
+		// Retroactively mark destination copies as from_self=1.
+		// For each canonical, the earliest copy is the source; all others
+		// were sent by the bridge account.
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE message_copies SET from_self = 1
+			WHERE rowid NOT IN (
+				SELECT MIN(rowid) FROM message_copies GROUP BY canonical_id
+			)`); err != nil {
+			return fmt.Errorf("migrate schema v2 to v3: fix from_self: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v2 to v3: update version: %w", err)
+		}
+		version = 3
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)

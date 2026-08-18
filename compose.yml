@@ -20,10 +20,7 @@ services:
       CONFIG_PATH: /config/config.json
       DATA_DIR: /data
     volumes:
-      - ./config.json:/config/config.json:ro
-      - message_sync_data:/data
+      - ./data/config.json:/config/config.json:ro
+      - ./data/data:/data
     restart: unless-stopped
     stop_grace_period: 20s
-
-volumes:
-  message_sync_data:

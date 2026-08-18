@@ -142,11 +142,17 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		}
 	}
 
+	phone := evt.Info.Sender.User
+	if evt.Info.Sender.Server == types.HiddenUserServer || evt.Info.Sender.Server == types.HostedLIDServer {
+		phone = ""
+	}
+
 	return transport.Incoming{
 		Endpoint: endpoint,
 		RemoteID: string(evt.Info.ID),
 		Sender: transport.Sender{
 			DisplayName: displayName,
+			PhoneNumber: phone,
 			OpaqueID:    n.hasher.UserID(evt.Info.Sender.ToNonAD().String()),
 		},
 		FromSelf:    evt.Info.IsFromMe,
