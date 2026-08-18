@@ -73,25 +73,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		cfg = loadedCfg
 	}
 
-	apiAddr := strings.TrimSpace(os.Getenv("API_ADDR"))
-	if apiAddr == "" {
-		apiAddr = ":8080"
-	}
-	apiServer := api.NewServer(api.Options{
-		Addr:   apiAddr,
-		Logger: logger,
-		DB:     syncStore.DB(),
-		Secret: []byte(secret),
-	})
-	if err := apiServer.Start(); err != nil {
-		return fmt.Errorf("start api server: %w", err)
-	}
-	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = apiServer.Shutdown(shutdownCtx)
-	}()
-
 	groupJIDs := make(map[string]string, len(cfg.Groups))
 	for alias, group := range cfg.Groups {
 		groupJIDs[alias] = group.JID
@@ -104,6 +85,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		UsernameMode:     cfg.Identity.UsernameMode,
 		Logger:           logger,
 		QROut:            os.Stdout,
+		EnableTerminalQR: false,
 		MediaEnabled:     cfg.Media.Enabled,
 		MediaMaxBytes:    uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 		RecoveryEnabled:  cfg.Recovery.Enabled,
@@ -114,6 +96,31 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("start WhatsApp transport: %w", err)
 	}
 	defer wa.Close()
+
+	var waService api.WhatsAppService
+	if s, ok := wa.(api.WhatsAppService); ok {
+		waService = s
+	}
+
+	apiAddr := strings.TrimSpace(os.Getenv("API_ADDR"))
+	if apiAddr == "" {
+		apiAddr = ":8080"
+	}
+	apiServer := api.NewServer(api.Options{
+		Addr:     apiAddr,
+		Logger:   logger,
+		DB:       syncStore.DB(),
+		Secret:   []byte(secret),
+		WhatsApp: waService,
+	})
+	if err := apiServer.Start(); err != nil {
+		return fmt.Errorf("start api server: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = apiServer.Shutdown(shutdownCtx)
+	}()
 
 	syncDBPath := filepath.Join(dataDir, SyncDBName)
 	if deleted, err := syncStore.PruneRetention(ctx, cfg.Storage.MessageRetentionDays, 1000); err != nil {

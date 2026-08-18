@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
+	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/safelog"
@@ -37,6 +38,7 @@ type Options struct {
 	UsernameMode     config.UsernameMode
 	Logger           *slog.Logger
 	QROut            io.Writer
+	EnableTerminalQR bool
 	MediaEnabled     bool
 	MediaMaxBytes    uint64
 	RecoveryEnabled  bool
@@ -52,7 +54,13 @@ type Adapter struct {
 	events           chan transport.Incoming
 	logger           *slog.Logger
 	qrOut            io.Writer
+	enableTerminalQR bool
 	qrCancel         context.CancelFunc
+	pairingActive    bool
+	currentQRCode    string
+	currentQRExpires time.Time
+	pairingCodeChan  chan string
+	mu               sync.Mutex
 	closeOnce        sync.Once
 	closeErr         error
 	mediaEnabled     bool
@@ -97,6 +105,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		events:           make(chan transport.Incoming, eventBufferSize),
 		logger:           opts.Logger,
 		qrOut:            opts.QROut,
+		enableTerminalQR: opts.EnableTerminalQR,
 		mediaEnabled:     opts.MediaEnabled,
 		mediaMaxBytes:    opts.MediaMaxBytes,
 		recoveryEnabled:  opts.RecoveryEnabled,
@@ -105,22 +114,18 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 	client.AddEventHandler(adapter.handleEvent)
 
-	if device.ID == nil {
-		qrCtx, cancel := context.WithCancel(ctx)
-		qrChan, qrErr := client.GetQRChannel(qrCtx)
-		if qrErr != nil {
-			cancel()
-			_ = container.Close()
-			return nil, fmt.Errorf("prepare WhatsApp QR pairing: %w", qrErr)
+	if device.ID != nil {
+		if err := client.ConnectContext(ctx); err != nil {
+			_ = adapter.Close()
+			return nil, fmt.Errorf("connect WhatsApp transport: %w", err)
 		}
-		adapter.qrCancel = cancel
-		go adapter.consumeQR(qrChan)
+	} else if opts.EnableTerminalQR {
+		if _, err := adapter.Pair(ctx); err != nil {
+			_ = adapter.Close()
+			return nil, fmt.Errorf("start WhatsApp terminal pairing: %w", err)
+		}
 	}
 
-	if err := client.ConnectContext(ctx); err != nil {
-		_ = adapter.Close()
-		return nil, fmt.Errorf("connect WhatsApp transport: %w", err)
-	}
 	return adapter, nil
 }
 
@@ -379,9 +384,16 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closeOnce.Do(func() {
+		a.mu.Lock()
 		if a.qrCancel != nil {
 			a.qrCancel()
+			a.qrCancel = nil
 		}
+		a.pairingActive = false
+		a.currentQRCode = ""
+		a.pairingCodeChan = nil
+		a.mu.Unlock()
+
 		if a.client != nil {
 			a.client.Disconnect()
 		}
@@ -390,6 +402,151 @@ func (a *Adapter) Close() error {
 		}
 	})
 	return a.closeErr
+}
+
+func (a *Adapter) Status(ctx context.Context) api.WhatsAppStatus {
+	if a == nil {
+		return api.WhatsAppStatus{
+			Status:      "unpaired",
+			IsLoggedIn:  false,
+			IsConnected: false,
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	var isLoggedIn, isConnected bool
+	if a.client != nil {
+		isLoggedIn = a.client.IsLoggedIn()
+		isConnected = a.client.IsConnected()
+	}
+
+	var state string
+	if isLoggedIn && isConnected {
+		state = "connected"
+	} else if isLoggedIn && !isConnected {
+		state = "disconnected"
+	} else if a.pairingActive {
+		state = "pairing"
+	} else {
+		state = "unpaired"
+	}
+
+	res := api.WhatsAppStatus{
+		Status:      state,
+		IsLoggedIn:  isLoggedIn,
+		IsConnected: isConnected,
+	}
+	if a.pairingActive && a.currentQRCode != "" && time.Now().Before(a.currentQRExpires) {
+		res.QRCode = a.currentQRCode
+	}
+	return res
+}
+
+func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
+	if a == nil || a.client == nil {
+		return api.WhatsAppPairResponse{}, errors.New("WhatsApp transport is not initialized")
+	}
+
+	a.mu.Lock()
+	if a.client.IsLoggedIn() {
+		a.mu.Unlock()
+		return api.WhatsAppPairResponse{
+			Status:     "connected",
+			IsLoggedIn: true,
+		}, nil
+	}
+
+	// If already pairing and current QR code is still valid, return it
+	if a.pairingActive && a.currentQRCode != "" && time.Now().Before(a.currentQRExpires) {
+		code := a.currentQRCode
+		remaining := int(time.Until(a.currentQRExpires).Seconds())
+		if remaining < 1 {
+			remaining = 1
+		}
+		a.mu.Unlock()
+		return api.WhatsAppPairResponse{
+			Status:         "pairing",
+			QRCode:         code,
+			TimeoutSeconds: remaining,
+		}, nil
+	}
+
+	// Cancel existing pairing if any
+	if a.qrCancel != nil {
+		a.qrCancel()
+		a.qrCancel = nil
+	}
+	if a.client.IsConnected() {
+		a.client.Disconnect()
+	}
+
+	qrCtx, cancel := context.WithCancel(context.Background())
+	a.qrCancel = cancel
+	a.pairingActive = true
+	a.currentQRCode = ""
+	codeChan := make(chan string, 1)
+	a.pairingCodeChan = codeChan
+
+	qrChan, qrErr := a.client.GetQRChannel(qrCtx)
+	if qrErr != nil {
+		cancel()
+		a.pairingActive = false
+		a.pairingCodeChan = nil
+		a.mu.Unlock()
+		return api.WhatsAppPairResponse{}, fmt.Errorf("prepare WhatsApp QR pairing: %w", qrErr)
+	}
+
+	go a.consumeQR(qrCtx, qrChan)
+
+	if err := a.client.ConnectContext(qrCtx); err != nil {
+		cancel()
+		a.pairingActive = false
+		a.pairingCodeChan = nil
+		a.mu.Unlock()
+		return api.WhatsAppPairResponse{}, fmt.Errorf("connect WhatsApp transport: %w", err)
+	}
+	a.mu.Unlock()
+
+	select {
+	case code := <-codeChan:
+		a.mu.Lock()
+		timeout := int(time.Until(a.currentQRExpires).Seconds())
+		if timeout < 1 {
+			timeout = 20
+		}
+		a.mu.Unlock()
+		return api.WhatsAppPairResponse{
+			Status:         "pairing",
+			QRCode:         code,
+			TimeoutSeconds: timeout,
+		}, nil
+	case <-ctx.Done():
+		return api.WhatsAppPairResponse{}, ctx.Err()
+	case <-time.After(15 * time.Second):
+		return api.WhatsAppPairResponse{}, errors.New("timeout waiting for WhatsApp QR code")
+	}
+}
+
+func (a *Adapter) CancelPair(ctx context.Context) error {
+	if a == nil {
+		return nil
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.qrCancel != nil {
+		a.qrCancel()
+		a.qrCancel = nil
+	}
+	a.pairingActive = false
+	a.currentQRCode = ""
+	a.pairingCodeChan = nil
+	if a.client != nil && !a.client.IsLoggedIn() && a.client.IsConnected() {
+		a.client.Disconnect()
+	}
+	a.logger.Info("WhatsApp pairing cancelled", "event", "whatsapp_pairing_cancelled")
+	return nil
 }
 
 func (a *Adapter) handleEvent(raw any) {
@@ -460,26 +617,87 @@ func (a *Adapter) handleEvent(raw any) {
 		a.logger.Info("WhatsApp connected", "event", "whatsapp_connected")
 	case *events.Disconnected:
 		a.logger.Warn("WhatsApp disconnected", "event", "whatsapp_disconnected")
+	case *events.LoggedOut:
+		a.logger.Warn("WhatsApp logged out", "event", "whatsapp_logged_out")
 	}
 }
 
-func (a *Adapter) consumeQR(items <-chan whatsmeow.QRChannelItem) {
-	for item := range items {
-		switch item.Event {
-		case "code":
-			fmt.Fprintln(a.qrOut, "\nWhatsApp pairing required. In WhatsApp open Linked devices, choose Link a device, and scan this QR code:")
-			qrterminal.GenerateHalfBlock(item.Code, qrterminal.L, a.qrOut)
-		case "success":
-			fmt.Fprintln(a.qrOut, "WhatsApp pairing complete. The linked session is stored in whatsapp.db.")
-		case "timeout":
-			a.logger.Warn("WhatsApp QR pairing timed out", "event", "whatsapp_pairing_timeout")
-		case "error":
-			safelog.Error(a.logger, "WhatsApp QR pairing failed", "whatsapp_pairing", item.Error)
-		case "err-client-outdated", "err-unexpected-state", "err-scanned-without-multidevice":
-			a.logger.Error("WhatsApp QR pairing failed",
-				"event", "whatsapp_pairing_failed",
-				"reason", item.Event,
-			)
+func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChannelItem) {
+	for {
+		select {
+		case <-qrCtx.Done():
+			a.mu.Lock()
+			a.pairingActive = false
+			a.currentQRCode = ""
+			a.pairingCodeChan = nil
+			a.mu.Unlock()
+			return
+		case item, ok := <-items:
+			if !ok {
+				a.mu.Lock()
+				a.pairingActive = false
+				a.currentQRCode = ""
+				a.pairingCodeChan = nil
+				a.mu.Unlock()
+				return
+			}
+			switch item.Event {
+			case whatsmeow.QRChannelEventCode:
+				a.mu.Lock()
+				a.currentQRCode = item.Code
+				timeout := item.Timeout
+				if timeout <= 0 {
+					timeout = 20 * time.Second
+				}
+				a.currentQRExpires = time.Now().Add(timeout)
+				a.pairingActive = true
+				if a.pairingCodeChan != nil {
+					select {
+					case a.pairingCodeChan <- item.Code:
+					default:
+					}
+				}
+				a.mu.Unlock()
+				a.logger.Info("WhatsApp QR code generated", "event", "whatsapp_qr_generated")
+				if a.enableTerminalQR && a.qrOut != nil {
+					fmt.Fprintln(a.qrOut, "\nWhatsApp pairing required. In WhatsApp open Linked devices, choose Link a device, and scan this QR code:")
+					qrterminal.GenerateHalfBlock(item.Code, qrterminal.L, a.qrOut)
+				}
+			case whatsmeow.QRChannelSuccess.Event:
+				a.mu.Lock()
+				a.pairingActive = false
+				a.currentQRCode = ""
+				a.pairingCodeChan = nil
+				a.mu.Unlock()
+				a.logger.Info("WhatsApp pairing complete", "event", "whatsapp_pairing_success")
+				if a.enableTerminalQR && a.qrOut != nil {
+					fmt.Fprintln(a.qrOut, "WhatsApp pairing complete. The linked session is stored in whatsapp.db.")
+				}
+			case "timeout":
+				a.mu.Lock()
+				a.pairingActive = false
+				a.currentQRCode = ""
+				a.pairingCodeChan = nil
+				a.mu.Unlock()
+				a.logger.Warn("WhatsApp QR pairing timed out", "event", "whatsapp_pairing_timeout")
+			case "error":
+				a.mu.Lock()
+				a.pairingActive = false
+				a.currentQRCode = ""
+				a.pairingCodeChan = nil
+				a.mu.Unlock()
+				safelog.Error(a.logger, "WhatsApp QR pairing failed", "whatsapp_pairing", item.Error)
+			default:
+				a.mu.Lock()
+				a.pairingActive = false
+				a.currentQRCode = ""
+				a.pairingCodeChan = nil
+				a.mu.Unlock()
+				a.logger.Error("WhatsApp QR pairing failed",
+					"event", "whatsapp_pairing_failed",
+					"reason", item.Event,
+				)
+			}
 		}
 	}
 }

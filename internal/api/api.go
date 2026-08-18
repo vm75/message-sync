@@ -13,12 +13,33 @@ import (
 	"time"
 )
 
+type WhatsAppStatus struct {
+	Status      string `json:"status"`
+	IsLoggedIn  bool   `json:"isLoggedIn"`
+	IsConnected bool   `json:"isConnected"`
+	QRCode      string `json:"qrCode,omitempty"`
+}
+
+type WhatsAppPairResponse struct {
+	Status         string `json:"status"`
+	QRCode         string `json:"qrCode,omitempty"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty"`
+	IsLoggedIn     bool   `json:"isLoggedIn,omitempty"`
+}
+
+type WhatsAppService interface {
+	Status(ctx context.Context) WhatsAppStatus
+	Pair(ctx context.Context) (WhatsAppPairResponse, error)
+	CancelPair(ctx context.Context) error
+}
+
 type Options struct {
 	Addr       string
 	Logger     *slog.Logger
 	DB         *sql.DB
 	Secret     []byte
 	SessionTTL time.Duration
+	WhatsApp   WhatsAppService
 }
 
 type Server struct {
@@ -28,6 +49,7 @@ type Server struct {
 	logger     *slog.Logger
 	db         *sql.DB
 	sessions   *SessionManager
+	whatsapp   WhatsAppService
 	listener   net.Listener
 }
 
@@ -52,6 +74,7 @@ func NewServer(opts Options) *Server {
 		logger:   logger,
 		db:       opts.DB,
 		sessions: sessions,
+		whatsapp: opts.WhatsApp,
 	}
 
 	s.registerRoutes()
@@ -75,6 +98,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+
+	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
+	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
+	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

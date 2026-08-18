@@ -3,7 +3,10 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
@@ -18,9 +22,13 @@ import (
 )
 
 type fakeWhatsAppTransport struct {
-	events chan transport.Incoming
-	mu     sync.Mutex
-	sent   []transport.Outgoing
+	events      chan transport.Incoming
+	mu          sync.Mutex
+	sent        []transport.Outgoing
+	status      api.WhatsAppStatus
+	pairResp    api.WhatsAppPairResponse
+	pairCalled  int
+	cancelCalls int
 }
 
 func (f *fakeWhatsAppTransport) Events() <-chan transport.Incoming { return f.events }
@@ -44,6 +52,32 @@ func (f *fakeWhatsAppTransport) Edit(ctx context.Context, ref transport.MessageR
 }
 
 func (f *fakeWhatsAppTransport) Delete(ctx context.Context, ref transport.MessageRef) error {
+	return nil
+}
+
+func (f *fakeWhatsAppTransport) Status(ctx context.Context) api.WhatsAppStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.status.Status == "" {
+		return api.WhatsAppStatus{Status: "unpaired"}
+	}
+	return f.status
+}
+
+func (f *fakeWhatsAppTransport) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pairCalled++
+	if f.pairResp.Status == "" {
+		return api.WhatsAppPairResponse{Status: "pairing", QRCode: "mock-qr", TimeoutSeconds: 20}, nil
+	}
+	return f.pairResp, nil
+}
+
+func (f *fakeWhatsAppTransport) CancelPair(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelCalls++
 	return nil
 }
 
@@ -320,5 +354,135 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 
 	if !strings.Contains(out.String(), "message-sync started") {
 		t.Fatalf("expected log to contain message-sync started: %s", out.String())
+	}
+}
+
+func TestRunWhatsAppAPIIntegration(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	apiAddr := "127.0.0.1:18099"
+	t.Setenv("API_ADDR", apiAddr)
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	syncPath := filepath.Join(dataDir, SyncDBName)
+	st, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "123456789@g.us"},
+			"c1g2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	originalOpen := openWhatsApp
+	defer func() { openWhatsApp = originalOpen }()
+	fake := &fakeWhatsAppTransport{
+		events: make(chan transport.Incoming),
+		status: api.WhatsAppStatus{
+			Status:      "unpaired",
+			IsLoggedIn:  false,
+			IsConnected: false,
+		},
+		pairResp: api.WhatsAppPairResponse{
+			Status:         "pairing",
+			QRCode:         "2@test-qr-code",
+			TimeoutSeconds: 25,
+		},
+	}
+	openWhatsApp = func(_ context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+
+	var out bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&out, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, cfg, logger)
+	}()
+
+	// Wait for server to start
+	client := &http.Client{Timeout: 2 * time.Second}
+	var token string
+	for i := 0; i < 50; i++ {
+		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"password":"testadminpassword123"}`))
+		if err == nil {
+			var tokenResp struct {
+				Token string `json:"token"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&tokenResp)
+			resp.Body.Close()
+			if tokenResp.Token != "" {
+				token = tokenResp.Token
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if token == "" {
+		t.Fatal("failed to setup auth on running api server")
+	}
+
+	// 1. GET /api/whatsapp/status
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/whatsapp/status", apiAddr), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /api/whatsapp/status failed: %v", err)
+	}
+	var statusResp api.WhatsAppStatus
+	_ = json.NewDecoder(resp.Body).Decode(&statusResp)
+	resp.Body.Close()
+	if statusResp.Status != "unpaired" || statusResp.IsLoggedIn {
+		t.Fatalf("unexpected status response: %+v", statusResp)
+	}
+
+	// 2. POST /api/whatsapp/pair
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/whatsapp/pair", apiAddr), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/whatsapp/pair failed: %v", err)
+	}
+	var pairResp api.WhatsAppPairResponse
+	_ = json.NewDecoder(resp.Body).Decode(&pairResp)
+	resp.Body.Close()
+	if pairResp.Status != "pairing" || pairResp.QRCode != "2@test-qr-code" || pairResp.TimeoutSeconds != 25 {
+		t.Fatalf("unexpected pair response: %+v", pairResp)
+	}
+
+	// 3. DELETE /api/whatsapp/pair
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/api/whatsapp/pair", apiAddr), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("DELETE /api/whatsapp/pair failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from DELETE, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if fake.cancelCalls != 1 {
+		t.Fatalf("expected 1 cancel call, got %d", fake.cancelCalls)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error: %v", err)
 	}
 }
