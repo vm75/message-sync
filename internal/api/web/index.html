@@ -700,6 +700,29 @@
               </div>
             </div>
 
+            <!-- Poll Settings Card -->
+            <div class="card settings-card">
+              <div class="settings-card-header">
+                <div class="icon-avatar icon-avatar-primary">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 20V10"></path>
+                    <path d="M18 20V4"></path>
+                    <path d="M6 20v-4"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="settings-card-title">Polls</h3>
+                  <p class="settings-card-subtitle">Configure poll aggregation and synchronization behaviors.</p>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="settings-polls-aggregation-trigger" class="form-label">Aggregation Trigger</label>
+                <input type="text" id="settings-polls-aggregation-trigger" class="form-input" required>
+                <p class="form-hint">The textual trigger used to aggregate poll responses.</p>
+              </div>
+            </div>
+
             <!-- Form Actions -->
             <div class="settings-form-actions">
               <button type="button" id="btn-reset-settings" class="btn btn-ghost">

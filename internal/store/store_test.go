@@ -416,3 +416,83 @@ INSERT INTO schema_meta(key, value) VALUES ('schema_version', '3');
 		t.Fatalf("expected migrated schema version %d, got %d", SchemaVersion, version)
 	}
 }
+
+func TestResolveOrCreateCanonicalIsPersistentAndIdempotent(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := MessageCopy{
+		EndpointID:      "c1g1",
+		RemoteMessageID: "source-remote-id",
+		CreatedAt:       time.Unix(1_700_000_000, 0).UTC(),
+	}
+
+	canonicalID, created, err := s.ResolveOrCreateCanonical(ctx, "c_first", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || canonicalID != "c_first" {
+		t.Fatalf("first resolution = (%q, %v), want (c_first, true)", canonicalID, created)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	canonicalID, created, err = s.ResolveOrCreateCanonical(ctx, "c_second", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created || canonicalID != "c_first" {
+		t.Fatalf("restart resolution = (%q, %v), want (c_first, false)", canonicalID, created)
+	}
+}
+
+func TestSuppressedReactions(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+
+	endpointID := "c1g1"
+	remoteID := "msg-123"
+	emoji := "👍"
+	now := time.Now().UTC()
+
+	// Check non-existent
+	found, err := store.CheckAndClearSuppressedReaction(ctx, endpointID, remoteID, emoji)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected no suppressed reaction initially")
+	}
+
+	// Record
+	if err := store.RecordSuppressedReaction(ctx, endpointID, remoteID, emoji, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Check and clear
+	found, err = store.CheckAndClearSuppressedReaction(ctx, endpointID, remoteID, emoji)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected suppressed reaction to be found")
+	}
+
+	// Check again (should be cleared)
+	found, err = store.CheckAndClearSuppressedReaction(ctx, endpointID, remoteID, emoji)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected suppressed reaction to be cleared")
+	}
+}

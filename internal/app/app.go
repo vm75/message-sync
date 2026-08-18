@@ -129,7 +129,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	apiAddr := strings.TrimSpace(os.Getenv("API_ADDR"))
 	if apiAddr == "" {
-		apiAddr = ":8080"
+		port := strings.TrimSpace(os.Getenv("PORT"))
+		if port == "" {
+			port = "8080"
+		}
+		if !strings.HasPrefix(port, ":") {
+			apiAddr = ":" + port
+		} else {
+			apiAddr = port
+		}
 	}
 	apiServer := api.NewServer(api.Options{
 		Addr:           apiAddr,

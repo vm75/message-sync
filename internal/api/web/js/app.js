@@ -108,6 +108,7 @@
   const settingsRecoveryMaxAge = document.getElementById('settings-recovery-max-age');
   const settingsRecoveryMaxMsgs = document.getElementById('settings-recovery-max-msgs');
   const settingsRetentionDays = document.getElementById('settings-retention-days');
+  const settingsPollsAggregationTrigger = document.getElementById('settings-polls-aggregation-trigger');
   const btnResetSettings = document.getElementById('btn-reset-settings');
   const btnSaveSettings = document.getElementById('btn-save-settings');
 
@@ -1360,6 +1361,7 @@
     if (settingsRecoveryMaxAge) settingsRecoveryMaxAge.value = cfg.recovery ? cfg.recovery.maxAgeHours : 72;
     if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
     if (settingsRetentionDays) settingsRetentionDays.value = cfg.storage ? cfg.storage.messageRetentionDays : 14;
+    if (settingsPollsAggregationTrigger) settingsPollsAggregationTrigger.value = cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response';
   }
 
   async function handleSettingsSubmit(e) {
@@ -1373,6 +1375,7 @@
     const recoveryMaxAge = parseInt(settingsRecoveryMaxAge.value, 10);
     const recoveryMaxMsgs = parseInt(settingsRecoveryMaxMsgs.value, 10);
     const retentionDays = parseInt(settingsRetentionDays.value, 10);
+    const pollsAggregationTrigger = settingsPollsAggregationTrigger.value.trim();
 
     if (isNaN(mediaMaxSize) || mediaMaxSize < 1) {
       settingsAlert.textContent = 'Media max size must be a positive number (1 MB minimum).';
@@ -1402,6 +1405,13 @@
       return;
     }
 
+    if (!pollsAggregationTrigger) {
+      settingsAlert.textContent = 'Polls aggregation trigger cannot be empty.';
+      settingsAlert.classList.remove('hidden');
+      settingsPollsAggregationTrigger.focus();
+      return;
+    }
+
     const payload = {
       usernameMode,
       media: {
@@ -1415,6 +1425,9 @@
       },
       storage: {
         messageRetentionDays: retentionDays
+      },
+      polls: {
+        aggregationTrigger: pollsAggregationTrigger
       }
     };
 

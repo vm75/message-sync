@@ -29,12 +29,6 @@ type copyKey struct {
 	remoteID string
 }
 
-type sentReactionKey struct {
-	endpoint transport.EndpointID
-	remoteID string
-	emoji    string
-}
-
 type pollMeta struct {
 	Question string
 	Options  []string
@@ -48,7 +42,6 @@ type Router struct {
 	usernameMode  config.UsernameMode
 	aggTrigger    string
 	knownCopies   map[copyKey]string
-	sentReactions map[sentReactionKey]struct{}
 	pollCache     map[string]pollMeta
 	newCanonical  func() (string, error)
 	afterPersist  func(transport.EndpointID) error
@@ -87,7 +80,6 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		usernameMode:  cfg.Identity.UsernameMode,
 		aggTrigger:    cfg.Polls.AggregationTrigger,
 		knownCopies:   make(map[copyKey]string),
-		sentReactions: make(map[sentReactionKey]struct{}),
 		pollCache:     make(map[string]pollMeta),
 		newCanonical:  newCanonicalID,
 	}, nil
@@ -281,13 +273,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			// The bridge is a linked device, so user reactions are also FromSelf.
 			// Distinguish genuine user reactions from bridge echo by checking
 			// whether we recently sent this exact reaction to this endpoint.
-			key := sentReactionKey{
-				endpoint: incoming.Endpoint,
-				remoteID: incoming.ReplyTo.RemoteMessageID,
-				emoji:    strings.TrimSpace(incoming.Text),
+			emoji := strings.TrimSpace(incoming.Text)
+			echoed, err := r.store.CheckAndClearSuppressedReaction(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID, emoji)
+			if err != nil {
+				return fmt.Errorf("check suppressed reaction: %w", err)
 			}
-			if _, echoed := r.sentReactions[key]; echoed {
-				delete(r.sentReactions, key)
+			if echoed {
 				return nil
 			}
 		}
@@ -358,11 +349,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}); err != nil {
 				return fmt.Errorf("send reaction copy: %w", err)
 			}
-			r.sentReactions[sentReactionKey{
-				endpoint: destination,
-				remoteID: targetCopy.RemoteMessageID,
-				emoji:    emoji,
-			}] = struct{}{}
+			if err := r.store.RecordSuppressedReaction(ctx, string(destination), targetCopy.RemoteMessageID, emoji, time.Now().UTC()); err != nil {
+				return fmt.Errorf("record suppressed reaction: %w", err)
+			}
 		}
 		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
 			EndpointID:       string(incoming.Endpoint),
