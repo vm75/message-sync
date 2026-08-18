@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS global_config (
     recovery_max_age_hours INTEGER NOT NULL DEFAULT 24,
     recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
     storage_message_retention_days INTEGER NOT NULL DEFAULT 90,
-    admin_password_hash TEXT NOT NULL DEFAULT ''
+    admin_password_hash TEXT NOT NULL DEFAULT '',
+    poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response'
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
@@ -52,9 +53,10 @@ CREATE TABLE IF NOT EXISTS sync_sets (
 
 CREATE TABLE IF NOT EXISTS groups (
     alias TEXT PRIMARY KEY,
-    jid TEXT NOT NULL,
+    jid TEXT NOT NULL UNIQUE,
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
 
 CREATE TABLE IF NOT EXISTS poll_options (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
@@ -78,4 +80,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '6');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '8');

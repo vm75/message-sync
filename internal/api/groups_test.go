@@ -142,6 +142,18 @@ func TestGroupsCRUDAndValidation(t *testing.T) {
 		}
 	}
 
+	// 5b. POST /api/groups duplicate JID with different alias
+	{
+		body := `{"alias":"g2","jid":"12345@g.us"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/groups", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST duplicate JID status = %d, want 400", rec.Code)
+		}
+	}
+
 	// 6. GET /api/groups/{alias}
 	{
 		req := httptest.NewRequest(http.MethodGet, "/api/groups/g1", nil)

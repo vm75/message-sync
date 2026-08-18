@@ -73,6 +73,7 @@ The daemon serves an embedded, zero-dependency Web UI console and REST API on po
 - `GET /api/whatsapp/status`: Returns the current WhatsApp client connection state (`"unpaired"`, `"pairing"`, `"connected"`, `"disconnected"`).
 - `POST /api/whatsapp/pair`: Initiates or retrieves an active WhatsApp QR pairing session.
 - `DELETE /api/whatsapp/pair`: Cancels an in-progress WhatsApp pairing session.
+- `GET /api/whatsapp/groups`: Returns joined WhatsApp groups (`jid`, `name`) ephemerally in-memory without persisting PII.
 - `GET /api/groups`, `POST /api/groups`: List and create groups (`alias`, `jid`, optional `syncSetId`).
 - `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Read, update, and delete configured groups.
 - `GET /api/sync-sets`, `POST /api/sync-sets`: List and create sync sets (`id`, list of `groups`).

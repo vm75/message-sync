@@ -50,7 +50,7 @@ func StaticHandler() http.Handler {
 						w.Header().Set("Content-Type", ct)
 					}
 					if strings.HasPrefix(trimmedPath, "css/") || strings.HasPrefix(trimmedPath, "js/") {
-						w.Header().Set("Cache-Control", "public, max-age=3600")
+						w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 					}
 					fileServer.ServeHTTP(w, r)
 					return

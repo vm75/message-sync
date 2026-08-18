@@ -20,6 +20,7 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
@@ -68,6 +69,7 @@ type Adapter struct {
 	recoveryEnabled  bool
 	recoveryMaxAge   time.Duration
 	recoveryMaxCount int
+	pcache           *participantCache
 }
 
 func Open(ctx context.Context, opts Options) (*Adapter, error) {
@@ -111,6 +113,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		recoveryEnabled:  opts.RecoveryEnabled,
 		recoveryMaxAge:   opts.RecoveryMaxAge,
 		recoveryMaxCount: opts.RecoveryMaxCount,
+		pcache:           newParticipantCache(1024),
 	}
 	client.AddEventHandler(adapter.handleEvent)
 
@@ -137,9 +140,12 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if a == nil || a.client == nil {
 		return transport.MessageRef{}, errors.New("WhatsApp transport is not initialized")
 	}
+	a.mu.Lock()
 	target, ok := a.targets[outgoing.Endpoint]
+	mediaEnabled := a.mediaEnabled
+	a.mu.Unlock()
 	if !ok {
-		return transport.MessageRef{}, errors.New("unknown WhatsApp endpoint")
+		return transport.MessageRef{}, fmt.Errorf("unknown WhatsApp endpoint %q", outgoing.Endpoint)
 	}
 
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -150,14 +156,24 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	var contextInfo *waE2E.ContextInfo
 	if outgoing.ReplyTo != nil {
+		var participant string
+		var useNative bool
+
 		if outgoing.ReplyTo.IsTargetFromMe {
-			participant := a.client.Store.ID.ToNonAD().String()
+			participant = a.client.Store.ID.ToNonAD().String()
+			useNative = true
+		} else if jid, ok := a.pcache.Get(outgoing.ReplyTo.RemoteMessageID); ok {
+			participant = jid
+			useNative = true
+		}
+
+		if useNative {
 			contextInfo = &waE2E.ContextInfo{
 				StanzaID:    proto.String(outgoing.ReplyTo.RemoteMessageID),
 				Participant: proto.String(participant),
 			}
 		} else {
-			// Fallback: prepend quoted text
+			// Fallback: prepend quoted text when original participant is unknown
 			quote := strings.TrimSpace(outgoing.QuotedText)
 			if quote == "" {
 				quote = "message"
@@ -196,7 +212,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			}
 		}
 	} else {
-		if !a.mediaEnabled {
+		if !mediaEnabled {
 			return transport.MessageRef{}, errors.New("WhatsApp sender supports text only when media is disabled")
 		}
 		if len(outgoing.MediaBytes) == 0 {
@@ -232,9 +248,11 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 	if a == nil || a.client == nil {
 		return errors.New("WhatsApp transport is not initialized")
 	}
+	a.mu.Lock()
 	target, ok := a.targets[r.Endpoint]
+	a.mu.Unlock()
 	if !ok {
-		return errors.New("unknown WhatsApp endpoint")
+		return fmt.Errorf("unknown WhatsApp endpoint %q", r.Endpoint)
 	}
 
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -243,20 +261,31 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 		defer cancel()
 	}
 
-	if r.IsTargetFromMe {
-		msg := a.client.BuildReaction(target, a.client.Store.ID.ToNonAD(), r.TargetRemoteID, r.Emoji)
-		_, err := a.client.SendMessage(ctx, target, msg)
-		if err != nil {
-			return fmt.Errorf("send WhatsApp native reaction: %w", err)
+	var participant *string
+	if !r.IsTargetFromMe {
+		if jid, ok := a.pcache.Get(r.TargetRemoteID); ok {
+			participant = proto.String(jid)
+		} else {
+			// Cache miss, we drop the reaction to avoid PII violations
+			return nil
 		}
-		return nil
 	}
 
-	if r.FallbackText != "" {
-		_, err := a.client.SendMessage(ctx, target, &waE2E.Message{Conversation: proto.String(r.FallbackText)})
-		if err != nil {
-			return fmt.Errorf("send WhatsApp reaction fallback: %w", err)
-		}
+	reactionMsg := &waE2E.Message{
+		ReactionMessage: &waE2E.ReactionMessage{
+			Key: &waCommon.MessageKey{
+				RemoteJID:   proto.String(target.String()),
+				FromMe:      proto.Bool(r.IsTargetFromMe),
+				ID:          proto.String(r.TargetRemoteID),
+				Participant: participant,
+			},
+			Text:              proto.String(r.Emoji),
+			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
+		},
+	}
+	_, err := a.client.SendMessage(ctx, target, reactionMsg)
+	if err != nil {
+		return fmt.Errorf("send WhatsApp native reaction: %w", err)
 	}
 	return nil
 }
@@ -265,9 +294,11 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	if a == nil || a.client == nil {
 		return errors.New("WhatsApp transport is not initialized")
 	}
+	a.mu.Lock()
 	target, ok := a.targets[ref.Endpoint]
+	a.mu.Unlock()
 	if !ok {
-		return errors.New("unknown WhatsApp endpoint")
+		return fmt.Errorf("unknown WhatsApp endpoint %q", ref.Endpoint)
 	}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
@@ -290,9 +321,11 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 	if a == nil || a.client == nil {
 		return errors.New("WhatsApp transport is not initialized")
 	}
+	a.mu.Lock()
 	target, ok := a.targets[ref.Endpoint]
+	a.mu.Unlock()
 	if !ok {
-		return errors.New("unknown WhatsApp endpoint")
+		return fmt.Errorf("unknown WhatsApp endpoint %q", ref.Endpoint)
 	}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		var cancel context.CancelFunc
@@ -565,13 +598,98 @@ func (a *Adapter) CancelPair(ctx context.Context) error {
 	return nil
 }
 
+func (a *Adapter) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
+	if a == nil {
+		return nil, errors.New("WhatsApp adapter is not initialized")
+	}
+	a.mu.Lock()
+	client := a.client
+	a.mu.Unlock()
+
+	if client == nil {
+		return nil, errors.New("WhatsApp client is not initialized")
+	}
+	if !client.IsLoggedIn() || !client.IsConnected() {
+		return nil, errors.New("WhatsApp client is not connected")
+	}
+
+	groups, err := client.GetJoinedGroups(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]api.WhatsAppGroup, 0, len(groups))
+	for _, g := range groups {
+		if g == nil {
+			continue
+		}
+		result = append(result, api.WhatsAppGroup{
+			JID:  g.JID.String(),
+			Name: g.Name,
+		})
+	}
+	return result, nil
+}
+
+func (a *Adapter) UpdateConfig(cfg *config.Config) error {
+	if a == nil || cfg == nil {
+		return nil
+	}
+	groupJIDs := make(map[string]string, len(cfg.Groups))
+	for alias, g := range cfg.Groups {
+		groupJIDs[alias] = g.JID
+	}
+
+	a.mu.Lock()
+	var hasher *identity.Hasher
+	if a.normalizer != nil {
+		hasher = a.normalizer.hasher
+	}
+	a.mu.Unlock()
+
+	normalizer, err := NewNormalizer(groupJIDs, hasher, cfg.Identity.UsernameMode)
+	if err != nil {
+		return fmt.Errorf("create normalizer for updated config: %w", err)
+	}
+	targets, err := outgoingTargets(groupJIDs)
+	if err != nil {
+		return fmt.Errorf("resolve targets for updated config: %w", err)
+	}
+
+	a.mu.Lock()
+	a.normalizer = normalizer
+	a.targets = targets
+	a.mediaEnabled = cfg.Media.Enabled
+	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
+	a.recoveryEnabled = cfg.Recovery.Enabled
+	a.recoveryMaxAge = time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour
+	a.recoveryMaxCount = cfg.Recovery.MaxMessagesPerGroup
+	a.mu.Unlock()
+
+	return nil
+}
+
 func (a *Adapter) handleEvent(raw any) {
 	switch evt := raw.(type) {
 	case *events.Message:
-		if a.recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > a.recoveryMaxAge {
+		a.mu.Lock()
+		normalizer := a.normalizer
+		mediaEnabled := a.mediaEnabled
+		mediaMaxBytes := a.mediaMaxBytes
+		recoveryMaxAge := a.recoveryMaxAge
+		client := a.client
+		a.mu.Unlock()
+
+		if recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > recoveryMaxAge {
 			return
 		}
-		incoming, ok := a.normalizer.NormalizeMessage(evt, a.mediaEnabled, a.mediaMaxBytes, a.client.Download, a.client.DecryptPollVote)
+		if normalizer == nil || client == nil {
+			return
+		}
+		if !evt.Info.MessageSource.Sender.IsEmpty() {
+			a.pcache.Add(evt.Info.ID, evt.Info.MessageSource.Sender.ToNonAD().String())
+		}
+		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote)
 		if !ok {
 			return
 		}
@@ -585,7 +703,17 @@ func (a *Adapter) handleEvent(raw any) {
 			)
 		}
 	case *events.HistorySync:
-		if !a.recoveryEnabled || evt.Data == nil {
+		a.mu.Lock()
+		normalizer := a.normalizer
+		mediaEnabled := a.mediaEnabled
+		mediaMaxBytes := a.mediaMaxBytes
+		recoveryEnabled := a.recoveryEnabled
+		recoveryMaxAge := a.recoveryMaxAge
+		recoveryMaxCount := a.recoveryMaxCount
+		client := a.client
+		a.mu.Unlock()
+
+		if !recoveryEnabled || evt.Data == nil || normalizer == nil || client == nil {
 			return
 		}
 		for _, conv := range evt.Data.GetConversations() {
@@ -594,26 +722,29 @@ func (a *Adapter) handleEvent(raw any) {
 				continue
 			}
 			chatJID = chatJID.ToNonAD()
-			if _, ok := a.normalizer.endpoints[chatJID.String()]; !ok {
+			if _, ok := normalizer.endpoints[chatJID.String()]; !ok {
 				continue
 			}
 			count := 0
 			for _, historyMsg := range conv.GetMessages() {
-				if a.recoveryMaxCount > 0 && count >= a.recoveryMaxCount {
+				if recoveryMaxCount > 0 && count >= recoveryMaxCount {
 					break
 				}
 				webMsg := historyMsg.GetMessage()
 				if webMsg == nil {
 					continue
 				}
-				parsed, err := a.client.ParseWebMessage(chatJID, webMsg)
+				parsed, err := client.ParseWebMessage(chatJID, webMsg)
 				if err != nil || parsed == nil {
 					continue
 				}
-				if a.recoveryMaxAge > 0 && !parsed.Info.Timestamp.IsZero() && time.Since(parsed.Info.Timestamp) > a.recoveryMaxAge {
+				if recoveryMaxAge > 0 && !parsed.Info.Timestamp.IsZero() && time.Since(parsed.Info.Timestamp) > recoveryMaxAge {
 					continue
 				}
-				incoming, ok := a.normalizer.NormalizeMessage(parsed, a.mediaEnabled, a.mediaMaxBytes, a.client.Download, a.client.DecryptPollVote)
+				if !parsed.Info.MessageSource.Sender.IsEmpty() {
+					a.pcache.Add(parsed.Info.ID, parsed.Info.MessageSource.Sender.ToNonAD().String())
+				}
+				incoming, ok := normalizer.NormalizeMessage(parsed, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote)
 				if !ok {
 					continue
 				}

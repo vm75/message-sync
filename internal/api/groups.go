@@ -141,6 +141,17 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var existingAliasForJID string
+	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE jid = ?`, req.JID).Scan(&existingAliasForJID)
+	if err == nil {
+		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
+		return
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		s.logger.Error("check existing group JID failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
 	var syncSetVal any
 	if req.SyncSetID != nil && strings.TrimSpace(*req.SyncSetID) != "" {
 		setID := strings.TrimSpace(*req.SyncSetID)
@@ -214,6 +225,17 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if err != nil {
 		s.logger.Error("check group existence failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	var otherAlias string
+	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE jid = ? AND alias != ?`, req.JID, alias).Scan(&otherAlias)
+	if err == nil {
+		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
+		return
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		s.logger.Error("check other group JID failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}

@@ -39,14 +39,15 @@ func (s *safeBuffer) String() string {
 }
 
 type fakeWhatsAppTransport struct {
-	events      chan transport.Incoming
-	mu          sync.Mutex
-	sent        []transport.Outgoing
-	sentCount   int
-	status      api.WhatsAppStatus
-	pairResp    api.WhatsAppPairResponse
-	pairCalled  int
-	cancelCalls int
+	events         chan transport.Incoming
+	mu             sync.Mutex
+	sent           []transport.Outgoing
+	sentCount      int
+	status         api.WhatsAppStatus
+	pairResp       api.WhatsAppPairResponse
+	pairCalled     int
+	cancelCalls    int
+	updatedConfigs []*config.Config
 }
 
 func (f *fakeWhatsAppTransport) Events() <-chan transport.Incoming { return f.events }
@@ -97,6 +98,17 @@ func (f *fakeWhatsAppTransport) CancelPair(ctx context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancelCalls++
+	return nil
+}
+
+func (f *fakeWhatsAppTransport) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
+	return []api.WhatsAppGroup{}, nil
+}
+
+func (f *fakeWhatsAppTransport) UpdateConfig(cfg *config.Config) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.updatedConfigs = append(f.updatedConfigs, cfg)
 	return nil
 }
 
@@ -680,6 +692,14 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	}
 	if strings.Contains(fake.sent[0].Text, "Alice") {
 		t.Fatalf("expected hash mode without push name Alice, got %q", fake.sent[0].Text)
+	}
+
+	if len(fake.updatedConfigs) == 0 {
+		t.Fatal("expected WhatsApp transport UpdateConfig to be called on dynamic config reload")
+	}
+	latestConfig := fake.updatedConfigs[len(fake.updatedConfigs)-1]
+	if _, ok := latestConfig.Groups["c1g3"]; !ok {
+		t.Fatalf("expected updated WhatsApp config to contain group c1g3, got %+v", latestConfig.Groups)
 	}
 	fake.mu.Unlock()
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Message Sync - Privacy-first message synchronization console">
   <title>Message Sync • Admin Console</title>
-  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/app.css?v=3">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'></path><path d='M8 10h8'></path><path d='M8 14h4'></path></svg>">
 </head>
 <body>
@@ -732,6 +732,15 @@
           <div id="modal-group-alert" class="alert alert-danger hidden" role="alert"></div>
 
           <div class="form-group">
+            <label for="select-group-wa" class="form-label">WhatsApp Group</label>
+            <select id="select-group-wa" class="form-select" required>
+              <option value="">-- Select WhatsApp Group --</option>
+            </select>
+            <input type="hidden" id="input-group-jid">
+            <p class="form-hint" id="select-group-wa-hint">Select from active joined groups on linked WhatsApp.</p>
+          </div>
+
+          <div class="form-group">
             <label for="input-group-alias" class="form-label">Group Alias</label>
             <input 
               type="text" 
@@ -740,19 +749,7 @@
               placeholder="e.g. engineering_team" 
               required
             >
-            <p class="form-hint">Letters, numbers, underscores, and hyphens (1-64 characters).</p>
-          </div>
-
-          <div class="form-group">
-            <label for="input-group-jid" class="form-label">WhatsApp Group JID</label>
-            <input 
-              type="text" 
-              id="input-group-jid" 
-              class="form-input font-mono" 
-              placeholder="e.g. 120363045678901234@g.us" 
-              required
-            >
-            <p class="form-hint">Standard WhatsApp Group JID ending in @g.us.</p>
+            <p class="form-hint">Unique safe identifier (1-64 alphanumeric, dash, or underscore characters).</p>
           </div>
 
           <div class="form-group">
@@ -855,9 +852,9 @@
     </footer>
   </div>
 
-  <script src="/js/qrcode.js"></script>
-  <script src="/js/api.js"></script>
-  <script src="/js/router.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="/js/qrcode.js?v=3"></script>
+  <script src="/js/api.js?v=3"></script>
+  <script src="/js/router.js?v=3"></script>
+  <script src="/js/app.js?v=3"></script>
 </body>
 </html>

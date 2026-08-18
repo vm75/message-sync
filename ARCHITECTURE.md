@@ -94,7 +94,7 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 - `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
 - `POST /api/auth/login`: Accepts `{"password": "..."}`, verifies against stored bcrypt hash, and returns a session token / sets an `HttpOnly` session cookie.
 - `POST /api/auth/logout`: Clears the session cookie.
-- `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`: Manage WhatsApp client connection and QR pairing session.
+- `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`, `GET /api/whatsapp/groups`: Manage WhatsApp client connection, QR pairing session, and on-demand ephemeral group discovery.
 - `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Manage group definitions and sync set mappings.
 - `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections and member group assignments.
 - `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.

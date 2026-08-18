@@ -39,3 +39,20 @@ func (s *Server) handleWhatsAppCancelPair(w http.ResponseWriter, r *http.Request
 	}
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
 }
+
+func (s *Server) handleWhatsAppGroups(w http.ResponseWriter, r *http.Request) {
+	if s.whatsapp == nil {
+		WriteError(w, http.StatusServiceUnavailable, "whatsapp service unavailable")
+		return
+	}
+	groups, err := s.whatsapp.GetJoinedGroups(r.Context())
+	if err != nil {
+		s.logger.Error("get joined groups failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "failed to get joined groups")
+		return
+	}
+	if groups == nil {
+		groups = []WhatsAppGroup{}
+	}
+	_ = WriteJSON(w, http.StatusOK, groups)
+}
