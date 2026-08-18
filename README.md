@@ -71,6 +71,11 @@ The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR
 - `GET /api/whatsapp/status`: Returns the current WhatsApp client connection state (`"unpaired"`, `"pairing"`, `"connected"`, `"disconnected"`).
 - `POST /api/whatsapp/pair`: Initiates or retrieves an active WhatsApp QR pairing session.
 - `DELETE /api/whatsapp/pair`: Cancels an in-progress WhatsApp pairing session.
+- `GET /api/groups`, `POST /api/groups`: List and create groups (`alias`, `jid`, optional `syncSetId`).
+- `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Read, update, and delete configured groups.
+- `GET /api/sync-sets`, `POST /api/sync-sets`: List and create sync sets (`id`, list of `groups`).
+- `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Read, update memberships, and delete sync sets.
+- `GET /api/config`, `PUT /api/config`: Retrieve and update global runtime settings (`usernameMode`, `media`, `recovery`, `storage`).
 - Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie.
 
 ## Rootless Podman

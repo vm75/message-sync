@@ -34,23 +34,25 @@ type WhatsAppService interface {
 }
 
 type Options struct {
-	Addr       string
-	Logger     *slog.Logger
-	DB         *sql.DB
-	Secret     []byte
-	SessionTTL time.Duration
-	WhatsApp   WhatsAppService
+	Addr           string
+	Logger         *slog.Logger
+	DB             *sql.DB
+	Secret         []byte
+	SessionTTL     time.Duration
+	WhatsApp       WhatsAppService
+	OnConfigChange func(ctx context.Context) error
 }
 
 type Server struct {
-	httpServer *http.Server
-	mux        *http.ServeMux
-	handler    http.Handler
-	logger     *slog.Logger
-	db         *sql.DB
-	sessions   *SessionManager
-	whatsapp   WhatsAppService
-	listener   net.Listener
+	httpServer     *http.Server
+	mux            *http.ServeMux
+	handler        http.Handler
+	logger         *slog.Logger
+	db             *sql.DB
+	sessions       *SessionManager
+	whatsapp       WhatsAppService
+	onConfigChange func(ctx context.Context) error
+	listener       net.Listener
 }
 
 func NewServer(opts Options) *Server {
@@ -70,11 +72,12 @@ func NewServer(opts Options) *Server {
 
 	mux := http.NewServeMux()
 	s := &Server{
-		mux:      mux,
-		logger:   logger,
-		db:       opts.DB,
-		sessions: sessions,
-		whatsapp: opts.WhatsApp,
+		mux:            mux,
+		logger:         logger,
+		db:             opts.DB,
+		sessions:       sessions,
+		whatsapp:       opts.WhatsApp,
+		onConfigChange: opts.OnConfigChange,
 	}
 
 	s.registerRoutes()
@@ -102,6 +105,29 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
 	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
+
+	s.mux.HandleFunc("GET /api/groups", s.handleListGroups)
+	s.mux.HandleFunc("GET /api/groups/{alias}", s.handleGetGroup)
+	s.mux.HandleFunc("POST /api/groups", s.handleCreateGroup)
+	s.mux.HandleFunc("PUT /api/groups/{alias}", s.handleUpdateGroup)
+	s.mux.HandleFunc("DELETE /api/groups/{alias}", s.handleDeleteGroup)
+
+	s.mux.HandleFunc("GET /api/sync-sets", s.handleListSyncSets)
+	s.mux.HandleFunc("GET /api/sync-sets/{id}", s.handleGetSyncSet)
+	s.mux.HandleFunc("POST /api/sync-sets", s.handleCreateSyncSet)
+	s.mux.HandleFunc("PUT /api/sync-sets/{id}", s.handleUpdateSyncSet)
+	s.mux.HandleFunc("DELETE /api/sync-sets/{id}", s.handleDeleteSyncSet)
+
+	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
+	s.mux.HandleFunc("PUT /api/config", s.handleUpdateConfig)
+}
+
+func (s *Server) notifyConfigChange(ctx context.Context) {
+	if s.onConfigChange != nil {
+		if err := s.onConfigChange(ctx); err != nil {
+			s.logger.Error("notify config change failed", "error", err.Error())
+		}
+	}
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +144,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("listen on %s: %w", s.httpServer.Addr, err)
 	}
 	s.listener = l
-	s.logger.Info("api server listening", "addr", s.httpServer.Addr)
+	s.logger.Info("api server listening", "addr", l.Addr().String())
 
 	go func() {
 		if err := s.httpServer.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -126,6 +152,13 @@ func (s *Server) Start() error {
 		}
 	}()
 	return nil
+}
+
+func (s *Server) Addr() string {
+	if s.listener != nil {
+		return s.listener.Addr().String()
+	}
+	return s.httpServer.Addr
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
