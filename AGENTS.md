@@ -54,7 +54,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - Process ingress deterministically; start with one router worker.
 - Download media only long enough to forward it. Do not add media persistence for convenience.
 - Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
-- Configuration is JSON. Secrets come from environment variables or secret mounts, never JSON.
+- Configuration is stored in SQLite (`sync.db`). Secrets come from environment variables or secret mounts, never database tables.
 - Group aliases are application-safe endpoint IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group subject, and every configured group must belong to exactly one MVP sync set.
 
 ## SQLite rules
@@ -89,7 +89,7 @@ For `sync.db`:
 
 Every feature must add tests for its invariants. As implementation lands, cover at least:
 
-- JSON config validation;
+- SQLite config validation and persistence;
 - HMAC stability and non-disclosure;
 - SQLite migrations and uniqueness constraints;
 - canonical lookup in both directions;

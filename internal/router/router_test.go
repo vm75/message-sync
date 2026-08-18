@@ -64,7 +64,7 @@ func (f *fakeSender) Delete(_ context.Context, ref transport.MessageRef) error {
 
 func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "push_name")
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 
 	incoming := testIncoming("c1g2", "source-1")
 	incoming.Sender.DisplayName = "  Alice   Example  "
@@ -92,7 +92,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 
 func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "push_name")
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 
 	incoming := testIncoming("c1g2", "source-1")
 	incoming.Sender.DisplayName = "   " // Empty after trim
@@ -112,7 +112,7 @@ func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 
 func TestHashAttributionNeverUsesPushName(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "hash")
+	r, _, fake := newTestRouter(t, config.UsernameModeHash)
 	incoming := testIncoming("c1g1", "source-1")
 	incoming.Sender.DisplayName = "Alice Example"
 
@@ -128,7 +128,7 @@ func TestHashAttributionNeverUsesPushName(t *testing.T) {
 
 func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "hash")
+	r, _, fake := newTestRouter(t, config.UsernameModeHash)
 	incoming := testIncoming("c1g1", "manual-self-message")
 	incoming.FromSelf = true
 
@@ -142,7 +142,7 @@ func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 
 func TestDuplicateAndBridgeEchoDoNotCreateCopies(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "push_name")
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 	incoming := testIncoming("c1g1", "source-1")
 
 	if err := r.Handle(ctx, incoming); err != nil {
@@ -168,7 +168,7 @@ func TestDuplicateAndBridgeEchoDoNotCreateCopies(t *testing.T) {
 
 func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, first := newTestRouter(t, "push_name")
+	r, syncStore, first := newTestRouter(t, config.UsernameModePushName)
 	incoming := testIncoming("c1g1", "source-1")
 	crash := errors.New("simulated crash")
 	r.afterPersist = func(endpoint transport.EndpointID) error {
@@ -254,7 +254,7 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 
 func TestEditPropagationToDestinationCopies(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, "push_name")
+	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Send original text message
 	orig := testIncoming("c1g1", "orig-msg-1")
@@ -312,7 +312,7 @@ func TestEditPropagationToDestinationCopies(t *testing.T) {
 
 func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, "push_name")
+	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Send original text message
 	orig := testIncoming("c1g1", "orig-msg-2")
@@ -392,7 +392,7 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 
 func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, "push_name")
+	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Ingest original message in c1g1
 	orig := testIncoming("c1g1", "orig-msg-reaction")
@@ -495,7 +495,7 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 
 func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, "push_name")
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Send original text message in c1g1
 	orig := testIncoming("c1g1", "orig-msg-reply")
@@ -546,7 +546,7 @@ func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	}
 }
 
-func newTestRouter(t *testing.T, usernameMode string) (*Router, *store.Store, *fakeSender) {
+func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *store.Store, *fakeSender) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sync.db")
 	syncStore, err := store.Open(context.Background(), path)
@@ -562,7 +562,7 @@ func newTestRouter(t *testing.T, usernameMode string) (*Router, *store.Store, *f
 	return r, syncStore, fake
 }
 
-func testConfig(usernameMode string) *config.Config {
+func testConfig(usernameMode config.UsernameMode) *config.Config {
 	return &config.Config{
 		Groups: map[string]config.Group{
 			"c1g1": {JID: "111@g.us"},

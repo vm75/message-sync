@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -19,7 +20,7 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 	}
 	normalizer, err := NewNormalizer(map[string]string{
 		"c1g1": "123456789@g.us",
-	}, hasher, "push_name")
+	}, hasher, config.UsernameModePushName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, "hash")
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +100,7 @@ func TestHashModeDropsPushName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, "hash")
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +128,7 @@ func TestNormalizeEditMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, "push_name")
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +178,7 @@ func TestNormalizeDeleteMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, "push_name")
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
 	if err != nil {
 		t.Fatal(err)
 	}

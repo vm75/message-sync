@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/router"
@@ -37,12 +38,9 @@ var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTra
 	return whatsapp.Open(ctx, opts)
 }
 
-// Run supervises persistence, the WhatsApp adapter, and the single ordered
-// router worker. Message bodies and participant identity are transient.
+// Run supervises persistence, the WhatsApp adapter, the HTTP API server, and
+// the single ordered router worker.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
-	if cfg == nil {
-		return errors.New("config is required")
-	}
 	if logger == nil {
 		return errors.New("logger is required")
 	}
@@ -66,6 +64,31 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer syncStore.Close()
+
+	if cfg == nil {
+		loadedCfg, err := config.Load(ctx, syncStore.DB())
+		if err != nil {
+			return fmt.Errorf("load config from sync database: %w", err)
+		}
+		cfg = loadedCfg
+	}
+
+	apiAddr := strings.TrimSpace(os.Getenv("API_ADDR"))
+	if apiAddr == "" {
+		apiAddr = ":8080"
+	}
+	apiServer := api.NewServer(api.Options{
+		Addr:   apiAddr,
+		Logger: logger,
+	})
+	if err := apiServer.Start(); err != nil {
+		return fmt.Errorf("start api server: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = apiServer.Shutdown(shutdownCtx)
+	}()
 
 	groupJIDs := make(map[string]string, len(cfg.Groups))
 	for alias, group := range cfg.Groups {

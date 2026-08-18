@@ -37,7 +37,7 @@ type Router struct {
 	store         *store.Store
 	sender        sender
 	routes        map[transport.EndpointID][]transport.EndpointID
-	usernameMode  string
+	usernameMode  config.UsernameMode
 	knownCopies   map[copyKey]string
 	sentReactions map[sentReactionKey]struct{}
 	newCanonical  func() (string, error)
@@ -54,7 +54,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 	if transportSender == nil {
 		return nil, errors.New("transport sender is required")
 	}
-	if cfg.Identity.UsernameMode != "push_name" && cfg.Identity.UsernameMode != "hash" {
+	if !cfg.Identity.UsernameMode.IsValid() {
 		return nil, errors.New("username mode must be push_name or hash")
 	}
 
@@ -237,7 +237,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		username := incoming.Sender.OpaqueID
-		if r.usernameMode == "push_name" {
+		if r.usernameMode == config.UsernameModePushName {
 			displayName := normalizeDisplayName(incoming.Sender.DisplayName)
 			phone := incoming.Sender.PhoneNumber
 			if phone != "" && displayName != "" {
@@ -429,7 +429,7 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 
 func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 	username := incoming.Sender.OpaqueID
-	if r.usernameMode == "push_name" {
+	if r.usernameMode == config.UsernameModePushName {
 		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
 		phone := incoming.Sender.PhoneNumber
 		if phone != "" && displayName != "" {

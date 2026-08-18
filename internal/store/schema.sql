@@ -33,8 +33,31 @@ CREATE TABLE IF NOT EXISTS recovery_cursors (
     updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS global_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    username_mode TEXT NOT NULL DEFAULT 'push_name',
+    media_enabled BOOLEAN NOT NULL DEFAULT 1,
+    media_max_size_mb INTEGER NOT NULL DEFAULT 100,
+    recovery_enabled BOOLEAN NOT NULL DEFAULT 1,
+    recovery_max_age_hours INTEGER NOT NULL DEFAULT 24,
+    recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
+    storage_message_retention_days INTEGER NOT NULL DEFAULT 90
+);
+INSERT OR IGNORE INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days)
+VALUES (1, 'push_name', 1, 100, 1, 24, 200, 90);
+
+CREATE TABLE IF NOT EXISTS sync_sets (
+    id TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS groups (
+    alias TEXT PRIMARY KEY,
+    jid TEXT NOT NULL,
+    sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '3');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '4');

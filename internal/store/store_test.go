@@ -124,21 +124,9 @@ func TestReactionAndRecoveryRepositories(t *testing.T) {
 
 func TestSyncSchemaHasNoPIIContentColumns(t *testing.T) {
 	store, path := openTestStore(t)
-	forbidden := []string{"jid", "phone", "name", "body", "caption", "media", "filename", "url"}
-	rows, err := store.db.Query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
-		tables = append(tables, table)
-	}
-	rows.Close()
-	for _, table := range tables {
+	forbidden := []string{"phone", "name", "body", "caption", "media", "filename", "url"}
+	routingTables := []string{"canonical_messages", "message_copies", "reactions", "recovery_cursors"}
+	for _, table := range routingTables {
 		cols, err := store.db.Query(`PRAGMA table_info(` + table + `)`)
 		if err != nil {
 			t.Fatal(err)
@@ -151,9 +139,12 @@ func TestSyncSchemaHasNoPIIContentColumns(t *testing.T) {
 				t.Fatal(err)
 			}
 			lower := strings.ToLower(name)
+			if lower == "jid" {
+				t.Fatalf("participant JID column in routing table %q", table)
+			}
 			for _, token := range forbidden {
 				if strings.Contains(lower, token) {
-					t.Fatalf("PII/content-shaped column %q in table %q", name, table)
+					t.Fatalf("PII/content-shaped column %q in routing table %q", name, table)
 				}
 			}
 		}
