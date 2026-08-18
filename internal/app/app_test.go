@@ -688,3 +688,99 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 }
+
+func TestApp_WebUIServing(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "123456789@g.us"},
+			"c1g2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+
+	syncPath := filepath.Join(dataDir, SyncDBName)
+	st, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	fake := &fakeWhatsAppTransport{
+		events: make(chan transport.Incoming, 10),
+	}
+
+	origOpen := openWhatsApp
+	openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+	defer func() { openWhatsApp = origOpen }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, cfg, logger)
+	}()
+
+	var apiAddr string
+	for i := 0; i < 50; i++ {
+		logs := logBuf.String()
+		if strings.Contains(logs, "api server listening") {
+			for _, line := range strings.Split(logs, "\n") {
+				if strings.Contains(line, "api server listening") && strings.Contains(line, "addr=") {
+					parts := strings.Split(line, "addr=")
+					if len(parts) > 1 {
+						apiAddr = strings.Trim(strings.Fields(parts[1])[0], "\"")
+						break
+					}
+				}
+			}
+			if apiAddr != "" {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if apiAddr == "" {
+		t.Fatal("failed to find api server listening address in logs")
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("http://%s/", apiAddr))
+	if err != nil {
+		t.Fatalf("GET / failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from UI, got %d", resp.StatusCode)
+	}
+
+	var buf bytes.Buffer
+	_, _ = buf.ReadFrom(resp.Body)
+	if !strings.Contains(buf.String(), "Message Sync • Admin Console") {
+		t.Errorf("expected HTML title in response, got: %s", buf.String())
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+}

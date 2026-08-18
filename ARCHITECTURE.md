@@ -84,10 +84,11 @@ The alias is the safe endpoint ID. Group JIDs are stored only in the configurati
 
 Each configured group must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
 
-### REST API & Authentication
+### REST API, Web UI & Authentication
 
-The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR`):
+The daemon provides an embedded Web UI console alongside the local HTTP REST server on port 8080 (configurable via `API_ADDR`):
 
+- `GET /`: Serves the Single Page Application (SPA) administration console built with vanilla HTML/CSS/JS (embedded directly into the binary via `go:embed` without CDN or runtime filesystem dependencies).
 - `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
 - `GET /api/auth/status`: Returns `{"isSetup": bool}` indicating whether the admin password has been initialized.
 - `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
@@ -98,7 +99,7 @@ The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR
 - `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections and member group assignments.
 - `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.
 
-Auth middleware protects all other `/api/*` endpoints, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Session tokens and plaintext passwords are never written to application logs.
+Auth middleware protects all other `/api/*` endpoints, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
 ## 4. Canonical message model
 
