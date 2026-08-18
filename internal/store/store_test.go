@@ -346,3 +346,73 @@ func TestPollOptionsAndVotes(t *testing.T) {
 		t.Fatalf("unexpected counts after actor 2 cleared: %+v", counts)
 	}
 }
+
+func TestMigrationFromV3ToV6(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sync.db")
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create v3 schema manually
+	v3SQL := `
+CREATE TABLE canonical_messages (
+    canonical_id TEXT PRIMARY KEY,
+    created_at INTEGER NOT NULL,
+    tombstoned_at INTEGER
+);
+CREATE TABLE message_copies (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    remote_message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    from_self BOOLEAN NOT NULL DEFAULT 0,
+    PRIMARY KEY (endpoint_id, remote_message_id),
+    UNIQUE (canonical_id, endpoint_id)
+);
+CREATE TABLE reactions (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    source_endpoint_id TEXT NOT NULL,
+    actor_hash TEXT NOT NULL,
+    emoji TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, source_endpoint_id, actor_hash)
+);
+CREATE TABLE recovery_cursors (
+    endpoint_id TEXT PRIMARY KEY,
+    remote_message_id TEXT,
+    message_timestamp INTEGER,
+    updated_at INTEGER NOT NULL
+);
+CREATE TABLE schema_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+INSERT INTO schema_meta(key, value) VALUES ('schema_version', '3');
+`
+	for _, stmt := range strings.Split(v3SQL, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := rawDB.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = rawDB.Close()
+
+	// Open via store.Open -> should migrate v3 -> v6 successfully
+	st, err := Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatalf("Open v3 database failed: %v", err)
+	}
+	defer st.Close()
+
+	var version int
+	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("expected migrated schema version %d, got %d", SchemaVersion, version)
+	}
+}

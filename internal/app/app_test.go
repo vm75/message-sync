@@ -784,3 +784,49 @@ func TestApp_WebUIServing(t *testing.T) {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 }
+
+func TestApp_FreshStartupWithoutConfig(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	fake := &fakeWhatsAppTransport{
+		events: make(chan transport.Incoming, 10),
+	}
+
+	origOpen := openWhatsApp
+	openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+	defer func() { openWhatsApp = origOpen }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	errCh := make(chan error, 1)
+	go func() {
+		// Nil cfg and empty database
+		errCh <- Run(ctx, nil, logger)
+	}()
+
+	for i := 0; i < 50; i++ {
+		if strings.Contains(logBuf.String(), "message-sync started") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !strings.Contains(logBuf.String(), "message-sync started") {
+		t.Fatalf("expected message-sync to start cleanly without pre-existing config: %s", logBuf.String())
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error on shutdown: %v", err)
+	}
+}

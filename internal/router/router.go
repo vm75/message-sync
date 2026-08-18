@@ -78,9 +78,6 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 			routes[member] = members
 		}
 	}
-	if len(routes) == 0 {
-		return nil, errors.New("at least one sync route is required")
-	}
 
 	return &Router{
 		store:         syncStore,
