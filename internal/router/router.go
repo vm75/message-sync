@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
@@ -34,6 +35,12 @@ type sentReactionKey struct {
 	emoji    string
 }
 
+type pollMeta struct {
+	Question string
+	Options  []string
+	Hashes   []string
+}
+
 type Router struct {
 	store         *store.Store
 	sender        sender
@@ -41,6 +48,7 @@ type Router struct {
 	usernameMode  config.UsernameMode
 	knownCopies   map[copyKey]string
 	sentReactions map[sentReactionKey]struct{}
+	pollCache     map[string]pollMeta
 	newCanonical  func() (string, error)
 	afterPersist  func(transport.EndpointID) error
 	mu            sync.RWMutex
@@ -81,6 +89,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		usernameMode:  cfg.Identity.UsernameMode,
 		knownCopies:   make(map[copyKey]string),
 		sentReactions: make(map[sentReactionKey]struct{}),
+		pollCache:     make(map[string]pollMeta),
 		newCanonical:  newCanonicalID,
 	}, nil
 }
@@ -123,6 +132,49 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	if strings.TrimSpace(incoming.RemoteID) == "" {
 		return errors.New("incoming remote message id is required")
+	}
+
+	if incoming.Kind == "poll_vote" {
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+			return nil
+		}
+		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil // Target unknown
+			}
+			return fmt.Errorf("resolve poll vote target: %w", err)
+		}
+
+		isTombstoned, err := r.store.IsTombstoned(ctx, targetCanonical)
+		if err != nil {
+			return fmt.Errorf("check poll vote target tombstone: %w", err)
+		}
+		if isTombstoned {
+			return nil
+		}
+
+		if err := r.store.RecordPollVote(ctx, targetCanonical, string(incoming.Endpoint), incoming.Sender.OpaqueID, incoming.PollOptionHashes, incoming.Timestamp); err != nil {
+			return fmt.Errorf("record poll vote: %w", err)
+		}
+
+		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+			EndpointID:       string(incoming.Endpoint),
+			RemoteMessageID:  incoming.RemoteID,
+			MessageTimestamp: incoming.Timestamp,
+			UpdatedAt:        time.Now().UTC(),
+		})
+		return nil
+	}
+
+	if strings.TrimSpace(incoming.Text) == "aggregate-response" && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+		if err == nil && targetCanonical != "" {
+			isPoll, err := r.store.IsPoll(ctx, targetCanonical)
+			if err == nil && isPoll {
+				return r.handlePollAggregation(ctx, incoming, targetCanonical, members)
+			}
+		}
 	}
 
 	if incoming.Kind == "delete" || incoming.Kind == "revoke" {
@@ -330,6 +382,27 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	if incoming.FromSelf && !created {
 		return nil
 	}
+
+	if incoming.Kind == "poll" {
+		optionHashes := make([]string, len(incoming.PollOptions))
+		for i, opt := range incoming.PollOptions {
+			h := sha256.Sum256([]byte(opt))
+			optionHashes[i] = hex.EncodeToString(h[:])
+		}
+		if created {
+			if err := r.store.SavePollOptions(ctx, canonicalID, optionHashes); err != nil {
+				return fmt.Errorf("save poll options: %w", err)
+			}
+		}
+		r.mu.Lock()
+		r.pollCache[canonicalID] = pollMeta{
+			Question: incoming.Text,
+			Options:  incoming.PollOptions,
+			Hashes:   optionHashes,
+		}
+		r.mu.Unlock()
+	}
+
 	forwardedText, err := r.forwardedText(incoming)
 	if err != nil {
 		return err
@@ -390,17 +463,19 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		var outgoingText string
-		if incoming.Kind == "text" || incoming.Kind == "image" || incoming.Kind == "video" || incoming.Kind == "document" {
+		if incoming.Kind == "text" || incoming.Kind == "image" || incoming.Kind == "video" || incoming.Kind == "document" || incoming.Kind == "poll" {
 			outgoingText = forwardedText
 		}
 
 		ref, err := r.sender.Send(ctx, transport.Outgoing{
-			Endpoint:   destination,
-			Kind:       incoming.Kind,
-			Text:       outgoingText,
-			MediaBytes: mediaBytes,
-			ReplyTo:    outgoingReplyTo,
-			QuotedText: incoming.QuotedText,
+			Endpoint:            destination,
+			Kind:                incoming.Kind,
+			Text:                outgoingText,
+			MediaBytes:          mediaBytes,
+			ReplyTo:             outgoingReplyTo,
+			QuotedText:          incoming.QuotedText,
+			PollOptions:         incoming.PollOptions,
+			PollSelectableCount: incoming.PollSelectableCount,
 		})
 		if err != nil {
 			return fmt.Errorf("send destination copy: %w", err)
@@ -425,6 +500,76 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 	}
+	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
+		EndpointID:       string(incoming.Endpoint),
+		RemoteMessageID:  incoming.RemoteID,
+		MessageTimestamp: incoming.Timestamp,
+		UpdatedAt:        time.Now().UTC(),
+	})
+	return nil
+}
+
+func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.Incoming, canonicalID string, members []transport.EndpointID) error {
+	optionHashes, err := r.store.GetPollOptions(ctx, canonicalID)
+	if err != nil {
+		return fmt.Errorf("get poll options: %w", err)
+	}
+	counts, err := r.store.GetPollVoteCounts(ctx, canonicalID)
+	if err != nil {
+		return fmt.Errorf("get poll vote counts: %w", err)
+	}
+
+	r.mu.RLock()
+	meta, hasMeta := r.pollCache[canonicalID]
+	r.mu.RUnlock()
+
+	var totalVotes int
+	for _, cnt := range counts {
+		totalVotes += cnt
+	}
+
+	var sb strings.Builder
+	if hasMeta && meta.Question != "" {
+		sb.WriteString(fmt.Sprintf("📊 Aggregated Poll Results: %s\n\n", meta.Question))
+	} else {
+		sb.WriteString("📊 Aggregated Poll Results\n\n")
+	}
+
+	for i, optHash := range optionHashes {
+		label := fmt.Sprintf("Option %d", i+1)
+		if hasMeta && i < len(meta.Options) {
+			label = meta.Options[i]
+		}
+		cnt := counts[optHash]
+		pct := 0
+		if totalVotes > 0 {
+			pct = (cnt * 100) / totalVotes
+		}
+		sb.WriteString(fmt.Sprintf("• %s: %d vote(s) (%d%%)\n", label, cnt, pct))
+	}
+	sb.WriteString(fmt.Sprintf("\nTotal votes: %d", totalVotes))
+	summaryText := sb.String()
+
+	for _, destination := range members {
+		var outgoingReplyTo *transport.MessageRef
+		if targetCopy, err := r.store.MessageCopyForEndpoint(ctx, canonicalID, string(destination)); err == nil {
+			outgoingReplyTo = &transport.MessageRef{
+				Endpoint:        destination,
+				RemoteMessageID: targetCopy.RemoteMessageID,
+				IsTargetFromMe:  targetCopy.FromSelf,
+			}
+		}
+
+		if _, err := r.sender.Send(ctx, transport.Outgoing{
+			Endpoint: destination,
+			Kind:     "text",
+			Text:     summaryText,
+			ReplyTo:  outgoingReplyTo,
+		}); err != nil {
+			return fmt.Errorf("send aggregated poll results: %w", err)
+		}
+	}
+
 	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
 		EndpointID:       string(incoming.Endpoint),
 		RemoteMessageID:  incoming.RemoteID,

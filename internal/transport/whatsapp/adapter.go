@@ -166,19 +166,34 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		}
 	}
 
-	var msg waE2E.Message
-	if outgoing.Kind == "text" || outgoing.Kind == "other" {
+	var msg *waE2E.Message
+	if outgoing.Kind == "poll" {
+		if outgoing.Text == "" {
+			return transport.MessageRef{}, errors.New("outgoing poll question is required")
+		}
+		if len(outgoing.PollOptions) == 0 {
+			return transport.MessageRef{}, errors.New("outgoing poll options are required")
+		}
+		msg = a.client.BuildPollCreation(outgoing.Text, outgoing.PollOptions, outgoing.PollSelectableCount)
+		if contextInfo != nil && msg.PollCreationMessage != nil {
+			msg.PollCreationMessage.ContextInfo = contextInfo
+		}
+	} else if outgoing.Kind == "text" || outgoing.Kind == "other" {
 		if outgoing.Text == "" {
 			return transport.MessageRef{}, errors.New("outgoing text is required")
 		}
 		text := outgoing.Text
 		if contextInfo != nil {
-			msg.ExtendedTextMessage = &waE2E.ExtendedTextMessage{
-				Text:        &text,
-				ContextInfo: contextInfo,
+			msg = &waE2E.Message{
+				ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+					Text:        &text,
+					ContextInfo: contextInfo,
+				},
 			}
 		} else {
-			msg.Conversation = &text
+			msg = &waE2E.Message{
+				Conversation: &text,
+			}
 		}
 	} else {
 		if !a.mediaEnabled {
@@ -197,12 +212,13 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			return transport.MessageRef{}, fmt.Errorf("upload WhatsApp media: %w", err)
 		}
 
-		if err := populateMediaMessage(&msg, outgoing, uploadResp, contextInfo); err != nil {
+		msg = &waE2E.Message{}
+		if err := populateMediaMessage(msg, outgoing, uploadResp, contextInfo); err != nil {
 			return transport.MessageRef{}, err
 		}
 	}
 
-	response, err := a.client.SendMessage(ctx, target, &msg)
+	response, err := a.client.SendMessage(ctx, target, msg)
 	if err != nil {
 		return transport.MessageRef{}, fmt.Errorf("send WhatsApp %s: %w", outgoing.Kind, err)
 	}
@@ -555,7 +571,7 @@ func (a *Adapter) handleEvent(raw any) {
 		if a.recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > a.recoveryMaxAge {
 			return
 		}
-		incoming, ok := a.normalizer.NormalizeMessage(evt, a.mediaEnabled, a.mediaMaxBytes, a.client.Download)
+		incoming, ok := a.normalizer.NormalizeMessage(evt, a.mediaEnabled, a.mediaMaxBytes, a.client.Download, a.client.DecryptPollVote)
 		if !ok {
 			return
 		}
@@ -597,7 +613,7 @@ func (a *Adapter) handleEvent(raw any) {
 				if a.recoveryMaxAge > 0 && !parsed.Info.Timestamp.IsZero() && time.Since(parsed.Info.Timestamp) > a.recoveryMaxAge {
 					continue
 				}
-				incoming, ok := a.normalizer.NormalizeMessage(parsed, a.mediaEnabled, a.mediaMaxBytes, a.client.Download)
+				incoming, ok := a.normalizer.NormalizeMessage(parsed, a.mediaEnabled, a.mediaMaxBytes, a.client.Download, a.client.DecryptPollVote)
 				if !ok {
 					continue
 				}

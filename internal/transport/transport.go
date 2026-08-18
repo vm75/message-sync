@@ -20,25 +20,30 @@ type Sender struct {
 }
 
 type Incoming struct {
-	Endpoint    EndpointID
-	RemoteID    string
-	Sender      Sender
-	FromSelf    bool
-	Kind        string
-	Text        string // transient only; never persist
-	ReplyTo     *MessageRef
-	QuotedText  string
-	Timestamp   time.Time
-	MediaLoader func(context.Context) ([]byte, error)
+	Endpoint            EndpointID
+	RemoteID            string
+	Sender              Sender
+	FromSelf            bool
+	Kind                string
+	Text                string // transient only; never persist
+	ReplyTo             *MessageRef
+	QuotedText          string
+	Timestamp           time.Time
+	MediaLoader         func(context.Context) ([]byte, error)
+	PollOptions         []string // transient only; never persist
+	PollSelectableCount int
+	PollOptionHashes    []string // SHA-256 hex hashes of selected options for poll_vote
 }
 
 type Outgoing struct {
-	Endpoint   EndpointID
-	Text       string
-	ReplyTo    *MessageRef
-	QuotedText string
-	MediaBytes []byte
-	Kind       string
+	Endpoint            EndpointID
+	Text                string
+	ReplyTo             *MessageRef
+	QuotedText          string
+	MediaBytes          []byte
+	Kind                string
+	PollOptions         []string
+	PollSelectableCount int
 }
 
 type Reaction struct {
