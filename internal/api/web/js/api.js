@@ -135,16 +135,92 @@
       return this.request('/api/config');
     },
 
+    async updateConfig(configData) {
+      return this.request('/api/config', {
+        method: 'PUT',
+        body: configData
+      });
+    },
+
+    /**
+     * WhatsApp Lifecycle Endpoints
+     */
     async getWhatsAppStatus() {
       return this.request('/api/whatsapp/status');
     },
 
+    async pairWhatsApp() {
+      return this.request('/api/whatsapp/pair', {
+        method: 'POST'
+      });
+    },
+
+    async cancelPairWhatsApp() {
+      return this.request('/api/whatsapp/pair', {
+        method: 'DELETE'
+      });
+    },
+
+    /**
+     * Groups CRUD Endpoints
+     */
     async getGroups() {
       return this.request('/api/groups');
     },
 
+    async getGroup(alias) {
+      return this.request(`/api/groups/${encodeURIComponent(alias)}`);
+    },
+
+    async createGroup(groupData) {
+      return this.request('/api/groups', {
+        method: 'POST',
+        body: groupData
+      });
+    },
+
+    async updateGroup(alias, groupData) {
+      return this.request(`/api/groups/${encodeURIComponent(alias)}`, {
+        method: 'PUT',
+        body: groupData
+      });
+    },
+
+    async deleteGroup(alias) {
+      return this.request(`/api/groups/${encodeURIComponent(alias)}`, {
+        method: 'DELETE'
+      });
+    },
+
+    /**
+     * Sync Sets CRUD Endpoints
+     */
     async getSyncSets() {
       return this.request('/api/sync-sets');
+    },
+
+    async getSyncSet(id) {
+      return this.request(`/api/sync-sets/${encodeURIComponent(id)}`);
+    },
+
+    async createSyncSet(syncSetData) {
+      return this.request('/api/sync-sets', {
+        method: 'POST',
+        body: syncSetData
+      });
+    },
+
+    async updateSyncSet(id, syncSetData) {
+      return this.request(`/api/sync-sets/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: syncSetData
+      });
+    },
+
+    async deleteSyncSet(id) {
+      return this.request(`/api/sync-sets/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
     }
   };
 
