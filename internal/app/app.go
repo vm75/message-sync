@@ -80,6 +80,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	apiServer := api.NewServer(api.Options{
 		Addr:   apiAddr,
 		Logger: logger,
+		DB:     syncStore.DB(),
+		Secret: []byte(secret),
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)

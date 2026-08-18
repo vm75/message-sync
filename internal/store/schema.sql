@@ -41,10 +41,10 @@ CREATE TABLE IF NOT EXISTS global_config (
     recovery_enabled BOOLEAN NOT NULL DEFAULT 1,
     recovery_max_age_hours INTEGER NOT NULL DEFAULT 24,
     recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
-    storage_message_retention_days INTEGER NOT NULL DEFAULT 90
+    storage_message_retention_days INTEGER NOT NULL DEFAULT 90,
+    admin_password_hash TEXT NOT NULL DEFAULT ''
 );
-INSERT OR IGNORE INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days)
-VALUES (1, 'push_name', 1, 100, 1, 24, 200, 90);
+INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
 CREATE TABLE IF NOT EXISTS sync_sets (
     id TEXT PRIMARY KEY
@@ -60,4 +60,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '4');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '5');
