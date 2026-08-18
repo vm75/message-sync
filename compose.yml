@@ -18,10 +18,13 @@ services:
     env_file:
       - .env
     environment:
-      DATA_DIR: /data
+      - DATA_DIR=${DATA_DIR:-/data}
+      - IDENTITY_SECRET=${IDENTITY_SECRET}
+      - PORT=${PORT:-8080}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./data:/data:Z,U
+      - ${MESSAGE_SYNC_DATA_DIR:-./data}:/data:Z,U
     restart: unless-stopped
     stop_grace_period: 20s
