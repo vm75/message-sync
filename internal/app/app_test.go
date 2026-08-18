@@ -21,10 +21,28 @@ import (
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 )
 
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *safeBuffer) Write(p []byte) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *safeBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
 type fakeWhatsAppTransport struct {
 	events      chan transport.Incoming
 	mu          sync.Mutex
 	sent        []transport.Outgoing
+	sentCount   int
 	status      api.WhatsAppStatus
 	pairResp    api.WhatsAppPairResponse
 	pairCalled  int
@@ -36,10 +54,11 @@ func (f *fakeWhatsAppTransport) Close() error                      { return nil 
 func (f *fakeWhatsAppTransport) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.sentCount++
 	f.sent = append(f.sent, outgoing)
 	return transport.MessageRef{
 		Endpoint:        outgoing.Endpoint,
-		RemoteMessageID: "sent-" + string(outgoing.Endpoint),
+		RemoteMessageID: fmt.Sprintf("sent-%s-%d", outgoing.Endpoint, f.sentCount),
 	}, nil
 }
 
@@ -480,6 +499,189 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 	if fake.cancelCalls != 1 {
 		t.Fatalf("expected 1 cancel call, got %d", fake.cancelCalls)
 	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+}
+
+func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "123456789@g.us"},
+			"c1g2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+
+	syncPath := filepath.Join(dataDir, SyncDBName)
+	st, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	fake := &fakeWhatsAppTransport{
+		events: make(chan transport.Incoming, 10),
+	}
+
+	origOpen := openWhatsApp
+	openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+	defer func() { openWhatsApp = origOpen }()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Run(ctx, cfg, logger)
+	}()
+
+	var apiAddr string
+	for i := 0; i < 50; i++ {
+		logs := logBuf.String()
+		if strings.Contains(logs, "api server listening") {
+			for _, line := range strings.Split(logs, "\n") {
+				if strings.Contains(line, "api server listening") && strings.Contains(line, "addr=") {
+					parts := strings.Split(line, "addr=")
+					if len(parts) > 1 {
+						apiAddr = strings.Trim(strings.Fields(parts[1])[0], "\"")
+						break
+					}
+				}
+			}
+			if apiAddr != "" {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if apiAddr == "" {
+		t.Fatal("failed to find api server listening address in logs")
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	var token string
+	for i := 0; i < 50; i++ {
+		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"password":"testadminpassword123"}`))
+		if err == nil {
+			var tokenResp struct {
+				Token string `json:"token"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&tokenResp)
+			resp.Body.Close()
+			if tokenResp.Token != "" {
+				token = tokenResp.Token
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if token == "" {
+		t.Fatal("failed to setup auth on running api server")
+	}
+
+	// 1. Initial message routing: c1g1 -> only c1g2 (push name)
+	fake.events <- transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "msg-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_alice1234",
+		},
+		Kind:      "text",
+		Text:      "Initial message",
+		Timestamp: time.Now().UTC(),
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	fake.mu.Lock()
+	if len(fake.sent) != 1 || fake.sent[0].Endpoint != "c1g2" {
+		t.Fatalf("expected initial message to route only to c1g2, got %+v", fake.sent)
+	}
+	if !strings.Contains(fake.sent[0].Text, "Alice") {
+		t.Fatalf("expected push name Alice in forwarded text, got %q", fake.sent[0].Text)
+	}
+	fake.sent = nil
+	fake.mu.Unlock()
+
+	// 2. Add group c1g3 via POST /api/groups
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/groups", apiAddr), strings.NewReader(`{"alias":"c1g3","jid":"333333333@g.us"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/groups failed: err=%v, code=%d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 3. Update sync-set mesh via PUT /api/sync-sets/mesh to include [c1g1, c1g2, c1g3]
+	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"groups":["c1g1","c1g2","c1g3"]}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/sync-sets/mesh failed: err=%v, code=%d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 4. Update global config via PUT /api/config to set usernameMode to "hash"
+	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/config", apiAddr), strings.NewReader(`{"usernameMode":"hash"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/config failed: err=%v, code=%d", err, resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// 5. Send message on c1g1 -> should now route to BOTH c1g2 and c1g3 with hash format
+	fake.events <- transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "msg-2",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_alice1234",
+		},
+		Kind:      "text",
+		Text:      "Updated dynamic routing message",
+		Timestamp: time.Now().UTC(),
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	fake.mu.Lock()
+	if len(fake.sent) != 2 {
+		t.Fatalf("expected 2 forwarded messages after dynamic update, got %d", len(fake.sent))
+	}
+	endpoints := map[transport.EndpointID]bool{
+		fake.sent[0].Endpoint: true,
+		fake.sent[1].Endpoint: true,
+	}
+	if !endpoints["c1g2"] || !endpoints["c1g3"] {
+		t.Fatalf("expected messages to c1g2 and c1g3, got %+v", fake.sent)
+	}
+	if strings.Contains(fake.sent[0].Text, "Alice") {
+		t.Fatalf("expected hash mode without push name Alice, got %q", fake.sent[0].Text)
+	}
+	fake.mu.Unlock()
 
 	cancel()
 	if err := <-errCh; err != nil {

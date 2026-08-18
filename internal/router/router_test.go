@@ -588,3 +588,50 @@ func testIncoming(endpoint transport.EndpointID, remoteID string) transport.Inco
 		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
 	}
 }
+
+func TestRouterUpdateConfig(t *testing.T) {
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	ctx := context.Background()
+
+	// Initial route: c1g1 forwards to c1g2, c1g3
+	inc := testIncoming("c1g1", "msg1")
+	if err := r.Handle(ctx, inc); err != nil {
+		t.Fatalf("Handle error = %v", err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("expected 2 forwarded messages, got %d", len(fake.sent))
+	}
+	if !strings.Contains(fake.sent[0].outgoing.Text, "Alice") {
+		t.Fatalf("expected push name in forwarded text, got %q", fake.sent[0].outgoing.Text)
+	}
+
+	// Update config to switch to hash mode and remove c1g3 from sync set
+	newCfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "111@g.us"},
+			"c1g2": {JID: "222@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+	}
+	if err := r.UpdateConfig(newCfg); err != nil {
+		t.Fatalf("UpdateConfig error = %v", err)
+	}
+
+	fake.sent = nil
+	inc2 := testIncoming("c1g1", "msg2")
+	if err := r.Handle(ctx, inc2); err != nil {
+		t.Fatalf("Handle error = %v", err)
+	}
+	// Now should only forward to c1g2 (1 message)
+	if len(fake.sent) != 1 {
+		t.Fatalf("expected 1 forwarded message after config update, got %d", len(fake.sent))
+	}
+	if fake.sent[0].outgoing.Endpoint != "c1g2" {
+		t.Fatalf("expected forwarded to c1g2, got %s", fake.sent[0].outgoing.Endpoint)
+	}
+	// Username mode is hash, so no "Alice"
+	if strings.Contains(fake.sent[0].outgoing.Text, "Alice") {
+		t.Fatalf("expected hash mode without push name, got %q", fake.sent[0].outgoing.Text)
+	}
+}

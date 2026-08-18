@@ -1,0 +1,268 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestSyncSetsAuthRequired(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+
+	endpoints := []struct {
+		method string
+		url    string
+		body   string
+	}{
+		{http.MethodGet, "/api/sync-sets", ""},
+		{http.MethodGet, "/api/sync-sets/mesh", ""},
+		{http.MethodPost, "/api/sync-sets", `{"id":"mesh","groups":["g1","g2"]}`},
+		{http.MethodPut, "/api/sync-sets/mesh", `{"groups":["g1","g2"]}`},
+		{http.MethodDelete, "/api/sync-sets/mesh", ""},
+	}
+
+	for _, ep := range endpoints {
+		var req *http.Request
+		if ep.body != "" {
+			req = httptest.NewRequest(ep.method, ep.url, bytes.NewReader([]byte(ep.body)))
+		} else {
+			req = httptest.NewRequest(ep.method, ep.url, nil)
+		}
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s %s expected 401 Unauthorized, got %d", ep.method, ep.url, rec.Code)
+		}
+	}
+}
+
+func TestSyncSetsCRUDAndValidation(t *testing.T) {
+	db := setupTestDB(t)
+	configChanges := 0
+	secret := []byte("01234567890123456789012345678901")
+	srv := NewServer(Options{
+		DB:     db,
+		Secret: secret,
+		OnConfigChange: func(ctx context.Context) error {
+			configChanges++
+			return nil
+		},
+	})
+
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatalf("create token failed: %v", err)
+	}
+	authHeader := "Bearer " + token
+
+	// Create test groups: g1, g2, g3
+	_, err = db.Exec(`
+		INSERT INTO groups (alias, jid) VALUES ('g1', '1@g.us'), ('g2', '2@g.us'), ('g3', '3@g.us')
+	`)
+	if err != nil {
+		t.Fatalf("insert test groups: %v", err)
+	}
+
+	// 1. Initial GET /api/sync-sets should be empty
+	{
+		req := httptest.NewRequest(http.MethodGet, "/api/sync-sets", nil)
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/sync-sets status = %d, want 200", rec.Code)
+		}
+		var sets []SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&sets); err != nil {
+			t.Fatalf("decode sync sets: %v", err)
+		}
+		if len(sets) != 0 {
+			t.Fatalf("expected empty sync sets, got %d", len(sets))
+		}
+	}
+
+	// 2. POST validation failures
+	invalidCases := []struct {
+		name string
+		body string
+	}{
+		{"empty id", `{"id":"","groups":["g1","g2"]}`},
+		{"invalid id characters", `{"id":"set 1!","groups":["g1","g2"]}`},
+		{"unknown group", `{"id":"s1","groups":["g1","unknown_group"]}`},
+		{"duplicate group in request", `{"id":"s1","groups":["g1","g1"]}`},
+	}
+
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(tc.body)))
+			req.Header.Set("Authorization", authHeader)
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("POST expected 400 for %s, got %d", tc.name, rec.Code)
+			}
+		})
+	}
+
+	// 3. POST valid creation of set1 with [g1, g2]
+	{
+		body := `{"id":"set1","groups":["g1","g2"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST /api/sync-sets status = %d, want 201 (body: %s)", rec.Code, rec.Body.String())
+		}
+		var created SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+			t.Fatalf("decode created sync set: %v", err)
+		}
+		if created.ID != "set1" || len(created.Groups) != 2 {
+			t.Fatalf("created sync set mismatch: %+v", created)
+		}
+		if configChanges != 1 {
+			t.Fatalf("expected 1 config change, got %d", configChanges)
+		}
+	}
+
+	// 4. POST duplicate sync set ID
+	{
+		body := `{"id":"set1","groups":["g3"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST duplicate set ID status = %d, want 400", rec.Code)
+		}
+	}
+
+	// 5. POST overlapping group assignment (g1 already belongs to set1)
+	{
+		body := `{"id":"set2","groups":["g1","g3"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("POST overlapping group status = %d, want 400", rec.Code)
+		}
+	}
+
+	// 6. GET /api/sync-sets/{id}
+	{
+		req := httptest.NewRequest(http.MethodGet, "/api/sync-sets/set1", nil)
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET /api/sync-sets/set1 status = %d, want 200", rec.Code)
+		}
+		var s SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&s); err != nil {
+			t.Fatalf("decode sync set: %v", err)
+		}
+		if s.ID != "set1" || len(s.Groups) != 2 {
+			t.Fatalf("sync set mismatch: %+v", s)
+		}
+
+		// GET non-existent
+		reqNotFound := httptest.NewRequest(http.MethodGet, "/api/sync-sets/nonexistent", nil)
+		reqNotFound.Header.Set("Authorization", authHeader)
+		recNotFound := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recNotFound, reqNotFound)
+		if recNotFound.Code != http.StatusNotFound {
+			t.Fatalf("GET non-existent status = %d, want 404", recNotFound.Code)
+		}
+	}
+
+	// 7. PUT /api/sync-sets/{id}
+	{
+		// Update set1 to have [g2, g3] (g1 removed)
+		body := `{"groups":["g2","g3"]}`
+		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT /api/sync-sets/set1 status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+		}
+		var updated SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatalf("decode updated sync set: %v", err)
+		}
+		if updated.ID != "set1" || len(updated.Groups) != 2 {
+			t.Fatalf("updated sync set mismatch: %+v", updated)
+		}
+
+		// Verify g1 is now unassigned
+		var g1Set *string
+		err := db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g1'`).Scan(&g1Set)
+		if err != nil {
+			t.Fatalf("query g1: %v", err)
+		}
+		if g1Set != nil {
+			t.Fatalf("expected g1 sync_set_id to be NULL, got %v", *g1Set)
+		}
+
+		// PUT non-existent sync set
+		reqNotFound := httptest.NewRequest(http.MethodPut, "/api/sync-sets/missing", bytes.NewReader([]byte(`{"groups":["g1"]}`)))
+		reqNotFound.Header.Set("Authorization", authHeader)
+		recNotFound := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recNotFound, reqNotFound)
+		if recNotFound.Code != http.StatusNotFound {
+			t.Fatalf("PUT non-existent sync set status = %d, want 404", recNotFound.Code)
+		}
+
+		// PUT invalid group
+		reqInvalid := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(`{"groups":["unknown_group"]}`)))
+		reqInvalid.Header.Set("Authorization", authHeader)
+		recInvalid := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recInvalid, reqInvalid)
+		if recInvalid.Code != http.StatusBadRequest {
+			t.Fatalf("PUT invalid group status = %d, want 400", recInvalid.Code)
+		}
+	}
+
+	// 8. DELETE /api/sync-sets/{id}
+	{
+		req := httptest.NewRequest(http.MethodDelete, "/api/sync-sets/set1", nil)
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("DELETE /api/sync-sets/set1 status = %d, want 200", rec.Code)
+		}
+
+		// Verify sync_set is deleted
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/sync-sets/set1", nil)
+		reqGet.Header.Set("Authorization", authHeader)
+		recGet := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recGet, reqGet)
+		if recGet.Code != http.StatusNotFound {
+			t.Fatalf("GET deleted sync set status = %d, want 404", recGet.Code)
+		}
+
+		// Verify g2 and g3 are now unassigned
+		var g2Set, g3Set *string
+		_ = db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g2'`).Scan(&g2Set)
+		_ = db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g3'`).Scan(&g3Set)
+		if g2Set != nil || g3Set != nil {
+			t.Fatalf("expected groups to be unassigned after sync set delete, got g2=%v g3=%v", g2Set, g3Set)
+		}
+
+		// DELETE non-existent
+		reqNotFound := httptest.NewRequest(http.MethodDelete, "/api/sync-sets/set1", nil)
+		reqNotFound.Header.Set("Authorization", authHeader)
+		recNotFound := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recNotFound, reqNotFound)
+		if recNotFound.Code != http.StatusNotFound {
+			t.Fatalf("DELETE non-existent sync set status = %d, want 404", recNotFound.Code)
+		}
+	}
+}

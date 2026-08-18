@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
@@ -42,6 +43,7 @@ type Router struct {
 	sentReactions map[sentReactionKey]struct{}
 	newCanonical  func() (string, error)
 	afterPersist  func(transport.EndpointID) error
+	mu            sync.RWMutex
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
@@ -83,11 +85,39 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 	}, nil
 }
 
+func (r *Router) UpdateConfig(cfg *config.Config) error {
+	if cfg == nil {
+		return errors.New("config is required")
+	}
+	if !cfg.Identity.UsernameMode.IsValid() {
+		return errors.New("username mode must be push_name or hash")
+	}
+
+	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Groups))
+	for _, set := range cfg.SyncSets {
+		members := make([]transport.EndpointID, 0, len(set.Groups))
+		for _, alias := range set.Groups {
+			members = append(members, transport.EndpointID(alias))
+		}
+		for _, member := range members {
+			routes[member] = members
+		}
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.routes = routes
+	r.usernameMode = cfg.Identity.UsernameMode
+	return nil
+}
+
 func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error {
 	if incoming.Kind == "other" {
 		return nil
 	}
+	r.mu.RLock()
 	members, configured := r.routes[incoming.Endpoint]
+	r.mu.RUnlock()
 	if !configured {
 		return nil
 	}
@@ -237,7 +267,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		username := incoming.Sender.OpaqueID
-		if r.usernameMode == config.UsernameModePushName {
+		if r.getUsernameMode() == config.UsernameModePushName {
 			displayName := normalizeDisplayName(incoming.Sender.DisplayName)
 			phone := incoming.Sender.PhoneNumber
 			if phone != "" && displayName != "" {
@@ -427,9 +457,15 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 	return canonicalID, created, nil
 }
 
+func (r *Router) getUsernameMode() config.UsernameMode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.usernameMode
+}
+
 func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 	username := incoming.Sender.OpaqueID
-	if r.usernameMode == config.UsernameModePushName {
+	if r.getUsernameMode() == config.UsernameModePushName {
 		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
 		phone := incoming.Sender.PhoneNumber
 		if phone != "" && displayName != "" {

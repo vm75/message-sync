@@ -102,16 +102,38 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		waService = s
 	}
 
+	mesh, err := router.New(cfg, syncStore, wa)
+	if err != nil {
+		return fmt.Errorf("create canonical router: %w", err)
+	}
+
+	onConfigChange := func(updateCtx context.Context) error {
+		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
+		if err != nil {
+			return fmt.Errorf("reload config: %w", err)
+		}
+		if err := mesh.UpdateConfig(updatedCfg); err != nil {
+			return fmt.Errorf("update router config: %w", err)
+		}
+		logger.Info("configuration reloaded",
+			"groups", len(updatedCfg.Groups),
+			"sync_sets", len(updatedCfg.SyncSets),
+			"username_mode", string(updatedCfg.Identity.UsernameMode),
+		)
+		return nil
+	}
+
 	apiAddr := strings.TrimSpace(os.Getenv("API_ADDR"))
 	if apiAddr == "" {
 		apiAddr = ":8080"
 	}
 	apiServer := api.NewServer(api.Options{
-		Addr:     apiAddr,
-		Logger:   logger,
-		DB:       syncStore.DB(),
-		Secret:   []byte(secret),
-		WhatsApp: waService,
+		Addr:           apiAddr,
+		Logger:         logger,
+		DB:             syncStore.DB(),
+		Secret:         []byte(secret),
+		WhatsApp:       waService,
+		OnConfigChange: onConfigChange,
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)
@@ -138,11 +160,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			"reactions", metrics.Reactions,
 			"sync_db_bytes", metrics.DatabaseSizeBytes,
 		)
-	}
-
-	mesh, err := router.New(cfg, syncStore, wa)
-	if err != nil {
-		return fmt.Errorf("create canonical router: %w", err)
 	}
 
 	logger.Info("message-sync started",

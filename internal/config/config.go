@@ -9,7 +9,36 @@ import (
 	"strings"
 )
 
-var aliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var (
+	aliasPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
+)
+
+func ValidateAlias(alias string) error {
+	if !aliasPattern.MatchString(alias) {
+		return fmt.Errorf("group alias %q must match %s", alias, aliasPattern.String())
+	}
+	return nil
+}
+
+func ValidateSyncSetID(id string) error {
+	if !syncSetIDPattern.MatchString(id) {
+		return fmt.Errorf("sync set id %q must match %s", id, syncSetIDPattern.String())
+	}
+	return nil
+}
+
+func ValidateGroupJID(jid string) error {
+	jid = strings.TrimSpace(jid)
+	if jid == "" {
+		return errors.New("group jid is required")
+	}
+	if !jidPattern.MatchString(jid) {
+		return fmt.Errorf("group jid %q is invalid WhatsApp group JID", jid)
+	}
+	return nil
+}
 
 type UsernameMode string
 
@@ -59,7 +88,7 @@ type Storage struct {
 	MessageRetentionDays int `json:"messageRetentionDays"`
 }
 
-func Load(ctx context.Context, db *sql.DB) (*Config, error) {
+func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	if db == nil {
 		return nil, errors.New("database connection is required")
 	}
@@ -102,13 +131,13 @@ func Load(ctx context.Context, db *sql.DB) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read groups: %w", err)
 	}
-	defer groupRows.Close()
 
 	syncSetMap := make(map[string][]string)
 	for groupRows.Next() {
 		var alias, jid string
 		var syncSetID sql.NullString
 		if err := groupRows.Scan(&alias, &jid, &syncSetID); err != nil {
+			groupRows.Close()
 			return nil, fmt.Errorf("scan group: %w", err)
 		}
 		cfg.Groups[alias] = Group{JID: jid}
@@ -117,8 +146,10 @@ func Load(ctx context.Context, db *sql.DB) (*Config, error) {
 		}
 	}
 	if err := groupRows.Err(); err != nil {
+		groupRows.Close()
 		return nil, fmt.Errorf("iterate groups: %w", err)
 	}
+	groupRows.Close()
 
 	setRows, err := db.QueryContext(ctx, `SELECT id FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
@@ -144,6 +175,14 @@ func Load(ctx context.Context, db *sql.DB) (*Config, error) {
 		return nil, fmt.Errorf("iterate sync_sets: %w", err)
 	}
 
+	return cfg, nil
+}
+
+func Load(ctx context.Context, db *sql.DB) (*Config, error) {
+	cfg, err := LoadRaw(ctx, db)
+	if err != nil {
+		return nil, err
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
