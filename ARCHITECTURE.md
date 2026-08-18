@@ -52,7 +52,7 @@ Requirements:
 - never copy contact/LID data into `sync.db`;
 - protect it with restrictive filesystem permissions and encrypted storage where appropriate.
 
-Phase 1 opens the database with the existing CGO-free SQLite driver, enables SQLite foreign keys, wraps the connection with whatsmeow `sqlstore`, and restricts the database file to mode `0600`. Both the whatsmeow client logger and sqlstore logger are no-op so protocol structs, identifiers, payloads, and arbitrary protocol errors cannot bypass the application safe-log boundary.
+The daemon opens the database with the CGO-free SQLite driver, enables SQLite foreign keys, wraps the connection with whatsmeow `sqlstore`, and restricts the database file to mode `0600`. Both the whatsmeow client logger and sqlstore logger are no-op so protocol structs, identifiers, payloads, and arbitrary protocol errors cannot bypass the application safe-log boundary.
 
 ### `sync.db`
 
@@ -114,7 +114,7 @@ Push names are never persisted.
 
 ## 6. WhatsApp ingress and router event flow
 
-Phase 1 establishes the WhatsApp ingress boundary before routing/fan-out exists:
+The WhatsApp ingress boundary normalizes incoming events before fan-out:
 
 ```text
 whatsmeow callback
@@ -125,11 +125,11 @@ whatsmeow callback
    -> application receives alias + event kind
 ```
 
-The normalized event may temporarily carry message text/caption and push-name data because later phases need them for immediate forwarding, but those fields are explicitly transient and must never be persisted or logged. DMs and unconfigured groups are discarded before an internal event is produced.
+The normalized event may temporarily carry message text/caption and push-name data because the router needs them for immediate forwarding, but those fields are explicitly transient and must never be persisted or logged. DMs and unconfigured groups are discarded before an internal event is produced.
 
 For first login, the adapter requests a cancellable whatsmeow QR channel before connecting and renders each QR directly as terminal pairing UI. After pairing, whatsmeow persists linked-device state in `whatsapp.db`. On normal restart the stored device already has an ID, so the QR path is skipped and the client connects directly.
 
-Phase 2 extends the path with the initial router’s one ordered worker:
+The router processes ingress events via an ordered worker:
 
 ```text
 normalized event

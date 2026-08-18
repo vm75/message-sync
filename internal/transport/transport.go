@@ -15,6 +15,7 @@ type MessageRef struct {
 
 type Sender struct {
 	DisplayName string // transient only; never persist
+	PhoneNumber string // transient only; never persist
 	OpaqueID    string // HMAC-derived application identity
 }
 

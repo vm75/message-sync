@@ -27,14 +27,21 @@ type copyKey struct {
 	remoteID string
 }
 
+type sentReactionKey struct {
+	endpoint transport.EndpointID
+	remoteID string
+	emoji    string
+}
+
 type Router struct {
-	store        *store.Store
-	sender       sender
-	routes       map[transport.EndpointID][]transport.EndpointID
-	usernameMode string
-	knownCopies  map[copyKey]string
-	newCanonical func() (string, error)
-	afterPersist func(transport.EndpointID) error
+	store         *store.Store
+	sender        sender
+	routes        map[transport.EndpointID][]transport.EndpointID
+	usernameMode  string
+	knownCopies   map[copyKey]string
+	sentReactions map[sentReactionKey]struct{}
+	newCanonical  func() (string, error)
+	afterPersist  func(transport.EndpointID) error
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
@@ -66,12 +73,13 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 	}
 
 	return &Router{
-		store:        syncStore,
-		sender:       transportSender,
-		routes:       routes,
-		usernameMode: cfg.Identity.UsernameMode,
-		knownCopies:  make(map[copyKey]string),
-		newCanonical: newCanonicalID,
+		store:         syncStore,
+		sender:        transportSender,
+		routes:        routes,
+		usernameMode:  cfg.Identity.UsernameMode,
+		knownCopies:   make(map[copyKey]string),
+		sentReactions: make(map[sentReactionKey]struct{}),
+		newCanonical:  newCanonicalID,
 	}, nil
 }
 
@@ -179,11 +187,22 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 
 	if incoming.Kind == "reaction" {
-		if incoming.FromSelf {
-			return nil
-		}
 		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
 			return errors.New("reaction target is required")
+		}
+		if incoming.FromSelf {
+			// The bridge is a linked device, so user reactions are also FromSelf.
+			// Distinguish genuine user reactions from bridge echo by checking
+			// whether we recently sent this exact reaction to this endpoint.
+			key := sentReactionKey{
+				endpoint: incoming.Endpoint,
+				remoteID: incoming.ReplyTo.RemoteMessageID,
+				emoji:    strings.TrimSpace(incoming.Text),
+			}
+			if _, echoed := r.sentReactions[key]; echoed {
+				delete(r.sentReactions, key)
+				return nil
+			}
 		}
 		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
 		if err != nil {
@@ -219,8 +238,14 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 
 		username := incoming.Sender.OpaqueID
 		if r.usernameMode == "push_name" {
-			if displayName := normalizeDisplayName(incoming.Sender.DisplayName); displayName != "" {
+			displayName := normalizeDisplayName(incoming.Sender.DisplayName)
+			phone := incoming.Sender.PhoneNumber
+			if phone != "" && displayName != "" {
+				username = fmt.Sprintf("%s (%s)", phone, displayName)
+			} else if displayName != "" {
 				username = displayName
+			} else if phone != "" {
+				username = phone
 			}
 		}
 		fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
@@ -246,6 +271,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}); err != nil {
 				return fmt.Errorf("send reaction copy: %w", err)
 			}
+			r.sentReactions[sentReactionKey{
+				endpoint: destination,
+				remoteID: targetCopy.RemoteMessageID,
+				emoji:    emoji,
+			}] = struct{}{}
 		}
 		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
 			EndpointID:       string(incoming.Endpoint),
@@ -354,6 +384,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			EndpointID:      string(destination),
 			RemoteMessageID: ref.RemoteMessageID,
 			CreatedAt:       time.Now().UTC(),
+			FromSelf:        true,
 		}); err != nil {
 			return fmt.Errorf("persist destination copy: %w", err)
 		}
@@ -387,6 +418,7 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 		EndpointID:      string(incoming.Endpoint),
 		RemoteMessageID: incoming.RemoteID,
 		CreatedAt:       incoming.Timestamp,
+		FromSelf:        incoming.FromSelf,
 	})
 	if err != nil {
 		return "", false, err
@@ -398,8 +430,14 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 	username := incoming.Sender.OpaqueID
 	if r.usernameMode == "push_name" {
-		if displayName := normalizeDisplayName(incoming.Sender.DisplayName); displayName != "" {
+		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
+		phone := incoming.Sender.PhoneNumber
+		if phone != "" && displayName != "" {
+			username = fmt.Sprintf("%s (%s)", phone, displayName)
+		} else if displayName != "" {
 			username = displayName
+		} else if phone != "" {
+			username = phone
 		}
 	}
 	if strings.TrimSpace(username) == "" {

@@ -12,9 +12,8 @@ Keep context lean. Read only what the current task requires:
 
 1. `README.md` for product scope and commands.
 2. `ARCHITECTURE.md` for invariants and data flow.
-3. `docs/MVP_IMPLEMENTATION_PLAN.md` for phase boundaries.
-4. The package(s) being changed and their tests.
-5. `docs/POST_MVP.md` only for deferred functionality.
+3. The package(s) being changed and their tests.
+4. `docs/POST_MVP.md` only for deferred functionality.
 
 The previous implementation in `vm75/whatsappdiscordsync` may be consulted as a behavioral reference for a specific feature. Do not copy its architecture wholesale.
 
@@ -140,7 +139,7 @@ Do not add image-publishing triggers for ordinary pushes, pull requests, tags, s
 
 ## Scope discipline
 
-MVP scope is defined in `README.md` and `docs/MVP_IMPLEMENTATION_PLAN.md`. Deferred features are recorded in `docs/POST_MVP.md`.
+MVP scope is defined in `README.md`. Deferred features are recorded in `docs/POST_MVP.md`.
 
 For a post-MVP feature:
 
@@ -156,6 +155,6 @@ At the end of every feature add/delete/modify:
 - update `README.md` for user-visible behavior/configuration/deployment changes;
 - update `ARCHITECTURE.md` for data flow/schema/privacy/component changes;
 - update `AGENTS.md` when contributor guidance or invariants change;
-- update the relevant implementation-plan/post-MVP document when scope or phase status changes.
+- update `docs/POST_MVP.md` when scope changes.
 
 Keep context and docs lean; avoid duplicating large authoritative sections.
