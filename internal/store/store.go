@@ -125,8 +125,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("read sync schema version: %w", err)
 	}
 	if version == 1 {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE message_copies ADD COLUMN from_self BOOLEAN NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("migrate schema v1 to v2: add from_self: %w", err)
+		hasCol, err := tableHasColumn(ctx, tx, "message_copies", "from_self")
+		if err != nil {
+			return fmt.Errorf("check message_copies column: %w", err)
+		}
+		if !hasCol {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE message_copies ADD COLUMN from_self BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate schema v1 to v2: add from_self: %w", err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'`); err != nil {
 			return fmt.Errorf("migrate schema v1 to v2: update version: %w", err)
@@ -156,8 +162,14 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		version = 4
 	}
 	if version == 4 {
-		if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN admin_password_hash TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("migrate schema v4 to v5: add admin_password_hash: %w", err)
+		hasCol, err := tableHasColumn(ctx, tx, "global_config", "admin_password_hash")
+		if err != nil {
+			return fmt.Errorf("check global_config column: %w", err)
+		}
+		if !hasCol {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN admin_password_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate schema v4 to v5: add admin_password_hash: %w", err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '5' WHERE key = 'schema_version'`); err != nil {
 			return fmt.Errorf("migrate schema v4 to v5: update version: %w", err)
@@ -198,6 +210,27 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("commit sync migration: %w", err)
 	}
 	return nil
+}
+
+func tableHasColumn(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, column) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func (s *Store) Close() error {

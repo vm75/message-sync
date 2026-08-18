@@ -66,7 +66,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	defer syncStore.Close()
 
 	if cfg == nil {
-		loadedCfg, err := config.Load(ctx, syncStore.DB())
+		loadedCfg, err := config.LoadRaw(ctx, syncStore.DB())
 		if err != nil {
 			return fmt.Errorf("load config from sync database: %w", err)
 		}
