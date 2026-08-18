@@ -50,6 +50,7 @@ func (f *fakeWhatsAppTransport) Delete(ctx context.Context, ref transport.Messag
 func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
 
@@ -59,7 +60,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 			"c1g2": {JID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: "push_name"},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -167,6 +168,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
 
@@ -176,7 +178,7 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 			"c1g2": {JID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: "push_name"},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -256,5 +258,67 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 	}
 	if metrics.CanonicalMessages != 0 || metrics.MessageCopies != 0 {
 		t.Fatalf("expected 0 canonical messages after startup prune, got %+v", metrics)
+	}
+}
+
+func TestRunLoadsConfigFromSyncDB(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	secret := "0123456789abcdef0123456789abcdef"
+	t.Setenv("IDENTITY_SECRET", secret)
+
+	syncPath := filepath.Join(dataDir, SyncDBName)
+	st, err := store.Open(context.Background(), syncPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "123456789@g.us"},
+			"c1g2": {JID: "987654321@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	originalOpen := openWhatsApp
+	defer func() { openWhatsApp = originalOpen }()
+	fake := &fakeWhatsAppTransport{events: make(chan transport.Incoming)}
+	openWhatsApp = func(_ context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		return fake, nil
+	}
+
+	var out bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&out, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		// Pass nil cfg so Run loads from sync.db
+		errCh <- Run(ctx, nil, logger)
+	}()
+
+	for i := 0; i < 50; i++ {
+		if strings.Contains(out.String(), "message-sync started") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "message-sync started") {
+		t.Fatalf("expected log to contain message-sync started: %s", out.String())
 	}
 }

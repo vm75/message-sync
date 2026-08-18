@@ -6,11 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/vm75/message-sync/internal/app"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/safelog"
+	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/version"
 )
 
@@ -21,7 +24,17 @@ func main() {
 			fmt.Println(version.Build)
 			return
 		case "validate-config":
-			cfg, err := config.Load(config.PathFromEnv())
+			dataDir := strings.TrimSpace(os.Getenv("DATA_DIR"))
+			if dataDir == "" {
+				dataDir = "/data"
+			}
+			st, err := store.Open(context.Background(), filepath.Join(dataDir, app.SyncDBName))
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "failed to open sync database")
+				os.Exit(1)
+			}
+			defer st.Close()
+			cfg, err := config.Load(context.Background(), st.DB())
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "invalid configuration")
 				os.Exit(1)
@@ -37,16 +50,10 @@ func main() {
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	cfg, err := config.Load(config.PathFromEnv())
-	if err != nil {
-		safelog.Error(logger, "configuration load failed", "config_load", err)
-		os.Exit(1)
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := app.Run(ctx, cfg, logger); err != nil {
+	if err := app.Run(ctx, nil, logger); err != nil {
 		safelog.Error(logger, "service stopped", "run", err)
 		os.Exit(1)
 	}

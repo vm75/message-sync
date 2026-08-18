@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
@@ -17,16 +18,16 @@ import (
 type Normalizer struct {
 	endpoints    map[string]transport.EndpointID
 	hasher       *identity.Hasher
-	usernameMode string
+	usernameMode config.UsernameMode
 }
 
 type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 
-func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode string) (*Normalizer, error) {
+func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
 	}
-	if usernameMode != "push_name" && usernameMode != "hash" {
+	if !usernameMode.IsValid() {
 		return nil, errors.New("username mode must be push_name or hash")
 	}
 
@@ -55,7 +56,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	}
 
 	displayName := ""
-	if n.usernameMode == "push_name" {
+	if n.usernameMode == config.UsernameModePushName {
 		displayName = strings.TrimSpace(evt.Info.PushName)
 	}
 	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)

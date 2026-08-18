@@ -1,9 +1,11 @@
 package config
 
 import (
-	"os"
+	"context"
 	"path/filepath"
 	"testing"
+
+	"github.com/vm75/message-sync/internal/store"
 )
 
 func validConfig() Config {
@@ -13,16 +15,50 @@ func validConfig() Config {
 			"b": {JID: "2@g.us"},
 		},
 		SyncSets: []SyncSet{{ID: "mesh", Groups: []string{"a", "b"}}},
-		Identity: Identity{UsernameMode: "hash"},
+		Identity: Identity{UsernameMode: UsernameModeHash},
 		Media:    Media{MaxSizeMB: 100},
 		Recovery: Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  Storage{MessageRetentionDays: 90},
 	}
 }
 
+func openTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "sync.db")
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	return st
+}
+
 func TestValidateAcceptsSimpleMesh(t *testing.T) {
 	if err := validConfig().Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateUsernameModeEnum(t *testing.T) {
+	cfg := validConfig()
+	cfg.Identity.UsernameMode = UsernameModePushName
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with push_name failed: %v", err)
+	}
+
+	cfg.Identity.UsernameMode = UsernameModeHash
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with hash failed: %v", err)
+	}
+
+	cfg.Identity.UsernameMode = "invalid_mode"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for invalid usernameMode")
+	}
+
+	cfg.Identity.UsernameMode = ""
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for empty usernameMode")
 	}
 }
 
@@ -49,25 +85,61 @@ func TestValidateRejectsUnsafeAliasAndUnassignedGroup(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultsAndRejectsTrailingJSON(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.json")
-	body := `{"groups":{"a":{"jid":"1@g.us"},"b":{"jid":"2@g.us"}},"syncSets":[{"id":"mesh","groups":["a","b"]}]}`
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
-		t.Fatal(err)
+func TestSaveAndLoadFromSQLite(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	cfg := validConfig()
+	cfg.Identity.UsernameMode = UsernameModePushName
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
 	}
-	cfg, err := Load(path)
+
+	loaded, err := Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if loaded.Identity.UsernameMode != UsernameModePushName {
+		t.Errorf("got usernameMode %q, want %q", loaded.Identity.UsernameMode, UsernameModePushName)
+	}
+	if len(loaded.Groups) != 2 {
+		t.Fatalf("got %d groups, want 2", len(loaded.Groups))
+	}
+	if loaded.Groups["a"].JID != "1@g.us" || loaded.Groups["b"].JID != "2@g.us" {
+		t.Errorf("loaded groups mismatch: %+v", loaded.Groups)
+	}
+	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" {
+		t.Fatalf("loaded sync sets mismatch: %+v", loaded.SyncSets)
+	}
+}
+
+func TestLoadDefaultsWhenEmpty(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	// Initially empty groups will fail validation in Load, but let's insert groups and check defaults
+	_, err := st.DB().ExecContext(ctx, `INSERT INTO sync_sets (id) VALUES ('set1')`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Identity.UsernameMode != "push_name" || cfg.Media.MaxSizeMB != 100 || cfg.Storage.MessageRetentionDays != 90 {
-		t.Fatalf("defaults not applied: %+v", cfg)
-	}
-
-	if err := os.WriteFile(path, []byte(body+` {}`), 0o600); err != nil {
+	_, err = st.DB().ExecContext(ctx, `INSERT INTO groups (alias, jid, sync_set_id) VALUES ('g1', '1@g.us', 'set1'), ('g2', '2@g.us', 'set1')`)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Load(path); err == nil {
-		t.Fatal("Load() expected trailing JSON error")
+
+	loaded, err := Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if loaded.Identity.UsernameMode != UsernameModePushName {
+		t.Errorf("default usernameMode = %q, want push_name", loaded.Identity.UsernameMode)
+	}
+	if loaded.Media.MaxSizeMB != 100 {
+		t.Errorf("default media MaxSizeMB = %d, want 100", loaded.Media.MaxSizeMB)
+	}
+	if loaded.Storage.MessageRetentionDays != 90 {
+		t.Errorf("default retention days = %d, want 90", loaded.Storage.MessageRetentionDays)
 	}
 }

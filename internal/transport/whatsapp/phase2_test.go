@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"testing"
 
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -27,7 +28,7 @@ func TestNormalizerMarksBridgeOriginMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, "hash")
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
 	if err != nil {
 		t.Fatal(err)
 	}

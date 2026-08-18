@@ -15,29 +15,32 @@ The previous Node/Baileys project is a behavioral reference only, not the archit
 ## 2. Trust and persistence boundaries
 
 ```text
- config.json                     IDENTITY_SECRET
- aliases + group JIDs            environment/secret
-      |                                |
-      v                                v
- +---------+                      +----------+
- | Config  |                      | Identity |
- +----+----+                      +----+-----+
-      |                                |
-      +---------------+----------------+
-                      |
-                      v
-              +------------------+       /data/sync.db
- events ----->| Canonical Router |<----> PII-free app state
-              +--------+---------+
-                       |
-                       v
-              +------------------+
-              | WhatsApp Adapter |
-              | whatsmeow        |
-              +--------+---------+
-                       |
-                       +----------> /data/whatsapp.db
-                                    sensitive protocol state
+                             IDENTITY_SECRET
+                           environment/secret
+                                    |
+                                    v
+                              +----------+
+                              | Identity |
+                              +----+-----+
+                                   |
+                                   v
+                           +------------------+       /data/sync.db
+  REST API / Web UI <----->|  internal/api    |<----> config &
+  (port 8080)              +--------+---------+       PII-free app state
+                                    |
+                                    v
+                           +------------------+
+  events ----------------->| Canonical Router |
+                           +--------+---------+
+                                    |
+                                    v
+                           +------------------+
+                           | WhatsApp Adapter |
+                           | whatsmeow        |
+                           +--------+---------+
+                                    |
+                                    +----------> /data/whatsapp.db
+                                                 sensitive protocol state
 ```
 
 ### `whatsapp.db`
@@ -61,24 +64,25 @@ Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in 
 It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, timestamps and recovery cursors. It must not store message content or raw participant identity.
 
 ## 3. Configuration
+ 
+Configuration is stored in SQLite (`sync.db`) and managed programmatically via Go packages and the REST API.
+ 
+### SQLite Configuration Tables
+ 
+- `global_config`: Single-row table (`id = 1`) storing global behavior settings:
+- `username_mode`: typed enum (`push_name` or `hash`, default `push_name`);
+- `media_enabled`: boolean (default `1`);
+- `media_max_size_mb`: integer (default `100`);
+- `recovery_enabled`: boolean (default `1`);
+- `recovery_max_age_hours`: integer (default `24`);
+- `recovery_max_messages_per_group`: integer (default `200`);
+- `storage_message_retention_days`: integer (default `90`).
+- `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
+- `groups`: Table of groups (`alias TEXT PRIMARY KEY`, `jid TEXT NOT NULL`, `sync_set_id TEXT REFERENCES sync_sets(id)`).
 
-Configuration is JSON and contains topology, not secrets.
+The alias is the safe endpoint ID. Group JIDs are stored only in the configuration table for WhatsApp addressing and are never written to message tables or application logs.
 
-```json
-{
-  "groups": {
-    "c1g1": { "jid": "...@g.us" },
-    "c1g2": { "jid": "...@g.us" }
-  },
-  "syncSets": [
-    { "id": "community1", "groups": ["c1g1", "c1g2"] }
-  ]
-}
-```
-
-Group JIDs are operator-managed sensitive configuration because they are required to address WhatsApp groups. They are never written to logs or `sync.db`. The alias is the application endpoint ID.
-
-MVP restricts each group to one sync set. Arbitrary routing graphs are post-MVP.
+Each configured group must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
 
 ## 4. Canonical message model
 
@@ -247,7 +251,7 @@ Runtime requirements:
 - `no-new-privileges`;
 - read-only root filesystem via Compose;
 - `/data` as the only persistent writable path;
-- config mounted read-only;
+- port 8080 exposed for local/admin REST API;
 - no host networking or privileged container.
 
 `Containerfile`, `.containerignore` and `compose.yml` intentionally avoid Docker-specific naming.

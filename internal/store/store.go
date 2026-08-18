@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 var (
 	//go:embed schema.sql
@@ -27,6 +27,13 @@ var (
 
 type Store struct {
 	db *sql.DB
+}
+
+func (s *Store) DB() *sql.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
 }
 
 type MessageCopy struct {
@@ -141,6 +148,12 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v2 to v3: update version: %w", err)
 		}
 		version = 3
+	}
+	if version == 3 {
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '4' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v3 to v4: update version: %w", err)
+		}
+		version = 4
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)

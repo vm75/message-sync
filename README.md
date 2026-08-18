@@ -39,26 +39,31 @@ The first-login QR is sensitive transient pairing material shown directly as ter
 
 Media is handled transiently and discarded after fan-out. Raw events, JIDs, phone numbers, push names, message bodies/captions, and media must never enter application logs.
 
-`IDENTITY_SECRET` is required, stable across restarts, and supplied through environment/container secret handling rather than `config.json`.
+`IDENTITY_SECRET` is required, stable across restarts, and supplied through environment/container secret handling rather than database tables.
 
 ## Configuration
 
+Configuration is stored in SQLite (`sync.db`) and managed programmatically or via the built-in REST API / Web UI.
+
 ```sh
-cp config.example.json config.json
 cp .env.example .env
 openssl rand -hex 32
 ```
 
-Put the generated secret in `.env` as `IDENTITY_SECRET=...`, then edit `config.json` with your WhatsApp group JIDs and aliases.
+Put the generated secret in `.env` as `IDENTITY_SECRET=...`.
 
-Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`. Do not use a phone number, JID, person name, or group subject as an alias. Every configured group must belong to exactly one MVP sync set.
+Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`. Do not use a phone number, JID, person name, or group subject as an alias. Every configured group must belong to exactly one sync set.
 
-`identity.usernameMode` supports:
+`usernameMode` supports:
 
 - `push_name`: use transient `<alias>/<push name>` when available, with HMAC ID fallback;
 - `hash`: always use `<alias>/u_xxxxxxxxxx`.
 
-For MVP, a group may belong to only one sync set.
+### REST API
+
+The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR`):
+
+- `GET /health`: Returns `{"status":"ok"}` with `200 OK`.
 
 ## Rootless Podman
 
@@ -109,13 +114,13 @@ make build
 Validate configuration:
 
 ```sh
-CONFIG_PATH=./config.json go run ./cmd/message-sync validate-config
+DATA_DIR=./data go run ./cmd/message-sync validate-config
 ```
 
 Run attached for first pairing or local event inspection:
 
 ```sh
-IDENTITY_SECRET="$(openssl rand -hex 32)" CONFIG_PATH=./config.json DATA_DIR=./data go run ./cmd/message-sync run
+IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-sync run
 ```
 
 Use a stable `IDENTITY_SECRET` for any real deployment; the one-liner above is only convenient for isolated local development.

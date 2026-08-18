@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/transport"
@@ -33,7 +34,7 @@ type Options struct {
 	DatabasePath     string
 	GroupJIDs        map[string]string
 	Hasher           *identity.Hasher
-	UsernameMode     string
+	UsernameMode     config.UsernameMode
 	Logger           *slog.Logger
 	QROut            io.Writer
 	MediaEnabled     bool
