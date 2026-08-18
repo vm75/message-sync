@@ -143,7 +143,7 @@ whatsmeow callback
 
 The normalized event may temporarily carry message text/caption and push-name data because the router needs them for immediate forwarding, but those fields are explicitly transient and must never be persisted or logged. DMs and unconfigured groups are discarded before an internal event is produced.
 
-For first login, the adapter requests a cancellable whatsmeow QR channel before connecting and renders each QR directly as terminal pairing UI. After pairing, whatsmeow persists linked-device state in `whatsapp.db`. On normal restart the stored device already has an ID, so the QR path is skipped and the client connects directly.
+For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
 
 The router processes ingress events via an ordered worker:
 

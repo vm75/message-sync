@@ -1,0 +1,224 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+)
+
+type mockWhatsAppService struct {
+	mu          sync.Mutex
+	status      WhatsAppStatus
+	pairResp    WhatsAppPairResponse
+	pairErr     error
+	cancelErr   error
+	pairCalled  int
+	cancelCalls int
+}
+
+func (m *mockWhatsAppService) Status(_ context.Context) WhatsAppStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.status
+}
+
+func (m *mockWhatsAppService) Pair(_ context.Context) (WhatsAppPairResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pairCalled++
+	if m.pairErr != nil {
+		return WhatsAppPairResponse{}, m.pairErr
+	}
+	return m.pairResp, nil
+}
+
+func (m *mockWhatsAppService) CancelPair(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cancelCalls++
+	return m.cancelErr
+}
+
+func TestWhatsAppEndpoints_Unauthorized(t *testing.T) {
+	mockWA := &mockWhatsAppService{
+		status: WhatsAppStatus{Status: "unpaired"},
+	}
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: mockWA,
+	})
+
+	// Test GET /api/whatsapp/status without token
+	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
+	}
+
+	// Test POST /api/whatsapp/pair without token
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
+	}
+
+	// Test DELETE /api/whatsapp/pair without token
+	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
+	}
+}
+
+func TestWhatsAppEndpoints_Authorized(t *testing.T) {
+	mockWA := &mockWhatsAppService{
+		status: WhatsAppStatus{
+			Status:      "unpaired",
+			IsLoggedIn:  false,
+			IsConnected: false,
+		},
+		pairResp: WhatsAppPairResponse{
+			Status:         "pairing",
+			QRCode:         "2@mock-qr-code",
+			TimeoutSeconds: 20,
+		},
+	}
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: mockWA,
+	})
+
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatalf("failed to create session token: %v", err)
+	}
+
+	// 1. GET /api/whatsapp/status (initial unpaired state)
+	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var status WhatsAppStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to unmarshal status response: %v", err)
+	}
+	if status.Status != "unpaired" || status.IsLoggedIn || status.IsConnected {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+
+	// 2. POST /api/whatsapp/pair
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var pairResp WhatsAppPairResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &pairResp); err != nil {
+		t.Fatalf("failed to unmarshal pair response: %v", err)
+	}
+	if pairResp.Status != "pairing" || pairResp.QRCode != "2@mock-qr-code" || pairResp.TimeoutSeconds != 20 {
+		t.Fatalf("unexpected pair response: %+v", pairResp)
+	}
+
+	// 3. DELETE /api/whatsapp/pair
+	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if mockWA.cancelCalls != 1 {
+		t.Fatalf("expected cancel calls 1, got %d", mockWA.cancelCalls)
+	}
+
+	// 4. Update status to connected and verify
+	mockWA.mu.Lock()
+	mockWA.status = WhatsAppStatus{
+		Status:      "connected",
+		IsLoggedIn:  true,
+		IsConnected: true,
+	}
+	mockWA.mu.Unlock()
+
+	req = httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("failed to unmarshal status: %v", err)
+	}
+	if status.Status != "connected" || !status.IsLoggedIn || !status.IsConnected {
+		t.Fatalf("unexpected connected status: %+v", status)
+	}
+}
+
+func TestWhatsAppEndpoints_ServiceUnavailable(t *testing.T) {
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: nil,
+	})
+	token, _ := srv.sessions.CreateToken()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestWhatsAppEndpoints_PairError(t *testing.T) {
+	mockWA := &mockWhatsAppService{
+		pairErr: errors.New("network error"),
+	}
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: mockWA,
+	})
+	token, _ := srv.sessions.CreateToken()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}

@@ -68,6 +68,9 @@ The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR
 - `POST /api/auth/setup`: Sets initial admin password, hashes with bcrypt into `sync.db`, and returns a session token and cookie.
 - `POST /api/auth/login`: Authenticates password and returns a session token and cookie.
 - `POST /api/auth/logout`: Clears the session cookie.
+- `GET /api/whatsapp/status`: Returns the current WhatsApp client connection state (`"unpaired"`, `"pairing"`, `"connected"`, `"disconnected"`).
+- `POST /api/whatsapp/pair`: Initiates or retrieves an active WhatsApp QR pairing session.
+- `DELETE /api/whatsapp/pair`: Cancels an in-progress WhatsApp pairing session.
 - Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie.
 
 ## Rootless Podman
