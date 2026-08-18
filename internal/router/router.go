@@ -36,16 +36,16 @@ type pollMeta struct {
 }
 
 type Router struct {
-	store         *store.Store
-	sender        sender
-	routes        map[transport.EndpointID][]transport.EndpointID
-	usernameMode  config.UsernameMode
-	aggTrigger    string
-	knownCopies   map[copyKey]string
-	pollCache     map[string]pollMeta
-	newCanonical  func() (string, error)
-	afterPersist  func(transport.EndpointID) error
-	mu            sync.RWMutex
+	store        *store.Store
+	sender       sender
+	routes       map[transport.EndpointID][]transport.EndpointID
+	usernameMode config.UsernameMode
+	aggTrigger   string
+	knownCopies  map[copyKey]string
+	pollCache    map[string]pollMeta
+	newCanonical func() (string, error)
+	afterPersist func(transport.EndpointID) error
+	mu           sync.RWMutex
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
@@ -74,14 +74,14 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 	}
 
 	return &Router{
-		store:         syncStore,
-		sender:        transportSender,
-		routes:        routes,
-		usernameMode:  cfg.Identity.UsernameMode,
-		aggTrigger:    cfg.Polls.AggregationTrigger,
-		knownCopies:   make(map[copyKey]string),
-		pollCache:     make(map[string]pollMeta),
-		newCanonical:  newCanonicalID,
+		store:        syncStore,
+		sender:       transportSender,
+		routes:       routes,
+		usernameMode: cfg.Identity.UsernameMode,
+		aggTrigger:   cfg.Polls.AggregationTrigger,
+		knownCopies:  make(map[copyKey]string),
+		pollCache:    make(map[string]pollMeta),
+		newCanonical: newCanonicalID,
 	}, nil
 }
 
