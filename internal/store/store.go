@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 var (
 	//go:embed schema.sql
@@ -154,6 +154,15 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v3 to v4: update version: %w", err)
 		}
 		version = 4
+	}
+	if version == 4 {
+		if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN admin_password_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("migrate schema v4 to v5: add admin_password_hash: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '5' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v4 to v5: update version: %w", err)
+		}
+		version = 5
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)

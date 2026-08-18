@@ -60,10 +60,15 @@ Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za
 - `hash`: always use `<alias>/u_xxxxxxxxxx`.
 
 ### REST API
-
+ 
 The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR`):
-
-- `GET /health`: Returns `{"status":"ok"}` with `200 OK`.
+ 
+- `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
+- `GET /api/auth/status`: Returns whether admin password setup is complete (`{"isSetup": false}` or `true`).
+- `POST /api/auth/setup`: Sets initial admin password, hashes with bcrypt into `sync.db`, and returns a session token and cookie.
+- `POST /api/auth/login`: Authenticates password and returns a session token and cookie.
+- `POST /api/auth/logout`: Clears the session cookie.
+- Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie.
 
 ## Rootless Podman
 

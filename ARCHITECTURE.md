@@ -84,6 +84,18 @@ The alias is the safe endpoint ID. Group JIDs are stored only in the configurati
 
 Each configured group must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
 
+### REST API & Authentication
+
+The daemon provides a local HTTP server on port 8080 (configurable via `API_ADDR`):
+
+- `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
+- `GET /api/auth/status`: Returns `{"isSetup": bool}` indicating whether the admin password has been initialized.
+- `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
+- `POST /api/auth/login`: Accepts `{"password": "..."}`, verifies against stored bcrypt hash, and returns a session token / sets an `HttpOnly` session cookie.
+- `POST /api/auth/logout`: Clears the session cookie.
+
+Auth middleware protects all other `/api/*` endpoints, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Session tokens and plaintext passwords are never written to application logs.
+
 ## 4. Canonical message model
 
 Every source message receives an opaque application canonical ID unrelated to transport IDs.

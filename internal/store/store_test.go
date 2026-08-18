@@ -172,3 +172,90 @@ func TestMissingLookupPreservesSQLNotFound(t *testing.T) {
 		t.Fatalf("error = %v, want sql.ErrNoRows", err)
 	}
 }
+
+func TestMigrationFromV4ToV5(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync_v4.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Setup v4 database schema without admin_password_hash
+	v4Statements := `
+		CREATE TABLE canonical_messages (
+			canonical_id TEXT PRIMARY KEY,
+			created_at INTEGER NOT NULL,
+			tombstoned_at INTEGER
+		);
+		CREATE TABLE message_copies (
+			canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+			endpoint_id TEXT NOT NULL,
+			remote_message_id TEXT NOT NULL,
+			created_at INTEGER NOT NULL,
+			from_self BOOLEAN NOT NULL DEFAULT 0,
+			PRIMARY KEY (endpoint_id, remote_message_id),
+			UNIQUE (canonical_id, endpoint_id)
+		);
+		CREATE TABLE reactions (
+			canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+			source_endpoint_id TEXT NOT NULL,
+			actor_hash TEXT NOT NULL,
+			emoji TEXT NOT NULL,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (canonical_id, source_endpoint_id, actor_hash)
+		);
+		CREATE TABLE recovery_cursors (
+			endpoint_id TEXT PRIMARY KEY,
+			remote_message_id TEXT,
+			message_timestamp INTEGER,
+			updated_at INTEGER NOT NULL
+		);
+		CREATE TABLE global_config (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			username_mode TEXT NOT NULL DEFAULT 'push_name',
+			media_enabled BOOLEAN NOT NULL DEFAULT 1,
+			media_max_size_mb INTEGER NOT NULL DEFAULT 100,
+			recovery_enabled BOOLEAN NOT NULL DEFAULT 1,
+			recovery_max_age_hours INTEGER NOT NULL DEFAULT 24,
+			recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
+			storage_message_retention_days INTEGER NOT NULL DEFAULT 90
+		);
+		INSERT INTO global_config (id) VALUES (1);
+		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
+		CREATE TABLE groups (alias TEXT PRIMARY KEY, jid TEXT NOT NULL, sync_set_id TEXT);
+		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '4');
+	`
+	for _, stmt := range strings.Split(v4Statements, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup v4 db: %v", err)
+		}
+	}
+	_ = db.Close()
+
+	// Open with Store.Open to trigger migration
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open v4 db failed: %v", err)
+	}
+	defer st.Close()
+
+	var version int
+	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 5 {
+		t.Fatalf("expected migrated schema version 5, got %d", version)
+	}
+
+	var hash string
+	if err := st.db.QueryRow(`SELECT admin_password_hash FROM global_config WHERE id=1`).Scan(&hash); err != nil {
+		t.Fatalf("expected admin_password_hash column to exist: %v", err)
+	}
+	if hash != "" {
+		t.Fatalf("expected empty default hash, got %q", hash)
+	}
+}

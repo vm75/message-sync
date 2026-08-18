@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,14 +14,20 @@ import (
 )
 
 type Options struct {
-	Addr   string
-	Logger *slog.Logger
+	Addr       string
+	Logger     *slog.Logger
+	DB         *sql.DB
+	Secret     []byte
+	SessionTTL time.Duration
 }
 
 type Server struct {
 	httpServer *http.Server
 	mux        *http.ServeMux
+	handler    http.Handler
 	logger     *slog.Logger
+	db         *sql.DB
+	sessions   *SessionManager
 	listener   net.Listener
 }
 
@@ -34,26 +41,40 @@ func NewServer(opts Options) *Server {
 		logger = slog.Default()
 	}
 
+	sessions, err := NewSessionManager(opts.Secret, opts.SessionTTL)
+	if err != nil {
+		sessions, _ = NewSessionManager(nil, opts.SessionTTL)
+	}
+
 	mux := http.NewServeMux()
 	s := &Server{
-		httpServer: &http.Server{
-			Addr:              addr,
-			Handler:           mux,
-			ReadHeaderTimeout: 10 * time.Second,
-			ReadTimeout:       30 * time.Second,
-			WriteTimeout:      30 * time.Second,
-			IdleTimeout:       60 * time.Second,
-		},
-		mux:    mux,
-		logger: logger,
+		mux:      mux,
+		logger:   logger,
+		db:       opts.DB,
+		sessions: sessions,
 	}
 
 	s.registerRoutes()
+	s.handler = s.authMiddleware(mux)
+
+	s.httpServer = &http.Server{
+		Addr:              addr,
+		Handler:           s.handler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
 	return s
 }
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
+	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
+	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
+	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +82,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return s.handler
 }
 
 func (s *Server) Start() error {
