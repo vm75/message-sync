@@ -16,10 +16,11 @@ The MVP will:
 - use aliases such as `c1g1` rather than group subjects for provenance;
 - prefix forwarded content as `<group-alias>/<username>`;
 - use transient push names or HMAC-derived user IDs without persisting participant identity;
-- forward text, images, videos, documents, audio/voice messages, stickers, and captions;
+- forward text, images, videos, documents, audio/voice messages, stickers, captions, and native WhatsApp polls;
 - preserve reply relationships where possible and use an attribution fallback otherwise;
 - propagate reaction add/change/remove events;
 - propagate edits and deletes/revokes where WhatsApp permits it;
+- track cross-group poll votes and provide aggregated summaries via the `aggregate-response` trigger;
 - persist canonical message-copy relationships so restarts and partial fan-out are idempotent;
 - perform bounded best-effort recovery after downtime;
 - store no application message content, media, participant JIDs, phone numbers, or push names.

@@ -61,7 +61,7 @@ The daemon opens the database with the CGO-free SQLite driver, enables SQLite fo
 
 Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in `internal/store/schema.sql`.
 
-It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, timestamps and recovery cursors. It must not store message content or raw participant identity.
+It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and recovery cursors. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
  
@@ -187,7 +187,8 @@ Supported MVP message classes:
 - video;
 - documents;
 - audio/voice notes;
-- stickers.
+- stickers;
+- native WhatsApp polls.
 
 Media flow:
 
@@ -220,7 +221,18 @@ Reaction state uses:
 
 This permits add/change/remove semantics without raw identity. A native reaction on a destination is necessarily made by the bridge WhatsApp account; origin attribution may require companion text if product behavior requires visible original actor identity.
 
-## 11. Edits and deletes
+## 11. Polls and vote aggregation
+
+Poll creation creates native WhatsApp polls across all destination groups in the sync set. Incoming poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`.
+
+Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
+- the router intercepts the trigger (it is not fanned out);
+- sums the votes for each option across all groups;
+- formats and sends an aggregated text summary to all groups in the sync set, quoting each group's local copy of the poll.
+
+Option text is retained transiently in memory for formatted summaries during the session and falls back cleanly to generic option indices (`Option 1`, `Option 2`) upon server restart.
+
+## 12. Edits and deletes
 
 Edits and revokes resolve the target through canonical mapping and apply to all known copies using whatsmeow helpers/protocol APIs.
 
@@ -228,7 +240,7 @@ Content is never persisted merely for edit idempotency. A content hash may be co
 
 Deletes mark a canonical message tombstoned before/while propagation so offline recovery cannot resurrect it.
 
-## 12. Offline recovery
+## 13. Offline recovery
 
 Recovery is bounded and best effort. Use WhatsApp offline/history events and, where appropriate, whatsmeow history-sync primitives.
 
@@ -239,13 +251,13 @@ Config bounds:
 
 Recovered events enter the same normalization/router path as live events. There is no separate recovery forwarding implementation.
 
-## 13. Retention
+## 14. Retention
 
 `sync.db` mapping retention defaults to 90 days. Cleanup is batched. After expiry, very old reply/reaction/edit/delete events may fall back or no longer propagate.
 
 `whatsapp.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
 
-## 14. Transport abstraction
+## 15. Transport abstraction
 
 The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. MVP ships WhatsApp only.
 
@@ -259,7 +271,7 @@ Post-MVP Discord becomes another adapter:
 
 This prevents the previous design’s Discord-centric message identity from returning.
 
-## 15. Rootless container model
+## 16. Rootless container model
 
 Runtime requirements:
 
@@ -273,7 +285,7 @@ Runtime requirements:
 
 `Containerfile`, `.containerignore` and `compose.yml` intentionally avoid Docker-specific naming.
 
-## 16. Versioning and releases
+## 17. Versioning and releases
 
 There is no `VERSION` during MVP development. `internal/version.Build` defaults to `development`.
 
@@ -281,7 +293,7 @@ The image workflow listens only for `VERSION` changes on `main`. The first versi
 
 Release builds inject `VERSION` using `-ldflags` and publish `amd64`/`arm64` images.
 
-## 17. Security/logging
+## 18. Security/logging
 
 Never log raw whatsmeow events or arbitrary errors containing protocol structs. Use explicit safe fields such as:
 
@@ -294,6 +306,6 @@ Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 
 The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
-## 18. Deliberate MVP exclusions
+## 19. Deliberate MVP exclusions
 
-Discord, web admin, user accounts, membership verification, polls/events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/POST_MVP.md`.
+Discord, events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/POST_MVP.md`.

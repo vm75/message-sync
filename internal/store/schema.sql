@@ -56,8 +56,26 @@ CREATE TABLE IF NOT EXISTS groups (
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS poll_options (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    option_index INTEGER NOT NULL,
+    option_hash TEXT NOT NULL,
+    PRIMARY KEY (canonical_id, option_index)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
+
+CREATE TABLE IF NOT EXISTS poll_votes (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    actor_hash TEXT NOT NULL,
+    option_hash TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, actor_hash, option_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_votes_canonical ON poll_votes(canonical_id);
+
 CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '5');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '6');

@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 var (
 	//go:embed schema.sql
@@ -163,6 +163,33 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v4 to v5: update version: %w", err)
 		}
 		version = 5
+	}
+	if version == 5 {
+		if _, err := tx.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS poll_options (
+				canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+				option_index INTEGER NOT NULL,
+				option_hash TEXT NOT NULL,
+				PRIMARY KEY (canonical_id, option_index)
+			);
+			CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
+
+			CREATE TABLE IF NOT EXISTS poll_votes (
+				canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+				endpoint_id TEXT NOT NULL,
+				actor_hash TEXT NOT NULL,
+				option_hash TEXT NOT NULL,
+				updated_at INTEGER NOT NULL,
+				PRIMARY KEY (canonical_id, endpoint_id, actor_hash, option_hash)
+			);
+			CREATE INDEX IF NOT EXISTS idx_poll_votes_canonical ON poll_votes(canonical_id);
+		`); err != nil {
+			return fmt.Errorf("migrate schema v5 to v6: add poll tables: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '6' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v5 to v6: update version: %w", err)
+		}
+		version = 6
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)
@@ -424,6 +451,132 @@ func (s *Store) RecoveryCursor(ctx context.Context, endpointID string) (Recovery
 	}
 	cursor.UpdatedAt = fromUnixMillis(updated)
 	return cursor, nil
+}
+
+func (s *Store) SavePollOptions(ctx context.Context, canonicalID string, optionHashes []string) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if len(optionHashes) == 0 {
+		return errors.New("poll options are required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrapDB("begin save poll options", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO poll_options(canonical_id, option_index, option_hash) VALUES (?, ?, ?)`)
+	if err != nil {
+		return wrapDB("prepare save poll option", err)
+	}
+	defer stmt.Close()
+
+	for i, hash := range optionHashes {
+		if strings.TrimSpace(hash) == "" {
+			return errors.New("option hash is required")
+		}
+		if _, err := stmt.ExecContext(ctx, canonicalID, i, hash); err != nil {
+			return wrapDB("insert poll option", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetPollOptions(ctx context.Context, canonicalID string) ([]string, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT option_hash FROM poll_options WHERE canonical_id = ? ORDER BY option_index ASC`, canonicalID)
+	if err != nil {
+		return nil, wrapDB("get poll options", err)
+	}
+	defer rows.Close()
+
+	var hashes []string
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, wrapDB("scan poll option", err)
+		}
+		hashes = append(hashes, h)
+	}
+	return hashes, rows.Err()
+}
+
+func (s *Store) IsPoll(ctx context.Context, canonicalID string) (bool, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return false, err
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM poll_options WHERE canonical_id = ?`, canonicalID).Scan(&count)
+	if err != nil {
+		return false, wrapDB("check is poll", err)
+	}
+	return count > 0, nil
+}
+
+func (s *Store) RecordPollVote(ctx context.Context, canonicalID, endpointID, actorHash string, optionHashes []string, updatedAt time.Time) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	if !actorPattern.MatchString(actorHash) {
+		return errors.New("actor hash must be an HMAC-derived user id")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrapDB("begin record poll vote", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM poll_votes WHERE canonical_id = ? AND endpoint_id = ? AND actor_hash = ?`, canonicalID, endpointID, actorHash); err != nil {
+		return wrapDB("delete old poll votes", err)
+	}
+
+	if len(optionHashes) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO poll_votes(canonical_id, endpoint_id, actor_hash, option_hash, updated_at) VALUES (?, ?, ?, ?, ?)`)
+		if err != nil {
+			return wrapDB("prepare insert poll vote", err)
+		}
+		defer stmt.Close()
+
+		for _, optHash := range optionHashes {
+			if strings.TrimSpace(optHash) == "" {
+				continue
+			}
+			if _, err := stmt.ExecContext(ctx, canonicalID, endpointID, actorHash, optHash, unixMillis(updatedAt)); err != nil {
+				return wrapDB("insert poll vote", err)
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (s *Store) GetPollVoteCounts(ctx context.Context, canonicalID string) (map[string]int, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT option_hash, COUNT(*) FROM poll_votes WHERE canonical_id = ? GROUP BY option_hash`, canonicalID)
+	if err != nil {
+		return nil, wrapDB("get poll vote counts", err)
+	}
+	defer rows.Close()
+
+	counts := make(map[string]int)
+	for rows.Next() {
+		var optHash string
+		var count int
+		if err := rows.Scan(&optHash, &count); err != nil {
+			return nil, wrapDB("scan poll vote count", err)
+		}
+		counts[optHash] = count
+	}
+	return counts, rows.Err()
 }
 
 func validateCopy(copy MessageCopy) error {

@@ -1,6 +1,7 @@
 package whatsapp
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +42,7 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 		Message: &waE2E.Message{Conversation: &body},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil)
+	incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil)
 	if !ok {
 		t.Fatal("configured group message was ignored")
 	}
@@ -88,7 +89,7 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}, true, 100*1024*1024, nil); ok {
+			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}, true, 100*1024*1024, nil, nil); ok {
 				t.Fatalf("unexpected normalized event: %+v", got)
 			}
 		})
@@ -114,7 +115,7 @@ func TestHashModeDropsPushName(t *testing.T) {
 			PushName: "Should Be Dropped",
 		},
 		Message: &waE2E.Message{Conversation: &body},
-	}, true, 100*1024*1024, nil)
+	}, true, 100*1024*1024, nil, nil)
 	if !ok {
 		t.Fatal("message was ignored")
 	}
@@ -158,7 +159,7 @@ func TestNormalizeEditMessage(t *testing.T) {
 		},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(editEvt, true, 100*1024*1024, nil)
+	incoming, ok := normalizer.NormalizeMessage(editEvt, true, 100*1024*1024, nil, nil)
 	if !ok {
 		t.Fatal("edit message was ignored")
 	}
@@ -204,7 +205,7 @@ func TestNormalizeDeleteMessage(t *testing.T) {
 		},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(delEvt, true, 100*1024*1024, nil)
+	incoming, ok := normalizer.NormalizeMessage(delEvt, true, 100*1024*1024, nil, nil)
 	if !ok {
 		t.Fatal("delete message was ignored")
 	}
@@ -213,6 +214,112 @@ func TestNormalizeDeleteMessage(t *testing.T) {
 	}
 	if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "original-target-id" {
 		t.Fatalf("incoming.ReplyTo = %+v, want target original-target-id", incoming.ReplyTo)
+	}
+}
+
+func TestNormalizePollCreation(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	question := "Favorite Fruit?"
+	pollEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("15551234567", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:        "poll-msg-id",
+			PushName:  "Alice",
+			Timestamp: time.Unix(1_700_000_300, 0),
+		},
+		Message: &waE2E.Message{
+			PollCreationMessage: &waE2E.PollCreationMessage{
+				Name: &question,
+				Options: []*waE2E.PollCreationMessage_Option{
+					{OptionName: protoPtr("Apple")},
+					{OptionName: protoPtr("Banana")},
+					{OptionName: protoPtr("Cherry")},
+				},
+				SelectableOptionsCount: protoPtr(uint32(1)),
+			},
+		},
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(pollEvt, true, 100*1024*1024, nil, nil)
+	if !ok {
+		t.Fatal("poll creation was ignored")
+	}
+	if incoming.Kind != "poll" {
+		t.Fatalf("incoming.Kind = %q, want poll", incoming.Kind)
+	}
+	if incoming.Text != question {
+		t.Fatalf("incoming.Text = %q, want %q", incoming.Text, question)
+	}
+	if len(incoming.PollOptions) != 3 || incoming.PollOptions[0] != "Apple" || incoming.PollOptions[1] != "Banana" || incoming.PollOptions[2] != "Cherry" {
+		t.Fatalf("unexpected PollOptions: %+v", incoming.PollOptions)
+	}
+	if incoming.PollSelectableCount != 1 {
+		t.Fatalf("incoming.PollSelectableCount = %d, want 1", incoming.PollSelectableCount)
+	}
+}
+
+func TestNormalizePollVote(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	voteEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("15551234567", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:        "vote-msg-id",
+			PushName:  "Bob",
+			Timestamp: time.Unix(1_700_000_400, 0),
+		},
+		Message: &waE2E.Message{
+			PollUpdateMessage: &waE2E.PollUpdateMessage{
+				PollCreationMessageKey: &waCommon.MessageKey{
+					ID: protoPtr("target-poll-id"),
+				},
+			},
+		},
+	}
+
+	mockDecryptor := func(ctx context.Context, msg *events.Message) (*waE2E.PollVoteMessage, error) {
+		return &waE2E.PollVoteMessage{
+			SelectedOptions: [][]byte{
+				[]byte("\x01\x02\x03\x04"),
+			},
+		}, nil
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(voteEvt, true, 100*1024*1024, nil, mockDecryptor)
+	if !ok {
+		t.Fatal("poll vote was ignored")
+	}
+	if incoming.Kind != "poll_vote" {
+		t.Fatalf("incoming.Kind = %q, want poll_vote", incoming.Kind)
+	}
+	if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "target-poll-id" {
+		t.Fatalf("incoming.ReplyTo = %+v, want target-poll-id", incoming.ReplyTo)
+	}
+	if len(incoming.PollOptionHashes) != 1 || incoming.PollOptionHashes[0] != "01020304" {
+		t.Fatalf("unexpected PollOptionHashes: %+v", incoming.PollOptionHashes)
 	}
 }
 

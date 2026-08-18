@@ -247,8 +247,8 @@ func TestMigrationFromV4ToV5(t *testing.T) {
 	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Fatalf("expected migrated schema version 5, got %d", version)
+	if version != SchemaVersion {
+		t.Fatalf("expected migrated schema version %d, got %d", SchemaVersion, version)
 	}
 
 	var hash string
@@ -257,5 +257,92 @@ func TestMigrationFromV4ToV5(t *testing.T) {
 	}
 	if hash != "" {
 		t.Fatalf("expected empty default hash, got %q", hash)
+	}
+}
+
+func TestPollOptionsAndVotes(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+	canonicalID := "canon-poll-1"
+
+	if err := store.CreateCanonical(ctx, canonicalID, now); err != nil {
+		t.Fatal(err)
+	}
+
+	isPoll, err := store.IsPoll(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isPoll {
+		t.Fatal("expected false before saving options")
+	}
+
+	options := []string{"hash1", "hash2", "hash3"}
+	if err := store.SavePollOptions(ctx, canonicalID, options); err != nil {
+		t.Fatal(err)
+	}
+
+	isPoll, err = store.IsPoll(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isPoll {
+		t.Fatal("expected true after saving options")
+	}
+
+	retrieved, err := store.GetPollOptions(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retrieved) != 3 || retrieved[0] != "hash1" || retrieved[1] != "hash2" || retrieved[2] != "hash3" {
+		t.Fatalf("unexpected options: %+v", retrieved)
+	}
+
+	actor1 := "u_abcdefghij"
+	actor2 := "u_klmnopqrst"
+
+	// Actor 1 votes for hash1
+	if err := store.RecordPollVote(ctx, canonicalID, "endpoint1", actor1, []string{"hash1"}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	// Actor 2 votes for hash1 and hash2
+	if err := store.RecordPollVote(ctx, canonicalID, "endpoint2", actor2, []string{"hash1", "hash2"}, now); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := store.GetPollVoteCounts(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["hash1"] != 2 || counts["hash2"] != 1 || counts["hash3"] != 0 {
+		t.Fatalf("unexpected counts: %+v", counts)
+	}
+
+	// Actor 1 changes vote to hash3
+	if err := store.RecordPollVote(ctx, canonicalID, "endpoint1", actor1, []string{"hash3"}, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err = store.GetPollVoteCounts(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["hash1"] != 1 || counts["hash2"] != 1 || counts["hash3"] != 1 {
+		t.Fatalf("unexpected updated counts: %+v", counts)
+	}
+
+	// Actor 2 removes all votes
+	if err := store.RecordPollVote(ctx, canonicalID, "endpoint2", actor2, nil, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err = store.GetPollVoteCounts(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["hash1"] != 0 || counts["hash2"] != 0 || counts["hash3"] != 1 {
+		t.Fatalf("unexpected counts after actor 2 cleared: %+v", counts)
 	}
 }

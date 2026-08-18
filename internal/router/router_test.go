@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"os"
 	"path/filepath"
@@ -634,4 +636,295 @@ func TestRouterUpdateConfig(t *testing.T) {
 	if strings.Contains(fake.sent[0].outgoing.Text, "Alice") {
 		t.Fatalf("expected hash mode without push name, got %q", fake.sent[0].outgoing.Text)
 	}
+}
+
+func TestRouterPollCreationFanOut(t *testing.T) {
+	r, store, fake := newTestRouter(t, config.UsernameModePushName)
+	ctx := context.Background()
+
+	inc := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "poll-orig-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:                "poll",
+		Text:                "What is your favorite pet?",
+		PollOptions:         []string{"Dog", "Cat", "Parrot"},
+		PollSelectableCount: 1,
+		Timestamp:           time.Unix(1_700_000_000, 0).UTC(),
+	}
+
+	if err := r.Handle(ctx, inc); err != nil {
+		t.Fatalf("Handle poll error: %v", err)
+	}
+
+	if len(fake.sent) != 2 {
+		t.Fatalf("expected 2 fan-out copies, got %d", len(fake.sent))
+	}
+
+	for _, s := range fake.sent {
+		if s.outgoing.Kind != "poll" {
+			t.Fatalf("expected Kind 'poll', got %q", s.outgoing.Kind)
+		}
+		if len(s.outgoing.PollOptions) != 3 || s.outgoing.PollOptions[0] != "Dog" || s.outgoing.PollOptions[1] != "Cat" || s.outgoing.PollOptions[2] != "Parrot" {
+			t.Fatalf("unexpected PollOptions: %+v", s.outgoing.PollOptions)
+		}
+		if s.outgoing.PollSelectableCount != 1 {
+			t.Fatalf("expected PollSelectableCount 1, got %d", s.outgoing.PollSelectableCount)
+		}
+	}
+
+	canonicalID, err := store.CanonicalForRemote(ctx, "c1g1", "poll-orig-1")
+	if err != nil {
+		t.Fatalf("failed to find canonical: %v", err)
+	}
+	isPoll, err := store.IsPoll(ctx, canonicalID)
+	if err != nil || !isPoll {
+		t.Fatalf("expected isPoll=true, got %v (err: %v)", isPoll, err)
+	}
+}
+
+func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	ctx := context.Background()
+
+	// 1. Create a poll in c1g1
+	pollInc := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "poll-msg-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:                "poll",
+		Text:                "Lunch choice?",
+		PollOptions:         []string{"Pizza", "Sushi"},
+		PollSelectableCount: 1,
+		Timestamp:           time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r.Handle(ctx, pollInc); err != nil {
+		t.Fatalf("Handle poll creation error: %v", err)
+	}
+
+	// Option hashes
+	hPizza := hex.EncodeToString(cryptoSHA256("Pizza"))
+	hSushi := hex.EncodeToString(cryptoSHA256("Sushi"))
+
+	// 2. User in c1g1 votes for Pizza
+	vote1 := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "vote-1",
+		Sender: transport.Sender{
+			OpaqueID: "u_bcdefghijk",
+		},
+		Kind:             "poll_vote",
+		ReplyTo:          &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-msg-1"},
+		PollOptionHashes: []string{hPizza},
+		Timestamp:        time.Unix(1_700_000_010, 0).UTC(),
+	}
+	if err := r.Handle(ctx, vote1); err != nil {
+		t.Fatalf("Handle vote 1 error: %v", err)
+	}
+
+	// 3. User in c1g2 votes for Sushi (replying to c1g2-sent-1)
+	vote2 := transport.Incoming{
+		Endpoint: "c1g2",
+		RemoteID: "vote-2",
+		Sender: transport.Sender{
+			OpaqueID: "u_cdefghijkl",
+		},
+		Kind:             "poll_vote",
+		ReplyTo:          &transport.MessageRef{Endpoint: "c1g2", RemoteMessageID: "c1g2-sent-1"},
+		PollOptionHashes: []string{hSushi},
+		Timestamp:        time.Unix(1_700_000_020, 0).UTC(),
+	}
+	if err := r.Handle(ctx, vote2); err != nil {
+		t.Fatalf("Handle vote 2 error: %v", err)
+	}
+
+	// 4. User in c1g3 votes for Pizza (replying to c1g3-sent-1)
+	vote3 := transport.Incoming{
+		Endpoint: "c1g3",
+		RemoteID: "vote-3",
+		Sender: transport.Sender{
+			OpaqueID: "u_defghijklm",
+		},
+		Kind:             "poll_vote",
+		ReplyTo:          &transport.MessageRef{Endpoint: "c1g3", RemoteMessageID: "c1g3-sent-1"},
+		PollOptionHashes: []string{hPizza},
+		Timestamp:        time.Unix(1_700_000_030, 0).UTC(),
+	}
+	if err := r.Handle(ctx, vote3); err != nil {
+		t.Fatalf("Handle vote 3 error: %v", err)
+	}
+
+	// Clear fake.sent before triggering aggregation
+	fake.sent = nil
+
+	// 5. Trigger aggregation by replying "aggregate-response" to c1g2-sent-1
+	aggTrigger := transport.Incoming{
+		Endpoint: "c1g2",
+		RemoteID: "agg-trigger-msg",
+		Sender: transport.Sender{
+			DisplayName: "Bob",
+			PhoneNumber: "15559876543",
+			OpaqueID:    "u_efghijklmn",
+		},
+		Kind:      "text",
+		Text:      "aggregate-response",
+		ReplyTo:   &transport.MessageRef{Endpoint: "c1g2", RemoteMessageID: "c1g2-sent-1"},
+		Timestamp: time.Unix(1_700_000_040, 0).UTC(),
+	}
+	if err := r.Handle(ctx, aggTrigger); err != nil {
+		t.Fatalf("Handle aggregation error: %v", err)
+	}
+
+	// Aggregated summary should be sent to all 3 groups
+	if len(fake.sent) != 3 {
+		t.Fatalf("expected 3 aggregation messages, got %d", len(fake.sent))
+	}
+
+	for _, s := range fake.sent {
+		if s.outgoing.Kind != "text" {
+			t.Fatalf("expected summary kind text, got %q", s.outgoing.Kind)
+		}
+		if !strings.Contains(s.outgoing.Text, "Lunch choice?") {
+			t.Fatalf("expected question in summary, got: %s", s.outgoing.Text)
+		}
+		if !strings.Contains(s.outgoing.Text, "Pizza: 2 vote(s) (66%)") {
+			t.Fatalf("expected Pizza 2 votes (66%%), got: %s", s.outgoing.Text)
+		}
+		if !strings.Contains(s.outgoing.Text, "Sushi: 1 vote(s) (33%)") {
+			t.Fatalf("expected Sushi 1 vote (33%%), got: %s", s.outgoing.Text)
+		}
+		if !strings.Contains(s.outgoing.Text, "Total votes: 3") {
+			t.Fatalf("expected Total votes: 3, got: %s", s.outgoing.Text)
+		}
+		// In c1g1, reply should be to poll-msg-1
+		if s.outgoing.Endpoint == "c1g1" {
+			if s.outgoing.ReplyTo == nil || s.outgoing.ReplyTo.RemoteMessageID != "poll-msg-1" {
+				t.Fatalf("expected c1g1 replyTo poll-msg-1, got %+v", s.outgoing.ReplyTo)
+			}
+		}
+		// In c1g2, reply should be to c1g2-sent-1
+		if s.outgoing.Endpoint == "c1g2" {
+			if s.outgoing.ReplyTo == nil || s.outgoing.ReplyTo.RemoteMessageID != "c1g2-sent-1" {
+				t.Fatalf("expected c1g2 replyTo c1g2-sent-1, got %+v", s.outgoing.ReplyTo)
+			}
+		}
+		// In c1g3, reply should be to c1g3-sent-1
+		if s.outgoing.Endpoint == "c1g3" {
+			if s.outgoing.ReplyTo == nil || s.outgoing.ReplyTo.RemoteMessageID != "c1g3-sent-1" {
+				t.Fatalf("expected c1g3 replyTo c1g3-sent-1, got %+v", s.outgoing.ReplyTo)
+			}
+		}
+	}
+}
+
+func TestRouterPollAggregationAfterRestart(t *testing.T) {
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"c1g1": {JID: "111@g.us"},
+			"c1g2": {JID: "222@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+	path := filepath.Join(t.TempDir(), "sync.db")
+	syncStore, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+	fake := &fakeSender{}
+	ctx := context.Background()
+
+	r1, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pollInc := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "poll-msg-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:                "poll",
+		Text:                "Question before restart",
+		PollOptions:         []string{"Option Alpha", "Option Beta"},
+		PollSelectableCount: 1,
+		Timestamp:           time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r1.Handle(ctx, pollInc); err != nil {
+		t.Fatalf("Handle poll creation error: %v", err)
+	}
+
+	hAlpha := hex.EncodeToString(cryptoSHA256("Option Alpha"))
+
+	vote1 := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "vote-1",
+		Sender: transport.Sender{
+			OpaqueID: "u_bcdefghijk",
+		},
+		Kind:             "poll_vote",
+		ReplyTo:          &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-msg-1"},
+		PollOptionHashes: []string{hAlpha},
+		Timestamp:        time.Unix(1_700_000_010, 0).UTC(),
+	}
+	if err := r1.Handle(ctx, vote1); err != nil {
+		t.Fatalf("Handle vote 1 error: %v", err)
+	}
+
+	// Simulate restart by instantiating a new Router instance with empty memory cache
+	fake.sent = nil
+	r2, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aggTrigger := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "agg-trigger-msg",
+		Sender: transport.Sender{
+			DisplayName: "Bob",
+			PhoneNumber: "15559876543",
+			OpaqueID:    "u_cdefghijkl",
+		},
+		Kind:      "text",
+		Text:      "aggregate-response",
+		ReplyTo:   &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-msg-1"},
+		Timestamp: time.Unix(1_700_000_040, 0).UTC(),
+	}
+	if err := r2.Handle(ctx, aggTrigger); err != nil {
+		t.Fatalf("Handle aggregation error after restart: %v", err)
+	}
+
+	if len(fake.sent) != 2 {
+		t.Fatalf("expected 2 summary messages, got %d", len(fake.sent))
+	}
+
+	for _, s := range fake.sent {
+		if !strings.Contains(s.outgoing.Text, "Option 1: 1 vote(s) (100%)") {
+			t.Fatalf("expected Option 1 fallback label with 1 vote (100%%), got: %s", s.outgoing.Text)
+		}
+		if !strings.Contains(s.outgoing.Text, "Option 2: 0 vote(s) (0%)") {
+			t.Fatalf("expected Option 2 fallback label with 0 votes, got: %s", s.outgoing.Text)
+		}
+		if !strings.Contains(s.outgoing.Text, "Total votes: 1") {
+			t.Fatalf("expected Total votes: 1, got: %s", s.outgoing.Text)
+		}
+	}
+}
+
+func cryptoSHA256(s string) []byte {
+	h := sha256.Sum256([]byte(s))
+	return h[:]
 }

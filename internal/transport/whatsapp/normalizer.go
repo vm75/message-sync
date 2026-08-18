@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +23,7 @@ type Normalizer struct {
 }
 
 type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
+type VoteDecryptor func(context.Context, *events.Message) (*waE2E.PollVoteMessage, error)
 
 func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
 	if hasher == nil {
@@ -46,7 +48,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 	return &Normalizer{endpoints: endpoints, hasher: hasher, usernameMode: usernameMode}, nil
 }
 
-func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader) (transport.Incoming, bool) {
+func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor) (transport.Incoming, bool) {
 	if n == nil || evt == nil || evt.Message == nil || !evt.Info.IsGroup || evt.Info.Chat.Server != types.GroupServer {
 		return transport.Incoming{}, false
 	}
@@ -61,7 +63,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	}
 	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)
 
-	if kind != "text" && kind != "other" && kind != "reaction" {
+	if kind != "text" && kind != "other" && kind != "reaction" && kind != "poll" && kind != "poll_vote" {
 		if !mediaEnabled {
 			return transport.Incoming{}, false
 		}
@@ -80,8 +82,35 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 
 	var replyTo *transport.MessageRef
 	var quotedText string
+	var pollOptions []string
+	var pollSelectableCount int
+	var pollOptionHashes []string
 
-	if kind == "delete" {
+	if kind == "poll" {
+		if poll := getPollCreation(evt.Message); poll != nil {
+			for _, opt := range poll.GetOptions() {
+				pollOptions = append(pollOptions, opt.GetOptionName())
+			}
+			pollSelectableCount = int(poll.GetSelectableOptionsCount())
+		}
+	} else if kind == "poll_vote" {
+		if pollUpdate := evt.Message.GetPollUpdateMessage(); pollUpdate != nil {
+			key := pollUpdate.GetPollCreationMessageKey()
+			if key != nil && key.GetID() != "" {
+				replyTo = &transport.MessageRef{
+					Endpoint:        endpoint,
+					RemoteMessageID: key.GetID(),
+				}
+			}
+			if decryptor != nil {
+				if voteMsg, err := decryptor(context.Background(), evt); err == nil && voteMsg != nil {
+					for _, hashBytes := range voteMsg.GetSelectedOptions() {
+						pollOptionHashes = append(pollOptionHashes, hex.EncodeToString(hashBytes))
+					}
+				}
+			}
+		}
+	} else if kind == "delete" {
 		protoMsg := evt.Message.GetProtocolMessage()
 		var targetID string
 		if protoMsg != nil && protoMsg.GetKey() != nil {
@@ -156,19 +185,50 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 			PhoneNumber: phone,
 			OpaqueID:    n.hasher.UserID(evt.Info.Sender.ToNonAD().String()),
 		},
-		FromSelf:    evt.Info.IsFromMe,
-		Kind:        kind,
-		Text:        text,
-		ReplyTo:     replyTo,
-		QuotedText:  quotedText,
-		Timestamp:   evt.Info.Timestamp,
-		MediaLoader: loader,
+		FromSelf:            evt.Info.IsFromMe,
+		Kind:                kind,
+		Text:                text,
+		ReplyTo:             replyTo,
+		QuotedText:          quotedText,
+		Timestamp:           evt.Info.Timestamp,
+		MediaLoader:         loader,
+		PollOptions:         pollOptions,
+		PollSelectableCount: pollSelectableCount,
+		PollOptionHashes:    pollOptionHashes,
 	}, true
+}
+
+func getPollCreation(msg *waE2E.Message) *waE2E.PollCreationMessage {
+	if msg == nil {
+		return nil
+	}
+	if p := msg.GetPollCreationMessage(); p != nil {
+		return p
+	}
+	if p := msg.GetPollCreationMessageV2(); p != nil {
+		return p
+	}
+	if p := msg.GetPollCreationMessageV3(); p != nil {
+		return p
+	}
+	if p := msg.GetPollCreationMessageV5(); p != nil {
+		return p
+	}
+	if p := msg.GetPollCreationMessageV6(); p != nil {
+		return p
+	}
+	return nil
 }
 
 func normalizedPayload(msg *waE2E.Message) (kind, text string, dl whatsmeow.DownloadableMessage, length uint64) {
 	if msg == nil {
 		return "other", "", nil, 0
+	}
+	if poll := getPollCreation(msg); poll != nil {
+		return "poll", poll.GetName(), nil, 0
+	}
+	if msg.GetPollUpdateMessage() != nil {
+		return "poll_vote", "", nil, 0
 	}
 	if msg.Conversation != nil {
 		return "text", msg.GetConversation(), nil, 0

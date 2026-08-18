@@ -29,13 +29,11 @@ Deferred:
 
 - contacts/vCards;
 - locations and live locations;
-- polls and poll updates;
-- cross-group aggregate poll results/votes;
 - WhatsApp Events;
 - broad `@all`/`@everyone` participant expansion;
 - other newer interactive WhatsApp message formats.
 
-Contacts/location are relatively straightforward but have additional PII implications. Polls require extra state and potentially encryption-secret/vote handling. New interactive formats may require low-level protobuf work.
+Contacts/location are relatively straightforward but have additional PII implications. New interactive formats may require low-level protobuf work.
 
 ## 3. Web administration and API
 
@@ -205,6 +203,6 @@ MVP uses disjoint all-to-all sync sets. Future routing could support one-way edg
 4. Discord adapter;
 5. multiple WhatsApp sessions;
 6. historical importer;
-7. polls/richer WhatsApp formats;
+7. richer WhatsApp interactive formats;
 8. optional membership/identity/notification subsystem;
 9. cloud/multi-instance storage only if operational requirements demand it.
