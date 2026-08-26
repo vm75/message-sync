@@ -1,6 +1,6 @@
 # Aspirational Feature Backlog
 
-This document tracks features and capabilities from the inspiration repository (`vm75/whatsappdiscordsync`) and subsequent design discussions.
+This document tracks aspirational features and capabilities from inspiration discussions and subsequent design explorations.
 
 These items are **aspirational tracking items**, not firm commitments. Any proposed implementation must be evaluated against the project's **KISS/YAGNI** principles and **strict zero-PII/PHI privacy model**.
 

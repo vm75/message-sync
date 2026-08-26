@@ -4,11 +4,14 @@
 [![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)
 [![Docker Pulls](https://img.shields.io/docker/pulls/vm75/message-sync?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
 [![Docker Image Size](https://img.shields.io/docker/image-size/vm75/message-sync/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platforms-linux%2Famd64%20%7C%20linux%2Farm64-326CE5?style=flat-square&logo=linux)](https://github.com/vm75/message-sync)
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
 
 `message-sync` is a simple server to sync messages between multiple messaging channels. Currently, it supports syncing between multiple WhatsApp groups.
+
+*Note: This project is inspired by earlier explorations and prototypes in multi-platform message synchronization and bridging.*
 
 ## Features
 
@@ -89,3 +92,12 @@ IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-s
 - `DOCKERHUB.md` — Information related to the published container images.
 - `docs/ASPIRATIONAL_FEATURES.md` — Future features (Discord support, cloud integrations, etc.).
 - `AGENTS.md` — Instructions for AI agents and code contributors.
+
+## Disclaimers
+
+- **Non-Affiliation**: This project is an independent open-source tool and is not affiliated, associated, authorized, endorsed by, or in any way officially connected with WhatsApp, Meta Platforms, Inc., or any of their subsidiaries or affiliates.
+- **Terms of Service**: Automated interactions and unofficial clients are subject to WhatsApp's Terms of Service. Use this tool responsibly and at your own risk. The maintainers assume no liability for any account restrictions, bans, or service disruptions.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

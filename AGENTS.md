@@ -15,7 +15,7 @@ Keep context lean. Read only what the current task requires:
 3. The package(s) being changed and their tests.
 4. `docs/ASPIRATIONAL_FEATURES.md` only for aspirational/deferred functionality.
 
-The previous implementation in `vm75/whatsappdiscordsync` may be consulted as a behavioral reference for a specific feature. Do not copy its architecture wholesale.
+The previous implementation or prototypes may be consulted as a behavioral reference for a specific feature. Do not copy legacy architecture wholesale.
 
 ## Non-negotiable privacy invariants
 
