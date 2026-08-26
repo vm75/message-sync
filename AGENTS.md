@@ -122,7 +122,7 @@ podman compose config
 The runtime container must:
 
 - run as a non-root user;
-- work with rootless Podman;
+- work with Docker, rootful Podman, and rootless Podman;
 - use `/data` as its only persistent writable location;
 - use a read-only root filesystem in Compose;
 - require no privileged mode, host networking, host PID namespace, or extra Linux capabilities;
@@ -130,8 +130,6 @@ The runtime container must:
 - avoid runtime-specific behavior unless isolated and documented.
 
 ## Version/release rules
-
-**Do not create `VERSION` until the MVP is complete and ready to publish.**
 
 `.github/workflows/release-images.yml` must trigger only when `VERSION` changes on `main`. Normal development builds identify as `development`. Release builds inject `VERSION` with linker flags.
 

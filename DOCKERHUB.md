@@ -8,21 +8,31 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a privacy-first message synchronization service written in Go. It connects multiple WhatsApp groups into unified all-to-all synchronization sets with strict privacy guarantees, ephemeral media forwarding, and an embedded management Web UI and REST API.
+`message-sync` is a simple server to sync messages between multiple messaging channels. Currently, it supports syncing between multiple WhatsApp groups.
 
 ---
 
-## Key Features
+## Features
 
-- **Privacy-First Architecture**: Application persistence (`sync.db`) contains zero PII/PHI. Never logs or stores phone numbers, JIDs, message bodies, media, or contact cards.
-- **Full WhatsApp Group Synchronization**: Synchronizes text, media (images, videos, audio/voice notes, documents, stickers), native WhatsApp polls, reactions, edits, and deletes.
-- **Cross-Group Poll Vote Aggregation**: Tracks poll votes across synchronized groups and provides aggregated summaries upon request (`aggregate-response`).
-- **Automated WhatsApp Chat Cleanup**: Configurable daily message clearing for sync-set groups on the sync account only, keeping local device storage lean.
-- **Replies & Reactions**: Preserves clickable native reply structures across groups with automatic attribution fallbacks when needed.
-- **Transient Media**: Media is downloaded into memory only long enough to forward to peer groups and is never retained on disk.
-- **Embedded Web UI & REST API**: Includes a zero-dependency dark-mode management console served directly on port `8080`.
-- **Hardened Container**: Built as a static, non-root binary (UID `10001`), supporting read-only filesystems, zero capabilities, and rootless Podman/Docker.
-- **Multi-Architecture**: Official multi-arch images for `linux/amd64` and `linux/arm64`.
+- **Multi-Group Synchronization**: Seamlessly connect multiple WhatsApp groups into unified sync sets.
+- **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
+- **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
+- **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
+- **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
+- **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
+- **Embedded Web UI**: Simple, zero-dependency management console to configure groups and sync sets directly from your browser.
+- **Hardened Security**: Runs as a static, non-root binary in read-only containers.
+
+---
+
+## Privacy Model
+
+`message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
+
+- **Zero PII/PHI**: The application database (`sync.db`) never stores phone numbers, WhatsApp JIDs, participant names, message bodies, media, or contact cards.
+- **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
+- **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
+- **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
 
 ---
 
@@ -30,7 +40,7 @@
 
 ### 1. Prepare Environment
 
-Generate a 32-byte secret for HMAC identity derivation:
+Generate a 32-byte secret for anonymized identity derivation:
 
 ```sh
 mkdir -p data
@@ -54,7 +64,6 @@ services:
   message-sync:
     container_name: message-sync
     image: docker.io/vm75/message-sync:latest
-    user: "10001:10001"
     read_only: true
     cap_drop:
       - ALL
@@ -77,9 +86,7 @@ services:
     stop_grace_period: 20s
 ```
 
-### 3. Initial Pairing
-
-#### Option A: Via Embedded Web UI (Recommended)
+### 3. Setup and Pairing
 
 1. Start the container:
    ```sh
@@ -87,33 +94,8 @@ services:
    ```
 2. Open `http://localhost:8080` in your browser.
 3. Complete initial admin password setup.
-4. Navigate to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp (**Linked Devices** &rarr; **Link a Device**).
-5. Configure your groups and sync sets in the web console.
-
-#### Option B: Via Terminal CLI
-
-Run the container interactively to scan the pairing QR directly from the terminal:
-
-```sh
-docker compose run --rm message-sync run
-```
-
-Scan the terminal QR with WhatsApp (**Linked Devices** &rarr; **Link a Device**). After pairing completes, stop with `Ctrl-C` and start in background:
-
-```sh
-docker compose up -d
-```
-
----
-
-## Environment Variables
-
-| Variable | Description | Required | Default |
-|---|---|---|---|
-| `IDENTITY_SECRET` | 32-byte hex secret used for stable HMAC actor ID derivation | Yes | *(None)* |
-| `DATA_DIR` | Directory where `/data/sync.db` and `/data/whatsapp.db` are stored | No | `/data` |
-| `PORT` | Listen port mapped for Web UI and REST API in compose and native | No | `8080` |
-| `API_ADDR` | Listen address/port (`[host]:port`) for advanced binds | No | `:${PORT}` |
+4. Navigate to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp (**Linked Devices** → **Link a Device**).
+5. Configure your groups and sync sets in the web console!
 
 ---
 
@@ -122,7 +104,7 @@ docker compose up -d
 Mount a persistent volume to `/data`:
 
 - `/data/whatsapp.db`: Sensitive protocol session store managed by `whatsmeow` (reconnects without re-pairing).
-- `/data/sync.db`: Application routing state (safe canonical IDs, HMAC identifiers, tombstone records, and retention cursors).
+- `/data/sync.db`: Application routing state.
 
 ---
 

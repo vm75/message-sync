@@ -7,7 +7,6 @@ services:
       dockerfile: Containerfile
       args:
         VERSION: development
-    user: "10001:10001"
     read_only: true
     cap_drop:
       - ALL
@@ -18,13 +17,13 @@ services:
     env_file:
       - .env
     environment:
-      - DATA_DIR=${DATA_DIR:-/data}
+      - DATA_DIR=/data
       - IDENTITY_SECRET=${IDENTITY_SECRET}
       - PORT=${PORT:-8080}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ${MESSAGE_SYNC_DATA_DIR:-./data}:/data:Z,U
+      - ${MESSAGE_SYNC_DATA_DIR:-./data}:/data:Z
     restart: unless-stopped
     stop_grace_period: 20s

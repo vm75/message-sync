@@ -1,6 +1,6 @@
 # Aspirational Feature Backlog
 
-This document tracks features and capabilities from the inspiration repository (`vm75/whatsappdiscordsync`) and subsequent design discussions. 
+This document tracks features and capabilities from the inspiration repository (`vm75/whatsappdiscordsync`) and subsequent design discussions.
 
 These items are **aspirational tracking items**, not firm commitments. Any proposed implementation must be evaluated against the project's **KISS/YAGNI** principles and **strict zero-PII/PHI privacy model**.
 
@@ -15,7 +15,7 @@ The following features have already been implemented in the core service:
 - **WhatsApp Native Polls & Aggregated Summaries**: Cross-group poll forwarding, vote tracking, and `aggregate-response` summary reporting.
 - **Full Message Lifecycle**: Text, transient media (images, videos, audio/voice, documents, stickers), native clickable replies (with attribution fallback), reactions, edits, and deletes.
 - **Privacy Core**: Ephemeral media streaming, transient push names, deterministic HMAC user pseudonyms, zero PII in SQLite `sync.db`.
-- **Hardened Rootless Container**: Non-root UID `10001`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
+- **Hardened Rootless Container**: Non-root UID `1000`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
 
 ---
 

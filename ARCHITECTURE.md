@@ -281,7 +281,7 @@ This prevents the previous design’s Discord-centric message identity from retu
 
 Runtime requirements:
 
-- non-root UID/GID 10001;
+- non-root UID/GID 1000;
 - no added capabilities;
 - `no-new-privileges`;
 - read-only root filesystem via Compose;
@@ -293,11 +293,9 @@ Runtime requirements:
 
 ## 17. Versioning and releases
 
-There is no `VERSION` during MVP development. `internal/version.Build` defaults to `development`.
+`internal/version.Build` defaults to `development` for local dev builds.
+The image workflow listens only for `VERSION` changes on `main`, which prevents development commits from repeatedly attempting Docker Hub/GHCR publication.
 
-The image workflow listens only for `VERSION` changes on `main`. The first version file is created only after MVP acceptance, which prevents development commits from repeatedly attempting Docker Hub/GHCR publication.
-
-Release builds inject `VERSION` using `-ldflags` and publish `amd64`/`arm64` images.
 
 ## 18. Security/logging
 

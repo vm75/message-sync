@@ -1,6 +1,6 @@
 BINARY := message-sync
 
-.PHONY: fmt test vet build run container-build
+.PHONY: fmt test vet build run container-build container-release
 fmt:
 	gofmt -w ./cmd ./internal
 
@@ -19,3 +19,6 @@ run:
 
 container-build:
 	podman build -f Containerfile -t message-sync:dev .
+
+container-release:
+	podman build -f Containerfile -t vm75/message-sync:latest .

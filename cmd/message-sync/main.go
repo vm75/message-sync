@@ -49,7 +49,22 @@ func main() {
 		}
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logLevelStr := os.Getenv("LOG_LEVEL")
+	var level slog.Level
+	switch strings.ToLower(logLevelStr) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: level,
+	}))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

@@ -17,13 +17,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /out/message-sync ./cmd/message-sync
 
 FROM docker.io/library/alpine:3.22
-RUN addgroup -S -g 10001 message-sync \
-    && adduser -S -D -H -u 10001 -G message-sync message-sync \
-    && mkdir -p /data /config \
-    && chown -R 10001:10001 /data /config
+RUN addgroup -g 1000 message-sync \
+    && adduser -u 1000 -G message-sync -D -H message-sync \
+    && mkdir -p /data \
+    && chown -R message-sync:message-sync /data
 COPY --from=build /out/message-sync /usr/local/bin/message-sync
 
-USER 10001:10001
+USER message-sync
 WORKDIR /data
 VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/message-sync"]
