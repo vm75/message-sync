@@ -242,3 +242,86 @@ func TestAdapterReact(t *testing.T) {
 		t.Fatal("expected error for uninitialized client")
 	}
 }
+
+func TestAdapterLogout(t *testing.T) {
+	dataDir := t.TempDir()
+	dbPath := filepath.Join(dataDir, "whatsapp.db")
+
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	hasher, err := identity.New(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts := Options{
+		DatabasePath: dbPath,
+		GroupJIDs: map[string]string{
+			"g1": "123456789@g.us",
+		},
+		Hasher:           hasher,
+		UsernameMode:     config.UsernameModePushName,
+		Logger:           slog.Default(),
+		EnableTerminalQR: false,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	adapter, err := Open(ctx, opts)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer adapter.Close()
+
+	if err := adapter.Logout(context.Background()); err != nil {
+		t.Fatalf("Logout failed: %v", err)
+	}
+
+	status := adapter.Status(context.Background())
+	if status.IsLoggedIn || status.IsConnected {
+		t.Fatalf("expected logged out and disconnected status: %+v", status)
+	}
+}
+
+func TestBuildClearChatPatch(t *testing.T) {
+	jid := types.NewJID("123456789", "g.us")
+	cutoff := time.Unix(1700000000, 0).UTC()
+
+	patch := BuildClearChatPatch(jid, cutoff, true)
+	if patch.Type != "regular_high" {
+		t.Errorf("patch.Type = %s, want regular_high", patch.Type)
+	}
+	if len(patch.Mutations) != 1 {
+		t.Fatalf("expected 1 mutation, got %d", len(patch.Mutations))
+	}
+	mut := patch.Mutations[0]
+	if len(mut.Index) != 4 || mut.Index[0] != "clearChat" || mut.Index[1] != jid.String() || mut.Index[3] != "1" {
+		t.Errorf("unexpected mutation Index: %+v", mut.Index)
+	}
+	if mut.Value == nil || mut.Value.ClearChatAction == nil || mut.Value.ClearChatAction.MessageRange == nil {
+		t.Fatalf("expected ClearChatAction value with MessageRange, got %+v", mut.Value)
+	}
+	if mut.Value.ClearChatAction.MessageRange.GetLastMessageTimestamp() != 1700000000 {
+		t.Errorf("got timestamp %d, want 1700000000", mut.Value.ClearChatAction.MessageRange.GetLastMessageTimestamp())
+	}
+}
+
+func TestAdapterClearChatUnauthenticated(t *testing.T) {
+	var a *Adapter
+	if err := a.ClearChatOlderThan(context.Background(), types.NewJID("1", "g.us"), time.Now(), true); err == nil {
+		t.Fatal("expected error for nil adapter")
+	}
+
+	adapter := &Adapter{}
+	if err := adapter.ClearChatOlderThan(context.Background(), types.NewJID("1", "g.us"), time.Now(), true); err == nil {
+		t.Fatal("expected error for unauthenticated client")
+	}
+
+	if _, err := adapter.ClearSyncSetChats(context.Background(), []types.JID{types.NewJID("1", "g.us")}, time.Now()); err == nil {
+		t.Fatal("expected error for ClearSyncSetChats with unauthenticated client")
+	}
+
+	if adapter.IsLoggedIn() {
+		t.Fatal("expected IsLoggedIn to return false")
+	}
+}

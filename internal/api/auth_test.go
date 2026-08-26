@@ -369,3 +369,89 @@ func TestAuthMiddleware(t *testing.T) {
 		t.Fatalf("expected 200 with token cookie, got %d", recTokenCookie.Code)
 	}
 }
+
+func TestChangePassword(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+
+	// 1. Initial setup
+	setupBody, _ := json.Marshal(AuthPasswordRequest{Password: "initialpassword123"})
+	reqSetup := httptest.NewRequest(http.MethodPost, "/api/auth/setup", bytes.NewReader(setupBody))
+	recSetup := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recSetup, reqSetup)
+	if recSetup.Code != http.StatusOK {
+		t.Fatalf("expected 200 setup, got %d: %s", recSetup.Code, recSetup.Body.String())
+	}
+	var tokenResp AuthTokenResponse
+	_ = json.Unmarshal(recSetup.Body.Bytes(), &tokenResp)
+	token := tokenResp.Token
+
+	// 2. Unauthorized without token
+	changeBody, _ := json.Marshal(AuthChangePasswordRequest{
+		CurrentPassword: "initialpassword123",
+		NewPassword:     "newpassword456",
+	})
+	reqUnauth := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(changeBody))
+	recUnauth := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized without token, got %d", recUnauth.Code)
+	}
+
+	// 3. Incorrect current password
+	wrongBody, _ := json.Marshal(AuthChangePasswordRequest{
+		CurrentPassword: "wrongpassword",
+		NewPassword:     "newpassword456",
+	})
+	reqWrong := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(wrongBody))
+	reqWrong.Header.Set("Authorization", "Bearer "+token)
+	recWrong := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recWrong, reqWrong)
+	if recWrong.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for wrong current password, got %d: %s", recWrong.Code, recWrong.Body.String())
+	}
+
+	// 4. Short new password
+	shortBody, _ := json.Marshal(AuthChangePasswordRequest{
+		CurrentPassword: "initialpassword123",
+		NewPassword:     "short",
+	})
+	reqShort := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(shortBody))
+	reqShort.Header.Set("Authorization", "Bearer "+token)
+	recShort := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recShort, reqShort)
+	if recShort.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request for short new password, got %d", recShort.Code)
+	}
+
+	// 5. Successful change password
+	validBody, _ := json.Marshal(AuthChangePasswordRequest{
+		CurrentPassword: "initialpassword123",
+		NewPassword:     "newpassword456",
+	})
+	reqValid := httptest.NewRequest(http.MethodPost, "/api/auth/change-password", bytes.NewReader(validBody))
+	reqValid.Header.Set("Authorization", "Bearer "+token)
+	recValid := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recValid, reqValid)
+	if recValid.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for valid change password, got %d: %s", recValid.Code, recValid.Body.String())
+	}
+
+	// 6. Verify old password no longer works
+	oldLoginBody, _ := json.Marshal(AuthPasswordRequest{Password: "initialpassword123"})
+	reqOldLogin := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(oldLoginBody))
+	recOldLogin := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recOldLogin, reqOldLogin)
+	if recOldLogin.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for old password, got %d", recOldLogin.Code)
+	}
+
+	// 7. Verify new password works
+	newLoginBody, _ := json.Marshal(AuthPasswordRequest{Password: "newpassword456"})
+	reqNewLogin := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewReader(newLoginBody))
+	recNewLogin := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recNewLogin, reqNewLogin)
+	if recNewLogin.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for new password login, got %d: %s", recNewLogin.Code, recNewLogin.Body.String())
+	}
+}

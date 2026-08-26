@@ -19,6 +19,7 @@ import (
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
+	"go.mau.fi/whatsmeow/types"
 )
 
 type safeBuffer struct {
@@ -47,6 +48,7 @@ type fakeWhatsAppTransport struct {
 	pairResp       api.WhatsAppPairResponse
 	pairCalled     int
 	cancelCalls    int
+	logoutCalls    int
 	updatedConfigs []*config.Config
 }
 
@@ -101,6 +103,13 @@ func (f *fakeWhatsAppTransport) CancelPair(ctx context.Context) error {
 	return nil
 }
 
+func (f *fakeWhatsAppTransport) Logout(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.logoutCalls++
+	return nil
+}
+
 func (f *fakeWhatsAppTransport) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
 	return []api.WhatsAppGroup{}, nil
 }
@@ -110,6 +119,16 @@ func (f *fakeWhatsAppTransport) UpdateConfig(cfg *config.Config) error {
 	defer f.mu.Unlock()
 	f.updatedConfigs = append(f.updatedConfigs, cfg)
 	return nil
+}
+
+func (f *fakeWhatsAppTransport) IsLoggedIn() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status.IsLoggedIn
+}
+
+func (f *fakeWhatsAppTransport) ClearSyncSetChats(ctx context.Context, groupJIDs []types.JID, cutoff time.Time) (int, error) {
+	return len(groupJIDs), nil
 }
 
 func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *testing.T) {
@@ -185,7 +204,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	}
 	forwarded := fake.sent[0]
 	fake.mu.Unlock()
-	if forwarded.Endpoint != "c1g2" || forwarded.Text != "c1g1/Alice Example: private body" {
+	if forwarded.Endpoint != "c1g2" || forwarded.Text != "*_c1g1/Alice Example_*: private body" {
 		cancel()
 		t.Fatalf("unexpected forwarded message: %+v", forwarded)
 	}
@@ -510,6 +529,22 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 
 	if fake.cancelCalls != 1 {
 		t.Fatalf("expected 1 cancel call, got %d", fake.cancelCalls)
+	}
+
+	// 4. POST /api/whatsapp/logout
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/whatsapp/logout", apiAddr), nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("POST /api/whatsapp/logout failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 OK from POST logout, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	if fake.logoutCalls != 1 {
+		t.Fatalf("expected 1 logout call, got %d", fake.logoutCalls)
 	}
 
 	cancel()
@@ -848,5 +883,56 @@ func TestApp_FreshStartupWithoutConfig(t *testing.T) {
 	cancel()
 	if err := <-errCh; err != nil {
 		t.Fatalf("Run() returned error on shutdown: %v", err)
+	}
+}
+
+func TestWhatsAppChatCleanupRunner(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "sync.db")
+	st, err := store.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	cfg := &config.Config{
+		Groups: map[string]config.Group{
+			"g1": {JID: "111111111111111111@g.us"},
+			"g2": {JID: "222222222222222222@g.us"},
+		},
+		SyncSets: []config.SyncSet{
+			{ID: "set1", Groups: []string{"g1", "g2"}},
+		},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 100},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+		WhatsAppCleanup: config.WhatsAppCleanup{
+			Enabled:       true,
+			RetentionDays: 14,
+		},
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+
+	fake := &fakeWhatsAppTransport{
+		status: api.WhatsAppStatus{IsLoggedIn: true, IsConnected: true, Status: "connected"},
+	}
+
+	runWhatsAppChatCleanup(context.Background(), logger, st.DB(), fake)
+
+	logStr := logBuf.String()
+	if !strings.Contains(logStr, "whatsapp chat cleanup completed") {
+		t.Fatalf("expected cleanup completion log, got: %s", logStr)
+	}
+	if !strings.Contains(logStr, `"groups_cleared":2`) {
+		t.Fatalf("expected 2 groups cleared in log, got: %s", logStr)
+	}
+	// Verify zero group JID / PII in log
+	if strings.Contains(logStr, "111111111111111111@g.us") || strings.Contains(logStr, "222222222222222222@g.us") {
+		t.Fatalf("log leaked raw JID: %s", logStr)
 	}
 }

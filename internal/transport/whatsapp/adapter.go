@@ -20,8 +20,10 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
@@ -132,6 +134,15 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	return adapter, nil
 }
 
+func (a *Adapter) getContactInfo(jid types.JID) types.ContactInfo {
+	if a.client != nil && a.client.Store != nil && a.client.Store.Contacts != nil {
+		if info, err := a.client.Store.Contacts.GetContact(context.Background(), jid); err == nil {
+			return info
+		}
+	}
+	return types.ContactInfo{}
+}
+
 func (a *Adapter) Events() <-chan transport.Incoming {
 	return a.events
 }
@@ -168,9 +179,16 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		}
 
 		if useNative {
+			quote := strings.TrimSpace(outgoing.QuotedText)
+			if quote == "" {
+				quote = "message"
+			}
 			contextInfo = &waE2E.ContextInfo{
 				StanzaID:    proto.String(outgoing.ReplyTo.RemoteMessageID),
 				Participant: proto.String(participant),
+				QuotedMessage: &waE2E.Message{
+					Conversation: proto.String(quote),
+				},
 			}
 		} else {
 			// Fallback: prepend quoted text when original participant is unknown
@@ -179,6 +197,43 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 				quote = "message"
 			}
 			outgoing.Text = fmt.Sprintf("> %s\n\n%s", quote, outgoing.Text)
+		}
+	}
+
+	if len(outgoing.Mentions) > 0 {
+		groupInfo, _ := a.client.GetGroupInfo(ctx, target)
+		isParticipant := func(user string) bool {
+			if groupInfo == nil {
+				return false
+			}
+			for _, p := range groupInfo.Participants {
+				if p.JID.User == user {
+					return true
+				}
+			}
+			return false
+		}
+
+		seenMentions := make(map[string]bool)
+		for _, m := range outgoing.Mentions {
+			if seenMentions[m.RemoteID] {
+				continue
+			}
+			seenMentions[m.RemoteID] = true
+
+			var replacement string
+			if isParticipant(m.RemoteID) {
+				// Format as a plain-text mention (non-clickable) to avoid WhatsApp revealing the phone number.
+				replacement = fmt.Sprintf("@%s", m.Name)
+			} else {
+				if outgoing.OriginEndpoint != "" {
+					replacement = fmt.Sprintf("<%s/%s>", outgoing.OriginEndpoint, m.Name)
+				} else {
+					replacement = fmt.Sprintf("<%s>", m.Name)
+				}
+			}
+			outgoing.Text = strings.ReplaceAll(outgoing.Text, "@"+m.RemoteID, replacement)
+			outgoing.QuotedText = strings.ReplaceAll(outgoing.QuotedText, "@"+m.RemoteID, replacement)
 		}
 	}
 
@@ -339,6 +394,79 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 		return fmt.Errorf("send WhatsApp delete: %w", err)
 	}
 	return nil
+}
+
+// BuildClearChatPatch creates an AppState PatchInfo for clearing messages in a chat up to the given cutoff.
+func BuildClearChatPatch(target types.JID, cutoff time.Time, deleteMedia bool) appstate.PatchInfo {
+	if cutoff.IsZero() {
+		cutoff = time.Now().UTC()
+	}
+	action := &waSyncAction.ClearChatAction{
+		MessageRange: &waSyncAction.SyncActionMessageRange{
+			LastMessageTimestamp: proto.Int64(cutoff.Unix()),
+		},
+	}
+	deleteMediaInt := "0"
+	if deleteMedia {
+		deleteMediaInt = "1"
+	}
+	return appstate.PatchInfo{
+		Type: appstate.WAPatchRegularHigh,
+		Mutations: []appstate.MutationInfo{{
+			Index:   []string{appstate.IndexClearChat, target.String(), "0", deleteMediaInt},
+			Version: 6,
+			Value: &waSyncAction.SyncActionValue{
+				ClearChatAction: action,
+			},
+		}},
+	}
+}
+
+// ClearChatOlderThan dispatches an AppState clearChat mutation to clear messages on the sync account
+// up to the given cutoff timestamp for a specific group.
+func (a *Adapter) ClearChatOlderThan(ctx context.Context, target types.JID, cutoff time.Time, deleteMedia bool) error {
+	if a == nil || a.client == nil {
+		return errors.New("whatsapp client is not initialized")
+	}
+	if !a.client.IsLoggedIn() {
+		return errors.New("whatsapp client is not logged in")
+	}
+	patch := BuildClearChatPatch(target, cutoff, deleteMedia)
+	return a.client.SendAppState(ctx, patch)
+}
+
+// ClearSyncSetChats clears messages older than the cutoff timestamp for the given group JIDs.
+// It returns the number of groups successfully cleared.
+func (a *Adapter) ClearSyncSetChats(ctx context.Context, groupJIDs []types.JID, cutoff time.Time) (int, error) {
+	if a == nil || a.client == nil {
+		return 0, errors.New("whatsapp client is not initialized")
+	}
+	if !a.client.IsLoggedIn() {
+		return 0, errors.New("whatsapp client is not logged in")
+	}
+	clearedCount := 0
+	var firstErr error
+	for _, jid := range groupJIDs {
+		if err := a.ClearChatOlderThan(ctx, jid, cutoff, true); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			safelog.Error(a.logger, "failed to clear chat for group", "clear_chat", err)
+			continue
+		}
+		clearedCount++
+	}
+	return clearedCount, firstErr
+}
+
+// IsLoggedIn returns whether the underlying WhatsApp client is currently authenticated.
+func (a *Adapter) IsLoggedIn() bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.client != nil && a.client.IsLoggedIn()
 }
 
 func getMediaType(kind string) (whatsmeow.MediaType, error) {
@@ -598,6 +726,50 @@ func (a *Adapter) CancelPair(ctx context.Context) error {
 	return nil
 }
 
+func (a *Adapter) Logout(ctx context.Context) error {
+	if a == nil {
+		return errors.New("WhatsApp adapter is not initialized")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.qrCancel != nil {
+		a.qrCancel()
+		a.qrCancel = nil
+	}
+	a.pairingActive = false
+	a.currentQRCode = ""
+	a.pairingCodeChan = nil
+
+	if a.client != nil {
+		if a.client.IsLoggedIn() {
+			if err := a.client.Logout(ctx); err != nil {
+				a.logger.Warn("WhatsApp server logout failed, forcing disconnect and session deletion", "error", err.Error())
+				a.client.Disconnect()
+				if a.client.Store != nil {
+					_ = a.client.Store.Delete(ctx)
+				}
+			}
+		} else if a.client.IsConnected() {
+			a.client.Disconnect()
+		}
+	}
+
+	if a.container != nil {
+		device, err := a.container.GetFirstDevice(ctx)
+		if err != nil {
+			return fmt.Errorf("reset WhatsApp session device: %w", err)
+		}
+		newClient := whatsmeow.NewClient(device, nil)
+		disablePlaintextPersistence(newClient)
+		newClient.AddEventHandler(a.handleEvent)
+		a.client = newClient
+	}
+
+	a.logger.Info("WhatsApp session logged out", "event", "whatsapp_logged_out")
+	return nil
+}
+
 func (a *Adapter) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
 	if a == nil {
 		return nil, errors.New("WhatsApp adapter is not initialized")
@@ -689,7 +861,7 @@ func (a *Adapter) handleEvent(raw any) {
 		if !evt.Info.MessageSource.Sender.IsEmpty() {
 			a.pcache.Add(evt.Info.ID, evt.Info.MessageSource.Sender.ToNonAD().String())
 		}
-		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote)
+		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo)
 		if !ok {
 			return
 		}
@@ -744,7 +916,7 @@ func (a *Adapter) handleEvent(raw any) {
 				if !parsed.Info.MessageSource.Sender.IsEmpty() {
 					a.pcache.Add(parsed.Info.ID, parsed.Info.MessageSource.Sender.ToNonAD().String())
 				}
-				incoming, ok := normalizer.NormalizeMessage(parsed, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote)
+				incoming, ok := normalizer.NormalizeMessage(parsed, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo)
 				if !ok {
 					continue
 				}

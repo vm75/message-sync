@@ -24,6 +24,7 @@ type Normalizer struct {
 
 type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 type VoteDecryptor func(context.Context, *events.Message) (*waE2E.PollVoteMessage, error)
+type ContactGetter func(types.JID) types.ContactInfo
 
 func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
 	if hasher == nil {
@@ -48,7 +49,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 	return &Normalizer{endpoints: endpoints, hasher: hasher, usernameMode: usernameMode}, nil
 }
 
-func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor) (transport.Incoming, bool) {
+func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor, contactGetter ContactGetter) (transport.Incoming, bool) {
 	if n == nil || evt == nil || evt.Message == nil || !evt.Info.IsGroup || evt.Info.Chat.Server != types.GroupServer {
 		return transport.Incoming{}, false
 	}
@@ -85,6 +86,12 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	var pollOptions []string
 	var pollSelectableCount int
 	var pollOptionHashes []string
+	var extractedMentions []transport.Mention
+
+	contextInfo := getContextInfo(evt.Message)
+	if contextInfo != nil && len(contextInfo.GetMentionedJID()) > 0 {
+		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter)
+	}
 
 	if kind == "poll" {
 		if poll := getPollCreation(evt.Message); poll != nil {
@@ -188,6 +195,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		FromSelf:            evt.Info.IsFromMe,
 		Kind:                kind,
 		Text:                text,
+		Mentions:            extractedMentions,
 		ReplyTo:             replyTo,
 		QuotedText:          quotedText,
 		Timestamp:           evt.Info.Timestamp,
@@ -196,6 +204,65 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		PollSelectableCount: pollSelectableCount,
 		PollOptionHashes:    pollOptionHashes,
 	}, true
+}
+
+func extractMentions(mentions []string, contactGetter ContactGetter) []transport.Mention {
+	if len(mentions) == 0 {
+		return nil
+	}
+	var result []transport.Mention
+	for _, rawJID := range mentions {
+		jid, err := types.ParseJID(rawJID)
+		if err != nil {
+			continue
+		}
+		var name string
+		if contactGetter != nil {
+			info := contactGetter(jid)
+			if info.Found {
+				if info.PushName != "" {
+					name = info.PushName
+				} else if info.FullName != "" {
+					name = info.FullName
+				} else if info.BusinessName != "" {
+					name = info.BusinessName
+				}
+			}
+		}
+		if name == "" {
+			name = jid.User
+		}
+		result = append(result, transport.Mention{
+			RemoteID: jid.User,
+			Name:     name,
+		})
+	}
+	return result
+}
+
+func getContextInfo(msg *waE2E.Message) *waE2E.ContextInfo {
+	if msg == nil {
+		return nil
+	}
+	if msg.ExtendedTextMessage != nil {
+		return msg.ExtendedTextMessage.ContextInfo
+	}
+	if msg.ImageMessage != nil {
+		return msg.ImageMessage.ContextInfo
+	}
+	if msg.VideoMessage != nil {
+		return msg.VideoMessage.ContextInfo
+	}
+	if msg.DocumentMessage != nil {
+		return msg.DocumentMessage.ContextInfo
+	}
+	if msg.AudioMessage != nil {
+		return msg.AudioMessage.ContextInfo
+	}
+	if msg.StickerMessage != nil {
+		return msg.StickerMessage.ContextInfo
+	}
+	return nil
 }
 
 func getPollCreation(msg *waE2E.Message) *waE2E.PollCreationMessage {

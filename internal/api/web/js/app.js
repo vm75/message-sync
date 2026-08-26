@@ -57,6 +57,7 @@
   const waStatusDesc = document.getElementById('wa-status-desc');
   const btnWaPair = document.getElementById('btn-wa-pair');
   const btnWaCancel = document.getElementById('btn-wa-cancel');
+  const btnWaLogout = document.getElementById('btn-wa-logout');
   const waQrSection = document.getElementById('wa-qr-section');
   const waQrCanvas = document.getElementById('wa-qr-canvas');
   const waQrLoader = document.getElementById('wa-qr-loader');
@@ -109,8 +110,21 @@
   const settingsRecoveryMaxMsgs = document.getElementById('settings-recovery-max-msgs');
   const settingsRetentionDays = document.getElementById('settings-retention-days');
   const settingsPollsAggregationTrigger = document.getElementById('settings-polls-aggregation-trigger');
+  const settingsWhatsAppCleanupEnabled = document.getElementById('settings-whatsapp-cleanup-enabled');
+  const settingsWhatsAppCleanupRetentionDays = document.getElementById('settings-whatsapp-cleanup-retention-days');
   const btnResetSettings = document.getElementById('btn-reset-settings');
   const btnSaveSettings = document.getElementById('btn-save-settings');
+
+  // Change Password Form Elements
+  const formChangePassword = document.getElementById('form-change-password');
+  const changePwdAlert = document.getElementById('change-pwd-alert');
+  const changePwdCurrent = document.getElementById('change-pwd-current');
+  const changePwdNew = document.getElementById('change-pwd-new');
+  const changePwdConfirm = document.getElementById('change-pwd-confirm');
+  const changePwdStrengthFill = document.getElementById('change-pwd-strength-fill');
+  const changePwdHint = document.getElementById('change-pwd-hint');
+  const changePwdConfirmHint = document.getElementById('change-pwd-confirm-hint');
+  const btnSubmitChangePwd = document.getElementById('btn-submit-change-pwd');
 
   // Universal Confirmation Modal
   const modalConfirm = document.getElementById('modal-confirm');
@@ -329,18 +343,21 @@
   }
 
   /**
-   * Setup Form Live Validation
+   * Password Strength Evaluator
+   */
+  function evaluatePasswordStrength(password) {
+    if (!password || password.length < 8) return 0;
+    let score = 1;
+    if (password.length >= 12) score++;
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
+    if (/[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password)) score++;
+    return score;
+  }
+
+  /**
+   * Form Live Validation
    */
   function setupFormValidation() {
-    function evaluatePasswordStrength(password) {
-      if (!password || password.length < 8) return 0;
-      let score = 1;
-      if (password.length >= 12) score++;
-      if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score++;
-      if (/[0-9]/.test(password) && /[^A-Za-z0-9]/.test(password)) score++;
-      return score;
-    }
-
     function updateSetupValidation() {
       if (!setupPasswordInput) return;
       const pwd = setupPasswordInput.value;
@@ -388,8 +405,73 @@
       }
     }
 
+    function updateChangePwdValidation() {
+      if (!changePwdNew) return;
+      const pwd = changePwdNew.value;
+      const confirmPwd = changePwdConfirm ? changePwdConfirm.value : '';
+
+      if (pwd.length === 0) {
+        if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill';
+        if (changePwdHint) {
+          changePwdHint.className = 'form-hint';
+          changePwdHint.textContent = 'Between 8 and 72 characters';
+        }
+      } else if (pwd.length < 8) {
+        if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill strength-weak';
+        if (changePwdHint) {
+          changePwdHint.className = 'form-hint hint-error';
+          changePwdHint.textContent = `Too short (${pwd.length}/8 characters minimum)`;
+        }
+      } else if (pwd.length > 72) {
+        if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill strength-weak';
+        if (changePwdHint) {
+          changePwdHint.className = 'form-hint hint-error';
+          changePwdHint.textContent = `Too long (${pwd.length}/72 characters maximum)`;
+        }
+      } else {
+        const strength = evaluatePasswordStrength(pwd);
+        if (strength <= 1) {
+          if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill strength-weak';
+          if (changePwdHint) {
+            changePwdHint.className = 'form-hint';
+            changePwdHint.textContent = 'Weak password';
+          }
+        } else if (strength <= 2) {
+          if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill strength-fair';
+          if (changePwdHint) {
+            changePwdHint.className = 'form-hint';
+            changePwdHint.textContent = 'Fair password';
+          }
+        } else {
+          if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill strength-strong';
+          if (changePwdHint) {
+            changePwdHint.className = 'form-hint hint-success';
+            changePwdHint.textContent = 'Strong password';
+          }
+        }
+      }
+
+      if (confirmPwd.length > 0) {
+        if (confirmPwd !== pwd) {
+          if (changePwdConfirmHint) {
+            changePwdConfirmHint.className = 'form-hint hint-error';
+            changePwdConfirmHint.textContent = 'Passwords do not match';
+          }
+        } else {
+          if (changePwdConfirmHint) {
+            changePwdConfirmHint.className = 'form-hint hint-success';
+            changePwdConfirmHint.textContent = 'Passwords match';
+          }
+        }
+      } else if (changePwdConfirmHint) {
+        changePwdConfirmHint.textContent = '';
+      }
+    }
+
     if (setupPasswordInput) setupPasswordInput.addEventListener('input', updateSetupValidation);
     if (setupConfirmPasswordInput) setupConfirmPasswordInput.addEventListener('input', updateSetupValidation);
+    if (changePwdNew) changePwdNew.addEventListener('input', updateChangePwdValidation);
+    if (changePwdConfirm) changePwdConfirm.addEventListener('input', updateChangePwdValidation);
   }
 
   /**
@@ -591,6 +673,7 @@
       
       btnWaPair.classList.add('hidden');
       btnWaCancel.classList.add('hidden');
+      if (btnWaLogout) btnWaLogout.classList.remove('hidden');
       waQrSection.classList.add('hidden');
       stopQrCountdown();
       stopWhatsAppPolling();
@@ -603,6 +686,7 @@
 
       btnWaPair.classList.add('hidden');
       btnWaCancel.classList.remove('hidden');
+      if (btnWaLogout) btnWaLogout.classList.add('hidden');
       waQrSection.classList.remove('hidden');
 
       if (data.qrCode && window.QRCode && waQrCanvas) {
@@ -620,6 +704,7 @@
 
       btnWaPair.classList.add('hidden');
       btnWaCancel.classList.add('hidden');
+      if (btnWaLogout) btnWaLogout.classList.remove('hidden');
       waQrSection.classList.add('hidden');
       stopQrCountdown();
     } else {
@@ -631,6 +716,7 @@
 
       btnWaPair.classList.remove('hidden');
       btnWaCancel.classList.add('hidden');
+      if (btnWaLogout) btnWaLogout.classList.add('hidden');
       waQrSection.classList.add('hidden');
       stopQrCountdown();
       stopWhatsAppPolling();
@@ -642,6 +728,7 @@
     waStatusText.className = 'status-badge badge-danger';
     waStatusText.textContent = 'Service Unavailable';
     waStatusDesc.textContent = msg;
+    if (btnWaLogout) btnWaLogout.classList.add('hidden');
   }
 
   async function handlePairWhatsApp() {
@@ -689,6 +776,29 @@
     } finally {
       setButtonLoading(btnWaCancel, false);
     }
+  }
+
+  function handleLogoutWhatsApp() {
+    showConfirmDialog({
+      title: 'Log Out WhatsApp',
+      message: 'Are you sure you want to disconnect and log out the WhatsApp session? The current session credentials will be removed and you will need to scan a QR code to reconnect.',
+      btnText: 'Log Out WhatsApp',
+      isDanger: true,
+      onConfirm: async () => {
+        setButtonLoading(btnWaLogout, true);
+        try {
+          await window.API.logoutWhatsApp();
+          stopQrCountdown();
+          stopWhatsAppPolling();
+          showToast('WhatsApp session logged out successfully.', 'success');
+          await loadWhatsAppStatus(false);
+        } catch (err) {
+          showToast(err.message || 'Failed to logout WhatsApp', 'danger');
+        } finally {
+          setButtonLoading(btnWaLogout, false);
+        }
+      }
+    });
   }
 
   /**
@@ -1362,6 +1472,8 @@
     if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
     if (settingsRetentionDays) settingsRetentionDays.value = cfg.storage ? cfg.storage.messageRetentionDays : 14;
     if (settingsPollsAggregationTrigger) settingsPollsAggregationTrigger.value = cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response';
+    if (settingsWhatsAppCleanupEnabled) settingsWhatsAppCleanupEnabled.checked = cfg.whatsappCleanup ? cfg.whatsappCleanup.enabled : false;
+    if (settingsWhatsAppCleanupRetentionDays) settingsWhatsAppCleanupRetentionDays.value = cfg.whatsappCleanup ? cfg.whatsappCleanup.retentionDays : 30;
   }
 
   async function handleSettingsSubmit(e) {
@@ -1376,6 +1488,8 @@
     const recoveryMaxMsgs = parseInt(settingsRecoveryMaxMsgs.value, 10);
     const retentionDays = parseInt(settingsRetentionDays.value, 10);
     const pollsAggregationTrigger = settingsPollsAggregationTrigger.value.trim();
+    const whatsappCleanupEnabled = settingsWhatsAppCleanupEnabled ? settingsWhatsAppCleanupEnabled.checked : false;
+    const whatsappCleanupRetentionDays = settingsWhatsAppCleanupRetentionDays ? parseInt(settingsWhatsAppCleanupRetentionDays.value, 10) : 30;
 
     if (isNaN(mediaMaxSize) || mediaMaxSize < 1) {
       settingsAlert.textContent = 'Media max size must be a positive number (1 MB minimum).';
@@ -1412,6 +1526,13 @@
       return;
     }
 
+    if (whatsappCleanupEnabled && (isNaN(whatsappCleanupRetentionDays) || whatsappCleanupRetentionDays < 1)) {
+      settingsAlert.textContent = 'WhatsApp chat retention must be a positive integer (1 day minimum).';
+      settingsAlert.classList.remove('hidden');
+      if (settingsWhatsAppCleanupRetentionDays) settingsWhatsAppCleanupRetentionDays.focus();
+      return;
+    }
+
     const payload = {
       usernameMode,
       media: {
@@ -1428,6 +1549,10 @@
       },
       polls: {
         aggregationTrigger: pollsAggregationTrigger
+      },
+      whatsappCleanup: {
+        enabled: whatsappCleanupEnabled,
+        retentionDays: isNaN(whatsappCleanupRetentionDays) || whatsappCleanupRetentionDays < 1 ? 30 : whatsappCleanupRetentionDays
       }
     };
 
@@ -1444,6 +1569,62 @@
       }
     } finally {
       setButtonLoading(btnSaveSettings, false);
+    }
+  }
+
+  async function handleChangePasswordSubmit(e) {
+    e.preventDefault();
+    if (changePwdAlert) changePwdAlert.classList.add('hidden');
+
+    const currentPassword = changePwdCurrent ? changePwdCurrent.value : '';
+    const newPassword = changePwdNew ? changePwdNew.value : '';
+    const confirmPassword = changePwdConfirm ? changePwdConfirm.value : '';
+
+    if (!currentPassword) {
+      if (changePwdAlert) {
+        changePwdAlert.textContent = 'Current password is required.';
+        changePwdAlert.classList.remove('hidden');
+      }
+      if (changePwdCurrent) changePwdCurrent.focus();
+      return;
+    }
+
+    if (newPassword.length < 8 || newPassword.length > 72) {
+      if (changePwdAlert) {
+        changePwdAlert.textContent = 'New password must be between 8 and 72 characters.';
+        changePwdAlert.classList.remove('hidden');
+      }
+      if (changePwdNew) changePwdNew.focus();
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      if (changePwdAlert) {
+        changePwdAlert.textContent = 'New passwords do not match.';
+        changePwdAlert.classList.remove('hidden');
+      }
+      if (changePwdConfirm) changePwdConfirm.focus();
+      return;
+    }
+
+    setButtonLoading(btnSubmitChangePwd, true);
+    try {
+      await window.API.changePassword(currentPassword, newPassword);
+      showToast('Admin password updated successfully!', 'success');
+      if (formChangePassword) formChangePassword.reset();
+      if (changePwdStrengthFill) changePwdStrengthFill.className = 'strength-fill';
+      if (changePwdHint) {
+        changePwdHint.className = 'form-hint';
+        changePwdHint.textContent = 'Between 8 and 72 characters';
+      }
+      if (changePwdConfirmHint) changePwdConfirmHint.textContent = '';
+    } catch (err) {
+      if (changePwdAlert) {
+        changePwdAlert.textContent = err.message || 'Failed to update password.';
+        changePwdAlert.classList.remove('hidden');
+      }
+    } finally {
+      setButtonLoading(btnSubmitChangePwd, false);
     }
   }
 
@@ -1480,6 +1661,7 @@
     if (btnWaRefresh) btnWaRefresh.addEventListener('click', () => loadWhatsAppStatus(true));
     if (btnWaPair) btnWaPair.addEventListener('click', handlePairWhatsApp);
     if (btnWaCancel) btnWaCancel.addEventListener('click', handleCancelPairWhatsApp);
+    if (btnWaLogout) btnWaLogout.addEventListener('click', handleLogoutWhatsApp);
 
     // Groups view
     if (btnOpenAddGroup) btnOpenAddGroup.addEventListener('click', openAddGroupModal);
@@ -1497,6 +1679,7 @@
 
     // Settings view
     if (formSettings) formSettings.addEventListener('submit', handleSettingsSubmit);
+    if (formChangePassword) formChangePassword.addEventListener('submit', handleChangePasswordSubmit);
     if (btnResetSettings) {
       btnResetSettings.addEventListener('click', () => {
         if (cachedConfig) populateSettingsForm(cachedConfig);

@@ -128,6 +128,13 @@
       }
     },
 
+    async changePassword(currentPassword, newPassword) {
+      return this.request('/api/auth/change-password', {
+        method: 'POST',
+        body: { currentPassword, newPassword }
+      });
+    },
+
     /**
      * Configuration & Status Endpoints
      */
@@ -158,6 +165,12 @@
     async cancelPairWhatsApp() {
       return this.request('/api/whatsapp/pair', {
         method: 'DELETE'
+      });
+    },
+
+    async logoutWhatsApp() {
+      return this.request('/api/whatsapp/logout', {
+        method: 'POST'
       });
     },
 

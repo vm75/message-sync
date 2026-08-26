@@ -43,7 +43,9 @@ CREATE TABLE IF NOT EXISTS global_config (
     recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
     storage_message_retention_days INTEGER NOT NULL DEFAULT 90,
     admin_password_hash TEXT NOT NULL DEFAULT '',
-    poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response'
+    poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response',
+    whatsapp_chat_cleanup_enabled BOOLEAN NOT NULL DEFAULT 0,
+    whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 

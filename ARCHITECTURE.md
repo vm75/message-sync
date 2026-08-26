@@ -76,7 +76,10 @@ Configuration is stored in SQLite (`sync.db`) and managed programmatically via G
 - `recovery_enabled`: boolean (default `1`);
 - `recovery_max_age_hours`: integer (default `24`);
 - `recovery_max_messages_per_group`: integer (default `200`);
-- `storage_message_retention_days`: integer (default `90`).
+- `storage_message_retention_days`: integer (default `90`);
+- `poll_aggregation_trigger`: text (default `aggregate-response`);
+- `whatsapp_chat_cleanup_enabled`: boolean (default `0`);
+- `whatsapp_chat_retention_days`: integer (default `30`).
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
 - `groups`: Table of groups (`alias TEXT PRIMARY KEY`, `jid TEXT NOT NULL`, `sync_set_id TEXT REFERENCES sync_sets(id)`).
 
@@ -94,7 +97,8 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 - `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
 - `POST /api/auth/login`: Accepts `{"password": "..."}`, verifies against stored bcrypt hash, and returns a session token / sets an `HttpOnly` session cookie.
 - `POST /api/auth/logout`: Clears the session cookie.
-- `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`, `GET /api/whatsapp/groups`: Manage WhatsApp client connection, QR pairing session, and on-demand ephemeral group discovery.
+- `POST /api/auth/change-password`: Accepts `{"currentPassword": "...", "newPassword": "..."}`, verifies existing password hash, and updates stored bcrypt hash.
+- `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`, `POST /api/whatsapp/logout`, `GET /api/whatsapp/groups`: Manage WhatsApp client connection, QR pairing session, logout/unlinking, and on-demand ephemeral group discovery.
 - `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Manage group definitions and sync set mappings.
 - `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections and member group assignments.
 - `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.
@@ -254,6 +258,8 @@ Recovered events enter the same normalization/router path as live events. There 
 ## 14. Retention
 
 `sync.db` mapping retention defaults to 90 days. Cleanup is batched. After expiry, very old reply/reaction/edit/delete events may fall back or no longer propagate.
+
+WhatsApp chat history on the sync account can optionally be cleared on a daily schedule via WhatsApp AppState `ClearChatAction` patches (`whatsapp_chat_cleanup_enabled`, `whatsapp_chat_retention_days`). This clears old messages on the sync account only for groups configured in sync-sets without modifying `sync.db` mappings or deleting messages for other group participants.
 
 `whatsapp.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
 

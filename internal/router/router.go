@@ -463,8 +463,10 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 
 		ref, err := r.sender.Send(ctx, transport.Outgoing{
 			Endpoint:            destination,
+			OriginEndpoint:      incoming.Endpoint,
 			Kind:                incoming.Kind,
 			Text:                outgoingText,
+			Mentions:            incoming.Mentions,
 			MediaBytes:          mediaBytes,
 			ReplyTo:             outgoingReplyTo,
 			QuotedText:          incoming.QuotedText,
@@ -618,7 +620,7 @@ func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 	if strings.TrimSpace(username) == "" {
 		return "", errors.New("incoming sender identity is required")
 	}
-	return fmt.Sprintf("%s/%s: %s", incoming.Endpoint, username, incoming.Text), nil
+	return fmt.Sprintf("*_%s/%s_*: %s", incoming.Endpoint, username, incoming.Text), nil
 }
 
 func normalizeDisplayName(value string) string {

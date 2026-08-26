@@ -29,6 +29,7 @@ The MVP will:
 - propagate reaction add/change/remove events;
 - propagate edits and deletes/revokes where WhatsApp permits it;
 - track cross-group poll votes and provide aggregated summaries via the `aggregate-response` trigger;
+- optionally automate daily WhatsApp chat history cleanup on the sync account for sync-set groups;
 - persist canonical message-copy relationships so restarts and partial fan-out are idempotent;
 - perform bounded best-effort recovery after downtime;
 - store no application message content, media, participant JIDs, phone numbers, or push names.
@@ -78,9 +79,11 @@ The daemon serves an embedded, zero-dependency Web UI console and REST API on po
 - `POST /api/auth/setup`: Sets initial admin password, hashes with bcrypt into `sync.db`, and returns a session token and cookie.
 - `POST /api/auth/login`: Authenticates password and returns a session token and cookie.
 - `POST /api/auth/logout`: Clears the session cookie.
+- `POST /api/auth/change-password`: Changes the admin password after verifying the current password.
 - `GET /api/whatsapp/status`: Returns the current WhatsApp client connection state (`"unpaired"`, `"pairing"`, `"connected"`, `"disconnected"`).
 - `POST /api/whatsapp/pair`: Initiates or retrieves an active WhatsApp QR pairing session.
 - `DELETE /api/whatsapp/pair`: Cancels an in-progress WhatsApp pairing session.
+- `POST /api/whatsapp/logout`: Disconnects and unlinks the active WhatsApp session and resets local device credentials.
 - `GET /api/whatsapp/groups`: Returns joined WhatsApp groups (`jid`, `name`) ephemerally in-memory without persisting PII.
 - `GET /api/groups`, `POST /api/groups`: List and create groups (`alias`, `jid`, optional `syncSetId`).
 - `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Read, update, and delete configured groups.
@@ -88,6 +91,21 @@ The daemon serves an embedded, zero-dependency Web UI console and REST API on po
 - `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Read, update memberships, and delete sync sets.
 - `GET /api/config`, `PUT /api/config`: Retrieve and update global runtime settings (`usernameMode`, `media`, `recovery`, `storage`).
 - Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie. Client routes (`/setup`, `/login`, `/dashboard`) automatically handle SPA navigation.
+
+### Resetting Admin Password
+
+If you forget the admin password, you can clear the existing password hash from the database. This allows you to set up a new password through the web interface on your next visit.
+
+```sh
+sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
+```
+
+If you are running the application using Podman or Docker Compose, you can run this command inside the container:
+
+```sh
+podman exec -it <container_name> sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
+```
+*(Replace `<container_name>` with the actual name of your container.)*
 
 ## Rootless Podman
 

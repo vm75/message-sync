@@ -42,7 +42,7 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 		Message: &waE2E.Message{Conversation: &body},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil)
+	incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil, nil)
 	if !ok {
 		t.Fatal("configured group message was ignored")
 	}
@@ -89,7 +89,7 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}, true, 100*1024*1024, nil, nil); ok {
+			if got, ok := normalizer.NormalizeMessage(&events.Message{Info: tc.info, Message: &waE2E.Message{Conversation: &body}}, true, 100*1024*1024, nil, nil, nil); ok {
 				t.Fatalf("unexpected normalized event: %+v", got)
 			}
 		})
@@ -115,7 +115,7 @@ func TestHashModeDropsPushName(t *testing.T) {
 			PushName: "Should Be Dropped",
 		},
 		Message: &waE2E.Message{Conversation: &body},
-	}, true, 100*1024*1024, nil, nil)
+	}, true, 100*1024*1024, nil, nil, nil)
 	if !ok {
 		t.Fatal("message was ignored")
 	}
@@ -159,7 +159,7 @@ func TestNormalizeEditMessage(t *testing.T) {
 		},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(editEvt, true, 100*1024*1024, nil, nil)
+	incoming, ok := normalizer.NormalizeMessage(editEvt, true, 100*1024*1024, nil, nil, nil)
 	if !ok {
 		t.Fatal("edit message was ignored")
 	}
@@ -205,7 +205,7 @@ func TestNormalizeDeleteMessage(t *testing.T) {
 		},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(delEvt, true, 100*1024*1024, nil, nil)
+	incoming, ok := normalizer.NormalizeMessage(delEvt, true, 100*1024*1024, nil, nil, nil)
 	if !ok {
 		t.Fatal("delete message was ignored")
 	}
@@ -252,7 +252,7 @@ func TestNormalizePollCreation(t *testing.T) {
 		},
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(pollEvt, true, 100*1024*1024, nil, nil)
+	incoming, ok := normalizer.NormalizeMessage(pollEvt, true, 100*1024*1024, nil, nil, nil)
 	if !ok {
 		t.Fatal("poll creation was ignored")
 	}
@@ -308,7 +308,7 @@ func TestNormalizePollVote(t *testing.T) {
 		}, nil
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(voteEvt, true, 100*1024*1024, nil, mockDecryptor)
+	incoming, ok := normalizer.NormalizeMessage(voteEvt, true, 100*1024*1024, nil, mockDecryptor, nil)
 	if !ok {
 		t.Fatal("poll vote was ignored")
 	}

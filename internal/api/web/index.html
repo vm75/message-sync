@@ -374,6 +374,15 @@
                 <span class="btn-text">Cancel Pairing</span>
                 <div class="btn-spinner hidden"></div>
               </button>
+              <button id="btn-wa-logout" class="btn btn-danger hidden">
+                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                  <polyline points="16 17 21 12 16 7"></polyline>
+                  <line x1="21" y1="12" x2="9" y2="12"></line>
+                </svg>
+                <span class="btn-text">Log Out WhatsApp</span>
+                <div class="btn-spinner hidden"></div>
+              </button>
             </div>
           </div>
 
@@ -723,6 +732,38 @@
               </div>
             </div>
 
+            <!-- WhatsApp Chat Cleanup Card -->
+            <div class="card settings-card">
+              <div class="settings-card-header">
+                <div class="icon-avatar icon-avatar-whatsapp">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                </div>
+                <div>
+                  <h3 class="settings-card-title">WhatsApp Chat Cleanup</h3>
+                  <p class="settings-card-subtitle">Automate daily WhatsApp message clearing on the sync account for groups in sync-sets.</p>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <div class="toggle-wrapper">
+                  <input type="checkbox" id="settings-whatsapp-cleanup-enabled" class="toggle-checkbox">
+                  <label for="settings-whatsapp-cleanup-enabled" class="toggle-label">
+                    <span class="toggle-title">Enable Daily WhatsApp Chat Cleanup</span>
+                    <span class="toggle-desc">Automatically clears messages older than the retention period on the sync account. Messages remain untouched for other group participants.</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label for="settings-whatsapp-cleanup-retention-days" class="form-label">WhatsApp Chat Retention (Days)</label>
+                <input type="number" id="settings-whatsapp-cleanup-retention-days" class="form-input" min="1" max="365" required>
+                <p class="form-hint">WhatsApp chat history older than this is cleared for sync-set groups during daily maintenance.</p>
+              </div>
+            </div>
+
             <!-- Form Actions -->
             <div class="settings-form-actions">
               <button type="button" id="btn-reset-settings" class="btn btn-ghost">
@@ -734,6 +775,104 @@
               </button>
             </div>
           </form>
+
+          <!-- Admin Security / Change Password Card -->
+          <div class="card settings-card" style="margin-top: 1.5rem;">
+            <div class="settings-card-header">
+              <div class="icon-avatar icon-avatar-primary">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+              </div>
+              <div>
+                <h3 class="settings-card-title">Admin Security</h3>
+                <p class="settings-card-subtitle">Change the web dashboard administrative password.</p>
+              </div>
+            </div>
+
+            <form id="form-change-password" class="auth-form" novalidate style="margin-top: 1rem;">
+              <div id="change-pwd-alert" class="alert alert-danger hidden" role="alert"></div>
+
+              <div class="form-group">
+                <label for="change-pwd-current" class="form-label">Current Password</label>
+                <div class="password-input-wrapper">
+                  <input 
+                    type="password" 
+                    id="change-pwd-current" 
+                    class="form-input" 
+                    placeholder="Enter current admin password" 
+                    autocomplete="current-password"
+                    required
+                  >
+                  <button type="button" class="btn-toggle-password" data-target="change-pwd-current" aria-label="Toggle password visibility">
+                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                      <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-grid-2">
+                <div class="form-group">
+                  <label for="change-pwd-new" class="form-label">New Password</label>
+                  <div class="password-input-wrapper">
+                    <input 
+                      type="password" 
+                      id="change-pwd-new" 
+                      class="form-input" 
+                      placeholder="Enter new password" 
+                      autocomplete="new-password"
+                      minlength="8"
+                      maxlength="72"
+                      required
+                    >
+                    <button type="button" class="btn-toggle-password" data-target="change-pwd-new" aria-label="Toggle password visibility">
+                      <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="password-strength-bar">
+                    <div id="change-pwd-strength-fill" class="strength-fill"></div>
+                  </div>
+                  <div class="form-hint" id="change-pwd-hint">Between 8 and 72 characters</div>
+                </div>
+
+                <div class="form-group">
+                  <label for="change-pwd-confirm" class="form-label">Confirm New Password</label>
+                  <div class="password-input-wrapper">
+                    <input 
+                      type="password" 
+                      id="change-pwd-confirm" 
+                      class="form-input" 
+                      placeholder="Re-enter new password" 
+                      autocomplete="new-password"
+                      minlength="8"
+                      maxlength="72"
+                      required
+                    >
+                    <button type="button" class="btn-toggle-password" data-target="change-pwd-confirm" aria-label="Toggle password visibility">
+                      <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                    </button>
+                  </div>
+                  <div class="form-hint" id="change-pwd-confirm-hint"></div>
+                </div>
+              </div>
+
+              <div class="settings-form-actions" style="margin-top: 1rem;">
+                <button type="submit" id="btn-submit-change-pwd" class="btn btn-primary">
+                  <span class="btn-text">Update Admin Password</span>
+                  <div class="btn-spinner hidden"></div>
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
     </main>

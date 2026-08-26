@@ -269,6 +269,69 @@ func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+type AuthChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
+}
+
+func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
+	if s.db == nil {
+		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+		return
+	}
+
+	var req AuthChangePasswordRequest
+	if err := ReadJSON(r, &req); err != nil {
+		WriteError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.CurrentPassword == "" {
+		WriteError(w, http.StatusBadRequest, "current password is required")
+		return
+	}
+
+	if len(req.NewPassword) < minPasswordLength || len(req.NewPassword) > maxPasswordLength {
+		WriteError(w, http.StatusBadRequest, fmt.Sprintf("new password must be between %d and %d characters", minPasswordLength, maxPasswordLength))
+		return
+	}
+
+	var storedHash string
+	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&storedHash)
+	if errors.Is(err, sql.ErrNoRows) || storedHash == "" {
+		WriteError(w, http.StatusBadRequest, "admin password not configured")
+		return
+	}
+	if err != nil {
+		s.logger.Error("fetch password hash failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "failed to verify password")
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(req.CurrentPassword)); err != nil {
+		s.logger.Warn("change password rejected: invalid current password")
+		WriteError(w, http.StatusUnauthorized, "invalid current password")
+		return
+	}
+
+	newHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		s.logger.Error("password hash failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "failed to process new password")
+		return
+	}
+
+	_, err = s.db.ExecContext(r.Context(), `UPDATE global_config SET admin_password_hash = ? WHERE id = 1`, string(newHashBytes))
+	if err != nil {
+		s.logger.Error("update password hash failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "failed to update password")
+		return
+	}
+
+	s.logger.Info("admin password updated successfully")
+	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
