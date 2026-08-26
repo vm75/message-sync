@@ -15,29 +15,32 @@ The previous Node/Baileys project is a behavioral reference only, not the archit
 ## 2. Trust and persistence boundaries
 
 ```text
- config.json                     IDENTITY_SECRET
- aliases + group JIDs            environment/secret
-      |                                |
-      v                                v
- +---------+                      +----------+
- | Config  |                      | Identity |
- +----+----+                      +----+-----+
-      |                                |
-      +---------------+----------------+
-                      |
-                      v
-              +------------------+       /data/sync.db
- events ----->| Canonical Router |<----> PII-free app state
-              +--------+---------+
-                       |
-                       v
-              +------------------+
-              | WhatsApp Adapter |
-              | whatsmeow        |
-              +--------+---------+
-                       |
-                       +----------> /data/whatsapp.db
-                                    sensitive protocol state
+                             IDENTITY_SECRET
+                           environment/secret
+                                    |
+                                    v
+                              +----------+
+                              | Identity |
+                              +----+-----+
+                                   |
+                                   v
+                           +------------------+       /data/sync.db
+  REST API / Web UI <----->|  internal/api    |<----> config &
+  (port 8080)              +--------+---------+       PII-free app state
+                                    |
+                                    v
+                           +------------------+
+  events ----------------->| Canonical Router |
+                           +--------+---------+
+                                    |
+                                    v
+                           +------------------+
+                           | WhatsApp Adapter |
+                           | whatsmeow        |
+                           +--------+---------+
+                                    |
+                                    +----------> /data/whatsapp.db
+                                                 sensitive protocol state
 ```
 
 ### `whatsapp.db`
@@ -52,31 +55,55 @@ Requirements:
 - never copy contact/LID data into `sync.db`;
 - protect it with restrictive filesystem permissions and encrypted storage where appropriate.
 
+The daemon opens the database with the CGO-free SQLite driver, enables SQLite foreign keys, wraps the connection with whatsmeow `sqlstore`, and restricts the database file to mode `0600`. Both the whatsmeow client logger and sqlstore logger are no-op so protocol structs, identifiers, payloads, and arbitrary protocol errors cannot bypass the application safe-log boundary.
+
 ### `sync.db`
 
 Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in `internal/store/schema.sql`.
 
-It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, timestamps and recovery cursors. It must not store message content or raw participant identity.
+It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and recovery cursors. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
 
-Configuration is JSON and contains topology, not secrets.
+Configuration is stored in SQLite (`sync.db`) and managed programmatically via Go packages and the REST API.
 
-```json
-{
-  "groups": {
-    "c1g1": { "jid": "...@g.us" },
-    "c1g2": { "jid": "...@g.us" }
-  },
-  "syncSets": [
-    { "id": "community1", "groups": ["c1g1", "c1g2"] }
-  ]
-}
-```
+### SQLite Configuration Tables
 
-Group JIDs are operator-managed sensitive configuration because they are required to address WhatsApp groups. They are never written to logs or `sync.db`. The alias is the application endpoint ID.
+- `global_config`: Single-row table (`id = 1`) storing global behavior settings:
+- `username_mode`: typed enum (`push_name` or `hash`, default `push_name`);
+- `media_enabled`: boolean (default `1`);
+- `media_max_size_mb`: integer (default `100`);
+- `recovery_enabled`: boolean (default `1`);
+- `recovery_max_age_hours`: integer (default `24`);
+- `recovery_max_messages_per_group`: integer (default `200`);
+- `storage_message_retention_days`: integer (default `90`);
+- `poll_aggregation_trigger`: text (default `aggregate-response`);
+- `whatsapp_chat_cleanup_enabled`: boolean (default `0`);
+- `whatsapp_chat_retention_days`: integer (default `30`).
+- `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
+- `groups`: Table of groups (`alias TEXT PRIMARY KEY`, `jid TEXT NOT NULL`, `sync_set_id TEXT REFERENCES sync_sets(id)`).
 
-MVP restricts each group to one sync set. Arbitrary routing graphs are post-MVP.
+The alias is the safe endpoint ID. Group JIDs are stored only in the configuration table for WhatsApp addressing and are never written to message tables or application logs.
+
+Each configured group must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
+
+### REST API, Web UI & Authentication
+
+The daemon provides an embedded Web UI console alongside the local HTTP REST server on port 8080 (configurable via `API_ADDR`):
+
+- `GET /`: Serves the Single Page Application (SPA) administration console built with vanilla HTML/CSS/JS (embedded directly into the binary via `go:embed` without CDN or runtime filesystem dependencies).
+- `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
+- `GET /api/auth/status`: Returns `{"isSetup": bool}` indicating whether the admin password has been initialized.
+- `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
+- `POST /api/auth/login`: Accepts `{"password": "..."}`, verifies against stored bcrypt hash, and returns a session token / sets an `HttpOnly` session cookie.
+- `POST /api/auth/logout`: Clears the session cookie.
+- `POST /api/auth/change-password`: Accepts `{"currentPassword": "...", "newPassword": "..."}`, verifies existing password hash, and updates stored bcrypt hash.
+- `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`, `POST /api/whatsapp/logout`, `GET /api/whatsapp/groups`: Manage WhatsApp client connection, QR pairing session, logout/unlinking, and on-demand ephemeral group discovery.
+- `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Manage group definitions and sync set mappings.
+- `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections and member group assignments.
+- `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.
+
+Auth middleware protects all other `/api/*` endpoints, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
 ## 4. Canonical message model
 
@@ -110,13 +137,27 @@ Attribution modes:
 
 Push names are never persisted.
 
-## 6. Router event flow
+## 6. WhatsApp ingress and router event flow
 
-The initial router uses one ordered worker:
+The WhatsApp ingress boundary normalizes incoming events before fan-out:
 
 ```text
 whatsmeow callback
-   -> normalize safe event
+   -> reject DM or unconfigured group
+   -> map configured group JID to safe alias
+   -> HMAC participant JID transiently
+   -> normalize message into transport.Incoming
+   -> application receives alias + event kind
+```
+
+The normalized event may temporarily carry message text/caption and push-name data because the router needs them for immediate forwarding, but those fields are explicitly transient and must never be persisted or logged. DMs and unconfigured groups are discarded before an internal event is produced.
+
+For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
+
+The router processes ingress events via an ordered worker:
+
+```text
+normalized event
    -> ingress queue
    -> resolve configured endpoint/sync set
    -> deduplicate
@@ -150,7 +191,8 @@ Supported MVP message classes:
 - video;
 - documents;
 - audio/voice notes;
-- stickers.
+- stickers;
+- native WhatsApp polls.
 
 Media flow:
 
@@ -183,7 +225,18 @@ Reaction state uses:
 
 This permits add/change/remove semantics without raw identity. A native reaction on a destination is necessarily made by the bridge WhatsApp account; origin attribution may require companion text if product behavior requires visible original actor identity.
 
-## 11. Edits and deletes
+## 11. Polls and vote aggregation
+
+Poll creation creates native WhatsApp polls across all destination groups in the sync set. Incoming poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`.
+
+Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
+- the router intercepts the trigger (it is not fanned out);
+- sums the votes for each option across all groups;
+- formats and sends an aggregated text summary to all groups in the sync set, quoting each group's local copy of the poll.
+
+Option text is retained transiently in memory for formatted summaries during the session and falls back cleanly to generic option indices (`Option 1`, `Option 2`) upon server restart.
+
+## 12. Edits and deletes
 
 Edits and revokes resolve the target through canonical mapping and apply to all known copies using whatsmeow helpers/protocol APIs.
 
@@ -191,7 +244,7 @@ Content is never persisted merely for edit idempotency. A content hash may be co
 
 Deletes mark a canonical message tombstoned before/while propagation so offline recovery cannot resurrect it.
 
-## 12. Offline recovery
+## 13. Offline recovery
 
 Recovery is bounded and best effort. Use WhatsApp offline/history events and, where appropriate, whatsmeow history-sync primitives.
 
@@ -202,13 +255,15 @@ Config bounds:
 
 Recovered events enter the same normalization/router path as live events. There is no separate recovery forwarding implementation.
 
-## 13. Retention
+## 14. Retention
 
 `sync.db` mapping retention defaults to 90 days. Cleanup is batched. After expiry, very old reply/reaction/edit/delete events may fall back or no longer propagate.
 
+WhatsApp chat history on the sync account can optionally be cleared on a daily schedule via WhatsApp AppState `ClearChatAction` patches (`whatsapp_chat_cleanup_enabled`, `whatsapp_chat_retention_days`). This clears old messages on the sync account only for groups configured in sync-sets without modifying `sync.db` mappings or deleting messages for other group participants.
+
 `whatsapp.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
 
-## 14. Transport abstraction
+## 15. Transport abstraction
 
 The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. MVP ships WhatsApp only.
 
@@ -222,7 +277,7 @@ Post-MVP Discord becomes another adapter:
 
 This prevents the previous design’s Discord-centric message identity from returning.
 
-## 15. Rootless container model
+## 16. Rootless container model
 
 Runtime requirements:
 
@@ -231,12 +286,12 @@ Runtime requirements:
 - `no-new-privileges`;
 - read-only root filesystem via Compose;
 - `/data` as the only persistent writable path;
-- config mounted read-only;
+- port 8080 exposed for local/admin REST API;
 - no host networking or privileged container.
 
 `Containerfile`, `.containerignore` and `compose.yml` intentionally avoid Docker-specific naming.
 
-## 16. Versioning and releases
+## 17. Versioning and releases
 
 There is no `VERSION` during MVP development. `internal/version.Build` defaults to `development`.
 
@@ -244,7 +299,7 @@ The image workflow listens only for `VERSION` changes on `main`. The first versi
 
 Release builds inject `VERSION` using `-ldflags` and publish `amd64`/`arm64` images.
 
-## 17. Security/logging
+## 18. Security/logging
 
 Never log raw whatsmeow events or arbitrary errors containing protocol structs. Use explicit safe fields such as:
 
@@ -255,6 +310,8 @@ event=fanout_failed source=c1g1 target=c1g2 error_class=timeout
 
 Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 
-## 18. Deliberate MVP exclusions
+The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
-Discord, web admin, user accounts, membership verification, polls/events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/POST_MVP.md`.
+## 19. Deliberate MVP exclusions
+
+Discord, events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/ASPIRATIONAL_FEATURES.md`.

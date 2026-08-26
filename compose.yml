@@ -1,5 +1,6 @@
 services:
   message-sync:
+    container_name: message-sync
     image: message-sync:dev
     build:
       context: .
@@ -17,13 +18,13 @@ services:
     env_file:
       - .env
     environment:
-      CONFIG_PATH: /config/config.json
-      DATA_DIR: /data
+      - DATA_DIR=${DATA_DIR:-/data}
+      - IDENTITY_SECRET=${IDENTITY_SECRET}
+      - PORT=${PORT:-8080}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    ports:
+      - "${PORT:-8080}:${PORT:-8080}"
     volumes:
-      - ./config.json:/config/config.json:ro
-      - message_sync_data:/data
+      - ${MESSAGE_SYNC_DATA_DIR:-./data}:/data:Z,U
     restart: unless-stopped
     stop_grace_period: 20s
-
-volumes:
-  message_sync_data:

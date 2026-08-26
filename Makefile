@@ -15,7 +15,7 @@ build:
 	go build -trimpath -o bin/$(BINARY) ./cmd/message-sync
 
 run:
-	go run ./cmd/message-sync run
+	set -a; . ./.env; set +a; go run ./cmd/message-sync run
 
 container-build:
 	podman build -f Containerfile -t message-sync:dev .

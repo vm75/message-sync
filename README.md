@@ -1,10 +1,18 @@
 # message-sync
 
+[![Build & Publish](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/release-images.yml?branch=main&label=build&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions)
+[![Go Version](https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)
+[![Docker Pulls](https://img.shields.io/docker/pulls/vm75/message-sync?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
+[![Docker Image Size](https://img.shields.io/docker/image-size/vm75/message-sync/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
+[![Platforms](https://img.shields.io/badge/platforms-linux%2Famd64%20%7C%20linux%2Farm64-326CE5?style=flat-square&logo=linux)](https://github.com/vm75/message-sync)
+[![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
+[![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
+
 Privacy-first message synchronization service implemented in Go. The MVP uses `tulir/whatsmeow` for WhatsApp transport, JSON configuration, SQLite runtime state, and a transport-neutral canonical message model that can support Discord and other adapters after MVP.
 
 ## Status
 
-This repository contains the Go MVP scaffold and implementation plan. WhatsApp connectivity and SQLite repositories are delivered phase-by-phase through the MVP issues.
+`message-sync` is fully implemented and operational: strict JSON config validation, HMAC identity, PII/PHI-free `sync.db` state, whatsmeow session lifecycle with QR pairing and automatic reconnect, all-to-all text and media synchronization, native reactions and clickable replies, edits and deletes with canonical tombstones, bounded offline recovery, 90-day retention pruning, and rootless container deployment.
 
 There is deliberately **no `VERSION` file** during MVP development. Builds report `development`. Adding or changing `VERSION` on `main` is the sole trigger for the container publication workflow.
 
@@ -16,10 +24,12 @@ The MVP will:
 - use aliases such as `c1g1` rather than group subjects for provenance;
 - prefix forwarded content as `<group-alias>/<username>`;
 - use transient push names or HMAC-derived user IDs without persisting participant identity;
-- forward text, images, videos, documents, audio/voice messages, stickers, and captions;
+- forward text, images, videos, documents, audio/voice messages, stickers, captions, and native WhatsApp polls;
 - preserve reply relationships where possible and use an attribution fallback otherwise;
 - propagate reaction add/change/remove events;
 - propagate edits and deletes/revokes where WhatsApp permits it;
+- track cross-group poll votes and provide aggregated summaries via the `aggregate-response` trigger;
+- optionally automate daily WhatsApp chat history cleanup on the sync account for sync-set groups;
 - persist canonical message-copy relationships so restarts and partial fan-out are idempotent;
 - perform bounded best-effort recovery after downtime;
 - store no application message content, media, participant JIDs, phone numbers, or push names.
@@ -33,35 +43,93 @@ Two SQLite databases have different trust boundaries:
 - `/data/whatsapp.db` is owned by `whatsmeow`. It contains linked-device/protocol state and may contain WhatsApp identifiers/contact metadata required by the protocol library. Treat it as sensitive protocol state.
 - `/data/sync.db` is owned by message-sync. It must remain PII/PHI-free and stores only canonical IDs, endpoint aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, timestamps, and recovery cursors.
 
-The WhatsApp adapter must explicitly keep whatsmeow decrypted-event and retry plaintext persistence disabled. Media is handled transiently and discarded after fan-out. Raw events, JIDs, phone numbers, push names, message bodies/captions, and media must never enter application logs.
+The WhatsApp adapter explicitly keeps whatsmeow decrypted-event and retry plaintext persistence disabled and supplies no whatsmeow/sqlstore logger, so raw protocol objects and identifiers do not enter application logs through the library. The adapter drops DMs and unconfigured groups before normalization. Application logs may contain only configured aliases, normalized event kinds, connection state, and stable error classes.
 
-`IDENTITY_SECRET` is required, stable across restarts, and supplied through environment/container secret handling rather than `config.json`.
+The first-login QR is sensitive transient pairing material shown directly as terminal UI. Do not copy, persist, or upload the QR. Once pairing succeeds, the QR flow is not started on normal restarts.
+
+Media is handled transiently and discarded after fan-out. Raw events, JIDs, phone numbers, push names, message bodies/captions, and media must never enter application logs.
+
+`IDENTITY_SECRET` is required, stable across restarts, and supplied through environment/container secret handling rather than database tables.
 
 ## Configuration
 
+Configuration is stored in SQLite (`sync.db`) and managed programmatically or via the built-in REST API / Web UI.
+
 ```sh
-cp config.example.json config.json
 cp .env.example .env
 openssl rand -hex 32
 ```
 
-Put the generated secret in `.env` as `IDENTITY_SECRET=...`, then edit `config.json` with your WhatsApp group JIDs and aliases.
+Put the generated secret in `.env` as `IDENTITY_SECRET=...`.
 
-`identity.usernameMode` supports:
+Group aliases are application-safe endpoint IDs and must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`. Do not use a phone number, JID, person name, or group subject as an alias. Every configured group must belong to exactly one sync set.
+
+`usernameMode` supports:
 
 - `push_name`: use transient `<alias>/<push name>` when available, with HMAC ID fallback;
 - `hash`: always use `<alias>/u_xxxxxxxxxx`.
 
-For MVP, a group may belong to only one sync set.
+### REST API & Web UI
+
+The daemon serves an embedded, zero-dependency Web UI console and REST API on port 8080 (configurable via `PORT` or `API_ADDR`):
+
+- `/`: Serves the responsive dark-mode Web UI console (self-contained Vanilla HTML/CSS/JS embedded in binary).
+- `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
+- `GET /api/auth/status`: Returns whether admin password setup is complete (`{"isSetup": false}` or `true`).
+- `POST /api/auth/setup`: Sets initial admin password, hashes with bcrypt into `sync.db`, and returns a session token and cookie.
+- `POST /api/auth/login`: Authenticates password and returns a session token and cookie.
+- `POST /api/auth/logout`: Clears the session cookie.
+- `POST /api/auth/change-password`: Changes the admin password after verifying the current password.
+- `GET /api/whatsapp/status`: Returns the current WhatsApp client connection state (`"unpaired"`, `"pairing"`, `"connected"`, `"disconnected"`).
+- `POST /api/whatsapp/pair`: Initiates or retrieves an active WhatsApp QR pairing session.
+- `DELETE /api/whatsapp/pair`: Cancels an in-progress WhatsApp pairing session.
+- `POST /api/whatsapp/logout`: Disconnects and unlinks the active WhatsApp session and resets local device credentials.
+- `GET /api/whatsapp/groups`: Returns joined WhatsApp groups (`jid`, `name`) ephemerally in-memory without persisting PII.
+- `GET /api/groups`, `POST /api/groups`: List and create groups (`alias`, `jid`, optional `syncSetId`).
+- `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Read, update, and delete configured groups.
+- `GET /api/sync-sets`, `POST /api/sync-sets`: List and create sync sets (`id`, list of `groups`).
+- `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Read, update memberships, and delete sync sets.
+- `GET /api/config`, `PUT /api/config`: Retrieve and update global runtime settings (`usernameMode`, `media`, `recovery`, `storage`).
+- Protected `/api/*` endpoints require `Authorization: Bearer <token>` or `session` cookie. Client routes (`/setup`, `/login`, `/dashboard`) automatically handle SPA navigation.
+
+### Resetting Admin Password
+
+If you forget the admin password, you can clear the existing password hash from the database. This allows you to set up a new password through the web interface on your next visit.
+
+```sh
+sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
+```
+
+If you are running the application using Podman or Docker Compose, you can run this command inside the container:
+
+```sh
+podman exec -it <container_name> sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
+```
+*(Replace `<container_name>` with the actual name of your container.)*
 
 ## Rootless Podman
 
-Build and run:
+Build:
 
 ```sh
 podman build -f Containerfile -t message-sync:dev .
+```
+
+For first login, run attached so the QR can be scanned from the terminal:
+
+```sh
+podman compose run --rm message-sync run
+```
+
+In WhatsApp, open **Linked devices**, choose **Link a device**, and scan the terminal QR. After the pairing-complete message appears, stop the attached process with Ctrl-C. Do not capture or upload the QR output.
+
+Start normally after pairing:
+
+```sh
 podman compose up -d
 ```
+
+The persisted `/data/whatsapp.db` in the Compose volume reconnects the linked session without another QR on a normal restart.
 
 The runtime user is UID/GID 10001, all capabilities are dropped in Compose, `no-new-privileges` is enabled, the root filesystem is read-only, and only `/data` is writable persistently.
 
@@ -73,11 +141,10 @@ podman run --rm message-sync:dev version
 
 It prints `development` until the first MVP release.
 
-> The foundation scaffold validates configuration and stays running. It does not connect to WhatsApp until the corresponding MVP phase is implemented.
 
 ## Local development
 
-Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer.
+Target Go toolchain: Go 1.26, with module compatibility at Go 1.25 because current whatsmeow requires Go 1.25 or newer. `sync.db` and `whatsapp.db` use the CGO-free `modernc.org/sqlite` driver so the runtime image can remain a static `CGO_ENABLED=0` build.
 
 ```sh
 make fmt
@@ -89,26 +156,25 @@ make build
 Validate configuration:
 
 ```sh
-CONFIG_PATH=./config.json go run ./cmd/message-sync validate-config
+DATA_DIR=./data go run ./cmd/message-sync validate-config
 ```
 
-Run:
+Run attached for first pairing or local event inspection:
 
 ```sh
-IDENTITY_SECRET="$(openssl rand -hex 32)" CONFIG_PATH=./config.json DATA_DIR=./data go run ./cmd/message-sync run
+IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-sync run
 ```
+
+Use a stable `IDENTITY_SECRET` for any real deployment; the one-liner above is only convenient for isolated local development.
 
 ## Restart contract
 
-After MVP implementation:
-
 1. `whatsapp.db` restores the linked WhatsApp session; normal restarts do not require another QR scan.
-2. `sync.db` restores canonical message/copy and reaction state.
-3. recent offline/history events are replayed through the same router;
-4. persisted message-copy rows make fan-out idempotent so only missing destination copies are retried;
-5. mappings expire under the configured retention policy, after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
-
-The default planned mapping retention is 90 days.
+2. Configured group messages are normalized through the safe adapter boundary after reconnect.
+3. `sync.db` restores canonical message/copy and reaction state.
+4. Recent offline/history events are replayed through the same router.
+5. Persisted message-copy rows make fan-out idempotent so only missing destination copies are retried.
+6. Mappings expire under the configured retention policy (default 90 days), after which very old replies/reactions/edits/deletes may fall back or no longer propagate.
 
 ## Versioning and images
 
@@ -130,10 +196,10 @@ Docker Hub publication requires `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repos
 ## Documentation
 
 - `ARCHITECTURE.md` — architecture, data boundaries, event flows, restart semantics.
-- `docs/MVP_IMPLEMENTATION_PLAN.md` — detailed phased implementation plan and acceptance criteria.
-- `docs/POST_MVP.md` — features from the previous implementation intentionally deferred until after MVP.
+- `DOCKERHUB.md` — Docker Hub overview, container features, and deployment guide.
+- `docs/ASPIRATIONAL_FEATURES.md` — aspirational feature backlog and tracking from the inspiration project.
 - `AGENTS.md` — contributor/AI-agent operating instructions.
 
-## Post-MVP
+## Future and Aspirational Features
 
-The core is intentionally designed so Discord, multiple WhatsApp accounts, richer WhatsApp types, management UI, membership workflows, cloud storage, provider integrations, and historical import can be added without making any one transport the canonical identity. See `docs/POST_MVP.md`.
+The core is intentionally designed so Discord, multiple WhatsApp accounts, richer WhatsApp types, membership workflows, cloud storage, provider integrations, and historical import can be added without making any one transport the canonical identity. See [docs/ASPIRATIONAL_FEATURES.md](docs/ASPIRATIONAL_FEATURES.md).

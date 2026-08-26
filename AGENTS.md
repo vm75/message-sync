@@ -12,9 +12,8 @@ Keep context lean. Read only what the current task requires:
 
 1. `README.md` for product scope and commands.
 2. `ARCHITECTURE.md` for invariants and data flow.
-3. `docs/MVP_IMPLEMENTATION_PLAN.md` for phase boundaries.
-4. The package(s) being changed and their tests.
-5. `docs/POST_MVP.md` only for deferred functionality.
+3. The package(s) being changed and their tests.
+4. `docs/ASPIRATIONAL_FEATURES.md` only for aspirational/deferred functionality.
 
 The previous implementation in `vm75/whatsappdiscordsync` may be consulted as a behavioral reference for a specific feature. Do not copy its architecture wholesale.
 
@@ -55,7 +54,8 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - Process ingress deterministically; start with one router worker.
 - Download media only long enough to forward it. Do not add media persistence for convenience.
 - Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
-- Configuration is JSON. Secrets come from environment variables or secret mounts, never JSON.
+- Configuration is stored in SQLite (`sync.db`). Secrets come from environment variables or secret mounts, never database tables.
+- Group aliases are application-safe endpoint IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group subject, and every configured group must belong to exactly one MVP sync set.
 
 ## SQLite rules
 
@@ -80,6 +80,7 @@ For `sync.db`:
 - Pass `context.Context` through blocking/network/database operations.
 - Wrap errors with useful operation context but never sensitive values.
 - Use `log/slog` with explicit safe fields; never log complete protocol structs.
+- Route arbitrary errors through the safe logging helper so raw error text cannot enter application logs.
 - Make ownership/lifetime of large media buffers obvious.
 - Validate inputs at config and transport boundaries.
 - Prefer table-driven tests when they improve clarity.
@@ -88,7 +89,7 @@ For `sync.db`:
 
 Every feature must add tests for its invariants. As implementation lands, cover at least:
 
-- JSON config validation;
+- SQLite config validation and persistence;
 - HMAC stability and non-disclosure;
 - SQLite migrations and uniqueness constraints;
 - canonical lookup in both directions;
@@ -138,9 +139,9 @@ Do not add image-publishing triggers for ordinary pushes, pull requests, tags, s
 
 ## Scope discipline
 
-MVP scope is defined in `README.md` and `docs/MVP_IMPLEMENTATION_PLAN.md`. Deferred features are recorded in `docs/POST_MVP.md`.
+MVP scope is defined in `README.md`. Aspirational and deferred features are tracked in `docs/ASPIRATIONAL_FEATURES.md`.
 
-For a post-MVP feature:
+For a future feature:
 
 1. state whether it changes the privacy model;
 2. keep optional integrations behind narrow interfaces;
@@ -152,8 +153,9 @@ For a post-MVP feature:
 At the end of every feature add/delete/modify:
 
 - update `README.md` for user-visible behavior/configuration/deployment changes;
+- update `DOCKERHUB.md` when deployment examples, container features, or configuration options change;
 - update `ARCHITECTURE.md` for data flow/schema/privacy/component changes;
 - update `AGENTS.md` when contributor guidance or invariants change;
-- update the relevant implementation-plan/post-MVP document when scope or phase status changes.
+- update `docs/ASPIRATIONAL_FEATURES.md` when scope changes.
 
 Keep context and docs lean; avoid duplicating large authoritative sections.
