@@ -17,6 +17,7 @@
 - **Privacy-First Architecture**: Application persistence (`sync.db`) contains zero PII/PHI. Never logs or stores phone numbers, JIDs, message bodies, media, or contact cards.
 - **Full WhatsApp Group Synchronization**: Synchronizes text, media (images, videos, audio/voice notes, documents, stickers), native WhatsApp polls, reactions, edits, and deletes.
 - **Cross-Group Poll Vote Aggregation**: Tracks poll votes across synchronized groups and provides aggregated summaries upon request (`aggregate-response`).
+- **Automated WhatsApp Chat Cleanup**: Configurable daily message clearing for sync-set groups on the sync account only, keeping local device storage lean.
 - **Replies & Reactions**: Preserves clickable native reply structures across groups with automatic attribution fallbacks when needed.
 - **Transient Media**: Media is downloaded into memory only long enough to forward to peer groups and is never retained on disk.
 - **Embedded Web UI & REST API**: Includes a zero-dependency dark-mode management console served directly on port `8080`.

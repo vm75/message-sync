@@ -36,6 +36,7 @@ type WhatsAppService interface {
 	Status(ctx context.Context) WhatsAppStatus
 	Pair(ctx context.Context) (WhatsAppPairResponse, error)
 	CancelPair(ctx context.Context) error
+	Logout(ctx context.Context) error
 	GetJoinedGroups(ctx context.Context) ([]WhatsAppGroup, error)
 }
 
@@ -107,10 +108,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
+	s.mux.HandleFunc("POST /api/auth/change-password", s.handleAuthChangePassword)
 
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
 	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
+	s.mux.HandleFunc("POST /api/whatsapp/logout", s.handleWhatsAppLogout)
 	s.mux.HandleFunc("GET /api/whatsapp/groups", s.handleWhatsAppGroups)
 
 	s.mux.HandleFunc("GET /api/groups", s.handleListGroups)

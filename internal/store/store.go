@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 9
+const SchemaVersion = 10
 
 var (
 	//go:embed schema.sql
@@ -245,6 +245,30 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v8 to v9: update version: %w", err)
 		}
 		version = 9
+	}
+	if version == 9 {
+		hasCol, err := tableHasColumn(ctx, tx, "global_config", "whatsapp_chat_cleanup_enabled")
+		if err != nil {
+			return fmt.Errorf("check global_config column: %w", err)
+		}
+		if !hasCol {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN whatsapp_chat_cleanup_enabled BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate schema v9 to v10: add whatsapp_chat_cleanup_enabled: %w", err)
+			}
+		}
+		hasCol2, err := tableHasColumn(ctx, tx, "global_config", "whatsapp_chat_retention_days")
+		if err != nil {
+			return fmt.Errorf("check global_config column: %w", err)
+		}
+		if !hasCol2 {
+			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30`); err != nil {
+				return fmt.Errorf("migrate schema v9 to v10: add whatsapp_chat_retention_days: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '10' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v9 to v10: update version: %w", err)
+		}
+		version = 10
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)

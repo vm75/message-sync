@@ -52,13 +52,14 @@ func (m UsernameMode) IsValid() bool {
 }
 
 type Config struct {
-	Groups   map[string]Group `json:"groups"`
-	SyncSets []SyncSet        `json:"syncSets"`
-	Identity Identity         `json:"identity"`
-	Media    Media            `json:"media"`
-	Recovery Recovery         `json:"recovery"`
-	Storage  Storage          `json:"storage"`
-	Polls    Polls            `json:"polls"`
+	Groups          map[string]Group `json:"groups"`
+	SyncSets        []SyncSet        `json:"syncSets"`
+	Identity        Identity         `json:"identity"`
+	Media           Media            `json:"media"`
+	Recovery        Recovery         `json:"recovery"`
+	Storage         Storage          `json:"storage"`
+	Polls           Polls            `json:"polls"`
+	WhatsAppCleanup WhatsAppCleanup  `json:"whatsappCleanup"`
 }
 
 type Group struct {
@@ -93,6 +94,11 @@ type Polls struct {
 	AggregationTrigger string `json:"aggregationTrigger"`
 }
 
+type WhatsAppCleanup struct {
+	Enabled       bool `json:"enabled"`
+	RetentionDays int  `json:"retentionDays"`
+}
+
 func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	if db == nil {
 		return nil, errors.New("database connection is required")
@@ -104,20 +110,22 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	}
 
 	var (
-		modeStr      string
-		mediaEnabled bool
-		maxSizeMB    int
-		recEnabled   bool
-		maxAgeHours  int
-		maxPerGroup  int
-		retention    int
-		aggTrigger   string
+		modeStr                string
+		mediaEnabled           bool
+		maxSizeMB              int
+		recEnabled             bool
+		maxAgeHours            int
+		maxPerGroup            int
+		retention              int
+		aggTrigger             string
+		whatsappCleanupEnabled bool
+		whatsappCleanupDays    int
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -130,6 +138,8 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		cfg.Recovery.MaxMessagesPerGroup = maxPerGroup
 		cfg.Storage.MessageRetentionDays = retention
 		cfg.Polls.AggregationTrigger = aggTrigger
+		cfg.WhatsAppCleanup.Enabled = whatsappCleanupEnabled
+		cfg.WhatsAppCleanup.RetentionDays = whatsappCleanupDays
 	}
 
 	applyDefaults(cfg)
@@ -215,8 +225,8 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -225,8 +235,10 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			recovery_max_age_hours = excluded.recovery_max_age_hours,
 			recovery_max_messages_per_group = excluded.recovery_max_messages_per_group,
 			storage_message_retention_days = excluded.storage_message_retention_days,
-			poll_aggregation_trigger = excluded.poll_aggregation_trigger
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger)
+			poll_aggregation_trigger = excluded.poll_aggregation_trigger,
+			whatsapp_chat_cleanup_enabled = excluded.whatsapp_chat_cleanup_enabled,
+			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays)
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
 	}
@@ -287,6 +299,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.Polls.AggregationTrigger == "" {
 		cfg.Polls.AggregationTrigger = "aggregate-response"
 	}
+	if cfg.WhatsAppCleanup.RetentionDays == 0 {
+		cfg.WhatsAppCleanup.RetentionDays = 30
+	}
 }
 
 func (c Config) Validate() error {
@@ -310,6 +325,9 @@ func (c Config) Validate() error {
 	}
 	if c.Storage.MessageRetentionDays < 1 {
 		return errors.New("storage.messageRetentionDays must be positive")
+	}
+	if c.WhatsAppCleanup.Enabled && c.WhatsAppCleanup.RetentionDays < 1 {
+		return errors.New("whatsappCleanup.retentionDays must be positive")
 	}
 
 	for alias, group := range c.Groups {

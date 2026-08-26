@@ -83,7 +83,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		t.Fatalf("destinations = %v, want %v", gotEndpoints, wantEndpoints)
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "c1g2/15551234567 (Alice Example): hello" {
+		if sent.outgoing.Text != "*_c1g2/15551234567 (Alice Example)_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 		if strings.Contains(sent.outgoing.Text, "@g.us") {
@@ -106,7 +106,7 @@ func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "c1g2/15551234567: hello" {
+		if sent.outgoing.Text != "*_c1g2/15551234567_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 	}
@@ -122,7 +122,7 @@ func TestHashAttributionNeverUsesPushName(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "c1g1/u_abcdefghij: hello" {
+		if sent.outgoing.Text != "*_c1g1/u_abcdefghij_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 	}

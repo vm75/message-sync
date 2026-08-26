@@ -19,6 +19,11 @@ type Sender struct {
 	OpaqueID    string // HMAC-derived application identity
 }
 
+type Mention struct {
+	RemoteID string
+	Name     string
+}
+
 type Incoming struct {
 	Endpoint            EndpointID
 	RemoteID            string
@@ -26,6 +31,7 @@ type Incoming struct {
 	FromSelf            bool
 	Kind                string
 	Text                string // transient only; never persist
+	Mentions            []Mention
 	ReplyTo             *MessageRef
 	QuotedText          string
 	Timestamp           time.Time
@@ -37,7 +43,9 @@ type Incoming struct {
 
 type Outgoing struct {
 	Endpoint            EndpointID
+	OriginEndpoint      EndpointID
 	Text                string
+	Mentions            []Mention
 	ReplyTo             *MessageRef
 	QuotedText          string
 	MediaBytes          []byte

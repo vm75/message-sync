@@ -16,10 +16,12 @@ type mockWhatsAppService struct {
 	pairResp    WhatsAppPairResponse
 	pairErr     error
 	cancelErr   error
+	logoutErr   error
 	groups      []WhatsAppGroup
 	groupsErr   error
 	pairCalled  int
 	cancelCalls int
+	logoutCalls int
 }
 
 func (m *mockWhatsAppService) Status(_ context.Context) WhatsAppStatus {
@@ -43,6 +45,13 @@ func (m *mockWhatsAppService) CancelPair(_ context.Context) error {
 	defer m.mu.Unlock()
 	m.cancelCalls++
 	return m.cancelErr
+}
+
+func (m *mockWhatsAppService) Logout(_ context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.logoutCalls++
+	return m.logoutErr
 }
 
 func (m *mockWhatsAppService) GetJoinedGroups(_ context.Context) ([]WhatsAppGroup, error) {
@@ -81,6 +90,14 @@ func TestWhatsAppEndpoints_Unauthorized(t *testing.T) {
 
 	// Test DELETE /api/whatsapp/pair without token
 	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
+	}
+
+	// Test POST /api/whatsapp/logout without token
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -284,5 +301,61 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+func TestWhatsAppEndpoints_Logout(t *testing.T) {
+	mockWA := &mockWhatsAppService{}
+	srv := NewServer(Options{
+		Secret:   []byte("12345678901234567890123456789012"),
+		WhatsApp: mockWA,
+	})
+	token, _ := srv.sessions.CreateToken()
+
+	// Successful logout
+	req := httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var res map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if res["status"] != "unpaired" {
+		t.Fatalf("expected status 'unpaired', got %q", res["status"])
+	}
+	if mockWA.logoutCalls != 1 {
+		t.Fatalf("expected 1 logout call, got %d", mockWA.logoutCalls)
+	}
+
+	// Error during logout
+	mockWA.mu.Lock()
+	mockWA.logoutErr = errors.New("logout failed")
+	mockWA.mu.Unlock()
+
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+
+	// Service unavailable
+	srvNoWA := NewServer(Options{
+		Secret: []byte("12345678901234567890123456789012"),
+	})
+	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	srvNoWA.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 }

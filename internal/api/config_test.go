@@ -80,6 +80,12 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		if cfg.Storage.MessageRetentionDays != 90 {
 			t.Errorf("default retention days = %d, want 90", cfg.Storage.MessageRetentionDays)
 		}
+		if cfg.WhatsAppCleanup.Enabled {
+			t.Errorf("default whatsappCleanup.enabled = true, want false")
+		}
+		if cfg.WhatsAppCleanup.RetentionDays != 30 {
+			t.Errorf("default whatsappCleanup.retentionDays = %d, want 30", cfg.WhatsAppCleanup.RetentionDays)
+		}
 	}
 
 	// 2. PUT validation errors
@@ -92,6 +98,7 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		{"negative recovery maxAgeHours", `{"recovery":{"enabled":true,"maxAgeHours":-1,"maxMessagesPerGroup":100}}`},
 		{"negative recovery maxMessagesPerGroup", `{"recovery":{"enabled":true,"maxAgeHours":24,"maxMessagesPerGroup":0}}`},
 		{"negative storage retention", `{"storage":{"messageRetentionDays":0}}`},
+		{"negative whatsapp cleanup retention", `{"whatsappCleanup":{"enabled":true,"retentionDays":0}}`},
 	}
 
 	for _, tc := range invalidCases {
@@ -121,6 +128,10 @@ func TestConfigGetAndUpdate(t *testing.T) {
 			},
 			"storage": {
 				"messageRetentionDays": 30
+			},
+			"whatsappCleanup": {
+				"enabled": true,
+				"retentionDays": 14
 			}
 		}`
 		req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader([]byte(updateBody)))
@@ -146,6 +157,9 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		if updated.Storage.MessageRetentionDays != 30 {
 			t.Errorf("got storage %+v", updated.Storage)
 		}
+		if !updated.WhatsAppCleanup.Enabled || updated.WhatsAppCleanup.RetentionDays != 14 {
+			t.Errorf("got whatsappCleanup %+v, want enabled=true, retentionDays=14", updated.WhatsAppCleanup)
+		}
 		if configChanges != 1 {
 			t.Fatalf("expected 1 config change notification, got %d", configChanges)
 		}
@@ -162,7 +176,7 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		if err := json.NewDecoder(recGet.Body).Decode(&loaded); err != nil {
 			t.Fatalf("decode config: %v", err)
 		}
-		if loaded.UsernameMode != config.UsernameModeHash || loaded.Media.MaxSizeMB != 50 || loaded.Storage.MessageRetentionDays != 30 {
+		if loaded.UsernameMode != config.UsernameModeHash || loaded.Media.MaxSizeMB != 50 || loaded.Storage.MessageRetentionDays != 30 || !loaded.WhatsAppCleanup.Enabled || loaded.WhatsAppCleanup.RetentionDays != 14 {
 			t.Fatalf("loaded config mismatch: %+v", loaded)
 		}
 	}

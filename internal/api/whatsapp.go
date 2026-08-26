@@ -40,6 +40,19 @@ func (s *Server) handleWhatsAppCancelPair(w http.ResponseWriter, r *http.Request
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
 }
 
+func (s *Server) handleWhatsAppLogout(w http.ResponseWriter, r *http.Request) {
+	if s.whatsapp == nil {
+		WriteError(w, http.StatusServiceUnavailable, "whatsapp service unavailable")
+		return
+	}
+	if err := s.whatsapp.Logout(r.Context()); err != nil {
+		s.logger.Error("whatsapp logout failed", "error", err.Error())
+		WriteError(w, http.StatusInternalServerError, "failed to logout whatsapp session")
+		return
+	}
+	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
+}
+
 func (s *Server) handleWhatsAppGroups(w http.ResponseWriter, r *http.Request) {
 	if s.whatsapp == nil {
 		WriteError(w, http.StatusServiceUnavailable, "whatsapp service unavailable")

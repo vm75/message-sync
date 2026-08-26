@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
+	"go.mau.fi/whatsmeow/types"
 )
 
 const (
@@ -163,6 +165,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		logger.Info("retention prune completed", "deleted_messages", deleted)
 	}
 
+	runWhatsAppChatCleanup(ctx, logger, syncStore.DB(), wa)
+
 	if metrics, err := syncStore.Metrics(ctx, syncDBPath); err != nil {
 		safelog.Error(logger, "fetch storage metrics failed", "storage_metrics", err)
 	} else {
@@ -194,6 +198,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			} else if deleted > 0 {
 				logger.Info("retention prune completed", "deleted_messages", deleted)
 			}
+			runWhatsAppChatCleanup(ctx, logger, syncStore.DB(), wa)
 			if metrics, err := syncStore.Metrics(ctx, syncDBPath); err == nil {
 				logger.Info("storage metrics",
 					"canonical_messages", metrics.CanonicalMessages,
@@ -216,5 +221,64 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				"kind", incoming.Kind,
 			)
 		}
+	}
+}
+
+func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB, wa any) {
+	cleaner, ok := wa.(interface {
+		IsLoggedIn() bool
+		ClearSyncSetChats(context.Context, []types.JID, time.Time) (int, error)
+	})
+	if !ok || cleaner == nil || !cleaner.IsLoggedIn() {
+		return
+	}
+	cfg, err := config.LoadRaw(ctx, db)
+	if err != nil {
+		safelog.Error(logger, "failed to load config for whatsapp cleanup", "whatsapp_cleanup", err)
+		return
+	}
+	if !cfg.WhatsAppCleanup.Enabled {
+		return
+	}
+	retentionDays := cfg.WhatsAppCleanup.RetentionDays
+	if retentionDays < 1 {
+		retentionDays = 30
+	}
+
+	// Extract distinct group JIDs configured in sync-sets
+	syncSetGroupAliases := make(map[string]struct{})
+	for _, set := range cfg.SyncSets {
+		for _, alias := range set.Groups {
+			syncSetGroupAliases[alias] = struct{}{}
+		}
+	}
+	groupJIDMap := make(map[string]types.JID)
+	for alias := range syncSetGroupAliases {
+		if grp, ok := cfg.Groups[alias]; ok && strings.TrimSpace(grp.JID) != "" {
+			parsedJID, err := types.ParseJID(grp.JID)
+			if err == nil {
+				groupJIDMap[parsedJID.String()] = parsedJID
+			}
+		}
+	}
+	if len(groupJIDMap) == 0 {
+		return
+	}
+
+	jids := make([]types.JID, 0, len(groupJIDMap))
+	for _, jid := range groupJIDMap {
+		jids = append(jids, jid)
+	}
+
+	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
+	cleared, err := cleaner.ClearSyncSetChats(ctx, jids, cutoff)
+	if err != nil {
+		safelog.Error(logger, "whatsapp chat cleanup had errors", "whatsapp_cleanup", err)
+	}
+	if cleared > 0 {
+		logger.Info("whatsapp chat cleanup completed",
+			"groups_cleared", cleared,
+			"retention_days", retentionDays,
+		)
 	}
 }

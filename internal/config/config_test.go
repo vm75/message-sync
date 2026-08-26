@@ -142,4 +142,43 @@ func TestLoadDefaultsWhenEmpty(t *testing.T) {
 	if loaded.Storage.MessageRetentionDays != 90 {
 		t.Errorf("default retention days = %d, want 90", loaded.Storage.MessageRetentionDays)
 	}
+	if loaded.WhatsAppCleanup.Enabled {
+		t.Errorf("default whatsappCleanup.enabled = true, want false")
+	}
+	if loaded.WhatsAppCleanup.RetentionDays != 30 {
+		t.Errorf("default whatsappCleanup.retentionDays = %d, want 30", loaded.WhatsAppCleanup.RetentionDays)
+	}
+}
+
+func TestWhatsAppCleanupValidationAndPersistence(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	cfg := validConfig()
+	cfg.WhatsAppCleanup.Enabled = true
+	cfg.WhatsAppCleanup.RetentionDays = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for zero retention days when enabled")
+	}
+
+	cfg.WhatsAppCleanup.RetentionDays = 14
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
+	}
+
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !loaded.WhatsAppCleanup.Enabled {
+		t.Errorf("loaded whatsappCleanup.enabled = false, want true")
+	}
+	if loaded.WhatsAppCleanup.RetentionDays != 14 {
+		t.Errorf("loaded whatsappCleanup.retentionDays = %d, want 14", loaded.WhatsAppCleanup.RetentionDays)
+	}
 }
