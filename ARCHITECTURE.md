@@ -330,7 +330,7 @@ Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 
 The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
-The Discord adapter likewise disables DiscordGo's internal logger because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and `safelog` error classes. The bot token is read only from `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; neither credential source is copied to `sync.db` or application logs.
+The Discord adapter replaces DiscordGo's default logger with a fixed-field warning/error classifier because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and safe error classes. The bot token is read only from `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; neither credential source is copied to `sync.db` or application logs.
 
 ## 19. Deliberate MVP exclusions
 
