@@ -129,7 +129,7 @@ func TestAdapterUpdateConfigUsesOnlyDiscordEndpoints(t *testing.T) {
 
 	waRemoteAsChannel := testMessage()
 	waRemoteAsChannel.ChannelID = "123456789"
-	if incoming, ok := adapter.normalizer.NormalizeMessage(waRemoteAsChannel, "", nil); ok {
+	if _, ok := adapter.normalizer.NormalizeMessage(waRemoteAsChannel, "", nil); ok {
 		t.Fatal("WhatsApp endpoint was incorrectly installed as Discord target")
 	}
 }
@@ -175,7 +175,7 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 	adapter.handleMessageCreate(session, testMessage())
 
 	select {
-	case incoming := <-adapter.events:
+	case <-adapter.events:
 		t.Fatal("bridge bot message re-entered Discord ingress")
 	default:
 	}
