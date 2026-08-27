@@ -72,6 +72,14 @@ If you forget the admin password, you can clear it to set up a new one on your n
 docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
 ```
 
+## Management API compatibility
+
+The authenticated management API now has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD.
+
+Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
+
+This management support does not yet enable Discord message routing by itself. Discord gateway ingestion and transport-specific outbound dispatch are implemented in later Discord-support work.
+
 ## Local Development
 
 If you'd like to build and test the project locally from source:
