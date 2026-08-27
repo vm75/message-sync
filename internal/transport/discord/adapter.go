@@ -73,10 +73,11 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	// and the normalizer still rejects any DM event defensively.
 	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
 
-	// DiscordGo's internal logger can include protocol identifiers and arbitrary
-	// server error text. Disable it completely; this adapter emits only fixed,
-	// explicitly safe application log fields and classifies returned errors.
-	session.LogLevel = -1
+	// DiscordGo's default logger may include protocol identifiers and arbitrary
+	// server error text. Replace it with a fixed-field classifier and keep only
+	// warning/error events from the dependency.
+	installSafeDiscordLogger(opts.Logger)
+	session.LogLevel = discordgo.LogWarning
 
 	adapter := &Adapter{
 		session:         session,
@@ -105,6 +106,26 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		"endpoints", len(opts.ChannelIDs),
 	)
 	return adapter, nil
+}
+
+func installSafeDiscordLogger(logger *slog.Logger) {
+	discordgo.Logger = func(level, _ int, _ string, _ ...interface{}) {
+		if logger == nil {
+			return
+		}
+		switch level {
+		case discordgo.LogError:
+			logger.Error("Discord client error",
+				"event", "discord_client_error",
+				"error_kind", "client",
+			)
+		case discordgo.LogWarning:
+			logger.Warn("Discord client warning",
+				"event", "discord_client_warning",
+				"error_kind", "client",
+			)
+		}
+	}
 }
 
 func (a *Adapter) Name() string {
