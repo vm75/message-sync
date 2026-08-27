@@ -18,6 +18,7 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
+	discord "github.com/vm75/message-sync/internal/transport/discord"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -39,6 +40,16 @@ type whatsappTransport interface {
 
 var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTransport, error) {
 	return whatsapp.Open(ctx, opts)
+}
+
+type discordTransport interface {
+	Events() <-chan transport.Incoming
+	Close() error
+	UpdateConfig(*config.Config) error
+}
+
+var openDiscord = func(ctx context.Context, opts discord.Options) (discordTransport, error) {
+	return discord.Open(ctx, opts)
 }
 
 // Run supervises persistence, the WhatsApp adapter, the HTTP API server, and
@@ -77,9 +88,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	groupJIDs := make(map[string]string)
+	discordChannelIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
-		if endpoint.Transport == config.TransportWhatsApp {
+		switch endpoint.Transport {
+		case config.TransportWhatsApp:
 			groupJIDs[alias] = endpoint.RemoteID
+		case config.TransportDiscord:
+			discordChannelIDs[alias] = endpoint.RemoteID
 		}
 	}
 
@@ -102,6 +117,25 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer wa.Close()
 
+	var dc discordTransport
+	if len(discordChannelIDs) > 0 {
+		token, err := discord.LoadBotToken()
+		if err != nil {
+			return err
+		}
+		dc, err = openDiscord(ctx, discord.Options{
+			Token:        token,
+			ChannelIDs:   discordChannelIDs,
+			Hasher:       hasher,
+			UsernameMode: cfg.Identity.UsernameMode,
+			Logger:       logger,
+		})
+		if err != nil {
+			return fmt.Errorf("start Discord transport: %w", err)
+		}
+		defer dc.Close()
+	}
+
 	var waService api.WhatsAppService
 	if s, ok := wa.(api.WhatsAppService); ok {
 		waService = s
@@ -122,6 +156,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 		if err := wa.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update whatsapp config: %w", err)
+		}
+		if dc != nil {
+			if err := dc.UpdateConfig(updatedCfg); err != nil {
+				return fmt.Errorf("update Discord config: %w", err)
+			}
 		}
 		logger.Info("configuration reloaded",
 			"endpoints", len(updatedCfg.Endpoints),
