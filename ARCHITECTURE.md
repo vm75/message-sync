@@ -99,11 +99,14 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 - `POST /api/auth/logout`: Clears the session cookie.
 - `POST /api/auth/change-password`: Accepts `{"currentPassword": "...", "newPassword": "..."}`, verifies existing password hash, and updates stored bcrypt hash.
 - `GET /api/whatsapp/status`, `POST /api/whatsapp/pair`, `DELETE /api/whatsapp/pair`, `POST /api/whatsapp/logout`, `GET /api/whatsapp/groups`: Manage WhatsApp client connection, QR pairing session, logout/unlinking, and on-demand ephemeral group discovery.
-- `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Manage group definitions and sync set mappings.
-- `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections and member group assignments.
+- `GET /api/endpoints`, `POST /api/endpoints`, `GET /api/endpoints/{alias}`, `PUT /api/endpoints/{alias}`, `DELETE /api/endpoints/{alias}`: Manage transport-neutral endpoint configuration. Endpoint DTOs contain only the safe alias, transport, opaque `remoteId`, and optional `syncSetId`; credentials and tokens are not part of this API.
+- `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Legacy WhatsApp-only compatibility wrappers. They continue using the existing `jid` payload shape, list and mutate only `transport=whatsapp` endpoints, and treat a Discord alias as not found.
+- `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections across all configured transports. The JSON member field remains named `groups` for compatibility, but every value is an endpoint alias and may identify a WhatsApp or Discord endpoint.
 - `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.
 
-Auth middleware protects all other `/api/*` endpoints, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
+Auth middleware protects all other `/api/*` endpoints, including both endpoint-management API shapes, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Endpoint request bodies are never logged, and validation/error responses never echo a transport remote target. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
+
+The management model is transport-aware before every transport is runtime-wired: Discord endpoints can be configured and placed in mixed sync sets, but Discord gateway ingestion and per-transport outbound dispatch are implemented by later Discord-support tickets. This API work does not make the current WhatsApp adapter capable of sending to Discord by itself.
 
 ## 4. Canonical message model
 
