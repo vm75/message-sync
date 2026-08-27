@@ -25,14 +25,14 @@ type Options struct {
 	Hasher          *identity.Hasher
 	UsernameMode    config.UsernameMode
 	Logger          *slog.Logger
-	ManagedWebhooks ManagedWebhookChecker
+	Webhook         ChannelWebhook
 }
 
 type Adapter struct {
 	session         *discordgo.Session
 	normalizer      *Normalizer
 	hasher          *identity.Hasher
-	managedWebhooks ManagedWebhookChecker
+	webhook         ChannelWebhook
 	events          chan transport.Incoming
 	logger          *slog.Logger
 
@@ -82,7 +82,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		session:         session,
 		normalizer:      normalizer,
 		hasher:          opts.Hasher,
-		managedWebhooks: opts.ManagedWebhooks,
+		webhook:         opts.Webhook,
 		events:          make(chan transport.Incoming, eventBufferSize),
 		logger:          opts.Logger,
 	}
@@ -185,7 +185,7 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	}
 	a.mu.RLock()
 	normalizer := a.normalizer
-	webhooks := a.managedWebhooks
+	webhooks := a.webhook
 	a.mu.RUnlock()
 	if normalizer == nil {
 		return
