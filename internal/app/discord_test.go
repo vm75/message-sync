@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -63,9 +64,9 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		return wa, nil
 	}
 
-	var gotDiscordOptions discord.Options
+	openedDiscord := make(chan discord.Options, 1)
 	openDiscord = func(_ context.Context, opts discord.Options) (discordTransport, error) {
-		gotDiscordOptions = opts
+		openedDiscord <- opts
 		return dc, nil
 	}
 
@@ -75,10 +76,14 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
-	for i := 0; i < 100; i++ {
-		if gotDiscordOptions.Token != "" && containsStarted(logBuf.String()) {
-			break
-		}
+	var gotDiscordOptions discord.Options
+	select {
+	case gotDiscordOptions = <-openedDiscord:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("Discord gateway was not opened")
+	}
+	for i := 0; i < 100 && !strings.Contains(logBuf.String(), "message-sync started"); i++ {
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -94,11 +99,11 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		cancel()
 		t.Fatalf("Discord privacy options were not initialized: %+v", gotDiscordOptions)
 	}
-	if !containsStarted(logBuf.String()) {
+	if !strings.Contains(logBuf.String(), "message-sync started") {
 		cancel()
 		t.Fatalf("application did not start with configured Discord gateway: %s", logBuf.String())
 	}
-	if containsSensitiveDiscordValue(logBuf.String()) {
+	if strings.Contains(logBuf.String(), "test-discord-token") || strings.Contains(logBuf.String(), "123456789012345678") {
 		cancel()
 		t.Fatalf("application logs leaked Discord credential or remote channel ID: %s", logBuf.String())
 	}
@@ -115,22 +120,3 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	}
 }
 
-func containsStarted(logs string) bool {
-	return stringsContains(logs, "message-sync started")
-}
-
-func containsSensitiveDiscordValue(logs string) bool {
-	return stringsContains(logs, "test-discord-token") || stringsContains(logs, "123456789012345678")
-}
-
-func stringsContains(s, substr string) bool {
-	if substr == "" {
-		return true
-	}
-	for i := 0; i+len(substr) <= len(s); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
