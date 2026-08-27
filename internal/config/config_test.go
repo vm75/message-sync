@@ -105,6 +105,18 @@ func TestValidateTransportAwareEndpoints(t *testing.T) {
 	}
 
 	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "not-a-channel"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for invalid Discord channel id")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "99999999999999999999"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for overflowing Discord channel id")
+	}
+
+	cfg = validConfig()
 	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "1@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for duplicate WhatsApp remote target")
