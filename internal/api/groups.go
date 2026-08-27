@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 type GroupDTO struct {
@@ -35,7 +36,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, remote_id, sync_set_id FROM endpoints WHERE transport = 'whatsapp' ORDER BY alias ASC`)
 	if err != nil {
-		s.logger.Error("query groups failed", "error", err.Error())
+		safelog.Error(s.logger, "query groups failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query groups")
 		return
 	}
@@ -46,7 +47,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		var alias, jid string
 		var syncSetID sql.NullString
 		if err := rows.Scan(&alias, &jid, &syncSetID); err != nil {
-			s.logger.Error("scan group failed", "error", err.Error())
+			safelog.Error(s.logger, "scan group failed", "legacy_group_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read groups")
 			return
 		}
@@ -61,7 +62,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		groups = append(groups, dto)
 	}
 	if err := rows.Err(); err != nil {
-		s.logger.Error("iterate groups failed", "error", err.Error())
+		safelog.Error(s.logger, "iterate groups failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to iterate groups")
 		return
 	}
@@ -89,7 +90,7 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("query group failed", "error", err.Error())
+		safelog.Error(s.logger, "query group failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query group")
 		return
 	}
@@ -136,7 +137,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "group alias already exists")
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("check existing group failed", "error", err.Error())
+		safelog.Error(s.logger, "check existing group failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -147,7 +148,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("check existing group JID failed", "error", err.Error())
+		safelog.Error(s.logger, "check existing group JID failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -161,7 +162,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadRequest, "sync set does not exist")
 			return
 		} else if err != nil {
-			s.logger.Error("check sync set failed", "error", err.Error())
+			safelog.Error(s.logger, "check sync set failed", "legacy_group_api", err)
 			WriteError(w, http.StatusInternalServerError, "database error")
 			return
 		}
@@ -170,7 +171,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.db.ExecContext(r.Context(), `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES (?, 'whatsapp', ?, ?)`, req.Alias, req.JID, syncSetVal)
 	if err != nil {
-		s.logger.Error("insert group failed", "error", err.Error())
+		safelog.Error(s.logger, "insert group failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to create group")
 		return
 	}
@@ -224,7 +225,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusNotFound, "group not found")
 		return
 	} else if err != nil {
-		s.logger.Error("check group existence failed", "error", err.Error())
+		safelog.Error(s.logger, "check group existence failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -235,7 +236,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("check other group JID failed", "error", err.Error())
+		safelog.Error(s.logger, "check other group JID failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -249,7 +250,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 			WriteError(w, http.StatusBadRequest, "sync set does not exist")
 			return
 		} else if err != nil {
-			s.logger.Error("check sync set failed", "error", err.Error())
+			safelog.Error(s.logger, "check sync set failed", "legacy_group_api", err)
 			WriteError(w, http.StatusInternalServerError, "database error")
 			return
 		}
@@ -258,7 +259,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 
 	_, err = s.db.ExecContext(r.Context(), `UPDATE endpoints SET remote_id = ?, sync_set_id = ? WHERE alias = ? AND transport = 'whatsapp'`, req.JID, syncSetVal, alias)
 	if err != nil {
-		s.logger.Error("update group failed", "error", err.Error())
+		safelog.Error(s.logger, "update group failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update group")
 		return
 	}
@@ -291,14 +292,14 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 
 	res, err := s.db.ExecContext(r.Context(), `DELETE FROM endpoints WHERE alias = ? AND transport = 'whatsapp'`, alias)
 	if err != nil {
-		s.logger.Error("delete group failed", "error", err.Error())
+		safelog.Error(s.logger, "delete group failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to delete group")
 		return
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		s.logger.Error("get rows affected failed", "error", err.Error())
+		safelog.Error(s.logger, "get rows affected failed", "legacy_group_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
