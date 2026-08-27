@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 type WhatsAppStatus struct {
@@ -116,6 +118,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/whatsapp/logout", s.handleWhatsAppLogout)
 	s.mux.HandleFunc("GET /api/whatsapp/groups", s.handleWhatsAppGroups)
 
+	s.mux.HandleFunc("GET /api/endpoints", s.handleListEndpoints)
+	s.mux.HandleFunc("GET /api/endpoints/{alias}", s.handleGetEndpoint)
+	s.mux.HandleFunc("POST /api/endpoints", s.handleCreateEndpoint)
+	s.mux.HandleFunc("PUT /api/endpoints/{alias}", s.handleUpdateEndpoint)
+	s.mux.HandleFunc("DELETE /api/endpoints/{alias}", s.handleDeleteEndpoint)
+
 	s.mux.HandleFunc("GET /api/groups", s.handleListGroups)
 	s.mux.HandleFunc("GET /api/groups/{alias}", s.handleGetGroup)
 	s.mux.HandleFunc("POST /api/groups", s.handleCreateGroup)
@@ -137,7 +145,7 @@ func (s *Server) registerRoutes() {
 func (s *Server) notifyConfigChange(ctx context.Context) {
 	if s.onConfigChange != nil {
 		if err := s.onConfigChange(ctx); err != nil {
-			s.logger.Error("notify config change failed", "error", err.Error())
+			safelog.Error(s.logger, "notify config change failed", "config_reload_notification", err)
 		}
 	}
 }
