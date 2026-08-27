@@ -119,4 +119,3 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		t.Fatal("Discord gateway was not closed with application lifecycle")
 	}
 }
-
