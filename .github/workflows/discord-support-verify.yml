@@ -1,0 +1,26 @@
+name: Discord support verification
+
+on:
+  push:
+    branches:
+      - agent/discord-support
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Verify formatting
+        run: |
+          make fmt
+          git diff --exit-code
+      - name: Run tests
+        run: make test
+      - name: Run vet
+        run: make vet
