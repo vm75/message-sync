@@ -6,18 +6,72 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var (
-	aliasPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
+	aliasPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}package config
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+)
+	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}package config
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+)
+	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.uspackage config
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+)
+	discordIDPattern = regexp.MustCompile(`^[0-9]{1,20}package config
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+)
+
+var (
+)
 )
 
 func ValidateAlias(alias string) error {
 	if !aliasPattern.MatchString(alias) {
-		return fmt.Errorf("group alias %q must match %s", alias, aliasPattern.String())
+		return fmt.Errorf("endpoint alias %q must match %s", alias, aliasPattern.String())
 	}
 	return nil
 }
@@ -64,6 +118,15 @@ func ValidateEndpointRemoteID(transport Transport, remoteID string) error {
 	}
 	if transport == TransportWhatsApp && !jidPattern.MatchString(remoteID) {
 		return errors.New("endpoint remote id is invalid WhatsApp group JID")
+	}
+	if transport == TransportDiscord {
+		if !discordIDPattern.MatchString(remoteID) {
+			return errors.New("endpoint remote id is invalid Discord channel ID")
+		}
+		value, err := strconv.ParseUint(remoteID, 10, 64)
+		if err != nil || value == 0 {
+			return errors.New("endpoint remote id is invalid Discord channel ID")
+		}
 	}
 	return nil
 }
