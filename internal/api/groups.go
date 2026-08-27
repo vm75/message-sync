@@ -219,7 +219,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ?`, alias).Scan(&existing)
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ? AND transport = 'whatsapp'`, alias).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "group not found")
 		return

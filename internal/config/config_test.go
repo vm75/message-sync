@@ -146,7 +146,8 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 	if len(loaded.Endpoints) != 2 {
 		t.Fatalf("got %d endpoints, want 2", len(loaded.Endpoints))
 	}
-	if loaded.Endpoints["a"].RemoteID != "1@g.us" || loaded.Endpoints["b"].RemoteID != "2@g.us" {
+	if loaded.Endpoints["a"].Transport != TransportWhatsApp || loaded.Endpoints["b"].Transport != TransportWhatsApp ||
+		loaded.Endpoints["a"].RemoteID != "1@g.us" || loaded.Endpoints["b"].RemoteID != "2@g.us" {
 		t.Errorf("loaded endpoints mismatch: %+v", loaded.Endpoints)
 	}
 	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" {

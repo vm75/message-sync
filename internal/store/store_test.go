@@ -47,8 +47,6 @@ func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-
 	columns := make(map[string]bool)
 	for rows.Next() {
 		var cid, notNull, pk int
@@ -58,6 +56,12 @@ func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
 			t.Fatal(err)
 		}
 		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
 	}
 	for _, name := range []string{"alias", "transport", "remote_id", "sync_set_id"} {
 		if !columns[name] {
@@ -71,6 +75,26 @@ func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
 	}
 	if legacyCount != 0 {
 		t.Fatal("fresh schema unexpectedly contains legacy groups table")
+	}
+}
+
+func TestEndpointSchemaEnforcesAliasAndTransportRemoteUniqueness(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	if _, err := store.db.Exec(`INSERT INTO sync_sets(id) VALUES ('mesh')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('a', 'whatsapp', '1@g.us', 'mesh')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('a', 'discord', '123', 'mesh')`); err == nil {
+		t.Fatal("expected duplicate alias to be rejected")
+	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('b', 'whatsapp', '1@g.us', 'mesh')`); err == nil {
+		t.Fatal("expected duplicate WhatsApp remote target to be rejected")
+	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('b', 'discord', '1@g.us', 'mesh')`); err != nil {
+		t.Fatalf("same opaque remote id on another transport should be allowed: %v", err)
 	}
 }
 
@@ -117,7 +141,6 @@ func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 
 	type endpointRow struct {
 		alias, transport, remoteID, syncSetID string
@@ -141,6 +164,12 @@ func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("migrated endpoint[%d] = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	var legacyCount int

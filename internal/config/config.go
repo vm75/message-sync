@@ -82,12 +82,12 @@ func (m UsernameMode) IsValid() bool {
 type Config struct {
 	Endpoints       map[string]Endpoint `json:"endpoints"`
 	SyncSets        []SyncSet           `json:"syncSets"`
-	Identity        Identity         `json:"identity"`
-	Media           Media            `json:"media"`
-	Recovery        Recovery         `json:"recovery"`
-	Storage         Storage          `json:"storage"`
-	Polls           Polls            `json:"polls"`
-	WhatsAppCleanup WhatsAppCleanup  `json:"whatsappCleanup"`
+	Identity        Identity            `json:"identity"`
+	Media           Media               `json:"media"`
+	Recovery        Recovery            `json:"recovery"`
+	Storage         Storage             `json:"storage"`
+	Polls           Polls               `json:"polls"`
+	WhatsAppCleanup WhatsAppCleanup     `json:"whatsappCleanup"`
 }
 
 type Endpoint struct {
