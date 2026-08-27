@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 type SyncSetDTO struct {
@@ -33,7 +34,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 
 	setRows, err := s.db.QueryContext(r.Context(), `SELECT id FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
-		s.logger.Error("query sync_sets failed", "error", err.Error())
+		safelog.Error(s.logger, "query sync_sets failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query sync sets")
 		return
 	}
@@ -43,7 +44,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 		var id string
 		if err := setRows.Scan(&id); err != nil {
 			setRows.Close()
-			s.logger.Error("scan sync_set failed", "error", err.Error())
+			safelog.Error(s.logger, "scan sync_set failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read sync set")
 			return
 		}
@@ -51,7 +52,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := setRows.Err(); err != nil {
 		setRows.Close()
-		s.logger.Error("iterate sync_sets failed", "error", err.Error())
+		safelog.Error(s.logger, "iterate sync_sets failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to iterate sync sets")
 		return
 	}
@@ -59,7 +60,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 
 	groupRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE sync_set_id IS NOT NULL ORDER BY alias ASC`)
 	if err != nil {
-		s.logger.Error("query groups for sync_sets failed", "error", err.Error())
+		safelog.Error(s.logger, "query groups for sync_sets failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query groups")
 		return
 	}
@@ -69,14 +70,14 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	for groupRows.Next() {
 		var alias, syncSetID string
 		if err := groupRows.Scan(&alias, &syncSetID); err != nil {
-			s.logger.Error("scan group alias failed", "error", err.Error())
+			safelog.Error(s.logger, "scan group alias failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read group memberships")
 			return
 		}
 		syncSetGroups[syncSetID] = append(syncSetGroups[syncSetID], alias)
 	}
 	if err := groupRows.Err(); err != nil {
-		s.logger.Error("iterate groups failed", "error", err.Error())
+		safelog.Error(s.logger, "iterate groups failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to iterate groups")
 		return
 	}
@@ -114,14 +115,14 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusNotFound, "sync set not found")
 		return
 	} else if err != nil {
-		s.logger.Error("query sync set failed", "error", err.Error())
+		safelog.Error(s.logger, "query sync set failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query sync set")
 		return
 	}
 
 	rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE sync_set_id = ? ORDER BY alias ASC`, id)
 	if err != nil {
-		s.logger.Error("query sync set groups failed", "error", err.Error())
+		safelog.Error(s.logger, "query sync set groups failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query sync set groups")
 		return
 	}
@@ -131,7 +132,7 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var alias string
 		if err := rows.Scan(&alias); err != nil {
-			s.logger.Error("scan sync set group failed", "error", err.Error())
+			safelog.Error(s.logger, "scan sync set group failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read group")
 			return
 		}
@@ -169,7 +170,7 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, "sync set already exists")
 		return
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("check existing sync set failed", "error", err.Error())
+		safelog.Error(s.logger, "check existing sync set failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -182,14 +183,14 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		s.logger.Error("begin tx failed", "error", err.Error())
+		safelog.Error(s.logger, "begin tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database transaction error")
 		return
 	}
 	defer tx.Rollback()
 
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO sync_sets (id) VALUES (?)`, req.ID); err != nil {
-		s.logger.Error("insert sync set failed", "error", err.Error())
+		safelog.Error(s.logger, "insert sync set failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to insert sync set")
 		return
 	}
@@ -197,14 +198,14 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 	for _, alias := range req.Groups {
 		alias = strings.TrimSpace(alias)
 		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, req.ID, alias); err != nil {
-			s.logger.Error("assign group to sync set failed", "error", err.Error())
+			safelog.Error(s.logger, "assign group to sync set failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.logger.Error("commit tx failed", "error", err.Error())
+		safelog.Error(s.logger, "commit tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
@@ -251,7 +252,7 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusNotFound, "sync set not found")
 		return
 	} else if err != nil {
-		s.logger.Error("check sync set existence failed", "error", err.Error())
+		safelog.Error(s.logger, "check sync set existence failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -264,7 +265,7 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		s.logger.Error("begin tx failed", "error", err.Error())
+		safelog.Error(s.logger, "begin tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database transaction error")
 		return
 	}
@@ -272,7 +273,7 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	// Clear current members
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
-		s.logger.Error("clear old sync set memberships failed", "error", err.Error())
+		safelog.Error(s.logger, "clear old sync set memberships failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -281,14 +282,14 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	for _, alias := range req.Groups {
 		alias = strings.TrimSpace(alias)
 		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, id, alias); err != nil {
-			s.logger.Error("assign group to sync set failed", "error", err.Error())
+			safelog.Error(s.logger, "assign group to sync set failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
 			return
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.logger.Error("commit tx failed", "error", err.Error())
+		safelog.Error(s.logger, "commit tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
@@ -319,7 +320,7 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
-		s.logger.Error("begin tx failed", "error", err.Error())
+		safelog.Error(s.logger, "begin tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database transaction error")
 		return
 	}
@@ -327,21 +328,21 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	// Unassign groups
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
-		s.logger.Error("unassign sync set groups failed", "error", err.Error())
+		safelog.Error(s.logger, "unassign sync set groups failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
 	res, err := tx.ExecContext(r.Context(), `DELETE FROM sync_sets WHERE id = ?`, id)
 	if err != nil {
-		s.logger.Error("delete sync set failed", "error", err.Error())
+		safelog.Error(s.logger, "delete sync set failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		s.logger.Error("get rows affected failed", "error", err.Error())
+		safelog.Error(s.logger, "get rows affected failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -351,7 +352,7 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		s.logger.Error("commit delete sync set tx failed", "error", err.Error())
+		safelog.Error(s.logger, "commit delete sync set tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
