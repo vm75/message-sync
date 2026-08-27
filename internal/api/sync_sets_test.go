@@ -20,8 +20,8 @@ func TestSyncSetsAuthRequired(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/sync-sets", ""},
 		{http.MethodGet, "/api/sync-sets/mesh", ""},
-		{http.MethodPost, "/api/sync-sets", `{"id":"mesh","groups":["g1","g2"]}`},
-		{http.MethodPut, "/api/sync-sets/mesh", `{"groups":["g1","g2"]}`},
+		{http.MethodPost, "/api/sync-sets", `{"id":"mesh","groups":["g1","d1"]}`},
+		{http.MethodPut, "/api/sync-sets/mesh", `{"groups":["g1","d1"]}`},
 		{http.MethodDelete, "/api/sync-sets/mesh", ""},
 	}
 
@@ -59,9 +59,9 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 	}
 	authHeader := "Bearer " + token
 
-	// Create test groups: g1, g2, g3
+	// Create mixed-transport endpoints: g1 and g3 are WhatsApp, d1 is Discord.
 	_, err = db.Exec(`
-		INSERT INTO endpoints (alias, transport, remote_id) VALUES ('g1', 'whatsapp', '1@g.us'), ('g2', 'whatsapp', '2@g.us'), ('g3', 'whatsapp', '3@g.us')
+		INSERT INTO endpoints (alias, transport, remote_id) VALUES ('g1', 'whatsapp', '1@g.us'), ('d1', 'discord', '123456789012345678'), ('g3', 'whatsapp', '3@g.us')
 	`)
 	if err != nil {
 		t.Fatalf("insert test groups: %v", err)
@@ -90,8 +90,8 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		name string
 		body string
 	}{
-		{"empty id", `{"id":"","groups":["g1","g2"]}`},
-		{"invalid id characters", `{"id":"set 1!","groups":["g1","g2"]}`},
+		{"empty id", `{"id":"","groups":["g1","d1"]}`},
+		{"invalid id characters", `{"id":"set 1!","groups":["g1","d1"]}`},
 		{"unknown group", `{"id":"s1","groups":["g1","unknown_group"]}`},
 		{"duplicate group in request", `{"id":"s1","groups":["g1","g1"]}`},
 	}
@@ -108,9 +108,9 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		})
 	}
 
-	// 3. POST valid creation of set1 with [g1, g2]
+	// 3. POST valid creation of set1 with [g1, d1]
 	{
-		body := `{"id":"set1","groups":["g1","g2"]}`
+		body := `{"id":"set1","groups":["g1","d1"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -183,8 +183,8 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// 7. PUT /api/sync-sets/{id}
 	{
-		// Update set1 to have [g2, g3] (g1 removed)
-		body := `{"groups":["g2","g3"]}`
+		// Update set1 to have [d1, g3] (g1 removed)
+		body := `{"groups":["d1","g3"]}`
 		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -248,12 +248,12 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 			t.Fatalf("GET deleted sync set status = %d, want 404", recGet.Code)
 		}
 
-		// Verify g2 and g3 are now unassigned
-		var g2Set, g3Set *string
-		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g2'`).Scan(&g2Set)
+		// Verify d1 and g3 are now unassigned
+		var d1Set, g3Set *string
+		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'd1'`).Scan(&d1Set)
 		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g3'`).Scan(&g3Set)
-		if g2Set != nil || g3Set != nil {
-			t.Fatalf("expected groups to be unassigned after sync set delete, got g2=%v g3=%v", g2Set, g3Set)
+		if d1Set != nil || g3Set != nil {
+			t.Fatalf("expected groups to be unassigned after sync set delete, got d1=%v g3=%v", d1Set, g3Set)
 		}
 
 		// DELETE non-existent
