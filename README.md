@@ -9,7 +9,7 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
 
-`message-sync` is a simple server to sync messages between multiple messaging channels. Currently, it supports syncing between multiple WhatsApp groups.
+`message-sync` is a simple server to sync messages between multiple messaging channels. Currently, completed end-to-end routing supports multiple WhatsApp groups; Discord transport support is being added incrementally.
 
 *Note: This project is inspired by earlier explorations and prototypes in multi-platform message synchronization and bridging.*
 
@@ -48,6 +48,18 @@ echo "DATA_DIR=/data" >> .env
 echo "PORT=8080" >> .env
 ```
 
+If your configuration contains Discord endpoints, also configure a Discord bot credential. Use one source only:
+
+```sh
+# Environment source (automatically passed by the repository's env_file setup)
+echo "DISCORD_BOT_TOKEN=your-bot-token" >> .env
+
+# Or mount a secret file into the container and set its in-container path:
+# DISCORD_BOT_TOKEN_FILE=/run/secrets/discord_bot_token
+```
+
+The Discord application must have the **Guild Messages** and **Message Content** gateway intents needed for channel message ingestion. Bot tokens and webhook credentials are never stored in `sync.db`.
+
 ### 2. Start the Server
 
 Create a `compose.yml` file (see [compose.yml](compose.yml) in this repository for an example) and start the server:
@@ -78,7 +90,7 @@ The authenticated management API now has transport-neutral endpoint CRUD at `/ap
 
 Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
 
-This management support does not yet enable Discord message routing by itself. Discord gateway ingestion and transport-specific outbound dispatch are implemented in later Discord-support work.
+The Discord gateway adapter now provides the ingress foundation: when Discord endpoints are configured, the application starts a gateway bot, filters events to configured channel IDs, converts those IDs to endpoint aliases, HMACs Discord actor IDs, and drops DMs plus bridge-bot/bridge-webhook loop events before producing internal transport events. Multi-adapter router dispatch and Discord outbound delivery remain separate follow-up tickets, so this foundation alone does not yet provide end-to-end WhatsApp ↔ Discord synchronization.
 
 ## Local Development
 
