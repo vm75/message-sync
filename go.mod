@@ -3,6 +3,7 @@ module github.com/vm75/message-sync
 go 1.25.0
 
 require (
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/mdp/qrterminal/v3 v3.2.1
 	go.mau.fi/whatsmeow v0.0.0-20260816113502-fb386f152837
 	google.golang.org/protobuf v1.36.12
