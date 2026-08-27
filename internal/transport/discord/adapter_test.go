@@ -124,13 +124,13 @@ func TestAdapterUpdateConfigUsesOnlyDiscordEndpoints(t *testing.T) {
 	discordEvent := testMessage()
 	incoming, ok := adapter.normalizer.NormalizeMessage(discordEvent, "", nil)
 	if !ok || incoming.Endpoint != "discord" {
-		t.Fatalf("Discord endpoint was not installed: %+v, ok=%v", incoming, ok)
+		t.Fatalf("Discord endpoint was not installed; accepted=%v", ok)
 	}
 
 	waRemoteAsChannel := testMessage()
 	waRemoteAsChannel.ChannelID = "123456789"
 	if incoming, ok := adapter.normalizer.NormalizeMessage(waRemoteAsChannel, "", nil); ok {
-		t.Fatalf("WhatsApp endpoint was incorrectly installed as Discord target: %+v", incoming)
+		t.Fatal("WhatsApp endpoint was incorrectly installed as Discord target")
 	}
 }
 
@@ -176,7 +176,7 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 
 	select {
 	case incoming := <-adapter.events:
-		t.Fatalf("bridge bot message re-entered ingress: %+v", incoming)
+		t.Fatal("bridge bot message re-entered Discord ingress")
 	default:
 	}
 	if logBuf.Len() != 0 {
