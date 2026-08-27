@@ -20,21 +20,21 @@ const eventBufferSize = 128
 var ErrOutboundNotImplemented = errors.New("Discord outbound delivery is not implemented")
 
 type Options struct {
-	Token           string
-	ChannelIDs      map[string]string
-	Hasher          *identity.Hasher
-	UsernameMode    config.UsernameMode
-	Logger          *slog.Logger
-	Webhook         ChannelWebhook
+	Token        string
+	ChannelIDs   map[string]string
+	Hasher       *identity.Hasher
+	UsernameMode config.UsernameMode
+	Logger       *slog.Logger
+	Webhook      ChannelWebhook
 }
 
 type Adapter struct {
-	session         *discordgo.Session
-	normalizer      *Normalizer
-	hasher          *identity.Hasher
-	webhook         ChannelWebhook
-	events          chan transport.Incoming
-	logger          *slog.Logger
+	session    *discordgo.Session
+	normalizer *Normalizer
+	hasher     *identity.Hasher
+	webhook    ChannelWebhook
+	events     chan transport.Incoming
+	logger     *slog.Logger
 
 	mu        sync.RWMutex
 	closeOnce sync.Once
@@ -80,12 +80,12 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	session.LogLevel = discordgo.LogWarning
 
 	adapter := &Adapter{
-		session:         session,
-		normalizer:      normalizer,
-		hasher:          opts.Hasher,
-		webhook:         opts.Webhook,
-		events:          make(chan transport.Incoming, eventBufferSize),
-		logger:          opts.Logger,
+		session:    session,
+		normalizer: normalizer,
+		hasher:     opts.Hasher,
+		webhook:    opts.Webhook,
+		events:     make(chan transport.Incoming, eventBufferSize),
+		logger:     opts.Logger,
 	}
 	session.AddHandler(adapter.handleMessageCreate)
 
