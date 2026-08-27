@@ -34,7 +34,7 @@ Never persist or log:
 Allowed in `sync.db`:
 
 - random canonical message IDs;
-- configured endpoint/group aliases;
+- configured endpoint aliases and their transport-specific operational remote target IDs;
 - opaque remote message IDs;
 - HMAC-derived actor IDs;
 - emoji values needed for reaction state;
@@ -55,7 +55,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - Download media only long enough to forward it. Do not add media persistence for convenience.
 - Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
 - Configuration is stored in SQLite (`sync.db`). Secrets come from environment variables or secret mounts, never database tables.
-- Group aliases are application-safe endpoint IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group subject, and every configured group must belong to exactly one MVP sync set.
+- Endpoint aliases are application-safe routing IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group/channel subject, and every validated configured endpoint must belong to exactly one sync set. Transport remote target IDs are operational addressing only and must never be logged.
 
 ## SQLite rules
 

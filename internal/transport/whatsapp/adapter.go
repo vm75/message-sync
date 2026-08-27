@@ -807,9 +807,11 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	if a == nil || cfg == nil {
 		return nil
 	}
-	groupJIDs := make(map[string]string, len(cfg.Groups))
-	for alias, g := range cfg.Groups {
-		groupJIDs[alias] = g.JID
+	groupJIDs := make(map[string]string)
+	for alias, endpoint := range cfg.Endpoints {
+		if endpoint.Transport == config.TransportWhatsApp {
+			groupJIDs[alias] = endpoint.RemoteID
+		}
 	}
 
 	a.mu.Lock()

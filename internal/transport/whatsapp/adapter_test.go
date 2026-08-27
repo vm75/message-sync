@@ -185,9 +185,9 @@ func TestAdapterUpdateConfig(t *testing.T) {
 
 	// Update config with 2 new groups
 	newCfg := &config.Config{
-		Groups: map[string]config.Group{
-			"t1": {JID: "123456789@g.us"},
-			"t2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"t1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"t2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{
 			{ID: "ss", Groups: []string{"t1", "t2"}},

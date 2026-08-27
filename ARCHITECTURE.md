@@ -81,11 +81,11 @@ Configuration is stored in SQLite (`sync.db`) and managed programmatically via G
 - `whatsapp_chat_cleanup_enabled`: boolean (default `0`);
 - `whatsapp_chat_retention_days`: integer (default `30`).
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
-- `groups`: Table of groups (`alias TEXT PRIMARY KEY`, `jid TEXT NOT NULL`, `sync_set_id TEXT REFERENCES sync_sets(id)`).
+- `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp` and `discord`; the runtime still uses only adapters that are actually wired into the application.
 
-The alias is the safe endpoint ID. Group JIDs are stored only in the configuration table for WhatsApp addressing and are never written to message tables or application logs.
+The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, while Discord channel IDs may be stored when Discord configuration is introduced. Human-readable guild/channel/group metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
-Each configured group must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
+Each validated configured endpoint must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
 
 ### REST API, Web UI & Authentication
 
@@ -267,7 +267,7 @@ WhatsApp chat history on the sync account can optionally be cleared on a daily s
 
 The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. MVP ships WhatsApp only.
 
-Post-MVP Discord becomes another adapter:
+The persisted configuration is transport-aware so Discord can become another adapter without changing canonical identity:
 
 ```text
               canonical router

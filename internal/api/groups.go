@@ -33,7 +33,7 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, jid, sync_set_id FROM groups ORDER BY alias ASC`)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, remote_id, sync_set_id FROM endpoints WHERE transport = 'whatsapp' ORDER BY alias ASC`)
 	if err != nil {
 		s.logger.Error("query groups failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to query groups")
@@ -83,7 +83,7 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 
 	var jid string
 	var syncSetID sql.NullString
-	err := s.db.QueryRowContext(r.Context(), `SELECT jid, sync_set_id FROM groups WHERE alias = ?`, alias).Scan(&jid, &syncSetID)
+	err := s.db.QueryRowContext(r.Context(), `SELECT remote_id, sync_set_id FROM endpoints WHERE alias = ? AND transport = 'whatsapp'`, alias).Scan(&jid, &syncSetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "group not found")
 		return
@@ -131,7 +131,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE alias = ?`, req.Alias).Scan(&existing)
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ?`, req.Alias).Scan(&existing)
 	if err == nil {
 		WriteError(w, http.StatusBadRequest, "group alias already exists")
 		return
@@ -142,7 +142,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existingAliasForJID string
-	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE jid = ?`, req.JID).Scan(&existingAliasForJID)
+	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE transport = 'whatsapp' AND remote_id = ?`, req.JID).Scan(&existingAliasForJID)
 	if err == nil {
 		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
 		return
@@ -168,7 +168,7 @@ func (s *Server) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		syncSetVal = setID
 	}
 
-	_, err = s.db.ExecContext(r.Context(), `INSERT INTO groups (alias, jid, sync_set_id) VALUES (?, ?, ?)`, req.Alias, req.JID, syncSetVal)
+	_, err = s.db.ExecContext(r.Context(), `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES (?, 'whatsapp', ?, ?)`, req.Alias, req.JID, syncSetVal)
 	if err != nil {
 		s.logger.Error("insert group failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to create group")
@@ -219,7 +219,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE alias = ?`, alias).Scan(&existing)
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ?`, alias).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "group not found")
 		return
@@ -230,7 +230,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var otherAlias string
-	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM groups WHERE jid = ? AND alias != ?`, req.JID, alias).Scan(&otherAlias)
+	err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE transport = 'whatsapp' AND remote_id = ? AND alias != ?`, req.JID, alias).Scan(&otherAlias)
 	if err == nil {
 		WriteError(w, http.StatusBadRequest, "a group alias is already defined for this WhatsApp group")
 		return
@@ -256,7 +256,7 @@ func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request) {
 		syncSetVal = setID
 	}
 
-	_, err = s.db.ExecContext(r.Context(), `UPDATE groups SET jid = ?, sync_set_id = ? WHERE alias = ?`, req.JID, syncSetVal, alias)
+	_, err = s.db.ExecContext(r.Context(), `UPDATE endpoints SET remote_id = ?, sync_set_id = ? WHERE alias = ? AND transport = 'whatsapp'`, req.JID, syncSetVal, alias)
 	if err != nil {
 		s.logger.Error("update group failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to update group")
@@ -289,7 +289,7 @@ func (s *Server) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.db.ExecContext(r.Context(), `DELETE FROM groups WHERE alias = ?`, alias)
+	res, err := s.db.ExecContext(r.Context(), `DELETE FROM endpoints WHERE alias = ? AND transport = 'whatsapp'`, alias)
 	if err != nil {
 		s.logger.Error("delete group failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to delete group")

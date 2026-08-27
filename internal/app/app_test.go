@@ -139,9 +139,9 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	t.Setenv("IDENTITY_SECRET", secret)
 
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -257,9 +257,9 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 	t.Setenv("IDENTITY_SECRET", secret)
 
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -358,9 +358,9 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -421,9 +421,9 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -561,9 +561,9 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	t.Setenv("IDENTITY_SECRET", secret)
 
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -733,8 +733,8 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 		t.Fatal("expected WhatsApp transport UpdateConfig to be called on dynamic config reload")
 	}
 	latestConfig := fake.updatedConfigs[len(fake.updatedConfigs)-1]
-	if _, ok := latestConfig.Groups["c1g3"]; !ok {
-		t.Fatalf("expected updated WhatsApp config to contain group c1g3, got %+v", latestConfig.Groups)
+	if _, ok := latestConfig.Endpoints["c1g3"]; !ok {
+		t.Fatalf("expected updated config to contain endpoint c1g3, got %+v", latestConfig.Endpoints)
 	}
 	fake.mu.Unlock()
 
@@ -752,9 +752,9 @@ func TestApp_WebUIServing(t *testing.T) {
 	t.Setenv("IDENTITY_SECRET", secret)
 
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "123456789@g.us"},
-			"c1g2": {JID: "987654321@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -895,9 +895,9 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 	defer st.Close()
 
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"g1": {JID: "111111111111111111@g.us"},
-			"g2": {JID: "222222222222222222@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"g1": {Transport: config.TransportWhatsApp, RemoteID: "111111111111111111@g.us"},
+			"g2": {Transport: config.TransportWhatsApp, RemoteID: "222222222222222222@g.us"},
 		},
 		SyncSets: []config.SyncSet{
 			{ID: "set1", Groups: []string{"g1", "g2"}},

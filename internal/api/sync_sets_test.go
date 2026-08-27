@@ -61,7 +61,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// Create test groups: g1, g2, g3
 	_, err = db.Exec(`
-		INSERT INTO groups (alias, jid) VALUES ('g1', '1@g.us'), ('g2', '2@g.us'), ('g3', '3@g.us')
+		INSERT INTO endpoints (alias, transport, remote_id) VALUES ('g1', 'whatsapp', '1@g.us'), ('g2', 'whatsapp', '2@g.us'), ('g3', 'whatsapp', '3@g.us')
 	`)
 	if err != nil {
 		t.Fatalf("insert test groups: %v", err)
@@ -202,7 +202,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 		// Verify g1 is now unassigned
 		var g1Set *string
-		err := db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g1'`).Scan(&g1Set)
+		err := db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g1'`).Scan(&g1Set)
 		if err != nil {
 			t.Fatalf("query g1: %v", err)
 		}
@@ -250,8 +250,8 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 		// Verify g2 and g3 are now unassigned
 		var g2Set, g3Set *string
-		_ = db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g2'`).Scan(&g2Set)
-		_ = db.QueryRow(`SELECT sync_set_id FROM groups WHERE alias = 'g3'`).Scan(&g3Set)
+		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g2'`).Scan(&g2Set)
+		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g3'`).Scan(&g3Set)
 		if g2Set != nil || g3Set != nil {
 			t.Fatalf("expected groups to be unassigned after sync set delete, got g2=%v g3=%v", g2Set, g3Set)
 		}

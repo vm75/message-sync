@@ -62,7 +62,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		return nil, errors.New("username mode must be push_name or hash")
 	}
 
-	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Groups))
+	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Endpoints))
 	for _, set := range cfg.SyncSets {
 		members := make([]transport.EndpointID, 0, len(set.Groups))
 		for _, alias := range set.Groups {
@@ -93,7 +93,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 		return errors.New("username mode must be push_name or hash")
 	}
 
-	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Groups))
+	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Endpoints))
 	for _, set := range cfg.SyncSets {
 		members := make([]transport.EndpointID, 0, len(set.Groups))
 		for _, alias := range set.Groups {

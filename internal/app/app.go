@@ -76,9 +76,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		cfg = loadedCfg
 	}
 
-	groupJIDs := make(map[string]string, len(cfg.Groups))
-	for alias, group := range cfg.Groups {
-		groupJIDs[alias] = group.JID
+	groupJIDs := make(map[string]string)
+	for alias, endpoint := range cfg.Endpoints {
+		if endpoint.Transport == config.TransportWhatsApp {
+			groupJIDs[alias] = endpoint.RemoteID
+		}
 	}
 
 	wa, err := openWhatsApp(ctx, whatsapp.Options{
@@ -122,7 +124,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("update whatsapp config: %w", err)
 		}
 		logger.Info("configuration reloaded",
-			"groups", len(updatedCfg.Groups),
+			"endpoints", len(updatedCfg.Endpoints),
 			"sync_sets", len(updatedCfg.SyncSets),
 			"username_mode", string(updatedCfg.Identity.UsernameMode),
 		)
@@ -179,7 +181,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	logger.Info("message-sync started",
-		"groups", len(cfg.Groups),
+		"endpoints", len(cfg.Endpoints),
 		"sync_sets", len(cfg.SyncSets),
 		"sync_schema", store.SchemaVersion,
 	)
@@ -254,8 +256,8 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 	}
 	groupJIDMap := make(map[string]types.JID)
 	for alias := range syncSetGroupAliases {
-		if grp, ok := cfg.Groups[alias]; ok && strings.TrimSpace(grp.JID) != "" {
-			parsedJID, err := types.ParseJID(grp.JID)
+		if endpoint, ok := cfg.Endpoints[alias]; ok && endpoint.Transport == config.TransportWhatsApp && strings.TrimSpace(endpoint.RemoteID) != "" {
+			parsedJID, err := types.ParseJID(endpoint.RemoteID)
 			if err == nil {
 				groupJIDMap[parsedJID.String()] = parsedJID
 			}

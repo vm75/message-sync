@@ -10,9 +10,9 @@ import (
 
 func validConfig() Config {
 	return Config{
-		Groups: map[string]Group{
-			"a": {JID: "1@g.us"},
-			"b": {JID: "2@g.us"},
+		Endpoints: map[string]Endpoint{
+			"a": {Transport: TransportWhatsApp, RemoteID: "1@g.us"},
+			"b": {Transport: TransportWhatsApp, RemoteID: "2@g.us"},
 		},
 		SyncSets: []SyncSet{{ID: "mesh", Groups: []string{"a", "b"}}},
 		Identity: Identity{UsernameMode: UsernameModeHash},
@@ -64,7 +64,7 @@ func TestValidateUsernameModeEnum(t *testing.T) {
 
 func TestValidateRejectsGroupInMultipleSets(t *testing.T) {
 	cfg := validConfig()
-	cfg.Groups["c"] = Group{JID: "3@g.us"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
 	cfg.SyncSets = append(cfg.SyncSets, SyncSet{ID: "two", Groups: []string{"a", "c"}})
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error")
@@ -73,15 +73,55 @@ func TestValidateRejectsGroupInMultipleSets(t *testing.T) {
 
 func TestValidateRejectsUnsafeAliasAndUnassignedGroup(t *testing.T) {
 	cfg := validConfig()
-	cfg.Groups["15551234567@s.whatsapp.net"] = Group{JID: "3@g.us"}
+	cfg.Endpoints["15551234567@s.whatsapp.net"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected unsafe alias error")
 	}
 
 	cfg = validConfig()
-	cfg.Groups["c"] = Group{JID: "3@g.us"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected unassigned group error")
+	}
+}
+
+func TestValidateTransportAwareEndpoints(t *testing.T) {
+	cfg := validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "123456789012345678"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with Discord endpoint failed: %v", err)
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: "unknown", RemoteID: "opaque"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for unknown transport")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: " "}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for empty remote id")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "1@g.us"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for duplicate WhatsApp remote target")
+	}
+}
+
+func TestValidateRejectsInvalidSyncSetAndDuplicateMembership(t *testing.T) {
+	cfg := validConfig()
+	cfg.SyncSets[0].ID = "unsafe set"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected invalid sync set id error")
+	}
+
+	cfg = validConfig()
+	cfg.SyncSets[0].Groups = []string{"a", "a"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected duplicate endpoint membership error")
 	}
 }
 
@@ -103,11 +143,11 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 	if loaded.Identity.UsernameMode != UsernameModePushName {
 		t.Errorf("got usernameMode %q, want %q", loaded.Identity.UsernameMode, UsernameModePushName)
 	}
-	if len(loaded.Groups) != 2 {
-		t.Fatalf("got %d groups, want 2", len(loaded.Groups))
+	if len(loaded.Endpoints) != 2 {
+		t.Fatalf("got %d endpoints, want 2", len(loaded.Endpoints))
 	}
-	if loaded.Groups["a"].JID != "1@g.us" || loaded.Groups["b"].JID != "2@g.us" {
-		t.Errorf("loaded groups mismatch: %+v", loaded.Groups)
+	if loaded.Endpoints["a"].RemoteID != "1@g.us" || loaded.Endpoints["b"].RemoteID != "2@g.us" {
+		t.Errorf("loaded endpoints mismatch: %+v", loaded.Endpoints)
 	}
 	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" {
 		t.Fatalf("loaded sync sets mismatch: %+v", loaded.SyncSets)
@@ -123,7 +163,7 @@ func TestLoadDefaultsWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.DB().ExecContext(ctx, `INSERT INTO groups (alias, jid, sync_set_id) VALUES ('g1', '1@g.us', 'set1'), ('g2', '2@g.us', 'set1')`)
+	_, err = st.DB().ExecContext(ctx, `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES ('g1', 'whatsapp', '1@g.us', 'set1'), ('g2', 'whatsapp', '2@g.us', 'set1')`)
 	if err != nil {
 		t.Fatal(err)
 	}

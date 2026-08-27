@@ -35,7 +35,35 @@ func ValidateGroupJID(jid string) error {
 		return errors.New("group jid is required")
 	}
 	if !jidPattern.MatchString(jid) {
-		return fmt.Errorf("group jid %q is invalid WhatsApp group JID", jid)
+		return errors.New("group jid is invalid WhatsApp group JID")
+	}
+	return nil
+}
+
+type Transport string
+
+const (
+	TransportWhatsApp Transport = "whatsapp"
+	TransportDiscord  Transport = "discord"
+)
+
+func (t Transport) IsValid() bool {
+	return t == TransportWhatsApp || t == TransportDiscord
+}
+
+func ValidateEndpointRemoteID(transport Transport, remoteID string) error {
+	if !transport.IsValid() {
+		return errors.New("endpoint transport must be whatsapp or discord")
+	}
+	remoteID = strings.TrimSpace(remoteID)
+	if remoteID == "" {
+		return errors.New("endpoint remote id is required")
+	}
+	if strings.ContainsAny(remoteID, "\r\n\x00") {
+		return errors.New("endpoint remote id contains invalid control characters")
+	}
+	if transport == TransportWhatsApp && !jidPattern.MatchString(remoteID) {
+		return errors.New("endpoint remote id is invalid WhatsApp group JID")
 	}
 	return nil
 }
@@ -52,8 +80,8 @@ func (m UsernameMode) IsValid() bool {
 }
 
 type Config struct {
-	Groups          map[string]Group `json:"groups"`
-	SyncSets        []SyncSet        `json:"syncSets"`
+	Endpoints       map[string]Endpoint `json:"endpoints"`
+	SyncSets        []SyncSet           `json:"syncSets"`
 	Identity        Identity         `json:"identity"`
 	Media           Media            `json:"media"`
 	Recovery        Recovery         `json:"recovery"`
@@ -62,8 +90,9 @@ type Config struct {
 	WhatsAppCleanup WhatsAppCleanup  `json:"whatsappCleanup"`
 }
 
-type Group struct {
-	JID string `json:"jid"`
+type Endpoint struct {
+	Transport Transport `json:"transport"`
+	RemoteID  string    `json:"remoteId"`
 }
 
 type SyncSet struct {
@@ -105,8 +134,8 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	}
 
 	cfg := &Config{
-		Groups:   make(map[string]Group),
-		SyncSets: make([]SyncSet, 0),
+		Endpoints: make(map[string]Endpoint),
+		SyncSets:  make([]SyncSet, 0),
 	}
 
 	var (
@@ -144,29 +173,29 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 
 	applyDefaults(cfg)
 
-	groupRows, err := db.QueryContext(ctx, `SELECT alias, jid, sync_set_id FROM groups ORDER BY alias ASC`)
+	endpointRows, err := db.QueryContext(ctx, `SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
 	if err != nil {
-		return nil, fmt.Errorf("read groups: %w", err)
+		return nil, fmt.Errorf("read endpoints: %w", err)
 	}
 
 	syncSetMap := make(map[string][]string)
-	for groupRows.Next() {
-		var alias, jid string
+	for endpointRows.Next() {
+		var alias, transportName, remoteID string
 		var syncSetID sql.NullString
-		if err := groupRows.Scan(&alias, &jid, &syncSetID); err != nil {
-			groupRows.Close()
-			return nil, fmt.Errorf("scan group: %w", err)
+		if err := endpointRows.Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
+			endpointRows.Close()
+			return nil, fmt.Errorf("scan endpoint: %w", err)
 		}
-		cfg.Groups[alias] = Group{JID: jid}
+		cfg.Endpoints[alias] = Endpoint{Transport: Transport(transportName), RemoteID: remoteID}
 		if syncSetID.Valid && strings.TrimSpace(syncSetID.String) != "" {
 			syncSetMap[syncSetID.String] = append(syncSetMap[syncSetID.String], alias)
 		}
 	}
-	if err := groupRows.Err(); err != nil {
-		groupRows.Close()
-		return nil, fmt.Errorf("iterate groups: %w", err)
+	if err := endpointRows.Err(); err != nil {
+		endpointRows.Close()
+		return nil, fmt.Errorf("iterate endpoints: %w", err)
 	}
-	groupRows.Close()
+	endpointRows.Close()
 
 	setRows, err := db.QueryContext(ctx, `SELECT id FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
@@ -243,15 +272,15 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 		return fmt.Errorf("save global_config: %w", err)
 	}
 
-	groupToSyncSet := make(map[string]string)
+	endpointToSyncSet := make(map[string]string)
 	for _, set := range cfg.SyncSets {
 		for _, alias := range set.Groups {
-			groupToSyncSet[alias] = set.ID
+			endpointToSyncSet[alias] = set.ID
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM groups`); err != nil {
-		return fmt.Errorf("delete old groups: %w", err)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM endpoints`); err != nil {
+		return fmt.Errorf("delete old endpoints: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM sync_sets`); err != nil {
 		return fmt.Errorf("delete old sync_sets: %w", err)
@@ -263,14 +292,10 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 		}
 	}
 
-	for alias, grp := range cfg.Groups {
-		syncSetID := groupToSyncSet[alias]
-		var syncSetVal any
-		if syncSetID != "" {
-			syncSetVal = syncSetID
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO groups (alias, jid, sync_set_id) VALUES (?, ?, ?)`, alias, grp.JID, syncSetVal); err != nil {
-			return fmt.Errorf("insert group %q: %w", alias, err)
+	for alias, endpoint := range cfg.Endpoints {
+		syncSetID := endpointToSyncSet[alias]
+		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES (?, ?, ?, ?)`, alias, string(endpoint.Transport), endpoint.RemoteID, syncSetID); err != nil {
+			return fmt.Errorf("insert endpoint %q: %w", alias, err)
 		}
 	}
 
@@ -305,8 +330,8 @@ func applyDefaults(cfg *Config) {
 }
 
 func (c Config) Validate() error {
-	if len(c.Groups) < 2 {
-		return errors.New("at least two groups are required")
+	if len(c.Endpoints) < 2 {
+		return errors.New("at least two endpoints are required")
 	}
 	if len(c.SyncSets) == 0 {
 		return errors.New("at least one sync set is required")
@@ -330,41 +355,47 @@ func (c Config) Validate() error {
 		return errors.New("whatsappCleanup.retentionDays must be positive")
 	}
 
-	for alias, group := range c.Groups {
-		if !aliasPattern.MatchString(alias) {
-			return fmt.Errorf("group alias %q must match %s", alias, aliasPattern.String())
+	remoteTargets := make(map[string]string, len(c.Endpoints))
+	for alias, endpoint := range c.Endpoints {
+		if err := ValidateAlias(alias); err != nil {
+			return err
 		}
-		if strings.TrimSpace(group.JID) == "" {
-			return fmt.Errorf("group %q has empty jid", alias)
+		if err := ValidateEndpointRemoteID(endpoint.Transport, endpoint.RemoteID); err != nil {
+			return fmt.Errorf("endpoint %q: %w", alias, err)
 		}
+		key := string(endpoint.Transport) + "\x00" + strings.TrimSpace(endpoint.RemoteID)
+		if previous, exists := remoteTargets[key]; exists {
+			return fmt.Errorf("endpoints %q and %q use the same remote target", previous, alias)
+		}
+		remoteTargets[key] = alias
 	}
 
-	membership := make(map[string]string, len(c.Groups))
+	membership := make(map[string]string, len(c.Endpoints))
 	for _, set := range c.SyncSets {
-		if strings.TrimSpace(set.ID) == "" {
-			return errors.New("sync set id is required")
+		if err := ValidateSyncSetID(set.ID); err != nil {
+			return err
 		}
 		if len(set.Groups) < 2 {
-			return fmt.Errorf("sync set %q must contain at least two groups", set.ID)
+			return fmt.Errorf("sync set %q must contain at least two endpoints", set.ID)
 		}
 		seen := make(map[string]struct{}, len(set.Groups))
 		for _, alias := range set.Groups {
-			if _, ok := c.Groups[alias]; !ok {
-				return fmt.Errorf("sync set %q references unknown group %q", set.ID, alias)
+			if _, ok := c.Endpoints[alias]; !ok {
+				return fmt.Errorf("sync set %q references unknown endpoint %q", set.ID, alias)
 			}
 			if _, duplicate := seen[alias]; duplicate {
-				return fmt.Errorf("sync set %q repeats group %q", set.ID, alias)
+				return fmt.Errorf("sync set %q repeats endpoint %q", set.ID, alias)
 			}
 			seen[alias] = struct{}{}
 			if previous, exists := membership[alias]; exists {
-				return fmt.Errorf("group %q belongs to both %q and %q", alias, previous, set.ID)
+				return fmt.Errorf("endpoint %q belongs to both %q and %q", alias, previous, set.ID)
 			}
 			membership[alias] = set.ID
 		}
 	}
-	for alias := range c.Groups {
+	for alias := range c.Endpoints {
 		if _, ok := membership[alias]; !ok {
-			return fmt.Errorf("group %q is not assigned to a sync set", alias)
+			return fmt.Errorf("endpoint %q is not assigned to a sync set", alias)
 		}
 	}
 	return nil

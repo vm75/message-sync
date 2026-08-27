@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 10
+const SchemaVersion = 11
 
 var (
 	//go:embed schema.sql
@@ -204,10 +204,16 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		version = 6
 	}
 	if version == 6 {
-		if _, err := tx.ExecContext(ctx, `
-			CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
-		`); err != nil {
-			return fmt.Errorf("migrate schema v6 to v7: add unique groups jid index: %w", err)
+		hasGroups, err := tableExists(ctx, tx, "groups")
+		if err != nil {
+			return fmt.Errorf("check legacy groups table: %w", err)
+		}
+		if hasGroups {
+			if _, err := tx.ExecContext(ctx, `
+				CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
+			`); err != nil {
+				return fmt.Errorf("migrate schema v6 to v7: add unique groups jid index: %w", err)
+			}
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`); err != nil {
 			return fmt.Errorf("migrate schema v6 to v7: update version: %w", err)
@@ -270,6 +276,27 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		}
 		version = 10
 	}
+	if version == 10 {
+		hasGroups, err := tableExists(ctx, tx, "groups")
+		if err != nil {
+			return fmt.Errorf("check legacy groups table: %w", err)
+		}
+		if hasGroups {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO endpoints(alias, transport, remote_id, sync_set_id)
+				SELECT alias, 'whatsapp', jid, sync_set_id FROM groups
+			`); err != nil {
+				return fmt.Errorf("migrate schema v10 to v11: copy WhatsApp endpoints: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `DROP TABLE groups`); err != nil {
+				return fmt.Errorf("migrate schema v10 to v11: drop groups table: %w", err)
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '11' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v10 to v11: update version: %w", err)
+		}
+		version = 11
+	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)
 	}
@@ -277,6 +304,18 @@ func migrate(ctx context.Context, db *sql.DB) error {
 		return fmt.Errorf("commit sync migration: %w", err)
 	}
 	return nil
+}
+
+func tableExists(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
+	var name string
+	err := tx.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func tableHasColumn(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {

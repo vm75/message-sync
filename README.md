@@ -28,7 +28,7 @@
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores phone numbers, WhatsApp JIDs, participant names, message bodies, media, or contact cards.
+- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, participant names, message bodies, media, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.

@@ -40,6 +40,118 @@ func TestOpenMigratesSchemaAndEnablesForeignKeys(t *testing.T) {
 	}
 }
 
+func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	rows, err := store.db.Query(`PRAGMA table_info(endpoints)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	for _, name := range []string{"alias", "transport", "remote_id", "sync_set_id"} {
+		if !columns[name] {
+			t.Fatalf("endpoints missing column %q", name)
+		}
+	}
+
+	var legacyCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='groups'`).Scan(&legacyCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCount != 0 {
+		t.Fatal("fresh schema unexpectedly contains legacy groups table")
+	}
+}
+
+func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync_v10.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `
+		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
+		INSERT INTO sync_sets(id) VALUES ('mesh');
+		CREATE TABLE groups (
+			alias TEXT PRIMARY KEY,
+			jid TEXT NOT NULL UNIQUE,
+			sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
+		);
+		INSERT INTO groups(alias, jid, sync_set_id) VALUES
+			('alpha', '1@g.us', 'mesh'),
+			('beta', '2@g.us', 'mesh');
+		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '10');
+	`
+	for _, stmt := range strings.Split(legacy, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup v10 database: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open v10 database failed: %v", err)
+	}
+	defer st.Close()
+
+	rows, err := st.db.Query(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	type endpointRow struct {
+		alias, transport, remoteID, syncSetID string
+	}
+	var got []endpointRow
+	for rows.Next() {
+		var row endpointRow
+		if err := rows.Scan(&row.alias, &row.transport, &row.remoteID, &row.syncSetID); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, row)
+	}
+	want := []endpointRow{
+		{alias: "alpha", transport: "whatsapp", remoteID: "1@g.us", syncSetID: "mesh"},
+		{alias: "beta", transport: "whatsapp", remoteID: "2@g.us", syncSetID: "mesh"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("migrated endpoints = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("migrated endpoint[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	var legacyCount int
+	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='groups'`).Scan(&legacyCount); err != nil {
+		t.Fatal(err)
+	}
+	if legacyCount != 0 {
+		t.Fatal("legacy groups table still exists after migration")
+	}
+}
+
 func TestMessageCopyUniquenessAndBidirectionalLookup(t *testing.T) {
 	store, _ := openTestStore(t)
 	ctx := context.Background()

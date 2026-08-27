@@ -39,7 +39,7 @@ func main() {
 				fmt.Fprintln(os.Stderr, "invalid configuration")
 				os.Exit(1)
 			}
-			fmt.Printf("configuration valid: %d groups, %d sync sets\n", len(cfg.Groups), len(cfg.SyncSets))
+			fmt.Printf("configuration valid: %d endpoints, %d sync sets\n", len(cfg.Endpoints), len(cfg.SyncSets))
 			return
 		case "run":
 			// continue below

@@ -53,12 +53,14 @@ CREATE TABLE IF NOT EXISTS sync_sets (
     id TEXT PRIMARY KEY
 );
 
-CREATE TABLE IF NOT EXISTS groups (
+CREATE TABLE IF NOT EXISTS endpoints (
     alias TEXT PRIMARY KEY,
-    jid TEXT NOT NULL UNIQUE,
-    sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
+    transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord')),
+    remote_id TEXT NOT NULL,
+    sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
+    UNIQUE (transport, remote_id)
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);
 
 CREATE TABLE IF NOT EXISTS poll_options (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
@@ -90,4 +92,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '9');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '11');

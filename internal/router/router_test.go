@@ -566,10 +566,10 @@ func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *st
 
 func testConfig(usernameMode config.UsernameMode) *config.Config {
 	return &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "111@g.us"},
-			"c1g2": {JID: "222@g.us"},
-			"c1g3": {JID: "333@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
+			"c1g3": {Transport: config.TransportWhatsApp, RemoteID: "333@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2", "c1g3"}}},
 		Identity: config.Identity{UsernameMode: usernameMode},
@@ -609,9 +609,9 @@ func TestRouterUpdateConfig(t *testing.T) {
 
 	// Update config to switch to hash mode and remove c1g3 from sync set
 	newCfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "111@g.us"},
-			"c1g2": {JID: "222@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -827,9 +827,9 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 
 func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	cfg := &config.Config{
-		Groups: map[string]config.Group{
-			"c1g1": {JID: "111@g.us"},
-			"c1g2": {JID: "222@g.us"},
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
