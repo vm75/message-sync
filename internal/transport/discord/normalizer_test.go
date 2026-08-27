@@ -194,7 +194,7 @@ func TestNormalizeFiltersDMUnconfiguredBotAndManagedWebhookMessages(t *testing.T
 			if tc.mutate != nil {
 				tc.mutate(evt)
 			}
-			incoming, ok := normalizer.NormalizeMessage(evt, tc.botUserID, tc.webhooks)
+			_, ok := normalizer.NormalizeMessage(evt, tc.botUserID, tc.webhooks)
 			if ok != tc.want {
 				t.Fatalf("NormalizeMessage acceptance = %v, want %v", ok, tc.want)
 			}
