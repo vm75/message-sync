@@ -57,7 +57,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	}
 	setRows.Close()
 
-	groupRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE transport = 'whatsapp' AND sync_set_id IS NOT NULL ORDER BY alias ASC`)
+	groupRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE sync_set_id IS NOT NULL ORDER BY alias ASC`)
 	if err != nil {
 		s.logger.Error("query groups for sync_sets failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to query groups")
@@ -119,7 +119,7 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE transport = 'whatsapp' AND sync_set_id = ? ORDER BY alias ASC`, id)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE sync_set_id = ? ORDER BY alias ASC`, id)
 	if err != nil {
 		s.logger.Error("query sync set groups failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "failed to query sync set groups")
@@ -196,7 +196,7 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	for _, alias := range req.Groups {
 		alias = strings.TrimSpace(alias)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ? AND transport = 'whatsapp'`, req.ID, alias); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, req.ID, alias); err != nil {
 			s.logger.Error("assign group to sync set failed", "error", err.Error())
 			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
 			return
@@ -271,7 +271,7 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Clear current members
-	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE transport = 'whatsapp' AND sync_set_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
 		s.logger.Error("clear old sync set memberships failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
@@ -280,7 +280,7 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	// Assign new members
 	for _, alias := range req.Groups {
 		alias = strings.TrimSpace(alias)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ? AND transport = 'whatsapp'`, id, alias); err != nil {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, id, alias); err != nil {
 			s.logger.Error("assign group to sync set failed", "error", err.Error())
 			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
 			return
@@ -326,7 +326,7 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	// Unassign groups
-	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE transport = 'whatsapp' AND sync_set_id = ?`, id); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
 		s.logger.Error("unassign sync set groups failed", "error", err.Error())
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
@@ -365,24 +365,24 @@ func (s *Server) validateSyncSetGroups(r *http.Request, currentSetID string, gro
 	for _, alias := range groups {
 		alias = strings.TrimSpace(alias)
 		if alias == "" {
-			return errors.New("group alias cannot be empty")
+			return errors.New("endpoint alias cannot be empty")
 		}
 		if _, dup := seen[alias]; dup {
-			return fmt.Errorf("duplicate group %q in sync set", alias)
+			return fmt.Errorf("duplicate endpoint %q in sync set", alias)
 		}
 		seen[alias] = struct{}{}
 
 		var assignedSet sql.NullString
-		err := s.db.QueryRowContext(r.Context(), `SELECT sync_set_id FROM endpoints WHERE alias = ? AND transport = 'whatsapp'`, alias).Scan(&assignedSet)
+		err := s.db.QueryRowContext(r.Context(), `SELECT sync_set_id FROM endpoints WHERE alias = ?`, alias).Scan(&assignedSet)
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("group %q does not exist", alias)
+			return fmt.Errorf("endpoint %q does not exist", alias)
 		} else if err != nil {
-			return fmt.Errorf("query group %q: %w", alias, err)
+			return fmt.Errorf("query endpoint %q: %w", alias, err)
 		}
 
 		if assignedSet.Valid && strings.TrimSpace(assignedSet.String) != "" {
 			if isNew || assignedSet.String != currentSetID {
-				return fmt.Errorf("group %q is already assigned to sync set %q", alias, assignedSet.String)
+				return fmt.Errorf("endpoint %q is already assigned to sync set %q", alias, assignedSet.String)
 			}
 		}
 	}
