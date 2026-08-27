@@ -8,7 +8,7 @@
 2. deterministic, restart-safe synchronization;
 3. simple rootless self-hosting;
 4. WhatsApp transport through `tulir/whatsmeow`;
-5. transport-neutral canonical IDs so Discord or another adapter can be added later.
+5. transport-neutral canonical IDs so Discord and future adapters do not become canonical identity.
 
 The previous Node/Baileys project is a behavioral reference only, not the architecture baseline.
 
@@ -106,7 +106,7 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 
 Auth middleware protects all other `/api/*` endpoints, including both endpoint-management API shapes, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Endpoint request bodies are never logged, and validation/error responses never echo a transport remote target. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
-The management model is transport-aware before every transport is runtime-wired: Discord endpoints can be configured and placed in mixed sync sets, but Discord gateway ingestion and per-transport outbound dispatch are implemented by later Discord-support tickets. This API work does not make the current WhatsApp adapter capable of sending to Discord by itself.
+The management model is transport-aware before every transport is fully router-wired. Discord endpoints can be configured and placed in mixed sync sets. The Discord gateway ingress adapter now starts when Discord endpoints exist, but multi-adapter router dispatch and Discord outbound delivery remain separate follow-up work; the current WhatsApp sender therefore cannot yet deliver to a Discord endpoint by itself.
 
 ## 4. Canonical message model
 
@@ -170,6 +170,23 @@ normalized event
 ```
 
 Sequential fan-out is deliberate for MVP. It makes crash semantics and SQLite state easy to reason about. Concurrency should be added only if measurement proves it necessary.
+
+### Discord gateway ingress boundary
+
+The Discord adapter uses a gateway bot for ingress and keeps Discord protocol identity outside the canonical model:
+
+```text
+Discord MESSAGE_CREATE
+   -> reject DM or unconfigured channel
+   -> reject bridge bot and bridge-managed webhook copies
+   -> map configured channel ID to safe endpoint alias
+   -> HMAC "discord:" + transient author ID
+   -> normalize text/reply/mentions into transport.Incoming
+```
+
+Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. Display names and mention IDs may exist only transiently inside a normalized event while immediate routing semantics require them.
+
+The gateway bot is intentionally distinct from the planned WhatsApp → Discord sender-rendering webhook. A narrow `ManagedWebhookChecker` boundary lets the ingress adapter identify bridge-owned webhook messages and suppress loops without making webhook IDs, tokens, or URLs canonical routing state. Webhook credentials remain outside `sync.db`. Multi-adapter dispatch is implemented by the next Discord-support ticket; until then the Discord event channel is an adapter boundary rather than a second router worker.
 
 ## 7. Idempotency and crash recovery
 
@@ -268,9 +285,9 @@ WhatsApp chat history on the sync account can optionally be cleared on a daily s
 
 ## 15. Transport abstraction
 
-The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. MVP ships WhatsApp only.
+The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. WhatsApp is the currently complete end-to-end transport; the Discord gateway adapter implements the same `transport.Adapter` boundary for ingress while outbound dispatch is staged separately.
 
-The persisted configuration is transport-aware so Discord can become another adapter without changing canonical identity:
+The persisted configuration is transport-aware so Discord can participate without changing canonical identity:
 
 ```text
               canonical router
@@ -313,6 +330,8 @@ Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 
 The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
+The Discord adapter likewise disables DiscordGo's internal logger because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and `safelog` error classes. The bot token is read only from `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; neither credential source is copied to `sync.db` or application logs.
+
 ## 19. Deliberate MVP exclusions
 
-Discord, events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap are deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Discord outbound lifecycle, multi-adapter dispatch, discovery/UI, threads/forums and richer Discord format semantics remain staged work. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
