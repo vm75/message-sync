@@ -11,62 +11,10 @@ import (
 )
 
 var (
-	aliasPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}package config
-
-import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
-)
-
-var (
-)
-	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}package config
-
-import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
-)
-
-var (
-)
-	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.uspackage config
-
-import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
-)
-
-var (
-)
-	discordIDPattern = regexp.MustCompile(`^[0-9]{1,20}package config
-
-import (
-	"context"
-	"database/sql"
-	"errors"
-	"fmt"
-	"regexp"
-	"strconv"
-	"strings"
-)
-
-var (
-)
+	aliasPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
+	discordIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
 )
 
 func ValidateAlias(alias string) error {
