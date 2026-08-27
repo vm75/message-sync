@@ -93,11 +93,11 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	}
 	if gotDiscordOptions.ChannelIDs["discord"] != "123456789012345678" || len(gotDiscordOptions.ChannelIDs) != 1 {
 		cancel()
-		t.Fatalf("Discord channel filter = %+v", gotDiscordOptions.ChannelIDs)
+		t.Fatal("Discord channel filter was not initialized correctly")
 	}
 	if gotDiscordOptions.UsernameMode != config.UsernameModeHash || gotDiscordOptions.Hasher == nil {
 		cancel()
-		t.Fatalf("Discord privacy options were not initialized: %+v", gotDiscordOptions)
+		t.Fatal("Discord privacy options were not initialized")
 	}
 	if !strings.Contains(logBuf.String(), "message-sync started") {
 		cancel()
