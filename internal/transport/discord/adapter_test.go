@@ -68,6 +68,24 @@ func TestLoadBotTokenRejectsMissingAndAmbiguousSources(t *testing.T) {
 	})
 }
 
+func TestDiscordGoLoggerDropsRawProtocolErrorText(t *testing.T) {
+	originalLogger := discordgo.Logger
+	defer func() { discordgo.Logger = originalLogger }()
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
+	installSafeDiscordLogger(logger)
+
+	discordgo.Logger(discordgo.LogError, 0, "raw error %s", "private-user-id private-message-body")
+	logged := logBuf.String()
+	if !strings.Contains(logged, "discord_client_error") || !strings.Contains(logged, "error_kind") {
+		t.Fatalf("safe Discord client error classification was not emitted: %s", logged)
+	}
+	if strings.Contains(logged, "private-user-id") || strings.Contains(logged, "private-message-body") || strings.Contains(logged, "raw error") {
+		t.Fatal("Discord client logger leaked raw protocol error text")
+	}
+}
+
 func TestAdapterEmitsOnlySafeStructuredFieldsWhenBufferFull(t *testing.T) {
 	var logBuf bytes.Buffer
 	adapter := &Adapter{
