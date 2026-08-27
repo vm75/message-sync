@@ -49,7 +49,7 @@ func testMessage() *discordgo.MessageCreate {
 			Username:   "alice-user",
 			GlobalName: "Alice Example",
 		},
-		Member: &discordgo.Member{Nick: "Alice Nick"},
+		Member:    &discordgo.Member{Nick: "Alice Nick"},
 		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
 	}}
 }
