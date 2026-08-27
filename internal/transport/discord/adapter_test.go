@@ -169,7 +169,9 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 		events:     make(chan transport.Incoming, 1),
 		logger:     slog.New(slog.NewJSONHandler(&logBuf, nil)),
 	}
-	session := &discordgo.Session{State: &discordgo.State{User: &discordgo.User{ID: testAuthorID}}}
+	state := discordgo.NewState()
+	state.User = &discordgo.User{ID: testAuthorID}
+	session := &discordgo.Session{State: state}
 	adapter.handleMessageCreate(session, testMessage())
 
 	select {
