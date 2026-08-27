@@ -23,7 +23,7 @@
 
 | Order | Issue | Scope | Depends on | Status | Implementation notes |
 |---|---|---|---|---|---|
-| 1 | [#16](https://github.com/vm75/message-sync/issues/16) | Generalize configured groups into transport-aware endpoints | — | Not started | |
+| 1 | [#16](https://github.com/vm75/message-sync/issues/16) | Generalize configured groups into transport-aware endpoints | — | In progress | Started endpoint schema/config generalization on `agent/discord-support`; preserving WhatsApp compatibility. |
 | 2 | [#17](https://github.com/vm75/message-sync/issues/17) | Generalize REST API and sync-set CRUD for transport endpoints | #16 | Not started | |
 | 3 | [#18](https://github.com/vm75/message-sync/issues/18) | Discord adapter foundation, bot lifecycle, channel event ingestion | #16, #17 | Not started | |
 | 4 | [#19](https://github.com/vm75/message-sync/issues/19) | Wire multiple adapters into application/router | #16, #18 | Not started | |
