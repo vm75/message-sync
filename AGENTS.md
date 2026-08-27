@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`message-sync` is a privacy-first message synchronization service written in Go. The MVP synchronizes WhatsApp groups using `tulir/whatsmeow`; future transports such as Discord must plug into the same canonical router rather than becoming the application’s central identity.
+`message-sync` is a privacy-first message synchronization service written in Go. The complete MVP path synchronizes WhatsApp groups using `tulir/whatsmeow`; Discord support is being added through the same canonical transport boundary rather than becoming the application’s central identity.
 
 Use **KISS** and **YAGNI** aggressively. Prefer standard-library Go, explicit data flow, small packages, and simple SQLite transactions. Do not port legacy functionality merely because it existed before.
 
@@ -28,7 +28,8 @@ Never persist or log:
 - push names, contact names, profile names, or designations;
 - message bodies, quoted text, captions, polls, contact cards, or location payloads;
 - media bytes, thumbnails, filenames that may contain personal information, or external media URLs;
-- raw WhatsApp/whatsmeow event objects;
+- raw WhatsApp/whatsmeow or Discord gateway/API event objects;
+- Discord user IDs, usernames/display names, guild/channel names, bot tokens, webhook tokens/URLs;
 - `IDENTITY_SECRET` or any credential/key material.
 
 Allowed in `sync.db`:
@@ -48,7 +49,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 
 - The canonical router owns cross-endpoint synchronization semantics.
 - Transport adapters own platform protocol details.
-- MVP implements only the WhatsApp adapter.
+- WhatsApp is the complete end-to-end adapter; Discord gateway ingress is a staged adapter and must remain transport-neutral until multi-adapter dispatch/outbound work is complete.
 - Never use a Discord or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Process ingress deterministically; start with one router worker.
