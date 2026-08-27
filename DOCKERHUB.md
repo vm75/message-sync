@@ -33,6 +33,7 @@
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
+- **Discord Credentials**: Discord bot/webhook credentials come only from environment variables or mounted secrets. They are never stored in `sync.db` or written to application logs.
 
 ---
 
@@ -53,6 +54,8 @@ Create a `.env` file:
 IDENTITY_SECRET=your-generated-32-byte-hex-secret
 DATA_DIR=/data
 PORT=8080
+# Required only when Discord endpoints are configured. Use this OR DISCORD_BOT_TOKEN_FILE.
+DISCORD_BOT_TOKEN=
 ```
 
 ### 2. Docker Compose / Podman Compose
