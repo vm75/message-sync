@@ -74,10 +74,10 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 		t.Fatal("configured Discord message was ignored")
 	}
 	if incoming.Endpoint != "team-discord" || incoming.RemoteID != evt.ID || incoming.Kind != "text" {
-		t.Fatalf("unexpected normalized metadata: %+v", incoming)
+		t.Fatal("unexpected normalized Discord metadata")
 	}
 	if incoming.Text != evt.Content || incoming.Sender.DisplayName != "Alice Nick" {
-		t.Fatalf("transient fields were not preserved: %+v", incoming)
+		t.Fatal("transient Discord fields were not preserved")
 	}
 	if incoming.Sender.PhoneNumber != "" {
 		t.Fatalf("Discord ingress unexpectedly populated phone number: %q", incoming.Sender.PhoneNumber)
@@ -86,13 +86,13 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 		t.Fatalf("Discord user ID was not replaced by HMAC identity: %q", incoming.Sender.OpaqueID)
 	}
 	if incoming.ReplyTo == nil || incoming.ReplyTo.Endpoint != "team-discord" || incoming.ReplyTo.RemoteMessageID != evt.MessageReference.MessageID {
-		t.Fatalf("unexpected reply mapping: %+v", incoming.ReplyTo)
+		t.Fatal("unexpected Discord reply mapping")
 	}
 	if incoming.QuotedText != "quoted private body" {
 		t.Fatalf("quoted text = %q", incoming.QuotedText)
 	}
 	if len(incoming.Mentions) != 1 || incoming.Mentions[0].RemoteID != "523456789012345678" || incoming.Mentions[0].Name != "Bob Example" {
-		t.Fatalf("unexpected mentions: %+v", incoming.Mentions)
+		t.Fatal("unexpected Discord mention normalization")
 	}
 	if !incoming.Timestamp.Equal(evt.Timestamp) {
 		t.Fatalf("timestamp = %v, want %v", incoming.Timestamp, evt.Timestamp)
@@ -196,7 +196,7 @@ func TestNormalizeFiltersDMUnconfiguredBotAndManagedWebhookMessages(t *testing.T
 			}
 			incoming, ok := normalizer.NormalizeMessage(evt, tc.botUserID, tc.webhooks)
 			if ok != tc.want {
-				t.Fatalf("NormalizeMessage ok = %v, want %v; incoming=%+v", ok, tc.want, incoming)
+				t.Fatalf("NormalizeMessage acceptance = %v, want %v", ok, tc.want)
 			}
 		})
 	}
@@ -217,6 +217,6 @@ func TestReplyToUnconfiguredChannelIsNotExposed(t *testing.T) {
 		t.Fatal("configured Discord message was ignored")
 	}
 	if incoming.ReplyTo != nil || incoming.QuotedText != "" {
-		t.Fatalf("unconfigured reply target leaked into normalized event: %+v / %q", incoming.ReplyTo, incoming.QuotedText)
+		t.Fatal("unconfigured reply target leaked into normalized event")
 	}
 }
