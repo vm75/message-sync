@@ -72,12 +72,13 @@ Expected outcome:
 - management changes continue to trigger runtime config reloads.
 
 ### Phase 3 — Build Discord ingress adapter
-Issue #18 adds the Discord client, lifecycle, safe gateway handling, channel filtering, HMAC actor identity, self-message loop prevention, and normalization to `transport.Incoming`.
+Issue #18 adds the Discord client, lifecycle, safe gateway handling, channel filtering, HMAC actor identity, self-message loop prevention, webhook-loop prevention, and normalization to `transport.Incoming`. It also establishes the bot-ingress + webhook-outbound split required for per-WhatsApp-user APP rendering.
 
 Expected outcome:
 - Discord messages from configured channels can enter the same router path as WhatsApp;
 - DMs/unconfigured channels are discarded at the adapter boundary;
-- Discord tokens and raw events never persist or enter logs.
+- bridge-owned webhook messages do not loop back as fresh ingress;
+- Discord tokens, webhook credentials, and raw events never persist or enter logs.
 
 ### Phase 4 — Multi-adapter router/application wiring
 Issue #19 makes application wiring adapter-agnostic and dispatches each destination alias to the correct adapter.
@@ -88,21 +89,28 @@ Expected outcome:
 - WhatsApp-only deployments still work unchanged.
 
 ### Phase 5 — Complete Discord message lifecycle
-Issue #20 adds Discord outbound send, transient media, replies, reactions, edits, and deletes.
+Issue #20 adds Discord outbound send, transient media, replies, reactions, edits, and deletes. WhatsApp -> Discord sends must use a bridge-managed channel webhook with the transient WhatsApp display/push name as the per-message webhook username so each WhatsApp participant appears as a distinct Discord APP/webhook sender. If no display name is available, use the HMAC actor ID fallback.
 
 Expected outcome:
+- different WhatsApp participants visibly appear in Discord under their own transient APP/webhook usernames, not one generic bridge bot identity;
+- no real Discord accounts or per-user webhooks are created;
+- webhook-created Discord message IDs are stored as normal opaque message copies for lifecycle mapping;
 - the existing canonical lifecycle semantics work across transports;
 - native Discord replies/reactions are used when possible;
 - privacy-preserving text fallbacks are used when mapping is unavailable;
+- WhatsApp display names remain transient and are never persisted/logged;
 - media is never persisted.
 
 ### Phase 6 — Admin discovery and UI
-Issue #21 adds Discord connection/status, transient channel discovery, alias assignment, and mixed-transport sync-set editing in the embedded UI.
+Issue #21 adds Discord connection/status, transient channel discovery, alias assignment, mixed-transport sync-set editing, and safe readiness/status for the bridge-managed channel webhook used for WhatsApp sender APP rendering.
 
 Expected outcome:
 - an admin can discover/select a Discord channel, give it a safe alias, and add it to a sync set;
+- the bridge can create/find/reuse the channel webhook when permissions allow;
+- missing webhook-management permissions produce a clear actionable admin error;
+- admins are not asked to create per-user webhooks or store webhook URLs;
 - guild/channel display metadata remains transient;
-- bot token is configured externally through environment/secret mechanisms.
+- bot token and webhook credentials are configured/managed without entering application persistence.
 
 ### Phase 7 — Discord-specific format semantics
 Issue #22 defines deterministic behavior for Discord threads/forums, mentions, WhatsApp polls, stickers, and unsupported Discord message types.
@@ -113,10 +121,13 @@ Expected outcome:
 - unsupported mappings fail/fallback predictably without weakening privacy.
 
 ### Phase 8 — Hardening, docs, and cleanup
-Issue #23 runs the mixed-transport test matrix, privacy review, reconnect/rate-limit tests, documentation updates, and final cleanup.
+Issue #23 runs the mixed-transport test matrix, privacy review, reconnect/rate-limit tests, sender-rendering verification, documentation updates, and final cleanup.
 
 Expected outcome:
 - all earlier issues are closed;
+- end-to-end tests prove at least two WhatsApp participants render with different Discord APP/webhook usernames plus the HMAC fallback path;
+- bot/gateway vs webhook responsibilities and required webhook permissions are documented;
+- webhook-created copies participate correctly in canonical replies/reactions/edits/deletes;
 - `make fmt`, `make test`, and `make vet` pass;
 - deployment/docs accurately describe Discord support;
 - `VERSION` is unchanged;
