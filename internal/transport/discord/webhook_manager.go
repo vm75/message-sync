@@ -18,8 +18,17 @@ type managedWebhookCredential struct {
 	token string
 }
 
+type webhookAPI interface {
+	ChannelWebhooks(channelID string, options ...discordgo.RequestOption) ([]*discordgo.Webhook, error)
+	WebhookCreate(channelID, name, avatar string, options ...discordgo.RequestOption) (*discordgo.Webhook, error)
+	WebhookExecute(webhookID, token string, wait bool, data *discordgo.WebhookParams, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	WebhookMessageEdit(webhookID, token, messageID string, data *discordgo.WebhookEdit, options ...discordgo.RequestOption) (*discordgo.Message, error)
+	WebhookMessageDelete(webhookID, token, messageID string, options ...discordgo.RequestOption) error
+}
+
 type managedWebhookClient struct {
-	session *discordgo.Session
+	api       webhookAPI
+	botUserID func() string
 
 	mu    sync.RWMutex
 	hooks map[string]managedWebhookCredential
@@ -27,8 +36,14 @@ type managedWebhookClient struct {
 
 func newManagedWebhookClient(session *discordgo.Session) *managedWebhookClient {
 	return &managedWebhookClient{
-		session: session,
-		hooks:   make(map[string]managedWebhookCredential),
+		api: session,
+		botUserID: func() string {
+			if session == nil || session.State == nil || session.State.User == nil {
+				return ""
+			}
+			return strings.TrimSpace(session.State.User.ID)
+		},
+		hooks: make(map[string]managedWebhookCredential),
 	}
 }
 
@@ -36,13 +51,13 @@ func newManagedWebhookClient(session *discordgo.Session) *managedWebhookClient {
 // channel and keeps its credential only in process memory. Re-running Prepare
 // reuses the existing webhook instead of creating one per source user or restart.
 func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string) error {
-	if m == nil || m.session == nil {
+	if m == nil || m.api == nil {
 		return errors.New("Discord webhook manager is not initialized")
 	}
 
 	botUserID := ""
-	if m.session.State != nil && m.session.State.User != nil {
-		botUserID = strings.TrimSpace(m.session.State.User.ID)
+	if m.botUserID != nil {
+		botUserID = strings.TrimSpace(m.botUserID())
 	}
 
 	next := make(map[string]managedWebhookCredential, len(channelIDs))
@@ -52,7 +67,7 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 			return errors.New("Discord webhook channel is required")
 		}
 
-		webhooks, err := m.session.ChannelWebhooks(
+		webhooks, err := m.api.ChannelWebhooks(
 			channelID,
 			discordgo.WithContext(ctx),
 			discordgo.WithRetryOnRatelimit(true),
@@ -77,7 +92,7 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 		}
 
 		if managed == nil {
-			managed, err = m.session.WebhookCreate(
+			managed, err = m.api.WebhookCreate(
 				channelID,
 				managedWebhookName,
 				"",
@@ -131,7 +146,7 @@ func (m *managedWebhookClient) Execute(ctx context.Context, channelID string, me
 		}}
 	}
 
-	created, err := m.session.WebhookExecute(
+	created, err := m.api.WebhookExecute(
 		credential.id,
 		credential.token,
 		true,
@@ -158,7 +173,7 @@ func (m *managedWebhookClient) Edit(ctx context.Context, channelID, messageID, c
 		return errors.New("Discord message id is required")
 	}
 
-	_, err := m.session.WebhookMessageEdit(
+	_, err := m.api.WebhookMessageEdit(
 		credential.id,
 		credential.token,
 		messageID,
@@ -185,7 +200,7 @@ func (m *managedWebhookClient) Delete(ctx context.Context, channelID, messageID 
 		return errors.New("Discord message id is required")
 	}
 
-	err := m.session.WebhookMessageDelete(
+	err := m.api.WebhookMessageDelete(
 		credential.id,
 		credential.token,
 		messageID,
