@@ -15,6 +15,7 @@ var (
 	syncSetIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 	jidPattern       = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
 	discordIDPattern = regexp.MustCompile(`^[0-9]{1,20}$`)
+	telegramIDPattern = regexp.MustCompile(`^-[1-9][0-9]{0,18}$`)
 )
 
 func ValidateAlias(alias string) error {
