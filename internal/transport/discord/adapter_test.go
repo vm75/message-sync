@@ -2,8 +2,6 @@ package discord
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -152,22 +150,10 @@ func TestAdapterUpdateConfigUsesOnlyDiscordEndpoints(t *testing.T) {
 	}
 }
 
-func TestAdapterContractAndDeferredOutbound(t *testing.T) {
+func TestAdapterContract(t *testing.T) {
 	var adapter transport.Adapter = &Adapter{}
 	if adapter.Name() != "discord" {
 		t.Fatalf("Name() = %q", adapter.Name())
-	}
-	if _, err := adapter.Send(context.Background(), transport.Outgoing{}); !errors.Is(err, ErrOutboundNotImplemented) {
-		t.Fatalf("Send error = %v", err)
-	}
-	if err := adapter.React(context.Background(), transport.Reaction{}); !errors.Is(err, ErrOutboundNotImplemented) {
-		t.Fatalf("React error = %v", err)
-	}
-	if err := adapter.Edit(context.Background(), transport.MessageRef{}, "text"); !errors.Is(err, ErrOutboundNotImplemented) {
-		t.Fatalf("Edit error = %v", err)
-	}
-	if err := adapter.Delete(context.Background(), transport.MessageRef{}); !errors.Is(err, ErrOutboundNotImplemented) {
-		t.Fatalf("Delete error = %v", err)
 	}
 }
 
