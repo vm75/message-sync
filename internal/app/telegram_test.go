@@ -147,7 +147,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	waitStarted()
 
 	wa.events <- transport.Incoming{
-		Endpoint:  "wa",
+		Endpoint:  "wa1",
 		RemoteID:  "wa-source-message",
 		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
 		Kind:      "text",
@@ -333,9 +333,10 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"wa2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"wa"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"wa1", "wa2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -440,10 +441,11 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 		cancel()
 		t.Fatalf("POST Telegram endpoint failed: %v", err)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusCreated {
+	statusCode := resp.StatusCode
+	resp.Body.Close()
+	if statusCode != http.StatusCreated {
 		cancel()
-		t.Fatalf("POST Telegram endpoint status = %d, want 201", resp.StatusCode)
+		t.Fatalf("POST Telegram endpoint status = %d, want 201", statusCode)
 	}
 
 	for i := 0; i < 100; i++ {
