@@ -30,6 +30,7 @@ The following features have already been implemented in the core service:
   - Native Discord poll/vote-state bridging.
   - Directional/one-way bridge modes.
 - **Architectural Requirement**: Any extension must keep Discord as a `transport.Adapter` at the canonical router boundary. Configured endpoint aliases remain routing identity; Discord message IDs remain remote-copy IDs only.
+
 ### B. Richer WhatsApp Message Formats
 - **Description**: Support for specialized message types.
 - **Tracked Capabilities**:
