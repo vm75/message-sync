@@ -36,8 +36,7 @@ func TestLoadBotTokenFromEnvironment(t *testing.T) {
 func TestLoadBotTokenFromSecretFile(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	path := filepath.Join(t.TempDir(), "telegram-token")
-	if err := os.WriteFile(path, []byte("12345:mounted-secret-token
-"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("12345:mounted-secret-token\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", path)
