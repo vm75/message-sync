@@ -147,7 +147,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	waitStarted()
 
 	wa.events <- transport.Incoming{
-		Endpoint:  "wa1",
+		Endpoint:  "wa",
 		RemoteID:  "wa-source-message",
 		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
 		Kind:      "text",
@@ -468,7 +468,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	}
 
 	wa.events <- transport.Incoming{
-		Endpoint:  "wa",
+		Endpoint:  "wa1",
 		RemoteID:  "wa-after-reload",
 		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
 		Kind:      "text",
