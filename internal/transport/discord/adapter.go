@@ -109,6 +109,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		reactionState:     make(map[reactionKey]string),
 		suppressedDeletes: make(map[string]struct{}),
 	}
+	session.AddHandler(adapter.handleReady)
+	session.AddHandler(adapter.handleResumed)
+	session.AddHandler(adapter.handleDisconnect)
 	session.AddHandler(adapter.handleMessageCreate)
 	session.AddHandler(adapter.handleMessageUpdate)
 	session.AddHandler(adapter.handleMessageDelete)
@@ -120,9 +123,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		_ = session.Close()
 		return nil, errors.New("connect Discord gateway")
 	}
-	adapter.mu.Lock()
-	adapter.connected = true
-	adapter.mu.Unlock()
+	adapter.setConnected(true, "discord_connected")
 	select {
 	case <-ctx.Done():
 		_ = adapter.Close()
@@ -141,10 +142,6 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		}
 	}
 
-	opts.Logger.Info("Discord transport connected",
-		"event", "discord_connected",
-		"endpoints", len(opts.ChannelIDs),
-	)
 	return adapter, nil
 }
 
@@ -184,9 +181,7 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closeOnce.Do(func() {
-		a.mu.Lock()
-		a.connected = false
-		a.mu.Unlock()
+		a.setConnected(false, "discord_disconnected")
 		if a.session == nil {
 			return
 		}
@@ -195,11 +190,44 @@ func (a *Adapter) Close() error {
 			a.closeErr = errors.New("close Discord gateway")
 			return
 		}
-		if a.logger != nil {
-			a.logger.Info("Discord transport disconnected", "event", "discord_disconnected")
-		}
 	})
 	return a.closeErr
+}
+
+func (a *Adapter) handleReady(_ *discordgo.Session, _ *discordgo.Ready) {
+	a.setConnected(true, "discord_connected")
+}
+
+func (a *Adapter) handleResumed(_ *discordgo.Session, _ *discordgo.Resumed) {
+	a.setConnected(true, "discord_reconnected")
+}
+
+func (a *Adapter) handleDisconnect(_ *discordgo.Session, _ *discordgo.Disconnect) {
+	a.setConnected(false, "discord_disconnected")
+}
+
+func (a *Adapter) setConnected(connected bool, event string) {
+	if a == nil {
+		return
+	}
+
+	a.mu.Lock()
+	changed := a.connected != connected
+	a.connected = connected
+	logger := a.logger
+	a.mu.Unlock()
+	if !changed || logger == nil {
+		return
+	}
+
+	message := "Discord transport disconnected"
+	if connected {
+		message = "Discord transport connected"
+		if event == "discord_reconnected" {
+			message = "Discord transport reconnected"
+		}
+	}
+	logger.Info(message, "event", event)
 }
 
 func (a *Adapter) UpdateConfig(cfg *config.Config) error {
