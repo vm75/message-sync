@@ -83,9 +83,9 @@ func TestBridgeInitiatedDiscordDeleteGatewayEchoIsIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	adapter := &Adapter{
-		normalizer:         normalizer,
-		events:             make(chan transport.Incoming, 1),
-		suppressedDeletes:  make(map[string]struct{}),
+		normalizer:        normalizer,
+		events:            make(chan transport.Incoming, 1),
+		suppressedDeletes: make(map[string]struct{}),
 	}
 	adapter.markSuppressedDelete(testChannelID, "923456789012345672")
 	adapter.handleMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{
