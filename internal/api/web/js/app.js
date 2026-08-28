@@ -10,6 +10,7 @@
   // Validation Regular Expressions
   const ALIAS_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const GROUP_JID_REGEX = /^[0-9]+(-[0-9]+)?@g\.us$/;
+  const DISCORD_CHANNEL_ID_REGEX = /^[0-9]+$/;
   const SYNC_SET_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
   // DOM Elements
@@ -24,6 +25,7 @@
     login: document.getElementById('view-login'),
     dashboard: document.getElementById('view-dashboard'),
     whatsapp: document.getElementById('view-whatsapp'),
+    discord: document.getElementById('view-discord'),
     groups: document.getElementById('view-groups'),
     'sync-sets': document.getElementById('view-sync-sets'),
     settings: document.getElementById('view-settings')
@@ -46,6 +48,7 @@
 
   // Dashboard Stats Elements
   const dashWaStatus = document.getElementById('dash-wa-status');
+  const dashDiscordStatus = document.getElementById('dash-discord-status');
   const dashGroupsCount = document.getElementById('dash-groups-count');
   const dashSyncSetsCount = document.getElementById('dash-sync-sets-count');
   const dashConfigMode = document.getElementById('dash-config-mode');
@@ -64,7 +67,19 @@
   const waCountdownBadge = document.getElementById('wa-countdown-badge');
   const waCountdownText = document.getElementById('wa-countdown-text');
 
-  // Groups View Elements
+  // Discord View Elements
+  const btnDiscordRefresh = document.getElementById('btn-discord-refresh');
+  const btnDiscordDiscover = document.getElementById('btn-discord-discover');
+  const discordStatusIndicator = document.getElementById('discord-status-indicator');
+  const discordStatusText = document.getElementById('discord-status-text');
+  const discordStatusDesc = document.getElementById('discord-status-desc');
+  const discordConfiguredBody = document.getElementById('discord-configured-body');
+  const discordConfiguredEmpty = document.getElementById('discord-configured-empty');
+  const discordDiscoveryAlert = document.getElementById('discord-discovery-alert');
+  const discordDiscoveryBody = document.getElementById('discord-discovery-body');
+  const discordDiscoveryEmpty = document.getElementById('discord-discovery-empty');
+
+  // Endpoint View Elements
   const btnOpenAddGroup = document.getElementById('btn-open-add-group');
   const searchGroupsInput = document.getElementById('search-groups');
   const groupsCountBadge = document.getElementById('groups-count-badge');
@@ -135,10 +150,13 @@
   // Application State
   let isSetup = null;
   let isAuthenticated = false;
-  let cachedGroups = [];
+  let cachedEndpoints = [];
   let cachedSyncSets = [];
   let cachedConfig = null;
+  let cachedDiscordChannels = [];
+  let cachedDiscordStatus = null;
   let editingGroupAlias = null;
+  let editingEndpointTransport = 'whatsapp';
   let editingSyncSetId = null;
   let confirmCallback = null;
 
@@ -550,6 +568,8 @@
       isAuthenticated = false;
       stopWhatsAppPolling();
       stopQrCountdown();
+      cachedDiscordChannels = [];
+      cachedDiscordStatus = null;
       showToast('Signed out of admin console.', 'success');
       window.Router.navigate('login');
     }
@@ -560,9 +580,10 @@
    */
   async function loadDashboardStats() {
     try {
-      const [waStatus, groups, syncSets, cfg] = await Promise.allSettled([
+      const [waStatus, discordStatus, endpoints, syncSets, cfg] = await Promise.allSettled([
         window.API.getWhatsAppStatus(),
-        window.API.getGroups(),
+        window.API.getDiscordStatus(),
+        window.API.getEndpoints(),
         window.API.getSyncSets(),
         window.API.getConfig()
       ]);
@@ -578,9 +599,19 @@
         }
       }
 
-      if (dashGroupsCount && groups.status === 'fulfilled' && Array.isArray(groups.value)) {
-        cachedGroups = groups.value;
-        dashGroupsCount.textContent = `${cachedGroups.length} Group${cachedGroups.length === 1 ? '' : 's'}`;
+      if (dashDiscordStatus) {
+        if (discordStatus.status === 'fulfilled' && discordStatus.value) {
+          const s = discordStatus.value;
+          dashDiscordStatus.textContent = !s.configured ? 'Not Configured' : s.connected ? 'Connected' : 'Disconnected';
+          dashDiscordStatus.className = s.connected ? 'stat-value text-success' : s.configured ? 'stat-value text-warning' : 'stat-value';
+        } else {
+          dashDiscordStatus.textContent = 'Standby';
+        }
+      }
+
+      if (dashGroupsCount && endpoints.status === 'fulfilled' && Array.isArray(endpoints.value)) {
+        cachedEndpoints = endpoints.value;
+        dashGroupsCount.textContent = `${cachedEndpoints.length} Endpoint${cachedEndpoints.length === 1 ? '' : 's'}`;
       }
 
       if (dashSyncSetsCount && syncSets.status === 'fulfilled' && Array.isArray(syncSets.value)) {
@@ -802,68 +833,273 @@
   }
 
   /**
-   * Groups View Controller
+   * Discord Admin & Discovery Controller
+   */
+  function webhookStatusForAlias(alias) {
+    if (!cachedDiscordStatus || !Array.isArray(cachedDiscordStatus.webhooks)) return 'unavailable';
+    const item = cachedDiscordStatus.webhooks.find((entry) => entry.alias === alias);
+    return item ? item.status : 'unavailable';
+  }
+
+  function renderWebhookReadiness(status) {
+    if (status === 'ready') {
+      return '<span class="badge badge-success">Webhook ready</span>';
+    }
+    if (status === 'missing_permission') {
+      return '<span class="badge badge-warning">Manage Webhooks required</span>';
+    }
+    return '<span class="badge badge-neutral">Webhook unavailable</span>';
+  }
+
+  function renderDiscordStatus(data) {
+    if (!data) return;
+    cachedDiscordStatus = data;
+    const missingPermission = Array.isArray(data.webhooks) && data.webhooks.some((item) => item.status === 'missing_permission');
+
+    if (!data.configured) {
+      discordStatusIndicator.className = 'status-indicator indicator-neutral';
+      discordStatusText.className = 'status-badge badge-neutral';
+      discordStatusText.textContent = 'Not Configured';
+      discordStatusDesc.textContent = 'Set DISCORD_BOT_TOKEN or DISCORD_BOT_TOKEN_FILE on the server and restart message-sync. Credentials are deployment-only and are never entered in this browser.';
+      if (btnDiscordDiscover) btnDiscordDiscover.disabled = true;
+    } else if (data.connected) {
+      discordStatusIndicator.className = missingPermission ? 'status-indicator indicator-warning' : 'status-indicator indicator-success';
+      discordStatusText.className = missingPermission ? 'status-badge badge-warning' : 'status-badge badge-success';
+      discordStatusText.textContent = missingPermission ? 'Connected • Permission Action Needed' : 'Connected & Active';
+      discordStatusDesc.textContent = missingPermission
+        ? 'Discord is connected, but one or more configured endpoints need the bot permission Manage Webhooks. Grant it in those channels, then refresh.'
+        : 'Discord gateway is connected. Live channel discovery is available.';
+      if (btnDiscordDiscover) btnDiscordDiscover.disabled = false;
+    } else {
+      discordStatusIndicator.className = 'status-indicator indicator-warning';
+      discordStatusText.className = 'status-badge badge-warning';
+      discordStatusText.textContent = 'Configured • Disconnected';
+      discordStatusDesc.textContent = 'A Discord credential source is configured, but the gateway is not currently connected.';
+      if (btnDiscordDiscover) btnDiscordDiscover.disabled = true;
+    }
+
+    renderConfiguredDiscordEndpoints();
+  }
+
+  function renderConfiguredDiscordEndpoints() {
+    if (!discordConfiguredBody) return;
+    const endpoints = cachedEndpoints.filter((endpoint) => endpoint.transport === 'discord');
+    if (endpoints.length === 0) {
+      discordConfiguredBody.innerHTML = '';
+      if (discordConfiguredEmpty) discordConfiguredEmpty.classList.remove('hidden');
+      return;
+    }
+    if (discordConfiguredEmpty) discordConfiguredEmpty.classList.add('hidden');
+    discordConfiguredBody.innerHTML = endpoints.map((endpoint) => {
+      const syncSet = endpoint.syncSetId
+        ? `<span class="badge-assigned">${escapeHtml(endpoint.syncSetId)}</span>`
+        : '<span class="badge-unassigned">Unassigned</span>';
+      return `
+        <tr>
+          <td><span class="alias-badge">${escapeHtml(endpoint.alias)}</span></td>
+          <td><span class="jid-text">${escapeHtml(endpoint.remoteId)}</span></td>
+          <td>${syncSet}</td>
+          <td>${renderWebhookReadiness(webhookStatusForAlias(endpoint.alias))}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadDiscordStatus(showSpinner = true) {
+    if (showSpinner && btnDiscordRefresh) setButtonLoading(btnDiscordRefresh, true);
+    try {
+      const [status, endpoints, syncSets] = await Promise.all([
+        window.API.getDiscordStatus(),
+        window.API.getEndpoints(),
+        window.API.getSyncSets()
+      ]);
+      cachedEndpoints = Array.isArray(endpoints) ? endpoints : [];
+      cachedSyncSets = Array.isArray(syncSets) ? syncSets : [];
+      renderDiscordStatus(status);
+      if (cachedDiscordChannels.length > 0) renderDiscordDiscovery();
+    } catch (err) {
+      if (discordStatusIndicator) discordStatusIndicator.className = 'status-indicator indicator-danger';
+      if (discordStatusText) {
+        discordStatusText.className = 'status-badge badge-danger';
+        discordStatusText.textContent = 'Service Unavailable';
+      }
+      if (discordStatusDesc) discordStatusDesc.textContent = err.message || 'Unable to query Discord status.';
+    } finally {
+      if (showSpinner && btnDiscordRefresh) setButtonLoading(btnDiscordRefresh, false);
+    }
+  }
+
+  function suggestedDiscordAlias(channel) {
+    const base = sanitizeAlias(channel.channelName) || 'discord_channel';
+    let candidate = base;
+    let suffix = 2;
+    const aliases = new Set(cachedEndpoints.map((endpoint) => endpoint.alias));
+    while (aliases.has(candidate)) {
+      const suffixText = `_${suffix++}`;
+      candidate = (base.slice(0, Math.max(1, 64 - suffixText.length)) + suffixText).slice(0, 64);
+    }
+    return candidate;
+  }
+
+  function renderDiscordDiscovery() {
+    if (!discordDiscoveryBody) return;
+    if (!Array.isArray(cachedDiscordChannels) || cachedDiscordChannels.length === 0) {
+      discordDiscoveryBody.innerHTML = '';
+      if (discordDiscoveryEmpty) {
+        discordDiscoveryEmpty.classList.remove('hidden');
+        discordDiscoveryEmpty.querySelector('.empty-title').textContent = 'No Discoverable Text Channels';
+        discordDiscoveryEmpty.querySelector('.empty-desc').textContent = 'The connected bot did not return any guild text or announcement channels.';
+      }
+      return;
+    }
+    if (discordDiscoveryEmpty) discordDiscoveryEmpty.classList.add('hidden');
+
+    discordDiscoveryBody.innerHTML = cachedDiscordChannels.map((channel) => {
+      const existing = cachedEndpoints.find((endpoint) => endpoint.transport === 'discord' && endpoint.remoteId === channel.channelId);
+      if (existing) {
+        const setText = existing.syncSetId ? ` • Sync set: ${escapeHtml(existing.syncSetId)}` : ' • Unassigned';
+        return `
+          <tr>
+            <td>${escapeHtml(channel.guildName || channel.guildId)}</td>
+            <td><strong>#${escapeHtml(channel.channelName || channel.channelId)}</strong></td>
+            <td><span class="jid-text">${escapeHtml(channel.channelId)}</span></td>
+            <td><span class="alias-badge">${escapeHtml(existing.alias)}</span>${setText}<br>${renderWebhookReadiness(webhookStatusForAlias(existing.alias))}</td>
+          </tr>
+        `;
+      }
+
+      const syncOptions = ['<option value="">-- Unassigned --</option>']
+        .concat(cachedSyncSets.map((set) => `<option value="${escapeHtml(set.id)}">${escapeHtml(set.id)}</option>`))
+        .join('');
+      return `
+        <tr>
+          <td>${escapeHtml(channel.guildName || channel.guildId)}</td>
+          <td><strong>#${escapeHtml(channel.channelName || channel.channelId)}</strong></td>
+          <td><span class="jid-text">${escapeHtml(channel.channelId)}</span></td>
+          <td>
+            <div class="form-grid-2">
+              <input class="form-input font-mono discord-alias-input" data-channel-id="${escapeHtml(channel.channelId)}" value="${escapeHtml(suggestedDiscordAlias(channel))}" aria-label="Endpoint alias">
+              <select class="form-select discord-sync-set-select" data-channel-id="${escapeHtml(channel.channelId)}">${syncOptions}</select>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm btn-configure-discord-channel" data-channel-id="${escapeHtml(channel.channelId)}" style="margin-top:.5rem;">Configure Endpoint</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    discordDiscoveryBody.querySelectorAll('.btn-configure-discord-channel').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const channelId = btn.getAttribute('data-channel-id');
+        const aliasInput = discordDiscoveryBody.querySelector(`.discord-alias-input[data-channel-id="${channelId}"]`);
+        const syncSelect = discordDiscoveryBody.querySelector(`.discord-sync-set-select[data-channel-id="${channelId}"]`);
+        const alias = aliasInput ? aliasInput.value.trim() : '';
+        const syncSetId = syncSelect && syncSelect.value ? syncSelect.value : null;
+        if (!ALIAS_REGEX.test(alias)) {
+          showToast('Alias must start with an alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.', 'warning');
+          if (aliasInput) aliasInput.focus();
+          return;
+        }
+        setButtonLoading(btn, true);
+        try {
+          await window.API.createEndpoint({ alias, transport: 'discord', remoteId: channelId, syncSetId });
+          showToast(`Discord endpoint '${alias}' configured.`, 'success');
+          await loadDiscordStatus(false);
+          await discoverDiscordChannels();
+        } catch (err) {
+          showToast(err.message || 'Failed to configure Discord endpoint', 'danger');
+        } finally {
+          setButtonLoading(btn, false);
+        }
+      });
+    });
+  }
+
+  async function discoverDiscordChannels() {
+    if (!btnDiscordDiscover) return;
+    setButtonLoading(btnDiscordDiscover, true);
+    if (discordDiscoveryAlert) discordDiscoveryAlert.classList.add('hidden');
+    try {
+      const [channels, endpoints, syncSets, status] = await Promise.all([
+        window.API.getDiscordChannels(),
+        window.API.getEndpoints(),
+        window.API.getSyncSets(),
+        window.API.getDiscordStatus()
+      ]);
+      cachedDiscordChannels = Array.isArray(channels) ? channels : [];
+      cachedEndpoints = Array.isArray(endpoints) ? endpoints : [];
+      cachedSyncSets = Array.isArray(syncSets) ? syncSets : [];
+      cachedDiscordStatus = status;
+      renderDiscordStatus(status);
+      renderDiscordDiscovery();
+    } catch (err) {
+      cachedDiscordChannels = [];
+      renderDiscordDiscovery();
+      if (discordDiscoveryAlert) {
+        discordDiscoveryAlert.textContent = err.message || 'Discord channel discovery failed.';
+        discordDiscoveryAlert.classList.remove('hidden');
+      }
+    } finally {
+      setButtonLoading(btnDiscordDiscover, false);
+    }
+  }
+
+  /**
+   * Endpoint View Controller
    */
   async function loadGroups() {
     try {
-      const [groupsRes, syncSetsRes] = await Promise.all([
-        window.API.getGroups(),
+      const [endpointsRes, syncSetsRes] = await Promise.all([
+        window.API.getEndpoints(),
         window.API.getSyncSets()
       ]);
-
-      cachedGroups = Array.isArray(groupsRes) ? groupsRes : [];
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : [];
       cachedSyncSets = Array.isArray(syncSetsRes) ? syncSetsRes : [];
       renderGroupsTable(searchGroupsInput ? searchGroupsInput.value : '');
     } catch (err) {
-      console.error('Failed to load groups', err);
-      showToast(err.message || 'Failed to load groups list', 'danger');
+      console.error('Failed to load endpoints', err);
+      showToast(err.message || 'Failed to load endpoint list', 'danger');
     }
   }
 
   function renderGroupsTable(query = '') {
     if (!groupsTableBody) return;
     const q = query.trim().toLowerCase();
-
-    const filtered = cachedGroups.filter((g) => {
+    const filtered = cachedEndpoints.filter((endpoint) => {
       if (!q) return true;
-      return (g.alias && g.alias.toLowerCase().includes(q)) || (g.jid && g.jid.toLowerCase().includes(q));
+      return [endpoint.alias, endpoint.transport, endpoint.remoteId, endpoint.syncSetId]
+        .some((value) => value && String(value).toLowerCase().includes(q));
     });
 
     if (groupsCountBadge) {
-      groupsCountBadge.textContent = `${cachedGroups.length} Group${cachedGroups.length === 1 ? '' : 's'}`;
+      groupsCountBadge.textContent = `${cachedEndpoints.length} Endpoint${cachedEndpoints.length === 1 ? '' : 's'}`;
     }
-
     if (filtered.length === 0) {
       groupsTableBody.innerHTML = '';
       if (groupsEmptyState) groupsEmptyState.classList.remove('hidden');
       return;
     }
-
     if (groupsEmptyState) groupsEmptyState.classList.add('hidden');
 
-    groupsTableBody.innerHTML = filtered.map((g) => {
-      const syncBadge = g.syncSetId
-        ? `<span class="badge-assigned"><svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>${escapeHtml(g.syncSetId)}</span>`
-        : `<span class="badge-unassigned">Unassigned</span>`;
-
+    groupsTableBody.innerHTML = filtered.map((endpoint) => {
+      const syncBadge = endpoint.syncSetId
+        ? `<span class="badge-assigned">${escapeHtml(endpoint.syncSetId)}</span>`
+        : '<span class="badge-unassigned">Unassigned</span>';
+      const transportBadge = endpoint.transport === 'discord'
+        ? '<span class="badge badge-primary">Discord</span>'
+        : '<span class="badge badge-success">WhatsApp</span>';
       return `
-        <tr data-alias="${escapeHtml(g.alias)}">
-          <td><span class="alias-badge">${escapeHtml(g.alias)}</span></td>
-          <td><span class="jid-text">${escapeHtml(g.jid)}</span></td>
+        <tr data-alias="${escapeHtml(endpoint.alias)}">
+          <td><span class="alias-badge">${escapeHtml(endpoint.alias)}</span></td>
+          <td>${transportBadge}</td>
+          <td><span class="jid-text">${escapeHtml(endpoint.remoteId)}</span></td>
           <td>${syncBadge}</td>
           <td class="text-right">
             <div class="table-actions">
-              <button class="btn-action-icon btn-edit-group" data-alias="${escapeHtml(g.alias)}" title="Edit Group">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-                </svg>
+              <button class="btn-action-icon btn-edit-group" data-alias="${escapeHtml(endpoint.alias)}" title="Edit Endpoint">
+                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </button>
-              <button class="btn-action-icon btn-action-delete btn-delete-group" data-alias="${escapeHtml(g.alias)}" title="Delete Group">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="3 6 5 6 21 6"></polyline>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                </svg>
+              <button class="btn-action-icon btn-action-delete btn-delete-group" data-alias="${escapeHtml(endpoint.alias)}" title="Delete Endpoint">
+                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               </button>
             </div>
           </td>
@@ -871,19 +1107,11 @@
       `;
     }).join('');
 
-    // Attach click listeners for action buttons
     groupsTableBody.querySelectorAll('.btn-edit-group').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const alias = btn.getAttribute('data-alias');
-        openEditGroupModal(alias);
-      });
+      btn.addEventListener('click', () => openEditGroupModal(btn.getAttribute('data-alias')));
     });
-
     groupsTableBody.querySelectorAll('.btn-delete-group').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const alias = btn.getAttribute('data-alias');
-        handleDeleteGroup(alias);
-      });
+      btn.addEventListener('click', () => handleDeleteGroup(btn.getAttribute('data-alias')));
     });
   }
 
@@ -909,7 +1137,8 @@
 
   async function openAddGroupModal() {
     editingGroupAlias = null;
-    modalGroupTitle.textContent = 'Add Configured Group';
+    editingEndpointTransport = 'whatsapp';
+    modalGroupTitle.textContent = 'Add WhatsApp Endpoint';
     modalGroupAlert.classList.add('hidden');
     inputGroupAlias.value = '';
     inputGroupAlias.disabled = false;
@@ -918,22 +1147,18 @@
 
     if (selectGroupWA) {
       selectGroupWA.disabled = true;
-      selectGroupWA.innerHTML = '<option value="">Fetching WhatsApp groups...</option>';
+      selectGroupWA.innerHTML = '<option value="">Fetching endpoints...</option>';
     }
-    if (selectGroupWAHint) {
-      selectGroupWAHint.textContent = 'Fetching joined groups from active WhatsApp session...';
-    }
-
+    if (selectGroupWAHint) selectGroupWAHint.textContent = 'Fetching joined groups from active WhatsApp session...';
     openModal(modalGroup);
 
     try {
-      const [waGroupsRes, groupsRes] = await Promise.all([
+      const [waGroupsRes, endpointsRes] = await Promise.all([
         window.API.getWhatsAppJoinedGroups().catch(() => []),
-        window.API.getGroups().catch(() => [])
+        window.API.getEndpoints().catch(() => [])
       ]);
-      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : cachedEndpoints;
       const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
-
       if (!selectGroupWA) return;
       selectGroupWA.disabled = false;
 
@@ -944,15 +1169,14 @@
       }
 
       selectGroupWA.innerHTML = '<option value="">-- Select a WhatsApp Group --</option>' +
-        waGroups.map((g) => {
-          const existing = cachedGroups.find((cg) => cg.jid === g.jid);
+        waGroups.map((group) => {
+          const existing = cachedEndpoints.find((endpoint) => endpoint.transport === 'whatsapp' && endpoint.remoteId === group.jid);
           if (existing) {
-            return `<option value="${escapeHtml(g.jid)}" disabled>${escapeHtml(g.name || g.jid)} (Configured as: ${escapeHtml(existing.alias)})</option>`;
+            return `<option value="${escapeHtml(group.jid)}" disabled>${escapeHtml(group.name || group.jid)} (Configured as: ${escapeHtml(existing.alias)})</option>`;
           }
-          return `<option value="${escapeHtml(g.jid)}" data-name="${escapeHtml(g.name || '')}">${escapeHtml(g.name || g.jid)}</option>`;
+          return `<option value="${escapeHtml(group.jid)}" data-name="${escapeHtml(group.name || '')}">${escapeHtml(group.name || group.jid)}</option>`;
         }).join('');
-
-      if (selectGroupWAHint) selectGroupWAHint.textContent = 'Select an active WhatsApp group to assign an alias.';
+      if (selectGroupWAHint) selectGroupWAHint.textContent = 'Select an active WhatsApp group to assign an endpoint alias.';
     } catch (err) {
       if (selectGroupWA) {
         selectGroupWA.disabled = false;
@@ -967,58 +1191,52 @@
       const selectedJid = selectGroupWA.value;
       inputGroupJid.value = selectedJid;
       const selectedOpt = selectGroupWA.options[selectGroupWA.selectedIndex];
-      if (selectedOpt && selectedOpt.dataset.name) {
-        const groupName = selectedOpt.dataset.name;
-        if (!inputGroupAlias.value) {
-          const suggested = sanitizeAlias(groupName);
-          if (suggested && !cachedGroups.some((g) => g.alias === suggested)) {
-            inputGroupAlias.value = suggested;
-          }
-        }
+      if (selectedOpt && selectedOpt.dataset.name && !inputGroupAlias.value) {
+        const suggested = sanitizeAlias(selectedOpt.dataset.name);
+        if (suggested && !cachedEndpoints.some((endpoint) => endpoint.alias === suggested)) inputGroupAlias.value = suggested;
       }
     });
   }
 
   function openEditGroupModal(alias) {
-    const group = cachedGroups.find((g) => g.alias === alias);
-    if (!group) return;
-
+    const endpoint = cachedEndpoints.find((item) => item.alias === alias);
+    if (!endpoint) return;
     editingGroupAlias = alias;
-    modalGroupTitle.textContent = `Edit Group: ${alias}`;
+    editingEndpointTransport = endpoint.transport;
+    modalGroupTitle.textContent = `Edit Endpoint: ${alias}`;
     modalGroupAlert.classList.add('hidden');
-    inputGroupAlias.value = group.alias;
-    inputGroupAlias.disabled = true; // Alias is primary key in path
-    inputGroupJid.value = group.jid;
+    inputGroupAlias.value = endpoint.alias;
+    inputGroupAlias.disabled = true;
+    inputGroupJid.value = endpoint.remoteId;
 
     if (selectGroupWA) {
-      selectGroupWA.innerHTML = `<option value="${escapeHtml(group.jid)}" selected>${escapeHtml(group.alias)} (${escapeHtml(group.jid)})</option>`;
+      const transportLabel = endpoint.transport === 'discord' ? 'Discord channel' : 'WhatsApp group';
+      selectGroupWA.innerHTML = `<option value="${escapeHtml(endpoint.remoteId)}" selected>${transportLabel} • ${escapeHtml(endpoint.remoteId)}</option>`;
       selectGroupWA.disabled = true;
     }
     if (selectGroupWAHint) {
-      selectGroupWAHint.textContent = 'WhatsApp group assignment is locked for existing alias.';
+      selectGroupWAHint.textContent = 'Transport target is locked for the existing alias; edit sync-set membership here.';
     }
-
-    populateSyncSetSelect(group.syncSetId || '');
+    populateSyncSetSelect(endpoint.syncSetId || '');
     openModal(modalGroup);
   }
 
   async function handleGroupFormSubmit(e) {
     e.preventDefault();
     modalGroupAlert.classList.add('hidden');
-
     const alias = inputGroupAlias.value.trim();
-    const jid = inputGroupJid.value.trim();
+    const remoteId = inputGroupJid.value.trim();
     const syncSetId = selectGroupSyncSet.value.trim() || null;
+    const transport = editingGroupAlias ? editingEndpointTransport : 'whatsapp';
 
-    if (!jid || !GROUP_JID_REGEX.test(jid)) {
-      modalGroupAlert.textContent = 'Please select a valid WhatsApp group.';
+    if ((transport === 'whatsapp' && (!remoteId || !GROUP_JID_REGEX.test(remoteId))) ||
+        (transport === 'discord' && (!remoteId || !DISCORD_CHANNEL_ID_REGEX.test(remoteId)))) {
+      modalGroupAlert.textContent = transport === 'discord' ? 'Discord channel ID is invalid.' : 'Please select a valid WhatsApp group.';
       modalGroupAlert.classList.remove('hidden');
-      if (selectGroupWA) selectGroupWA.focus();
       return;
     }
-
     if (!ALIAS_REGEX.test(alias)) {
-      modalGroupAlert.textContent = 'Alias must start with alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.';
+      modalGroupAlert.textContent = 'Alias must start with an alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.';
       modalGroupAlert.classList.remove('hidden');
       inputGroupAlias.focus();
       return;
@@ -1027,18 +1245,16 @@
     setButtonLoading(btnSubmitGroup, true);
     try {
       if (editingGroupAlias) {
-        // Update existing group
-        await window.API.updateGroup(editingGroupAlias, { jid, syncSetId });
-        showToast(`Group '${editingGroupAlias}' updated successfully.`, 'success');
+        await window.API.updateEndpoint(editingGroupAlias, { transport, remoteId, syncSetId });
+        showToast(`Endpoint '${editingGroupAlias}' updated successfully.`, 'success');
       } else {
-        // Create new group
-        await window.API.createGroup({ alias, jid, syncSetId });
-        showToast(`Group '${alias}' created successfully.`, 'success');
+        await window.API.createEndpoint({ alias, transport, remoteId, syncSetId });
+        showToast(`Endpoint '${alias}' created successfully.`, 'success');
       }
       closeModal(modalGroup);
       await loadGroups();
     } catch (err) {
-      modalGroupAlert.textContent = err.message || 'Failed to save group.';
+      modalGroupAlert.textContent = err.message || 'Failed to save endpoint.';
       modalGroupAlert.classList.remove('hidden');
     } finally {
       setButtonLoading(btnSubmitGroup, false);
@@ -1047,13 +1263,13 @@
 
   function handleDeleteGroup(alias) {
     showConfirmDialog({
-      title: `Delete Group: ${alias}`,
-      message: `Are you sure you want to delete group '${alias}'? This will remove its JID binding and detach it from any assigned sync set.`,
-      btnText: 'Delete Group',
+      title: `Delete Endpoint: ${alias}`,
+      message: `Are you sure you want to delete endpoint '${alias}'? It will be detached from any assigned sync set.`,
+      btnText: 'Delete Endpoint',
       isDanger: true,
       onConfirm: async () => {
-        await window.API.deleteGroup(alias);
-        showToast(`Group '${alias}' deleted successfully.`, 'success');
+        await window.API.deleteEndpoint(alias);
+        showToast(`Endpoint '${alias}' deleted successfully.`, 'success');
         await loadGroups();
       }
     });
@@ -1066,11 +1282,11 @@
     try {
       const [syncSetsRes, groupsRes] = await Promise.all([
         window.API.getSyncSets(),
-        window.API.getGroups()
+        window.API.getEndpoints()
       ]);
 
       cachedSyncSets = Array.isArray(syncSetsRes) ? syncSetsRes : [];
-      cachedGroups = Array.isArray(groupsRes) ? groupsRes : [];
+      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : [];
       renderSyncSetsGrid(searchSyncSetsInput ? searchSyncSetsInput.value : '');
     } catch (err) {
       console.error('Failed to load sync sets', err);
@@ -1105,7 +1321,7 @@
       const groups = Array.isArray(set.groups) ? set.groups : [];
       const memberChips = groups.length > 0
         ? groups.map((g) => `<span class="group-chip-tag"><svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>${escapeHtml(g)}</span>`).join('')
-        : `<span class="no-members-text">No member groups assigned yet</span>`;
+        : `<span class="no-members-text">No member endpoints assigned yet</span>`;
 
       return `
         <div class="card sync-set-card" data-id="${escapeHtml(set.id)}">
@@ -1168,121 +1384,94 @@
     });
   }
 
-  function renderSyncSetGroupChecklist(waGroups = [], groups = [], selectedGroupAliases = [], currentSetId = '') {
+  function renderSyncSetGroupChecklist(waGroups = [], endpoints = [], selectedEndpointAliases = [], currentSetId = '') {
     if (!syncSetGroupsChecklist) return;
 
-    // Combine WA groups and configured groups
-    const jidMap = new Map();
-
-    // 1. Add configured groups first
-    groups.forEach((g) => {
-      jidMap.set(g.jid, {
-        jid: g.jid,
+    const endpointMap = new Map();
+    endpoints.forEach((endpoint) => {
+      endpointMap.set(`${endpoint.transport}:${endpoint.remoteId}`, {
+        remoteId: endpoint.remoteId,
+        transport: endpoint.transport,
         name: '',
-        alias: g.alias,
-        syncSetId: g.syncSetId || null
+        alias: endpoint.alias,
+        syncSetId: endpoint.syncSetId || null
       });
     });
 
-    // 2. Add or enrich with ephemeral WhatsApp groups
-    waGroups.forEach((wg) => {
-      if (jidMap.has(wg.jid)) {
-        jidMap.get(wg.jid).name = wg.name;
+    waGroups.forEach((group) => {
+      const key = `whatsapp:${group.jid}`;
+      if (endpointMap.has(key)) {
+        endpointMap.get(key).name = group.name;
       } else {
-        jidMap.set(wg.jid, {
-          jid: wg.jid,
-          name: wg.name,
+        endpointMap.set(key, {
+          remoteId: group.jid,
+          transport: 'whatsapp',
+          name: group.name,
           alias: null,
           syncSetId: null
         });
       }
     });
 
-    const items = Array.from(jidMap.values());
-
+    const items = Array.from(endpointMap.values());
     if (items.length === 0) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No WhatsApp groups found. Join groups in WhatsApp first.</div>';
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No endpoints available. Pair WhatsApp or configure Discord channels first.</div>';
       return;
     }
 
     syncSetGroupsChecklist.innerHTML = items.map((item) => {
       const hasAlias = Boolean(item.alias);
-      const isSelected = hasAlias && selectedGroupAliases.includes(item.alias);
+      const isSelected = hasAlias && selectedEndpointAliases.includes(item.alias);
       const isAssignedOther = hasAlias && item.syncSetId && item.syncSetId !== currentSetId;
       const isAssignedThis = hasAlias && item.syncSetId === currentSetId;
-
       const isDisabled = !hasAlias || isAssignedOther;
-
       let statusBadge = '';
       if (!hasAlias) {
         statusBadge = '<span class="checklist-no-alias-tag">Needs Alias</span>';
       } else if (isAssignedOther) {
         statusBadge = `<span class="checklist-assigned-tag">In Set '${escapeHtml(item.syncSetId)}'</span>`;
       } else if (isAssignedThis) {
-        statusBadge = `<span class="badge badge-success font-mono" style="font-size:0.72rem;">Current Member</span>`;
+        statusBadge = '<span class="badge badge-success font-mono" style="font-size:0.72rem;">Current Member</span>';
       }
-
-      const aliasBadge = hasAlias
-        ? `<span class="checklist-alias">${escapeHtml(item.alias)}</span>`
+      const aliasBadge = hasAlias ? `<span class="checklist-alias">${escapeHtml(item.alias)}</span>` : '';
+      const transportBadge = item.transport === 'discord'
+        ? '<span class="badge badge-primary">Discord</span>'
+        : '<span class="badge badge-success">WhatsApp</span>';
+      const defineAliasBtn = !hasAlias && item.transport === 'whatsapp'
+        ? `<button type="button" class="btn-inline-alias" data-jid="${escapeHtml(item.remoteId)}" data-name="${escapeHtml(item.name || '')}">+ Define Alias</button>`
         : '';
-
-      const defineAliasBtn = !hasAlias
-        ? `<button type="button" class="btn-inline-alias" data-jid="${escapeHtml(item.jid)}" data-name="${escapeHtml(item.name || '')}">+ Define Alias</button>`
-        : '';
-
-      const displayName = item.name ? escapeHtml(item.name) : (hasAlias ? escapeHtml(item.alias) : escapeHtml(item.jid));
+      const displayName = item.name ? escapeHtml(item.name) : (hasAlias ? escapeHtml(item.alias) : escapeHtml(item.remoteId));
 
       return `
-        <div class="checklist-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-jid="${escapeHtml(item.jid)}" data-alias="${escapeHtml(item.alias || '')}">
+        <div class="checklist-item ${isSelected ? 'selected' : ''} ${isDisabled ? 'disabled' : ''}" data-remote-id="${escapeHtml(item.remoteId)}" data-alias="${escapeHtml(item.alias || '')}">
           <div class="checklist-item-row">
             <label class="checklist-item-main">
-              <input 
-                type="checkbox" 
-                class="checklist-checkbox" 
-                value="${escapeHtml(item.alias || '')}" 
-                ${isSelected ? 'checked' : ''}
-                ${isDisabled ? 'disabled' : ''}
-              >
+              <input type="checkbox" class="checklist-checkbox" value="${escapeHtml(item.alias || '')}" ${isSelected ? 'checked' : ''} ${isDisabled ? 'disabled' : ''}>
               <div class="checklist-info">
                 <div class="checklist-group-name">${displayName}</div>
-                <div class="checklist-group-meta">
-                  ${aliasBadge}
-                  ${statusBadge}
-                </div>
+                <div class="checklist-group-meta">${transportBadge} ${aliasBadge} ${statusBadge}</div>
               </div>
             </label>
-            <div class="checklist-action">
-              ${defineAliasBtn}
-            </div>
+            <div class="checklist-action">${defineAliasBtn}</div>
           </div>
-          <div class="inline-alias-box hidden" id="alias-box-${escapeHtml(item.jid.replace(/[^a-zA-Z0-9]/g, '_'))}">
+          ${item.transport === 'whatsapp' && !hasAlias ? `
+          <div class="inline-alias-box hidden" id="alias-box-${escapeHtml(item.remoteId.replace(/[^a-zA-Z0-9]/g, '_'))}">
             <input type="text" class="inline-alias-input" placeholder="e.g. team_a" value="${escapeHtml(sanitizeAlias(item.name))}">
-            <button type="button" class="btn btn-primary btn-sm btn-save-inline-alias" data-jid="${escapeHtml(item.jid)}">Save</button>
+            <button type="button" class="btn btn-primary btn-sm btn-save-inline-alias" data-jid="${escapeHtml(item.remoteId)}">Save</button>
             <button type="button" class="btn btn-ghost btn-sm btn-cancel-inline-alias">Cancel</button>
-          </div>
+          </div>` : ''}
         </div>
       `;
     }).join('');
 
-    // Attach checkbox listeners
     syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox').forEach((cb) => {
-      cb.addEventListener('change', () => {
-        const parent = cb.closest('.checklist-item');
-        if (cb.checked) {
-          parent.classList.add('selected');
-        } else {
-          parent.classList.remove('selected');
-        }
-      });
+      cb.addEventListener('change', () => cb.closest('.checklist-item').classList.toggle('selected', cb.checked));
     });
-
-    // Attach inline alias button listeners
     syncSetGroupsChecklist.querySelectorAll('.btn-inline-alias').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const jid = btn.getAttribute('data-jid');
-        const boxId = 'alias-box-' + jid.replace(/[^a-zA-Z0-9]/g, '_');
-        const box = document.getElementById(boxId);
+        const box = document.getElementById('alias-box-' + jid.replace(/[^a-zA-Z0-9]/g, '_'));
         if (box) {
           box.classList.toggle('hidden');
           const input = box.querySelector('.inline-alias-input');
@@ -1290,43 +1479,35 @@
         }
       });
     });
-
-    // Attach cancel inline alias
     syncSetGroupsChecklist.querySelectorAll('.btn-cancel-inline-alias').forEach((btn) => {
       btn.addEventListener('click', () => {
         const box = btn.closest('.inline-alias-box');
         if (box) box.classList.add('hidden');
       });
     });
-
-    // Attach save inline alias
     syncSetGroupsChecklist.querySelectorAll('.btn-save-inline-alias').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const jid = btn.getAttribute('data-jid');
         const box = btn.closest('.inline-alias-box');
         const input = box.querySelector('.inline-alias-input');
         const alias = input.value.trim();
-
         if (!ALIAS_REGEX.test(alias)) {
           showToast('Alias must start with alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.', 'warning');
           input.focus();
           return;
         }
-
         btn.disabled = true;
         try {
-          await window.API.createGroup({ alias, jid });
-          showToast(`Group alias '${alias}' saved.`, 'success');
-          // Reload groups and re-render checklist
-          const [waGroupsRes, groupsRes] = await Promise.all([
+          await window.API.createEndpoint({ alias, transport: 'whatsapp', remoteId: jid });
+          showToast(`Endpoint alias '${alias}' saved.`, 'success');
+          const [waGroupsRes, endpointsRes] = await Promise.all([
             window.API.getWhatsAppJoinedGroups().catch(() => []),
-            window.API.getGroups()
+            window.API.getEndpoints()
           ]);
-          cachedGroups = groupsRes;
-          // Retain current selection + add newly aliased group
-          const currentSelected = Array.from(syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox:checked')).map((c) => c.value);
+          cachedEndpoints = endpointsRes;
+          const currentSelected = Array.from(syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox:checked')).map((checkbox) => checkbox.value);
           currentSelected.push(alias);
-          renderSyncSetGroupChecklist(waGroupsRes, cachedGroups, currentSelected, currentSetId);
+          renderSyncSetGroupChecklist(waGroupsRes, cachedEndpoints, currentSelected, currentSetId);
         } catch (err) {
           showToast(err.message || 'Failed to save alias', 'danger');
         } finally {
@@ -1344,7 +1525,7 @@
     inputSyncSetId.disabled = false;
 
     if (syncSetGroupsChecklist) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching WhatsApp groups...</div>';
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
     }
     openModal(modalSyncSet);
     inputSyncSetId.focus();
@@ -1352,11 +1533,11 @@
     try {
       const [waGroupsRes, groupsRes] = await Promise.all([
         window.API.getWhatsAppJoinedGroups().catch(() => []),
-        window.API.getGroups().catch(() => [])
+        window.API.getEndpoints().catch(() => [])
       ]);
-      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : cachedEndpoints;
       const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
-      renderSyncSetGroupChecklist(waGroups, cachedGroups, [], '');
+      renderSyncSetGroupChecklist(waGroups, cachedEndpoints, [], '');
     } catch (err) {
       if (syncSetGroupsChecklist) {
         syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
@@ -1375,18 +1556,18 @@
     inputSyncSetId.disabled = true;
 
     if (syncSetGroupsChecklist) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching WhatsApp groups...</div>';
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
     }
     openModal(modalSyncSet);
 
     try {
       const [waGroupsRes, groupsRes] = await Promise.all([
         window.API.getWhatsAppJoinedGroups().catch(() => []),
-        window.API.getGroups().catch(() => [])
+        window.API.getEndpoints().catch(() => [])
       ]);
-      cachedGroups = Array.isArray(groupsRes) ? groupsRes : cachedGroups;
+      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : cachedEndpoints;
       const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
-      renderSyncSetGroupChecklist(waGroups, cachedGroups, set.groups || [], id);
+      renderSyncSetGroupChecklist(waGroups, cachedEndpoints, set.groups || [], id);
     } catch (err) {
       if (syncSetGroupsChecklist) {
         syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
@@ -1663,7 +1844,11 @@
     if (btnWaCancel) btnWaCancel.addEventListener('click', handleCancelPairWhatsApp);
     if (btnWaLogout) btnWaLogout.addEventListener('click', handleLogoutWhatsApp);
 
-    // Groups view
+    // Discord view
+    if (btnDiscordRefresh) btnDiscordRefresh.addEventListener('click', () => loadDiscordStatus(true));
+    if (btnDiscordDiscover) btnDiscordDiscover.addEventListener('click', discoverDiscordChannels);
+
+    // Endpoint view
     if (btnOpenAddGroup) btnOpenAddGroup.addEventListener('click', openAddGroupModal);
     if (formGroup) formGroup.addEventListener('submit', handleGroupFormSubmit);
     if (searchGroupsInput) {
@@ -1692,6 +1877,8 @@
         isAuthenticated = false;
         stopWhatsAppPolling();
         stopQrCountdown();
+        cachedDiscordChannels = [];
+        cachedDiscordStatus = null;
         showToast('Your session has expired. Please sign in again.', 'danger');
         window.Router.navigate('login');
       }
@@ -1755,6 +1942,11 @@
     window.Router.addRoute('whatsapp', () => {
       switchView('whatsapp');
       loadWhatsAppStatus(true);
+    });
+
+    window.Router.addRoute('discord', () => {
+      switchView('discord');
+      loadDiscordStatus(true);
     });
 
     window.Router.addRoute('groups', () => {

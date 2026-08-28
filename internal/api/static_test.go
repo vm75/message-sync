@@ -68,6 +68,56 @@ func TestStaticHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("Discord admin UI is deployment-only and transport-aware", func(t *testing.T) {
+		resp, err := client.Get(ts.URL + "/")
+		if err != nil {
+			t.Fatalf("GET / failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		html := string(body)
+		for _, expected := range []string{
+			`data-tab="discord"`,
+			"Discord Bot & Channel Discovery",
+			"DISCORD_BOT_TOKEN",
+			"DISCORD_BOT_TOKEN_FILE",
+			"Configured Endpoints",
+		} {
+			if !strings.Contains(html, expected) {
+				t.Fatalf("Discord admin HTML missing %q", expected)
+			}
+		}
+		for _, forbidden := range []string{
+			`id="discord-token"`,
+			`name="discord-token"`,
+			`type="password" id="discord`,
+		} {
+			if strings.Contains(html, forbidden) {
+				t.Fatalf("Discord admin HTML contains credential input marker %q", forbidden)
+			}
+		}
+
+		resp, err = client.Get(ts.URL + "/js/app.js")
+		if err != nil {
+			t.Fatalf("GET /js/app.js failed: %v", err)
+		}
+		js, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		appJS := string(js)
+		for _, expected := range []string{
+			"missing_permission",
+			"Manage Webhooks required",
+			"Webhook ready",
+			"createEndpoint",
+			"getDiscordChannels",
+			"cachedDiscordChannels",
+		} {
+			if !strings.Contains(appJS, expected) {
+				t.Fatalf("Discord admin JS missing %q", expected)
+			}
+		}
+	})
+
 	t.Run("Serves js scripts", func(t *testing.T) {
 		scripts := []string{"/js/qrcode.js", "/js/api.js", "/js/router.js", "/js/app.js"}
 		for _, s := range scripts {
@@ -91,7 +141,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("SPA route fallback to index.html", func(t *testing.T) {
-		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/groups", "/sync-sets", "/settings"}
+		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/discord", "/groups", "/sync-sets", "/settings"}
 		for _, route := range routes {
 			resp, err := client.Get(ts.URL + route)
 			if err != nil {

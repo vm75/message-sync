@@ -179,7 +179,49 @@
     },
 
     /**
-     * Groups CRUD Endpoints
+     * Discord Admin Endpoints
+     */
+    async getDiscordStatus() {
+      return this.request('/api/discord/status');
+    },
+
+    async getDiscordChannels() {
+      return this.request('/api/discord/channels');
+    },
+
+    /**
+     * Transport-neutral Endpoint CRUD
+     */
+    async getEndpoints() {
+      return this.request('/api/endpoints');
+    },
+
+    async getEndpoint(alias) {
+      return this.request(`/api/endpoints/${encodeURIComponent(alias)}`);
+    },
+
+    async createEndpoint(endpointData) {
+      return this.request('/api/endpoints', {
+        method: 'POST',
+        body: endpointData
+      });
+    },
+
+    async updateEndpoint(alias, endpointData) {
+      return this.request(`/api/endpoints/${encodeURIComponent(alias)}`, {
+        method: 'PUT',
+        body: endpointData
+      });
+    },
+
+    async deleteEndpoint(alias) {
+      return this.request(`/api/endpoints/${encodeURIComponent(alias)}`, {
+        method: 'DELETE'
+      });
+    },
+
+    /**
+     * WhatsApp-only compatibility group CRUD
      */
     async getGroups() {
       return this.request('/api/groups');

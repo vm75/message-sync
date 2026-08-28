@@ -50,6 +50,15 @@
             </svg>
             WhatsApp
           </button>
+          <button class="nav-tab" data-tab="discord">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8 9h.01"></path>
+              <path d="M16 9h.01"></path>
+              <path d="M7 15c2 1 8 1 10 0"></path>
+              <path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>
+            </svg>
+            Discord
+          </button>
           <button class="nav-tab" data-tab="groups">
             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -57,7 +66,7 @@
               <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
               <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
             </svg>
-            Groups
+            Endpoints
           </button>
           <button class="nav-tab" data-tab="sync-sets">
             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -277,6 +286,20 @@
               </div>
             </div>
 
+            <div class="card stat-card" data-action="discord">
+              <div class="stat-icon-wrapper icon-groups">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path>
+                  <path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <h3 class="stat-title">Discord Bot</h3>
+                <p id="dash-discord-status" class="stat-value">Checking...</p>
+                <p class="stat-desc">Inspect bot status and discover channels.</p>
+              </div>
+            </div>
+
             <div class="card stat-card" data-action="groups">
               <div class="stat-icon-wrapper icon-groups">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -287,9 +310,9 @@
                 </svg>
               </div>
               <div class="stat-content">
-                <h3 class="stat-title">Configured Groups</h3>
-                <p id="dash-groups-count" class="stat-value">0 Groups</p>
-                <p class="stat-desc">Manage group aliases and JID bindings.</p>
+                <h3 class="stat-title">Configured Endpoints</h3>
+                <p id="dash-groups-count" class="stat-value">0 Endpoints</p>
+                <p class="stat-desc">Manage WhatsApp and Discord routing aliases.</p>
               </div>
             </div>
 
@@ -451,13 +474,102 @@
         </div>
       </section>
 
-      <!-- Groups Management View -->
+      <!-- Discord Administration & Discovery View -->
+      <section id="view-discord" class="view hidden">
+        <div class="page-shell">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">Discord Bot & Channel Discovery</h1>
+              <p class="page-subtitle">Inspect the live bot connection, verify managed-webhook readiness, and configure Discord channels by safe alias.</p>
+            </div>
+            <div class="page-actions">
+              <button id="btn-discord-refresh" class="btn btn-ghost" title="Refresh Discord status">
+                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card status-banner-card">
+            <div class="status-banner-main">
+              <div id="discord-status-indicator" class="status-indicator indicator-neutral"><span class="status-pulse"></span></div>
+              <div class="status-banner-text">
+                <div class="status-banner-header">
+                  <span class="status-label">Current State:</span>
+                  <span id="discord-status-text" class="status-badge badge-neutral">Checking Status...</span>
+                </div>
+                <p id="discord-status-desc" class="status-detail">Checking Discord bot connection...</p>
+              </div>
+            </div>
+            <div class="status-banner-actions">
+              <button id="btn-discord-discover" class="btn btn-primary">
+                <span class="btn-text">Discover Channels</span>
+                <div class="btn-spinner hidden"></div>
+              </button>
+            </div>
+          </div>
+
+          <div class="card settings-card">
+            <div class="settings-card-header">
+              <div class="icon-avatar icon-avatar-primary">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              </div>
+              <div>
+                <h3 class="settings-card-title">Deployment-only credentials</h3>
+                <p class="settings-card-subtitle">Set <code>DISCORD_BOT_TOKEN</code> or <code>DISCORD_BOT_TOKEN_FILE</code> on the server and restart message-sync. This console never accepts or stores a Discord bot token.</p>
+              </div>
+            </div>
+            <p class="form-hint">Required gateway intents: Guild Messages and Message Content. Configure View Channel, Read Message History, Send Messages, Add Reactions, and Manage Webhooks permissions for channels you bridge.</p>
+          </div>
+
+          <div class="page-header" style="margin-top:1.5rem;">
+            <div>
+              <h2 class="page-title" style="font-size:1.15rem;">Configured Discord Endpoints</h2>
+              <p class="page-subtitle">Webhook readiness is exposed only as safe state; webhook IDs, URLs, and tokens are never returned.</p>
+            </div>
+          </div>
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead><tr><th>Alias</th><th>Channel ID</th><th>Sync Set</th><th>Managed Webhook</th></tr></thead>
+                <tbody id="discord-configured-body"></tbody>
+              </table>
+            </div>
+            <div id="discord-configured-empty" class="empty-state hidden">
+              <h3 class="empty-title">No Discord Endpoints Configured</h3>
+              <p class="empty-desc">Use live discovery below to choose a channel and assign a safe alias.</p>
+            </div>
+          </div>
+
+          <div class="page-header" style="margin-top:1.5rem;">
+            <div>
+              <h2 class="page-title" style="font-size:1.15rem;">Live Channel Discovery</h2>
+              <p class="page-subtitle">Guild and channel names below are fetched on demand and remain transient browser/runtime data; they are not written to sync.db.</p>
+            </div>
+          </div>
+          <div id="discord-discovery-alert" class="alert alert-danger hidden" role="alert"></div>
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead><tr><th>Guild</th><th>Channel</th><th>Channel ID</th><th>Configuration</th></tr></thead>
+                <tbody id="discord-discovery-body"></tbody>
+              </table>
+            </div>
+            <div id="discord-discovery-empty" class="empty-state">
+              <h3 class="empty-title">Run Channel Discovery</h3>
+              <p class="empty-desc">Channel display names are shown only after an authenticated on-demand discovery request.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Endpoint Management View -->
       <section id="view-groups" class="view hidden">
         <div class="page-shell">
           <div class="page-header">
             <div>
-              <h1 class="page-title">Configured Groups</h1>
-              <p class="page-subtitle">Configure application-safe group aliases and map them to WhatsApp Group JIDs.</p>
+              <h1 class="page-title">Configured Endpoints</h1>
+              <p class="page-subtitle">Manage transport-neutral aliases for WhatsApp groups and Discord channels.</p>
             </div>
             <div class="page-actions">
               <button id="btn-open-add-group" class="btn btn-primary">
@@ -465,7 +577,7 @@
                   <line x1="12" y1="5" x2="12" y2="19"></line>
                   <line x1="5" y1="12" x2="19" y2="12"></line>
                 </svg>
-                <span>Add Group</span>
+                <span>Add WhatsApp Endpoint</span>
               </button>
             </div>
           </div>
@@ -477,9 +589,9 @@
                 <circle cx="11" cy="11" r="8"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
               </svg>
-              <input type="text" id="search-groups" class="form-input search-input" placeholder="Search by alias or JID...">
+              <input type="text" id="search-groups" class="form-input search-input" placeholder="Search by alias, transport, or remote ID...">
             </div>
-            <div id="groups-count-badge" class="badge badge-neutral">0 Groups</div>
+            <div id="groups-count-badge" class="badge badge-neutral">0 Endpoints</div>
           </div>
 
           <!-- Groups Table Card -->
@@ -488,8 +600,9 @@
               <table class="data-table" id="table-groups">
                 <thead>
                   <tr>
-                    <th>Group Alias</th>
-                    <th>WhatsApp JID</th>
+                    <th>Endpoint Alias</th>
+                    <th>Transport</th>
+                    <th>Remote Target ID</th>
                     <th>Sync Set Membership</th>
                     <th class="text-right">Actions</th>
                   </tr>
@@ -510,10 +623,10 @@
                   <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
                 </svg>
               </div>
-              <h3 class="empty-title">No Groups Configured</h3>
-              <p class="empty-desc">Create your first group alias to start synchronizing messages between channels.</p>
+              <h3 class="empty-title">No Endpoints Configured</h3>
+              <p class="empty-desc">Add a WhatsApp endpoint here or configure a Discord endpoint through live discovery.</p>
               <button class="btn btn-primary btn-sm btn-empty-cta" onclick="document.getElementById('btn-open-add-group').click()">
-                Add First Group
+                Add First WhatsApp Endpoint
               </button>
             </div>
           </div>
@@ -526,7 +639,7 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Sync Sets</h1>
-              <p class="page-subtitle">Assemble groups into all-to-all synchronization sets. Each group belongs to at most one sync set.</p>
+              <p class="page-subtitle">Assemble WhatsApp and Discord endpoints into all-to-all synchronization sets. Each endpoint belongs to at most one sync set.</p>
             </div>
             <div class="page-actions">
               <button id="btn-open-add-sync-set" class="btn btn-primary">
@@ -568,7 +681,7 @@
               </svg>
             </div>
             <h3 class="empty-title">No Sync Sets Configured</h3>
-            <p class="empty-desc">Create a sync set to bridge 2 or more groups into a seamless synchronization cluster.</p>
+            <p class="empty-desc">Create a sync set to bridge 2 or more endpoints across supported transports.</p>
             <button class="btn btn-primary btn-sm btn-empty-cta" onclick="document.getElementById('btn-open-add-sync-set').click()">
               Create First Sync Set
             </button>
@@ -881,7 +994,7 @@
     <div id="modal-group" class="modal-overlay hidden" role="dialog" aria-modal="true">
       <div class="modal-card">
         <div class="modal-header">
-          <h3 id="modal-group-title" class="modal-title">Add Group</h3>
+          <h3 id="modal-group-title" class="modal-title">Add WhatsApp Endpoint</h3>
           <button type="button" class="btn-modal-close" data-modal="modal-group" aria-label="Close modal">
             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -903,7 +1016,7 @@
           </div>
 
           <div class="form-group">
-            <label for="input-group-alias" class="form-label">Group Alias</label>
+            <label for="input-group-alias" class="form-label">Endpoint Alias</label>
             <input 
               type="text" 
               id="input-group-alias" 
@@ -924,7 +1037,7 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-ghost" data-modal="modal-group">Cancel</button>
             <button type="submit" id="btn-submit-group" class="btn btn-primary">
-              <span class="btn-text">Save Group</span>
+              <span class="btn-text">Save Endpoint</span>
               <div class="btn-spinner hidden"></div>
             </button>
           </div>
@@ -961,8 +1074,8 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Select Member Groups</label>
-            <p class="form-hint">Select the groups to synchronize together in this set.</p>
+            <label class="form-label">Select Member Endpoints</label>
+            <p class="form-hint">Select configured WhatsApp or Discord endpoint aliases to synchronize together.</p>
             <div id="sync-set-groups-checklist" class="groups-checklist">
               <!-- Rendered dynamically -->
             </div>
