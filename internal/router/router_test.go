@@ -216,8 +216,13 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 		t.Fatal(err)
 	}
 	incoming := testIncoming("c1g1", "source-privacy")
-	incoming.Sender.DisplayName = "Privacy Sentinel Name"
-	incoming.Text = "PRIVACY_SENTINEL_BODY"
+	incoming.Sender.DisplayName = "Discord Member Sentinel"
+	incoming.Text = "PRIVACY_SENTINEL_BODY Discord Guild Sentinel"
+	incoming.QuotedText = "Discord Channel Sentinel"
+	incoming.Mentions = []transport.Mention{{
+		RemoteID: "discord-transient-member-id",
+		Name:     "Discord Mention Sentinel",
+	}}
 
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
@@ -233,7 +238,15 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"Privacy Sentinel Name", "PRIVACY_SENTINEL_BODY", "u_abcdefghij"} {
+	for _, forbidden := range []string{
+		"Discord Member Sentinel",
+		"Discord Guild Sentinel",
+		"Discord Channel Sentinel",
+		"Discord Mention Sentinel",
+		"discord-transient-member-id",
+		"PRIVACY_SENTINEL_BODY",
+		"u_abcdefghij",
+	} {
 		if strings.Contains(string(dbBytes), forbidden) {
 			t.Fatalf("sync.db persisted participant/content value %q", forbidden)
 		}
