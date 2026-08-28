@@ -246,11 +246,11 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 
 func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *testing.T) {
 	ctx := context.Background()
-	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	dbPath := filepath.Join(t.TempDir(), "sync.db")
+	firstStore, err := store.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = syncStore.Close() })
 
 	cfg := threeTransportConfig()
 	firstWA := &fakeSender{}
@@ -263,23 +263,37 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 		config.TransportTelegram: firstTG,
 	})
 	if err != nil {
+		_ = firstStore.Close()
 		t.Fatal(err)
 	}
-	firstRouter, err := New(cfg, syncStore, firstRegistry)
+	firstRouter, err := New(cfg, firstStore, firstRegistry)
 	if err != nil {
+		_ = firstStore.Close()
 		t.Fatal(err)
 	}
 
 	incoming := testIncoming("wa", "restart-source")
 	if err := firstRouter.Handle(ctx, incoming); !errors.Is(err, sendFailure) {
+		_ = firstStore.Close()
 		t.Fatalf("first Handle error = %v, want Telegram send failure", err)
 	}
 	if len(firstDC.sent) != 1 || firstDC.sent[0].outgoing.Endpoint != "discord" {
+		_ = firstStore.Close()
 		t.Fatalf("first Discord sends = %#v, want one successful persisted copy", firstDC.sent)
 	}
 	if len(firstTG.attempts) != 1 || firstTG.attempts[0].Endpoint != "telegram" {
+		_ = firstStore.Close()
 		t.Fatalf("first Telegram attempts = %#v, want one failed attempt", firstTG.attempts)
 	}
+	if err := firstStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondStore, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondStore.Close() })
 
 	secondWA := &fakeSender{}
 	secondDC := &fakeSender{}
@@ -292,7 +306,7 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := New(cfg, syncStore, secondRegistry)
+	restarted, err := New(cfg, secondStore, secondRegistry)
 	if err != nil {
 		t.Fatal(err)
 	}
