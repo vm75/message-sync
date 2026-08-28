@@ -344,7 +344,6 @@ func discordChannelIDs(targets map[transport.EndpointID]string) []string {
 	return channelIDs
 }
 
-
 func configuredIngressChannelID(session *discordgo.Session, normalizer *Normalizer, channelID string) string {
 	channelID = strings.TrimSpace(channelID)
 	if normalizer == nil || channelID == "" {
