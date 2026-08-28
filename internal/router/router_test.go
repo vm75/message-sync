@@ -86,6 +86,9 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		if sent.outgoing.Text != "*_c1g2/15551234567 (Alice Example)_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
+		if sent.outgoing.SourceText != "hello" || sent.outgoing.Sender.DisplayName != "  Alice   Example  " {
+			t.Fatalf("transient sender/source metadata was not preserved: %#v", sent.outgoing)
+		}
 		if strings.Contains(sent.outgoing.Text, "@g.us") {
 			t.Fatalf("forwarded attribution exposed a JID: %q", sent.outgoing.Text)
 		}
