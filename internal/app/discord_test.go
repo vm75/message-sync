@@ -144,10 +144,16 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	dc.mu.Lock()
-	closed := dc.closed
+	discordClosed := dc.closed
 	dc.mu.Unlock()
-	if !closed {
+	if !discordClosed {
 		t.Fatal("Discord gateway was not closed with application lifecycle")
+	}
+	wa.mu.Lock()
+	whatsAppClosed := wa.closed
+	wa.mu.Unlock()
+	if !whatsAppClosed {
+		t.Fatal("WhatsApp adapter was not closed with application lifecycle")
 	}
 }
 
