@@ -76,7 +76,7 @@ echo "TELEGRAM_BOT_TOKEN=your-bot-token" >> .env
 
 Add the bot to each intended Telegram group/supergroup. For ordinary group messages to be visible to the bot, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The bridge does not attempt to bypass Telegram visibility rules. Telegram user/display data and raw Bot API updates remain transient; only configured opaque chat IDs are eligible endpoint addressing.
 
-At this implementation phase, the Telegram package owns Bot API long-poll lifecycle and ingress normalization, but application-wide adapter registration/canonical fan-out is intentionally deferred to the next Telegram wiring ticket; Telegram outbound message lifecycle support is also not part of this phase.
+Telegram long-poll ingress is now registered in the application-wide adapter registry and consumed by the same single canonical router loop as WhatsApp and Discord. Destination aliases dispatch by configured transport, and runtime config reloads update Telegram targets. The Telegram adapter starts when Telegram endpoints are configured or a Telegram token source is present; deployments with neither remain unaffected. Telegram outbound protocol delivery remains staged for the next Telegram ticket, so full end-to-end Telegram delivery is not yet enabled.
 
 ### 2. Start the Server
 
@@ -104,7 +104,7 @@ docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET adm
 
 ## Management API compatibility
 
-The authenticated management API has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. The Telegram Bot API adapter foundation now provides long-poll ingress normalization in its transport package, while registration in the application-wide adapter registry is handled by the following implementation phase.
+The authenticated management API has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. The Telegram Bot API adapter now provides long-poll ingress normalization and is registered in the existing application-wide adapter registry. Telegram ingress uses the same canonical router path as WhatsApp and Discord, destination aliases dispatch by configured transport, and runtime reload updates Telegram routing targets. Telegram protocol outbound delivery remains staged for the following implementation phase.
 
 Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp, Discord, or Telegram endpoints.
 
