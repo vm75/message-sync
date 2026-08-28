@@ -44,6 +44,10 @@ var openWhatsApp = func(ctx context.Context, opts whatsapp.Options) (whatsappTra
 
 type discordTransport interface {
 	Events() <-chan transport.Incoming
+	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
+	React(context.Context, transport.Reaction) error
+	Edit(context.Context, transport.MessageRef, string) error
+	Delete(context.Context, transport.MessageRef) error
 	Close() error
 	UpdateConfig(*config.Config) error
 }
@@ -141,7 +145,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		waService = s
 	}
 
-	mesh, err := router.New(cfg, syncStore, wa)
+	adapters := map[config.Transport]router.OutboundAdapter{
+		config.TransportWhatsApp: wa,
+	}
+	if dc != nil {
+		adapters[config.TransportDiscord] = dc
+	}
+	adapterRegistry, err := router.NewAdapterRegistry(cfg, adapters)
+	if err != nil {
+		return fmt.Errorf("create transport adapter registry: %w", err)
+	}
+
+	mesh, err := router.New(cfg, syncStore, adapterRegistry)
 	if err != nil {
 		return fmt.Errorf("create canonical router: %w", err)
 	}
@@ -150,6 +165,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
 		if err != nil {
 			return fmt.Errorf("reload config: %w", err)
+		}
+		if err := adapterRegistry.UpdateConfig(updatedCfg); err != nil {
+			return fmt.Errorf("update transport adapter registry: %w", err)
 		}
 		if err := mesh.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update router config: %w", err)
@@ -228,6 +246,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	pruneTicker := time.NewTicker(24 * time.Hour)
 	defer pruneTicker.Stop()
 
+	whatsAppEvents := wa.Events()
+	var discordEvents <-chan transport.Incoming
+	if dc != nil {
+		discordEvents = dc.Events()
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -248,7 +272,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					"sync_db_bytes", metrics.DatabaseSizeBytes,
 				)
 			}
-		case incoming, ok := <-wa.Events():
+		case incoming, ok := <-whatsAppEvents:
 			if !ok {
 				return errors.New("WhatsApp event stream closed")
 			}
@@ -256,7 +280,20 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				safelog.Error(logger, "message routing failed", "route_message", err)
 				continue
 			}
-			logger.Info("WhatsApp message routed",
+			logger.Info("message routed",
+				"event", "message_routed",
+				"endpoint", string(incoming.Endpoint),
+				"kind", incoming.Kind,
+			)
+		case incoming, ok := <-discordEvents:
+			if !ok {
+				return errors.New("Discord event stream closed")
+			}
+			if err := mesh.Handle(ctx, incoming); err != nil {
+				safelog.Error(logger, "message routing failed", "route_message", err)
+				continue
+			}
+			logger.Info("message routed",
 				"event", "message_routed",
 				"endpoint", string(incoming.Endpoint),
 				"kind", incoming.Kind,

@@ -90,7 +90,7 @@ The authenticated management API now has transport-neutral endpoint CRUD at `/ap
 
 Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
 
-The Discord gateway adapter now provides the ingress foundation: when Discord endpoints are configured, the application starts a gateway bot, filters events to configured channel IDs, converts those IDs to endpoint aliases, HMACs Discord actor IDs, and drops DMs plus bridge-bot/bridge-webhook loop events before producing internal transport events. Multi-adapter router dispatch and Discord outbound delivery remain separate follow-up tickets, so this foundation alone does not yet provide end-to-end WhatsApp ↔ Discord synchronization.
+The Discord gateway adapter now provides privacy-bounded ingress, and the application consumes WhatsApp plus Discord ingress through one ordered canonical-routing loop. Outbound operations pass through a transport adapter registry keyed by each destination alias's configured transport, so mixed sync sets preserve the same canonical/message-copy semantics. Discord protocol outbound delivery is still staged for the next ticket, so end-to-end WhatsApp ↔ Discord sending is not complete yet.
 
 ## Local Development
 

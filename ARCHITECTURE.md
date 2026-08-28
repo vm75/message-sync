@@ -106,7 +106,7 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 
 Auth middleware protects all other `/api/*` endpoints, including both endpoint-management API shapes, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Endpoint request bodies are never logged, and validation/error responses never echo a transport remote target. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
-The management model is transport-aware before every transport is fully router-wired. Discord endpoints can be configured and placed in mixed sync sets. The Discord gateway ingress adapter now starts when Discord endpoints exist, but multi-adapter router dispatch and Discord outbound delivery remain separate follow-up work; the current WhatsApp sender therefore cannot yet deliver to a Discord endpoint by itself.
+The management and runtime routing models are transport-aware. Discord endpoints can be configured and placed in mixed sync sets, the Discord gateway ingress adapter starts when Discord endpoints exist, and the application dispatches each destination alias through the adapter registered for that endpoint's configured transport. Discord protocol outbound delivery itself remains staged, so the Discord adapter currently rejects unsupported outbound operations until the next ticket implements them.
 
 ## 4. Canonical message model
 
@@ -186,7 +186,7 @@ Discord MESSAGE_CREATE
 
 Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. Display names and mention IDs may exist only transiently inside a normalized event while immediate routing semantics require them.
 
-The gateway bot is intentionally distinct from the planned WhatsApp → Discord sender-rendering webhook. A narrow `ManagedWebhookChecker` boundary lets the ingress adapter identify bridge-owned webhook messages and suppress loops without making webhook IDs, tokens, or URLs canonical routing state. Webhook credentials remain outside `sync.db`. Multi-adapter dispatch is implemented by the next Discord-support ticket; until then the Discord event channel is an adapter boundary rather than a second router worker.
+The gateway bot is intentionally distinct from the planned WhatsApp → Discord sender-rendering webhook. A narrow `ManagedWebhookChecker` boundary lets the ingress adapter identify bridge-owned webhook messages and suppress loops without making webhook IDs, tokens, or URLs canonical routing state. Webhook credentials remain outside `sync.db`. The application now reads the Discord event channel alongside WhatsApp in one select loop and feeds both into the same ordered router worker; no second canonical worker or platform-specific ID path is introduced.
 
 ## 7. Idempotency and crash recovery
 
@@ -285,7 +285,9 @@ WhatsApp chat history on the sync account can optionally be cleared on a daily s
 
 ## 15. Transport abstraction
 
-The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. WhatsApp is the currently complete end-to-end transport; the Discord gateway adapter implements the same `transport.Adapter` boundary for ingress while outbound dispatch is staged separately.
+The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. WhatsApp is the currently complete end-to-end transport; Discord gateway ingress is wired into the same application loop, while Discord protocol outbound behavior remains staged separately.
+
+Outbound routing uses a small adapter registry keyed by configured transport type. The registry maintains only the safe endpoint-alias → transport mapping; the canonical router still emits operations addressed by alias and never switches on Discord or WhatsApp remote message IDs. Config reload updates the alias mapping without changing canonical/message-copy state.
 
 The persisted configuration is transport-aware so Discord can participate without changing canonical identity:
 
@@ -334,4 +336,4 @@ The Discord adapter replaces DiscordGo's default logger with a fixed-field warni
 
 ## 19. Deliberate MVP exclusions
 
-Discord outbound lifecycle, multi-adapter dispatch, discovery/UI, threads/forums and richer Discord format semantics remain staged work. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Discord outbound lifecycle, discovery/UI, threads/forums and richer Discord format semantics remain staged work. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.

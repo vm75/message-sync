@@ -49,7 +49,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 
 - The canonical router owns cross-endpoint synchronization semantics.
 - Transport adapters own platform protocol details.
-- WhatsApp is the complete end-to-end adapter; Discord gateway ingress is a staged adapter and must remain transport-neutral until multi-adapter dispatch/outbound work is complete.
+- WhatsApp is the complete end-to-end adapter; Discord gateway ingress and transport-aware application dispatch are wired through the same canonical boundary, while Discord outbound lifecycle support remains staged.
 - Never use a Discord or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Process ingress deterministically; start with one router worker.
