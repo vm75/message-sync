@@ -99,6 +99,12 @@ func TestValidateTransportAwareEndpoints(t *testing.T) {
 	}
 
 	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-123456789"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with Telegram basic-group endpoint failed: %v", err)
+	}
+
+	cfg = validConfig()
 	cfg.Endpoints["b"] = Endpoint{Transport: "unknown", RemoteID: "opaque"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for unknown transport")
