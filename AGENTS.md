@@ -28,8 +28,9 @@ Never persist or log:
 - push names, contact names, profile names, or designations;
 - message bodies, quoted text, captions, polls, contact cards, or location payloads;
 - media bytes, thumbnails, filenames that may contain personal information, or external media URLs;
-- raw WhatsApp/whatsmeow or Discord gateway/API event objects;
+- raw WhatsApp/whatsmeow, Discord gateway/API, or Telegram Bot API update/message/user/chat objects;
 - Discord user IDs, usernames/display names, guild/channel names, bot tokens, webhook tokens/URLs;
+- Telegram user IDs, usernames/display names, chat titles/usernames/invite links, bot tokens, raw API errors, and file URLs;
 - `IDENTITY_SECRET` or any credential/key material.
 
 Allowed in `sync.db`:
@@ -50,7 +51,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - The canonical router owns cross-endpoint synchronization semantics.
 - Transport adapters own platform protocol details.
 - WhatsApp and Discord both use the canonical router for end-to-end text/media and reply/reaction/edit/delete lifecycle routing. Discord discovery/UI, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and unsupported-format handling are implemented. Dynamic thread endpoints, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional routing remain deferred.
-- Never use a Discord or WhatsApp message ID as the global canonical ID.
+- Never use a Discord, Telegram, or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Process ingress deterministically; start with one router worker.
 - Download media only long enough to forward it. Do not add media persistence for convenience.
