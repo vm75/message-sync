@@ -141,7 +141,6 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	}
 }
 
-
 func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("API_ADDR", "127.0.0.1:0")
