@@ -50,10 +50,16 @@ type fakeWhatsAppTransport struct {
 	cancelCalls    int
 	logoutCalls    int
 	updatedConfigs []*config.Config
+	closed         bool
 }
 
 func (f *fakeWhatsAppTransport) Events() <-chan transport.Incoming { return f.events }
-func (f *fakeWhatsAppTransport) Close() error                      { return nil }
+func (f *fakeWhatsAppTransport) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.closed = true
+	return nil
+}
 func (f *fakeWhatsAppTransport) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
