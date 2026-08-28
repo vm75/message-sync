@@ -221,7 +221,6 @@ func TestReplyToUnconfiguredChannelIsNotExposed(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeDiscordMentionsUseSafeTextFallbacks(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModePushName)
 	evt := testMessage()
