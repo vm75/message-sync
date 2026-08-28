@@ -17,24 +17,31 @@ import (
 
 const eventBufferSize = 128
 
-var ErrOutboundNotImplemented = errors.New("Discord outbound delivery is not implemented")
-
 type Options struct {
-	Token        string
-	ChannelIDs   map[string]string
-	Hasher       *identity.Hasher
-	UsernameMode config.UsernameMode
-	Logger       *slog.Logger
-	Webhook      ChannelWebhook
+	Token         string
+	ChannelIDs    map[string]string
+	Hasher        *identity.Hasher
+	UsernameMode  config.UsernameMode
+	Logger        *slog.Logger
+	Webhook       ChannelWebhook
+	MediaEnabled  bool
+	MediaMaxBytes uint64
 }
 
 type Adapter struct {
 	session    *discordgo.Session
+	api        discordAPI
 	normalizer *Normalizer
 	hasher     *identity.Hasher
 	webhook    ChannelWebhook
+	targets    map[transport.EndpointID]string
 	events     chan transport.Incoming
 	logger     *slog.Logger
+
+	mediaEnabled      bool
+	mediaMaxBytes     uint64
+	reactionState     map[reactionKey]string
+	suppressedDeletes map[string]struct{}
 
 	mu        sync.RWMutex
 	closeOnce sync.Once
@@ -68,6 +75,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err != nil {
 		return nil, errors.New("create Discord gateway client")
 	}
+	session.ShouldRetryOnRateLimit = true
 
 	// Request guild message events only. DMs are intentionally not subscribed,
 	// and the normalizer still rejects any DM event defensively.
@@ -79,15 +87,30 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	installSafeDiscordLogger(opts.Logger)
 	session.LogLevel = discordgo.LogWarning
 
+	targets := discordTargets(opts.ChannelIDs)
+	webhook := opts.Webhook
+	if webhook == nil {
+		webhook = newManagedWebhookClient(session)
+	}
 	adapter := &Adapter{
-		session:    session,
-		normalizer: normalizer,
-		hasher:     opts.Hasher,
-		webhook:    opts.Webhook,
-		events:     make(chan transport.Incoming, eventBufferSize),
-		logger:     opts.Logger,
+		session:            session,
+		api:                session,
+		normalizer:         normalizer,
+		hasher:             opts.Hasher,
+		webhook:            webhook,
+		targets:            targets,
+		events:             make(chan transport.Incoming, eventBufferSize),
+		logger:             opts.Logger,
+		mediaEnabled:       opts.MediaEnabled,
+		mediaMaxBytes:      opts.MediaMaxBytes,
+		reactionState:      make(map[reactionKey]string),
+		suppressedDeletes:  make(map[string]struct{}),
 	}
 	session.AddHandler(adapter.handleMessageCreate)
+	session.AddHandler(adapter.handleMessageUpdate)
+	session.AddHandler(adapter.handleMessageDelete)
+	session.AddHandler(adapter.handleMessageReactionAdd)
+	session.AddHandler(adapter.handleMessageReactionRemove)
 
 	if err := session.Open(); err != nil {
 		safelog.Error(opts.Logger, "Discord gateway connection failed", "discord_connect", err)
@@ -99,6 +122,17 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		_ = adapter.Close()
 		return nil, ctx.Err()
 	default:
+	}
+
+	if preparer, ok := webhook.(webhookPreparer); ok {
+		if err := preparer.Prepare(ctx, discordChannelIDs(targets)); err != nil {
+			opts.Logger.Error("Discord webhook preparation failed",
+				"event", "discord_webhook_prepare_failed",
+				"error_kind", "webhook",
+			)
+			_ = adapter.Close()
+			return nil, errors.New("prepare Discord managed webhooks")
+		}
 	}
 
 	opts.Logger.Info("Discord transport connected",
@@ -139,22 +173,6 @@ func (a *Adapter) Events() <-chan transport.Incoming {
 	return a.events
 }
 
-func (a *Adapter) Send(context.Context, transport.Outgoing) (transport.MessageRef, error) {
-	return transport.MessageRef{}, ErrOutboundNotImplemented
-}
-
-func (a *Adapter) React(context.Context, transport.Reaction) error {
-	return ErrOutboundNotImplemented
-}
-
-func (a *Adapter) Edit(context.Context, transport.MessageRef, string) error {
-	return ErrOutboundNotImplemented
-}
-
-func (a *Adapter) Delete(context.Context, transport.MessageRef) error {
-	return ErrOutboundNotImplemented
-}
-
 func (a *Adapter) Close() error {
 	if a == nil {
 		return nil
@@ -193,9 +211,25 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	targets := discordTargets(channelIDs)
+	a.mu.RLock()
+	webhook := a.webhook
+	a.mu.RUnlock()
+	if preparer, ok := webhook.(webhookPreparer); ok {
+		if err := preparer.Prepare(context.Background(), discordChannelIDs(targets)); err != nil {
+			return errors.New("prepare Discord managed webhooks")
+		}
+	}
+	maxBytes := uint64(0)
+	if cfg.Media.MaxSizeMB > 0 {
+		maxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
+	}
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.targets = targets
+	a.mediaEnabled = cfg.Media.Enabled
+	a.mediaMaxBytes = maxBytes
 	a.mu.Unlock()
 	return nil
 }
@@ -217,6 +251,10 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 		botUserID = session.State.User.ID
 	}
 	incoming, ok := normalizer.NormalizeMessage(evt, botUserID, webhooks)
+	if !ok {
+		return
+	}
+	incoming, ok = a.withDiscordMedia(incoming, evt.Message)
 	if !ok {
 		return
 	}
@@ -266,4 +304,20 @@ func LoadBotToken() (string, error) {
 		return "", errors.New("Discord bot token secret is empty")
 	}
 	return token, nil
+}
+
+func discordTargets(channelIDs map[string]string) map[transport.EndpointID]string {
+	targets := make(map[transport.EndpointID]string, len(channelIDs))
+	for alias, channelID := range channelIDs {
+		targets[transport.EndpointID(alias)] = strings.TrimSpace(channelID)
+	}
+	return targets
+}
+
+func discordChannelIDs(targets map[transport.EndpointID]string) []string {
+	channelIDs := make([]string, 0, len(targets))
+	for _, channelID := range targets {
+		channelIDs = append(channelIDs, channelID)
+	}
+	return channelIDs
 }
