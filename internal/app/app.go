@@ -19,6 +19,7 @@ import (
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -57,7 +58,21 @@ var openDiscord = func(ctx context.Context, opts discord.Options) (discordTransp
 	return discord.Open(ctx, opts)
 }
 
-// Run supervises persistence, the WhatsApp adapter, the HTTP API server, and
+type telegramTransport interface {
+	Events() <-chan transport.Incoming
+	Send(context.Context, transport.Outgoing) (transport.MessageRef, error)
+	React(context.Context, transport.Reaction) error
+	Edit(context.Context, transport.MessageRef, string) error
+	Delete(context.Context, transport.MessageRef) error
+	Close() error
+	UpdateConfig(*config.Config) error
+}
+
+var openTelegram = func(ctx context.Context, opts telegram.Options) (telegramTransport, error) {
+	return telegram.Open(ctx, opts)
+}
+
+// Run supervises persistence, the transport adapters, the HTTP API server, and
 // the single ordered router worker.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if logger == nil {
@@ -94,12 +109,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	groupJIDs := make(map[string]string)
 	discordChannelIDs := make(map[string]string)
+	telegramChatIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		switch endpoint.Transport {
 		case config.TransportWhatsApp:
 			groupJIDs[alias] = endpoint.RemoteID
 		case config.TransportDiscord:
 			discordChannelIDs[alias] = endpoint.RemoteID
+		case config.TransportTelegram:
+			telegramChatIDs[alias] = endpoint.RemoteID
 		}
 	}
 
@@ -143,6 +161,20 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		defer dc.Close()
 	}
 
+	var tg telegramTransport
+	if len(telegramChatIDs) > 0 || telegram.BotTokenConfigured() {
+		tg, err = openTelegram(ctx, telegram.Options{
+			ChatIDs:      telegramChatIDs,
+			Hasher:       hasher,
+			UsernameMode: cfg.Identity.UsernameMode,
+			Logger:       logger,
+		})
+		if err != nil {
+			return fmt.Errorf("start Telegram transport: %w", err)
+		}
+		defer tg.Close()
+	}
+
 	var waService api.WhatsAppService
 	if s, ok := wa.(api.WhatsAppService); ok {
 		waService = s
@@ -153,6 +185,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	if dc != nil {
 		adapters[config.TransportDiscord] = dc
+	}
+	if tg != nil {
+		adapters[config.TransportTelegram] = tg
 	}
 	adapterRegistry, err := router.NewAdapterRegistry(cfg, adapters)
 	if err != nil {
@@ -181,6 +216,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if dc != nil {
 			if err := dc.UpdateConfig(updatedCfg); err != nil {
 				return fmt.Errorf("update Discord config: %w", err)
+			}
+		}
+		if tg != nil {
+			if err := tg.UpdateConfig(updatedCfg); err != nil {
+				return fmt.Errorf("update Telegram config: %w", err)
 			}
 		}
 		logger.Info("configuration reloaded",
@@ -255,6 +295,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if dc != nil {
 		discordEvents = dc.Events()
 	}
+	var telegramEvents <-chan transport.Incoming
+	if tg != nil {
+		telegramEvents = tg.Events()
+	}
 
 	for {
 		select {
@@ -292,6 +336,19 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		case incoming, ok := <-discordEvents:
 			if !ok {
 				return errors.New("Discord event stream closed")
+			}
+			if err := mesh.Handle(ctx, incoming); err != nil {
+				safelog.Error(logger, "message routing failed", "route_message", err)
+				continue
+			}
+			logger.Info("message routed",
+				"event", "message_routed",
+				"endpoint", string(incoming.Endpoint),
+				"kind", incoming.Kind,
+			)
+		case incoming, ok := <-telegramEvents:
+			if !ok {
+				return errors.New("Telegram event stream closed")
 			}
 			if err := mesh.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)
