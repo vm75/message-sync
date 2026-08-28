@@ -15,7 +15,7 @@
 
 ## Features
 
-- **Multi-Group Synchronization**: Seamlessly connect multiple WhatsApp groups into unified sync sets.
+- **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same alias-based sync sets.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
@@ -28,7 +28,7 @@
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, participant names, message bodies, media, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
+- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, participant or Discord user names/IDs, guild/channel names, message bodies, media, source filenames, CDN URLs, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
@@ -94,7 +94,7 @@ The authenticated management API now has transport-neutral endpoint CRUD at `/ap
 
 Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
 
-The Discord adapter provides bidirectional text/media synchronization plus replies, reactions, edits, deletes, authenticated channel discovery, and safe managed-webhook readiness through the same canonical/message-copy model used by WhatsApp. WhatsApp → Discord messages use a single reusable bridge-managed webhook per destination channel: the transient WhatsApp display name is rendered as the webhook APP username, with the HMAC actor ID as fallback, while the message body remains separate. Discord attachment bytes and CDN URLs stay transient and are bounded by the configured media size limit. Discord's incoming-webhook API does not support `message_reference`, so a mapped reply emits a minimal bot-authored native reply marker and sends the actual bridged content under the sender-specific webhook APP identity; if the destination copy is unavailable, the content uses an alias-based textual reply fallback instead.
+The Discord adapter provides bidirectional text/media synchronization plus replies, reactions, edits, deletes, authenticated channel discovery, and safe managed-webhook readiness through the same canonical/message-copy model used by WhatsApp. The **gateway bot** owns Discord ingress, discovery, reply markers, reactions, and connection lifecycle; the **bridge-managed incoming webhook** owns WhatsApp → Discord message rendering. WhatsApp → Discord messages reuse one managed webhook per destination channel: the transient WhatsApp display/push name is supplied only as that message's webhook APP username, with the HMAC actor ID as fallback, while the message body remains separate. An APP/webhook username is only Discord presentation metadata—it is not a real Discord user account—and the bridge never creates a Discord account or webhook per WhatsApp participant. Discord attachment bytes and CDN URLs stay transient and are bounded by the configured media size limit. Discord's incoming-webhook API does not support `message_reference`, so a mapped reply emits a minimal bot-authored native reply marker and sends the actual bridged content under the sender-specific webhook APP identity; if the destination copy is unavailable, the content uses an alias-based textual reply fallback instead.
 
 Discord thread messages are flattened to the already-configured parent channel alias using live gateway state; no thread/post endpoint is created or persisted. Replies, reactions, edits, and deletes from such threads therefore use the same parent alias and ordinary remote-copy message IDs. Forum-post threads follow the same ingress rule when their parent forum channel has already been configured, but the admin discovery UI continues to expose only text/announcement channels and the bridge does not dynamically create Discord forum posts. WhatsApp polls sent to Discord use a deterministic text representation (question plus numbered options); native Discord polls, embed/component-only messages, system messages, and native Discord sticker-only events are ignored rather than creating ambiguous canonical content. WhatsApp stickers sent to Discord are forwarded as transient `sticker.webp` attachments. Discord user mentions are rendered as transient display text or an HMAC fallback, while role/channel mentions use generic text fallbacks; raw Discord member, role, and channel IDs never cross the adapter boundary.
 
@@ -116,7 +116,7 @@ IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-s
 
 - `ARCHITECTURE.md` — In-depth overview of the architecture, data boundaries, event flows, and restart semantics.
 - `DOCKERHUB.md` — Information related to the published container images.
-- `docs/ASPIRATIONAL_FEATURES.md` — Future features (Discord support, cloud integrations, etc.).
+- `docs/ASPIRATIONAL_FEATURES.md` — Deferred extensions and future capabilities beyond the implemented Discord transport.
 - `AGENTS.md` — Instructions for AI agents and code contributors.
 
 ## Disclaimers
