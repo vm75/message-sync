@@ -46,6 +46,7 @@ type Outgoing struct {
 	OriginEndpoint      EndpointID
 	Sender              Sender // transient only; never persist
 	SourceText          string // transient un-attributed source text; never persist
+	AttributionOnly     bool // protocol compatibility companion; never canonical
 	Text                string
 	Mentions            []Mention
 	ReplyTo             *MessageRef
