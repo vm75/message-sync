@@ -44,6 +44,8 @@ type Incoming struct {
 type Outgoing struct {
 	Endpoint            EndpointID
 	OriginEndpoint      EndpointID
+	Sender              Sender // transient only; never persist
+	SourceText          string // transient un-attributed source text; never persist
 	Text                string
 	Mentions            []Mention
 	ReplyTo             *MessageRef
