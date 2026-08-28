@@ -33,13 +33,13 @@ The previous Node/Baileys project is a behavioral reference only, not the archit
   events ----------------->| Canonical Router |
                            +--------+---------+
                                     |
-                         +----------+----------+
-                         |                     |
-                         v                     v
-                +------------------+   +------------------+
-                | WhatsApp Adapter |   | Discord Adapter  |
-                | whatsmeow        |   | gateway/webhook  |
-                +--------+---------+   +------------------+
+                         +----------+----------+----------+
+                         |                     |          |
+                         v                     v          v
+                +------------------+   +------------------+   +------------------+
+                | WhatsApp Adapter |   | Discord Adapter  |   | Telegram Adapter |
+                | whatsmeow        |   | gateway/webhook  |   | Bot API polling  |
+                +--------+---------+   +------------------+   +------------------+
                          |
                          +--------------------> /data/whatsapp.db
                                                sensitive protocol state
@@ -83,7 +83,7 @@ Configuration is stored in SQLite (`sync.db`) and managed programmatically via G
 - `whatsapp_chat_cleanup_enabled`: boolean (default `0`);
 - `whatsapp_chat_retention_days`: integer (default `30`).
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
-- `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp` and `discord`; the runtime still uses only adapters that are actually wired into the application.
+- `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp`, `discord`, and `telegram`; the runtime still uses only adapters that are actually wired into the application, with Telegram application registration intentionally deferred to the next Telegram wiring ticket.
 
 The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, while Discord channel IDs may be stored when Discord configuration is introduced. Human-readable guild/channel/group metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
