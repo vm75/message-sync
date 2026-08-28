@@ -128,11 +128,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			return err
 		}
 		dc, err = openDiscord(ctx, discord.Options{
-			Token:        token,
-			ChannelIDs:   discordChannelIDs,
-			Hasher:       hasher,
-			UsernameMode: cfg.Identity.UsernameMode,
-			Logger:       logger,
+			Token:         token,
+			ChannelIDs:    discordChannelIDs,
+			Hasher:        hasher,
+			UsernameMode:  cfg.Identity.UsernameMode,
+			Logger:        logger,
+			MediaEnabled:  cfg.Media.Enabled,
+			MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 		})
 		if err != nil {
 			return fmt.Errorf("start Discord transport: %w", err)
