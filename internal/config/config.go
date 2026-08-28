@@ -47,15 +47,16 @@ type Transport string
 const (
 	TransportWhatsApp Transport = "whatsapp"
 	TransportDiscord  Transport = "discord"
+	TransportTelegram Transport = "telegram"
 )
 
 func (t Transport) IsValid() bool {
-	return t == TransportWhatsApp || t == TransportDiscord
+	return t == TransportWhatsApp || t == TransportDiscord || t == TransportTelegram
 }
 
 func ValidateEndpointRemoteID(transport Transport, remoteID string) error {
 	if !transport.IsValid() {
-		return errors.New("endpoint transport must be whatsapp or discord")
+		return errors.New("endpoint transport must be whatsapp, discord, or telegram")
 	}
 	remoteID = strings.TrimSpace(remoteID)
 	if remoteID == "" {
@@ -74,6 +75,15 @@ func ValidateEndpointRemoteID(transport Transport, remoteID string) error {
 		value, err := strconv.ParseUint(remoteID, 10, 64)
 		if err != nil || value == 0 {
 			return errors.New("endpoint remote id is invalid Discord channel ID")
+		}
+	}
+	if transport == TransportTelegram {
+		if !telegramIDPattern.MatchString(remoteID) {
+			return errors.New("endpoint remote id is invalid Telegram group/supergroup chat ID")
+		}
+		value, err := strconv.ParseInt(remoteID, 10, 64)
+		if err != nil || value >= 0 {
+			return errors.New("endpoint remote id is invalid Telegram group/supergroup chat ID")
 		}
 	}
 	return nil
