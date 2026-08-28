@@ -165,6 +165,14 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		defer cancel()
 	}
 
+	if outgoing.ReplyFallback {
+		quote := strings.TrimSpace(outgoing.QuotedText)
+		if quote == "" {
+			quote = "message"
+		}
+		outgoing.Text = fmt.Sprintf("> %s\n\n%s", quote, outgoing.Text)
+	}
+
 	var contextInfo *waE2E.ContextInfo
 	if outgoing.ReplyTo != nil {
 		var participant string
