@@ -304,7 +304,8 @@ func TestLegacyGroupsRemainWhatsAppOnly(t *testing.T) {
 	if _, err := db.Exec(`
 		INSERT INTO endpoints (alias, transport, remote_id)
 		VALUES ('wa', 'whatsapp', '1@g.us'),
-		       ('discord', 'discord', '123456789012345678')
+		       ('discord', 'discord', '123456789012345678'),
+		       ('telegram', 'telegram', '-1001234567890')
 	`); err != nil {
 		t.Fatal(err)
 	}
@@ -324,19 +325,21 @@ func TestLegacyGroupsRemainWhatsAppOnly(t *testing.T) {
 		t.Fatalf("legacy groups exposed non-WhatsApp endpoint: %+v", groups)
 	}
 
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-		var body *strings.Reader
-		if method == http.MethodPut {
-			body = strings.NewReader(`{"jid":"2@g.us"}`)
-		} else {
-			body = strings.NewReader("")
-		}
-		req := httptest.NewRequest(method, "/api/groups/discord", body)
-		req.Header.Set("Authorization", authHeader)
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s legacy Discord alias status = %d, want 404", method, rec.Code)
+	for _, alias := range []string{"discord", "telegram"} {
+		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+			var body *strings.Reader
+			if method == http.MethodPut {
+				body = strings.NewReader(`{"jid":"2@g.us"}`)
+			} else {
+				body = strings.NewReader("")
+			}
+			req := httptest.NewRequest(method, "/api/groups/"+alias, body)
+			req.Header.Set("Authorization", authHeader)
+			rec := httptest.NewRecorder()
+			srv.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("%s legacy %s alias status = %d, want 404", method, alias, rec.Code)
+			}
 		}
 	}
 }
