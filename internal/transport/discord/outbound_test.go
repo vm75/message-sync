@@ -289,3 +289,81 @@ func TestSanitizeWebhookUsernameCollapsesControlsAndLimitsLength(t *testing.T) {
 		t.Fatalf("username exceeds %d runes: %d", maxWebhookUsernameRunes, len([]rune(got)))
 	}
 }
+
+
+func TestDiscordPollUsesDeterministicTextRepresentation(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:            "discord",
+		Sender:              transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		SourceText:          "Lunch?",
+		Kind:                "poll",
+		PollOptions:         []string{"Pizza", "Salad"},
+		PollSelectableCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := webhook.executed[len(webhook.executed)-1]
+	want := "Poll: Lunch?\n1. Pizza\n2. Salad\nChoose one option."
+	if got.Content != want {
+		t.Fatalf("poll fallback = %q, want %q", got.Content, want)
+	}
+	if got.Username != "Alice" {
+		t.Fatalf("poll sender username = %q", got.Username)
+	}
+}
+
+func TestDiscordOutboundMentionsNeverExposeWhatsAppRemoteIdentity(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+	remoteID := "15551234567"
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:   "discord",
+		Sender:     transport.Sender{OpaqueID: "u_hash"},
+		SourceText: "hello @" + remoteID,
+		Kind:       "text",
+		Mentions: []transport.Mention{{
+			RemoteID: remoteID,
+			Name:     remoteID,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := webhook.executed[len(webhook.executed)-1].Content
+	if strings.Contains(got, remoteID) {
+		t.Fatalf("WhatsApp remote identity leaked into Discord content: %q", got)
+	}
+	if !strings.Contains(got, "@participant") {
+		t.Fatalf("safe mention fallback missing: %q", got)
+	}
+}
+
+func TestDiscordStickerUsesWebPAttachmentFallback(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:   "discord",
+		Sender:     transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		Kind:       "sticker",
+		MediaBytes: []byte("private-webp"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := webhook.executed[len(webhook.executed)-1]
+	if got.File == nil || got.File.Name != "sticker.webp" || got.File.ContentType != "image/webp" {
+		t.Fatalf("sticker fallback = %#v", got.File)
+	}
+	if string(got.File.Data) != "private-webp" {
+		t.Fatal("sticker bytes were not forwarded transiently")
+	}
+	if got.Username != "Alice" {
+		t.Fatalf("sticker sender username = %q", got.Username)
+	}
+}
