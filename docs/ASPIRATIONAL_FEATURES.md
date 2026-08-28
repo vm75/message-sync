@@ -15,6 +15,7 @@ The following features have already been implemented in the core service:
 - **WhatsApp Native Polls & Aggregated Summaries**: Cross-group poll forwarding, vote tracking, and `aggregate-response` summary reporting.
 - **Full Message Lifecycle**: Text, transient media (images, videos, audio/voice, documents, stickers), native clickable replies (with attribution fallback), reactions, edits, and deletes.
 - **Discord Transport Adapter**: Bidirectional WhatsApp ↔ Discord synchronization through endpoint aliases, gateway ingress, one reusable bridge-managed webhook per channel for sender-specific APP rendering, text/transient media, replies/reactions/edits/deletes, authenticated discovery/readiness, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and deterministic unsupported-format handling.
+- **Telegram Transport Foundation + Router Wiring**: Transport-aware group/supergroup endpoint configuration, privacy-safe Bot API long-poll ingress, and registration in the shared adapter registry/single canonical router loop are implemented; Telegram protocol outbound lifecycle remains staged in the Telegram support sequence.
 - **Privacy Core**: Ephemeral media streaming, transient push names, deterministic HMAC user pseudonyms, zero PII in SQLite `sync.db`.
 - **Hardened Rootless Container**: Non-root UID `1000`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
 
