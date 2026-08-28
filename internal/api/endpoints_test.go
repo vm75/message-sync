@@ -188,6 +188,110 @@ func TestEndpointsCRUDMixedTransportsAndReload(t *testing.T) {
 	}
 }
 
+func TestTelegramEndpointCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authHeader := "Bearer " + token
+
+	if _, err := db.Exec(`INSERT INTO sync_sets (id) VALUES ('mesh')`); err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
+		`{"alias":"tg1","transport":"telegram","remoteId":"123456789","syncSetId":"mesh"}`,
+	))
+	invalid.Header.Set("Authorization", authHeader)
+	invalidRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(invalidRec, invalid)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("positive Telegram private chat id status = %d, want 400", invalidRec.Code)
+	}
+
+	create := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
+		`{"alias":"tg1","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`,
+	))
+	create.Header.Set("Authorization", authHeader)
+	createRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(createRec, create)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("POST Telegram endpoint status = %d, want 201: %s", createRec.Code, createRec.Body.String())
+	}
+	var created EndpointDTO
+	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Alias != "tg1" || created.Transport != "telegram" || created.RemoteID != "-1001234567890" || created.SyncSetID == nil || *created.SyncSetID != "mesh" {
+		t.Fatalf("unexpected Telegram endpoint: %+v", created)
+	}
+
+	get := httptest.NewRequest(http.MethodGet, "/api/endpoints/tg1", nil)
+	get.Header.Set("Authorization", authHeader)
+	getRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(getRec, get)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET Telegram endpoint status = %d, want 200", getRec.Code)
+	}
+	var got EndpointDTO
+	if err := json.NewDecoder(getRec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Transport != "telegram" || got.RemoteID != "-1001234567890" {
+		t.Fatalf("unexpected Telegram endpoint read: %+v", got)
+	}
+
+	list := httptest.NewRequest(http.MethodGet, "/api/endpoints", nil)
+	list.Header.Set("Authorization", authHeader)
+	listRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(listRec, list)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("GET endpoint list status = %d, want 200", listRec.Code)
+	}
+	var endpoints []EndpointDTO
+	if err := json.NewDecoder(listRec.Body).Decode(&endpoints); err != nil {
+		t.Fatal(err)
+	}
+	if len(endpoints) != 1 || endpoints[0].Alias != "tg1" || endpoints[0].Transport != "telegram" {
+		t.Fatalf("unexpected endpoint list: %+v", endpoints)
+	}
+
+	update := httptest.NewRequest(http.MethodPut, "/api/endpoints/tg1", strings.NewReader(
+		`{"alias":"tg1","transport":"telegram","remoteId":"-1009876543210","syncSetId":"mesh"}`,
+	))
+	update.Header.Set("Authorization", authHeader)
+	updateRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(updateRec, update)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("PUT Telegram endpoint status = %d, want 200: %s", updateRec.Code, updateRec.Body.String())
+	}
+	var updated EndpointDTO
+	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.RemoteID != "-1009876543210" || updated.Transport != "telegram" {
+		t.Fatalf("unexpected updated Telegram endpoint: %+v", updated)
+	}
+
+	remove := httptest.NewRequest(http.MethodDelete, "/api/endpoints/tg1", nil)
+	remove.Header.Set("Authorization", authHeader)
+	removeRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(removeRec, remove)
+	if removeRec.Code != http.StatusOK {
+		t.Fatalf("DELETE Telegram endpoint status = %d, want 200", removeRec.Code)
+	}
+
+	missing := httptest.NewRequest(http.MethodGet, "/api/endpoints/tg1", nil)
+	missing.Header.Set("Authorization", authHeader)
+	missingRec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(missingRec, missing)
+	if missingRec.Code != http.StatusNotFound {
+		t.Fatalf("GET deleted Telegram endpoint status = %d, want 404", missingRec.Code)
+	}
+}
+
 func TestLegacyGroupsRemainWhatsAppOnly(t *testing.T) {
 	db := setupTestDB(t)
 	srv := setupTestServer(t, db)
