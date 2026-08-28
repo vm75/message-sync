@@ -130,26 +130,48 @@ func TestManagedWebhookPrepareCreatesOneAndReusesOnReconnect(t *testing.T) {
 }
 
 func TestManagedWebhookPrepareReportsMissingPermissionWithoutLeakingCredentials(t *testing.T) {
-	api := &fakeWebhookAPI{
-		channels: map[string][]*discordgo.Webhook{},
-		listErr: &discordgo.RESTError{
-			Response: &http.Response{StatusCode: http.StatusForbidden},
+	tests := []struct {
+		name      string
+		listErr   error
+		createErr error
+	}{
+		{
+			name: "list forbidden",
+			listErr: &discordgo.RESTError{
+				Response: &http.Response{StatusCode: http.StatusForbidden},
+			},
+		},
+		{
+			name: "create forbidden",
+			createErr: &discordgo.RESTError{
+				Response: &http.Response{StatusCode: http.StatusForbidden},
+			},
 		},
 	}
-	manager := &managedWebhookClient{
-		api:       api,
-		botUserID: func() string { return "bridge-bot" },
-		hooks:     make(map[string]managedWebhookCredential),
-		states:    make(map[string]WebhookStatus),
-	}
 
-	if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
-		t.Fatalf("missing Manage Webhooks permission should be a readiness state, got: %v", err)
-	}
-	if got := manager.Readiness(testChannelID); got != WebhookStatusMissingPermission {
-		t.Fatalf("readiness=%q, want %q", got, WebhookStatusMissingPermission)
-	}
-	if _, ok := manager.credential(testChannelID); ok {
-		t.Fatal("missing-permission channel unexpectedly retained a webhook credential")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeWebhookAPI{
+				channels:  map[string][]*discordgo.Webhook{},
+				listErr:   tc.listErr,
+				createErr: tc.createErr,
+			}
+			manager := &managedWebhookClient{
+				api:       api,
+				botUserID: func() string { return "bridge-bot" },
+				hooks:     make(map[string]managedWebhookCredential),
+				states:    make(map[string]WebhookStatus),
+			}
+
+			if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
+				t.Fatalf("missing Manage Webhooks permission should be a readiness state, got: %v", err)
+			}
+			if got := manager.Readiness(testChannelID); got != WebhookStatusMissingPermission {
+				t.Fatalf("readiness=%q, want %q", got, WebhookStatusMissingPermission)
+			}
+			if _, ok := manager.credential(testChannelID); ok {
+				t.Fatal("missing-permission channel unexpectedly retained a webhook credential")
+			}
+		})
 	}
 }
