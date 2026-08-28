@@ -188,7 +188,6 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 	}
 }
 
-
 func TestConfiguredIngressChannelFlattensThreadsToParentAlias(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	state := discordgo.NewState()
