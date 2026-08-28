@@ -48,7 +48,7 @@ echo "DATA_DIR=/data" >> .env
 echo "PORT=8080" >> .env
 ```
 
-If your configuration contains Discord endpoints, also configure a Discord bot credential. Use one source only:
+If you want Discord channel discovery or your configuration contains Discord endpoints, also configure a Discord bot credential. Use one source only:
 
 ```sh
 # Environment source (automatically passed by the repository's env_file setup)
