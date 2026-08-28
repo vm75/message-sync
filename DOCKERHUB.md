@@ -8,19 +8,19 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a simple server to sync messages between multiple messaging channels. Currently, it supports syncing between multiple WhatsApp groups.
+`message-sync` is a privacy-first server for bidirectional synchronization between WhatsApp groups and configured Discord channels through transport-neutral endpoint aliases.
 
 ---
 
 ## Features
 
-- **Multi-Group Synchronization**: Seamlessly connect multiple WhatsApp groups into unified sync sets.
+- **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same sync sets.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
-- **Embedded Web UI**: Simple, zero-dependency management console to configure groups and sync sets directly from your browser.
+- **Embedded Web UI**: Zero-dependency management console for WhatsApp pairing, Discord status/channel discovery, endpoint aliases, and mixed sync sets.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
 ---
@@ -29,7 +29,7 @@
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores phone numbers, WhatsApp JIDs, participant names, message bodies, media, or contact cards.
+- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord user IDs or names, guild/channel names, message bodies, media, source filenames, CDN URLs, or contact cards. Configured transport target IDs are the narrow operational addressing exception.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
@@ -54,9 +54,19 @@ Create a `.env` file:
 IDENTITY_SECRET=your-generated-32-byte-hex-secret
 DATA_DIR=/data
 PORT=8080
-# Required only when Discord endpoints are configured. Use this OR DISCORD_BOT_TOKEN_FILE.
+# Required for Discord discovery or configured Discord endpoints. Use this OR DISCORD_BOT_TOKEN_FILE.
 DISCORD_BOT_TOKEN=
+# For a mounted secret instead, set its in-container path and leave DISCORD_BOT_TOKEN empty.
+DISCORD_BOT_TOKEN_FILE=
 ```
+
+### Discord setup
+
+Discord credentials are deployment-only. Set exactly one of `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; the latter must point to a secret file you mount into the container. The Web UI never accepts bot or webhook credentials, and neither bot tokens nor managed-webhook IDs/tokens/URLs are stored in `sync.db` or retained logs.
+
+In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In each bridged channel grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
+
+The gateway bot handles Discord ingress, discovery, native reply markers, reactions, and connection lifecycle. For WhatsApp → Discord outbound messages, `message-sync` finds or creates **one bridge-managed incoming webhook per configured channel** and reuses it across participants and restarts. The transient WhatsApp display/push name becomes that message's Discord APP/webhook username; if no display name is available, the HMAC actor ID is used. These APP labels are not real Discord accounts, and no Discord account or webhook is created per WhatsApp participant. Display names remain transient and are never persisted or logged.
 
 ### 2. Docker Compose / Podman Compose
 
@@ -98,7 +108,7 @@ services:
 2. Open `http://localhost:8080` in your browser.
 3. Complete initial admin password setup.
 4. Navigate to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp (**Linked Devices** → **Link a Device**).
-5. Configure your groups and sync sets in the web console!
+5. Discover/configure Discord channels with safe aliases as needed, then configure mixed sync sets in the web console!
 
 ---
 
