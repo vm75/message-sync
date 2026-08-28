@@ -13,7 +13,7 @@ import (
 
 const (
 	maxWebhookUsernameRunes = 80
-	replyMarkerText          = "↪"
+	replyMarkerText         = "↪"
 )
 
 type discordAPI interface {
