@@ -181,17 +181,17 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		{
 			Endpoint: "wa-one", RemoteID: "wa-source-1", Kind: "text",
 			Sender: transport.Sender{DisplayName: "Vidhya Private", OpaqueID: "u_abcde23456"},
-			Text: "PRIVATE_BODY_ONE", Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+			Text:   "PRIVATE_BODY_ONE", Timestamp: time.Unix(1_700_000_000, 0).UTC(),
 		},
 		{
 			Endpoint: "wa-one", RemoteID: "wa-source-2", Kind: "text",
 			Sender: transport.Sender{DisplayName: "Ravi Private", OpaqueID: "u_bcdef23456"},
-			Text: "PRIVATE_BODY_TWO", Timestamp: time.Unix(1_700_000_001, 0).UTC(),
+			Text:   "PRIVATE_BODY_TWO", Timestamp: time.Unix(1_700_000_001, 0).UTC(),
 		},
 		{
 			Endpoint: "wa-one", RemoteID: "wa-source-3", Kind: "text",
 			Sender: transport.Sender{OpaqueID: "u_cdefg23456"},
-			Text: "PRIVATE_BODY_FALLBACK", Timestamp: time.Unix(1_700_000_002, 0).UTC(),
+			Text:   "PRIVATE_BODY_FALLBACK", Timestamp: time.Unix(1_700_000_002, 0).UTC(),
 		},
 	}
 	for _, incoming := range messages {
@@ -243,7 +243,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	reply := transport.Incoming{
 		Endpoint: "wa-one", RemoteID: "wa-reply-1", Kind: "text",
 		Sender: transport.Sender{DisplayName: "Vidhya Private", OpaqueID: "u_abcde23456"},
-		Text: "PRIVATE_REPLY_BODY", QuotedText: "PRIVATE_BODY_ONE",
+		Text:   "PRIVATE_REPLY_BODY", QuotedText: "PRIVATE_BODY_ONE",
 		ReplyTo:   &transport.MessageRef{Endpoint: "wa-one", RemoteMessageID: "wa-source-1"},
 		Timestamp: time.Unix(1_700_000_003, 0).UTC(),
 	}
@@ -259,9 +259,9 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 
 	edit := transport.Incoming{
 		Endpoint: "wa-one", RemoteID: "wa-edit-1", Kind: "edit",
-		Sender: transport.Sender{DisplayName: "Vidhya Private", OpaqueID: "u_abcde23456"},
-		Text:     "PRIVATE_EDIT_BODY",
-		ReplyTo:  &transport.MessageRef{Endpoint: "wa-one", RemoteMessageID: "wa-source-1"},
+		Sender:    transport.Sender{DisplayName: "Vidhya Private", OpaqueID: "u_abcde23456"},
+		Text:      "PRIVATE_EDIT_BODY",
+		ReplyTo:   &transport.MessageRef{Endpoint: "wa-one", RemoteMessageID: "wa-source-1"},
 		Timestamp: time.Unix(1_700_000_004, 0).UTC(),
 	}
 	if err := mesh.Handle(ctx, edit); err != nil {
