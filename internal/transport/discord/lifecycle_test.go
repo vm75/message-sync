@@ -60,12 +60,15 @@ func TestNormalizeDiscordLifecycleEvents(t *testing.T) {
 		if add.Kind != "reaction" || add.Text != "👍" || add.Sender.OpaqueID == "" || add.Sender.OpaqueID == testAuthorID || add.FromSelf {
 			t.Fatalf("unexpected reaction add: %#v", add)
 		}
-		remove, ok := normalizer.NormalizeReaction(reaction, testAuthorID, true)
+		remove, ok := normalizer.NormalizeReaction(reaction, "different-bot", true)
 		if !ok {
 			t.Fatal("reaction remove was not normalized")
 		}
-		if remove.Text != "" || !remove.FromSelf {
+		if remove.Text != "" || remove.FromSelf {
 			t.Fatalf("unexpected reaction remove: %#v", remove)
+		}
+		if _, ok := normalizer.NormalizeReaction(reaction, testAuthorID, false); ok {
+			t.Fatal("bridge bot reaction echo was not filtered")
 		}
 	})
 }
