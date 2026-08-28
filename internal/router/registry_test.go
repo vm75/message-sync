@@ -162,7 +162,6 @@ func mixedTransportConfig() *config.Config {
 	}
 }
 
-
 type failingOutboundAdapter struct {
 	err      error
 	attempts []transport.Outgoing
