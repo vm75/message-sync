@@ -14,6 +14,7 @@ The following features have already been implemented in the core service:
 - **REST Management & Status API**: Group management, sync set CRUD, QR pairing endpoints, runtime status, health check (`GET /health`), and bcrypt-authenticated admin sessions.
 - **WhatsApp Native Polls & Aggregated Summaries**: Cross-group poll forwarding, vote tracking, and `aggregate-response` summary reporting.
 - **Full Message Lifecycle**: Text, transient media (images, videos, audio/voice, documents, stickers), native clickable replies (with attribution fallback), reactions, edits, and deletes.
+- **Discord Transport Adapter**: Bidirectional WhatsApp ↔ Discord synchronization through endpoint aliases, gateway ingress, one reusable bridge-managed webhook per channel for sender-specific APP rendering, text/transient media, replies/reactions/edits/deletes, authenticated discovery/readiness, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and deterministic unsupported-format handling.
 - **Privacy Core**: Ephemeral media streaming, transient push names, deterministic HMAC user pseudonyms, zero PII in SQLite `sync.db`.
 - **Hardened Rootless Container**: Non-root UID `1000`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
 
@@ -21,17 +22,14 @@ The following features have already been implemented in the core service:
 
 ## 2. Aspirational Features Backlog
 
-### A. Discord Transport Adapter
-- **Description**: Bidirectional synchronization between WhatsApp and Discord (and future platforms).
-- **Implementation status**: Endpoint configuration, privacy-bounded Discord gateway ingress, transport-aware dispatch, reusable webhook sender rendering, transient media forwarding, reply/reaction/edit/delete lifecycle support, authenticated live channel discovery, safe managed-webhook readiness, mixed-transport admin UI, deterministic thread/forum parent flattening, privacy-safe mention fallbacks, textual WhatsApp-poll rendering, and sticker/unsupported-format fallbacks are implemented. Dynamic thread endpoints, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional routing remain staged work.
-- **Tracked Capabilities**:
-  - WhatsApp &harr; Discord synchronization.
-  - Discord gateway bot ingress plus bridge-managed per-channel webhook rendering.
-  - Channels, threads, and forum post mapping.
-  - Discord replies, reactions, edits, and deletes mapped to canonical copies.
+### A. Discord Transport Extensions
+- **Description**: Optional capabilities beyond the implemented bidirectional Discord transport.
+- **Deferred Capabilities**:
+  - Dynamic thread-specific endpoint creation.
+  - Automatic outbound Discord forum-post creation.
+  - Native Discord poll/vote-state bridging.
   - Directional/one-way bridge modes.
-- **Architectural Requirement**: Discord remains a `transport.Adapter` at the canonical router boundary. Configured channel aliases are routing identity; Discord message IDs are remote-copy IDs only.
-
+- **Architectural Requirement**: Any extension must keep Discord as a `transport.Adapter` at the canonical router boundary. Configured endpoint aliases remain routing identity; Discord message IDs remain remote-copy IDs only.
 ### B. Richer WhatsApp Message Formats
 - **Description**: Support for specialized message types.
 - **Tracked Capabilities**:
