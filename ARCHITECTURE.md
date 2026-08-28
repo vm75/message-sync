@@ -273,7 +273,7 @@ This permits add/change/remove semantics without raw identity. A native reaction
 
 ## 11. Polls and vote aggregation
 
-Poll creation creates native WhatsApp polls across all destination groups in the sync set. Incoming poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`.
+Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`; Discord textual copies do not introduce a second vote-state model.
 
 Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
 - the router intercepts the trigger (it is not fanned out);
