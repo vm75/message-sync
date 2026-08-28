@@ -59,9 +59,13 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 	}
 	authHeader := "Bearer " + token
 
-	// Create mixed-transport endpoints: g1 and g3 are WhatsApp, d1 is Discord.
+	// Create mixed-transport endpoints: g1 and g3 are WhatsApp, d1 is Discord, t1 is Telegram.
 	_, err = db.Exec(`
-		INSERT INTO endpoints (alias, transport, remote_id) VALUES ('g1', 'whatsapp', '1@g.us'), ('d1', 'discord', '123456789012345678'), ('g3', 'whatsapp', '3@g.us')
+		INSERT INTO endpoints (alias, transport, remote_id) VALUES
+			('g1', 'whatsapp', '1@g.us'),
+			('d1', 'discord', '123456789012345678'),
+			('t1', 'telegram', '-1001234567890'),
+			('g3', 'whatsapp', '3@g.us')
 	`)
 	if err != nil {
 		t.Fatalf("insert test groups: %v", err)
@@ -108,9 +112,9 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		})
 	}
 
-	// 3. POST valid creation of set1 with [g1, d1]
+	// 3. POST valid creation of set1 with WhatsApp + Discord + Telegram endpoints.
 	{
-		body := `{"id":"set1","groups":["g1","d1"]}`
+		body := `{"id":"set1","groups":["g1","d1","t1"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -122,7 +126,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 			t.Fatalf("decode created sync set: %v", err)
 		}
-		if created.ID != "set1" || len(created.Groups) != 2 {
+		if created.ID != "set1" || len(created.Groups) != 3 {
 			t.Fatalf("created sync set mismatch: %+v", created)
 		}
 		if configChanges != 1 {
@@ -167,7 +171,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&s); err != nil {
 			t.Fatalf("decode sync set: %v", err)
 		}
-		if s.ID != "set1" || len(s.Groups) != 2 {
+		if s.ID != "set1" || len(s.Groups) != 3 {
 			t.Fatalf("sync set mismatch: %+v", s)
 		}
 
@@ -183,8 +187,8 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// 7. PUT /api/sync-sets/{id}
 	{
-		// Update set1 to have [d1, g3] (g1 removed)
-		body := `{"groups":["d1","g3"]}`
+		// Update set1 to keep Discord + Telegram and replace the WhatsApp endpoint.
+		body := `{"groups":["d1","t1","g3"]}`
 		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -196,7 +200,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
 			t.Fatalf("decode updated sync set: %v", err)
 		}
-		if updated.ID != "set1" || len(updated.Groups) != 2 {
+		if updated.ID != "set1" || len(updated.Groups) != 3 {
 			t.Fatalf("updated sync set mismatch: %+v", updated)
 		}
 
@@ -248,12 +252,13 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 			t.Fatalf("GET deleted sync set status = %d, want 404", recGet.Code)
 		}
 
-		// Verify d1 and g3 are now unassigned
-		var d1Set, g3Set *string
+		// Verify all mixed-transport endpoints are now unassigned.
+		var d1Set, t1Set, g3Set *string
 		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'd1'`).Scan(&d1Set)
+		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 't1'`).Scan(&t1Set)
 		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g3'`).Scan(&g3Set)
-		if d1Set != nil || g3Set != nil {
-			t.Fatalf("expected groups to be unassigned after sync set delete, got d1=%v g3=%v", d1Set, g3Set)
+		if d1Set != nil || t1Set != nil || g3Set != nil {
+			t.Fatalf("expected endpoints to be unassigned after sync set delete, got d1=%v t1=%v g3=%v", d1Set, t1Set, g3Set)
 		}
 
 		// DELETE non-existent
