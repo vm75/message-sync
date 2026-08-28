@@ -15,7 +15,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 11
+const SchemaVersion = 12
 
 var (
 	//go:embed schema.sql
@@ -296,6 +296,28 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate schema v10 to v11: update version: %w", err)
 		}
 		version = 11
+	}
+	if version == 11 {
+		if _, err := tx.ExecContext(ctx, `
+			ALTER TABLE endpoints RENAME TO endpoints_v11;
+			CREATE TABLE endpoints (
+				alias TEXT PRIMARY KEY,
+				transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
+				remote_id TEXT NOT NULL,
+				sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
+				UNIQUE (transport, remote_id)
+			);
+			INSERT INTO endpoints(alias, transport, remote_id, sync_set_id)
+			SELECT alias, transport, remote_id, sync_set_id FROM endpoints_v11;
+			DROP TABLE endpoints_v11;
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);
+		`); err != nil {
+			return fmt.Errorf("migrate schema v11 to v12: allow Telegram transport: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '12' WHERE key = 'schema_version'`); err != nil {
+			return fmt.Errorf("migrate schema v11 to v12: update version: %w", err)
+		}
+		version = 12
 	}
 	if version != SchemaVersion {
 		return fmt.Errorf("unsupported sync schema version %d", version)
