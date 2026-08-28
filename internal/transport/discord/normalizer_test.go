@@ -91,8 +91,8 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 	if incoming.QuotedText != "quoted private body" {
 		t.Fatalf("quoted text = %q", incoming.QuotedText)
 	}
-	if len(incoming.Mentions) != 1 || incoming.Mentions[0].RemoteID != "523456789012345678" || incoming.Mentions[0].Name != "Bob Example" {
-		t.Fatal("unexpected Discord mention normalization")
+	if incoming.Mentions != nil {
+		t.Fatal("Discord identities must not leave the adapter as structured mentions")
 	}
 	if !incoming.Timestamp.Equal(evt.Timestamp) {
 		t.Fatalf("timestamp = %v, want %v", incoming.Timestamp, evt.Timestamp)
@@ -218,5 +218,68 @@ func TestReplyToUnconfiguredChannelIsNotExposed(t *testing.T) {
 	}
 	if incoming.ReplyTo != nil || incoming.QuotedText != "" {
 		t.Fatal("unconfigured reply target leaked into normalized event")
+	}
+}
+
+
+func TestNormalizeDiscordMentionsUseSafeTextFallbacks(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	evt := testMessage()
+	knownID := "523456789012345678"
+	unknownID := "623456789012345678"
+	roleID := "723456789012345678"
+	channelID := "823456789012345678"
+	evt.Content = "hi <@" + knownID + "> <@!" + unknownID + "> <@&" + roleID + "> <#" + channelID + ">"
+	evt.Mentions = []*discordgo.User{{
+		ID:         knownID,
+		Username:   "bob-user",
+		GlobalName: "Bob Example",
+	}}
+
+	incoming, ok := normalizer.NormalizeMessage(evt, "", nil)
+	if !ok {
+		t.Fatal("configured Discord message was ignored")
+	}
+	if !strings.Contains(incoming.Text, "@Bob Example") || !strings.Contains(incoming.Text, "@role") || !strings.Contains(incoming.Text, "#channel") {
+		t.Fatalf("safe mention fallbacks missing: %q", incoming.Text)
+	}
+	if strings.Contains(incoming.Text, knownID) || strings.Contains(incoming.Text, unknownID) || strings.Contains(incoming.Text, roleID) || strings.Contains(incoming.Text, channelID) {
+		t.Fatalf("raw Discord identifier leaked into normalized text: %q", incoming.Text)
+	}
+	if !strings.Contains(incoming.Text, "@u_") {
+		t.Fatalf("unknown Discord user did not use HMAC fallback: %q", incoming.Text)
+	}
+	if incoming.Mentions != nil {
+		t.Fatal("Discord structured mentions should not cross the privacy boundary")
+	}
+}
+
+func TestNormalizeUnsupportedDiscordFormatsAreIgnored(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+
+	poll := testMessage()
+	poll.Poll = &discordgo.Poll{Question: discordgo.PollMedia{Text: "private poll"}}
+	if _, ok := normalizer.NormalizeMessage(poll, "", nil); ok {
+		t.Fatal("native Discord poll should use deterministic unsupported-format handling")
+	}
+
+	system := testMessage()
+	system.Type = discordgo.MessageTypeGuildMemberJoin
+	if _, ok := normalizer.NormalizeMessage(system, "", nil); ok {
+		t.Fatal("Discord system message should be ignored")
+	}
+
+	embedOnly := testMessage()
+	embedOnly.Content = ""
+	embedOnly.Embeds = []*discordgo.MessageEmbed{{Title: "private embed"}}
+	if _, ok := normalizer.NormalizeMessage(embedOnly, "", nil); ok {
+		t.Fatal("embed-only Discord message should be ignored")
+	}
+
+	stickerOnly := testMessage()
+	stickerOnly.Content = ""
+	stickerOnly.StickerItems = []*discordgo.StickerItem{{ID: "923456789012345678", Name: "private sticker"}}
+	if _, ok := normalizer.NormalizeMessage(stickerOnly, "", nil); ok {
+		t.Fatal("native Discord sticker-only message should be ignored")
 	}
 }
