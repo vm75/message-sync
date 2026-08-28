@@ -9,7 +9,7 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
 
-`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups and configured Discord channels through one transport-neutral canonical router; Discord discovery/UI and richer thread/forum semantics are still being added incrementally.
+`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups and configured Discord channels through one transport-neutral canonical router; authenticated Discord discovery and mixed-transport administration are available in the embedded Web UI, while richer thread/forum semantics remain future work.
 
 *Note: This project is inspired by earlier explorations and prototypes in multi-platform message synchronization and bridging.*
 
@@ -21,7 +21,7 @@
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
-- **Embedded Web UI**: Simple, zero-dependency management console to configure groups and sync sets directly from your browser.
+- **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord status, discover Discord channels on demand, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
 ## Privacy Model
@@ -58,7 +58,11 @@ echo "DISCORD_BOT_TOKEN=your-bot-token" >> .env
 # DISCORD_BOT_TOKEN_FILE=/run/secrets/discord_bot_token
 ```
 
-The Discord application must have the **Guild Messages** and **Message Content** gateway intents needed for channel message ingestion, plus permission to read/send messages, add reactions, and **Manage Webhooks** in each configured destination channel. `message-sync` finds or creates one bridge-managed incoming webhook per configured Discord channel and reuses it across source users and restarts. Bot tokens and webhook credentials are never stored in `sync.db`.
+The Discord application must enable the **Guild Messages** gateway intent and the privileged **Message Content** intent in the Discord Developer Portal. In each channel you want to bridge, grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**. `message-sync` finds or creates one bridge-managed incoming webhook per configured Discord channel and reuses it across source users and restarts.
+
+The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE` at deployment time and restart the service. When a token source is configured, the Discord gateway starts even before the first Discord endpoint exists so the authenticated admin UI can discover guild text/announcement channels. Guild and channel display names returned by discovery are transient response/UI data only; only the selected channel ID is persisted as the endpoint's operational `remote_id`. Bot tokens and managed-webhook credentials are never stored in `sync.db`.
+
+If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
 
 ### 2. Start the Server
 
@@ -88,9 +92,9 @@ docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET adm
 
 The authenticated management API now has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD.
 
-Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
+Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp or Discord endpoints.
 
-The Discord adapter now provides bidirectional text/media synchronization plus replies, reactions, edits, and deletes through the same canonical/message-copy model used by WhatsApp. WhatsApp → Discord messages use a single reusable bridge-managed webhook per destination channel: the transient WhatsApp display name is rendered as the webhook APP username, with the HMAC actor ID as fallback, while the message body remains separate. Discord attachment bytes and CDN URLs stay transient and are bounded by the configured media size limit. Discord's incoming-webhook API does not support `message_reference`, so a mapped reply emits a minimal bot-authored native reply marker and sends the actual bridged content under the sender-specific webhook APP identity; if the destination copy is unavailable, the content uses an alias-based textual reply fallback instead. Discovery/UI, threads/forums, polls, and richer Discord format semantics remain follow-up work.
+The Discord adapter now provides bidirectional text/media synchronization plus replies, reactions, edits, deletes, authenticated channel discovery, and safe managed-webhook readiness through the same canonical/message-copy model used by WhatsApp. WhatsApp → Discord messages use a single reusable bridge-managed webhook per destination channel: the transient WhatsApp display name is rendered as the webhook APP username, with the HMAC actor ID as fallback, while the message body remains separate. Discord attachment bytes and CDN URLs stay transient and are bounded by the configured media size limit. Discord's incoming-webhook API does not support `message_reference`, so a mapped reply emits a minimal bot-authored native reply marker and sends the actual bridged content under the sender-specific webhook APP identity; if the destination copy is unavailable, the content uses an alias-based textual reply fallback instead. Threads/forums, polls, and richer Discord format semantics remain follow-up work.
 
 ## Local Development
 
