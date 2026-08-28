@@ -135,8 +135,9 @@ func (m *managedWebhookClient) Execute(ctx context.Context, channelID string, me
 	}
 
 	params := &discordgo.WebhookParams{
-		Content:  message.Content,
-		Username: message.Username,
+		Content:         message.Content,
+		Username:        message.Username,
+		AllowedMentions: &discordgo.MessageAllowedMentions{},
 	}
 	if message.File != nil {
 		params.Files = []*discordgo.File{{
@@ -177,7 +178,10 @@ func (m *managedWebhookClient) Edit(ctx context.Context, channelID, messageID, c
 		credential.id,
 		credential.token,
 		messageID,
-		&discordgo.WebhookEdit{Content: &content},
+		&discordgo.WebhookEdit{
+			Content:         &content,
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
+		},
 		discordgo.WithContext(ctx),
 		discordgo.WithRetryOnRatelimit(true),
 	)
