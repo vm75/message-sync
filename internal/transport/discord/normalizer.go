@@ -174,7 +174,7 @@ func sanitizeDiscordMentions(content string, mentions []*discordgo.User, hasher 
 			continue
 		}
 		label := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " ")
-		if label == "" && hasher != nil {
+		if (label == "" || label == id) && hasher != nil {
 			label = hasher.UserID("discord:" + id)
 		}
 		if label == "" {
