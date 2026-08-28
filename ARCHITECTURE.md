@@ -317,15 +317,19 @@ The core transport interface uses endpoint IDs and remote message IDs, not platf
 
 Outbound routing uses a small adapter registry keyed by configured transport type. The registry maintains only the safe endpoint-alias → transport mapping; the canonical router still emits operations addressed by alias and never switches on Discord or WhatsApp remote message IDs. Config reload updates the alias mapping without changing canonical/message-copy state.
 
-The persisted configuration is transport-aware so Discord can participate without changing canonical identity:
+The persisted configuration is transport-aware so Discord and Telegram endpoint records can participate in alias-based sync-set configuration without changing canonical identity. The endpoint schema accepts `transport=whatsapp|discord|telegram`; Telegram stores only the opaque negative Bot API group/supergroup chat ID required for operational addressing. Human-readable Telegram chat metadata and Telegram credentials are not part of the endpoint schema.
 
 ```text
-              canonical router
-              /      |       \
-        WA:c1g1  WA:c1g2  Discord:d1
+configured sync set
+  WA:c1g1
+  Discord:d1
+  Telegram:t1
+        |
+        v
+canonical alias-based routing model
 ```
 
-This prevents the previous design’s Discord-centric message identity from returning.
+Telegram Bot API execution and adapter registration are introduced by later Telegram tickets; this configuration phase does not create a Telegram-specific router or canonical identity. This prevents platform-specific message identity from becoming the application identity.
 
 ## 16. Rootless container model
 
