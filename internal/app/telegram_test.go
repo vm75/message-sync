@@ -2,15 +2,19 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
 	telegram "github.com/vm75/message-sync/internal/transport/telegram"
@@ -314,4 +318,183 @@ func waitForCount(t *testing.T, count func() int, want int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("count = %d, want %d", count(), want)
+}
+
+
+func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("DISCORD_BOT_TOKEN", "")
+	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "12345:test-reload-token")
+	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", "")
+
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"wa"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+
+	st, err := store.Open(context.Background(), filepath.Join(dataDir, SyncDBName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(context.Background(), st.DB(), cfg); err != nil {
+		_ = st.Close()
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	wa := &fakeWhatsAppTransport{events: make(chan transport.Incoming, 2)}
+	tg := &fakeTelegramTransport{events: make(chan transport.Incoming, 2)}
+
+	originalOpenWhatsApp := openWhatsApp
+	originalOpenTelegram := openTelegram
+	defer func() {
+		openWhatsApp = originalOpenWhatsApp
+		openTelegram = originalOpenTelegram
+	}()
+	openWhatsApp = func(context.Context, whatsapp.Options) (whatsappTransport, error) {
+		return wa, nil
+	}
+	openTelegram = func(context.Context, telegram.Options) (telegramTransport, error) {
+		return tg, nil
+	}
+
+	var logBuf safeBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- Run(ctx, cfg, logger) }()
+
+	var apiAddr string
+	for i := 0; i < 100; i++ {
+		for _, line := range strings.Split(logBuf.String(), "\n") {
+			if strings.Contains(line, "api server listening") && strings.Contains(line, "addr=") {
+				parts := strings.Split(line, "addr=")
+				if len(parts) > 1 {
+					apiAddr = strings.Trim(strings.Fields(parts[1])[0], "\"")
+					break
+				}
+			}
+		}
+		if apiAddr != "" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if apiAddr == "" {
+		cancel()
+		t.Fatalf("failed to find API address in logs: %s", logBuf.String())
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	var token string
+	for i := 0; i < 50; i++ {
+		resp, requestErr := client.Post(
+			fmt.Sprintf("http://%s/api/auth/setup", apiAddr),
+			"application/json",
+			strings.NewReader(`{"password":"testadminpassword123"}`),
+		)
+		if requestErr == nil {
+			var tokenResp struct {
+				Token string `json:"token"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&tokenResp)
+			resp.Body.Close()
+			if tokenResp.Token != "" {
+				token = tokenResp.Token
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if token == "" {
+		cancel()
+		t.Fatal("failed to set up admin authentication")
+	}
+
+	const telegramRemoteID = "-1001234567890"
+	req, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("http://%s/api/endpoints", apiAddr),
+		strings.NewReader(`{"alias":"telegram","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`),
+	)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		cancel()
+		t.Fatalf("POST Telegram endpoint failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		cancel()
+		t.Fatalf("POST Telegram endpoint status = %d, want 201", resp.StatusCode)
+	}
+
+	for i := 0; i < 100; i++ {
+		tg.mu.Lock()
+		updated := len(tg.updatedConfigs) > 0
+		var endpoint config.Endpoint
+		var ok bool
+		if updated {
+			endpoint, ok = tg.updatedConfigs[len(tg.updatedConfigs)-1].Endpoints["telegram"]
+		}
+		tg.mu.Unlock()
+		if updated && ok && endpoint.Transport == config.TransportTelegram && endpoint.RemoteID == telegramRemoteID {
+			break
+		}
+		if i == 99 {
+			cancel()
+			t.Fatal("runtime config reload did not update Telegram adapter targets")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	wa.events <- transport.Incoming{
+		Endpoint:  "wa",
+		RemoteID:  "wa-after-reload",
+		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
+		Kind:      "text",
+		Text:      "after reload",
+		Timestamp: time.Unix(1_700_000_100, 0).UTC(),
+	}
+	waitForCount(t, func() int {
+		tg.mu.Lock()
+		defer tg.mu.Unlock()
+		return len(tg.sent)
+	}, 1)
+	tg.mu.Lock()
+	if tg.sent[0].Endpoint != "telegram" {
+		got := tg.sent[0].Endpoint
+		tg.mu.Unlock()
+		cancel()
+		t.Fatalf("post-reload destination = %q, want telegram", got)
+	}
+	tg.mu.Unlock()
+
+	if strings.Contains(logBuf.String(), telegramRemoteID) ||
+		strings.Contains(logBuf.String(), "12345:test-reload-token") {
+		cancel()
+		t.Fatalf("runtime reload logs leaked Telegram credential or remote ID: %s", logBuf.String())
+	}
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 }
