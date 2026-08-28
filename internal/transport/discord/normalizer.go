@@ -150,7 +150,6 @@ func transientUserDisplayName(user *discordgo.User) string {
 	return strings.TrimSpace(user.Username)
 }
 
-
 func discordMessageSupported(msg *discordgo.Message) bool {
 	if msg == nil || msg.Poll != nil {
 		return false
@@ -192,7 +191,7 @@ func sanitizeDiscordMentions(content string, mentions []*discordgo.User, hasher 
 			return label
 		}
 		if hasher != nil {
-			return "@" + hasher.UserID("discord:" + matches[1])
+			return "@" + hasher.UserID("discord:"+matches[1])
 		}
 		return "@user"
 	})
