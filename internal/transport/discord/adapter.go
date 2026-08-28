@@ -31,6 +31,7 @@ type Options struct {
 type Adapter struct {
 	session    *discordgo.Session
 	api        discordAPI
+	adminAPI   discordAdminAPI
 	normalizer *Normalizer
 	hasher     *identity.Hasher
 	webhook    ChannelWebhook
@@ -44,6 +45,7 @@ type Adapter struct {
 	suppressedDeletes map[string]struct{}
 
 	mu        sync.RWMutex
+	connected bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -95,6 +97,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	adapter := &Adapter{
 		session:           session,
 		api:               session,
+		adminAPI:          session,
 		normalizer:        normalizer,
 		hasher:            opts.Hasher,
 		webhook:           webhook,
@@ -117,6 +120,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		_ = session.Close()
 		return nil, errors.New("connect Discord gateway")
 	}
+	adapter.mu.Lock()
+	adapter.connected = true
+	adapter.mu.Unlock()
 	select {
 	case <-ctx.Done():
 		_ = adapter.Close()
@@ -178,6 +184,9 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closeOnce.Do(func() {
+		a.mu.Lock()
+		a.connected = false
+		a.mu.Unlock()
 		if a.session == nil {
 			return
 		}
@@ -282,6 +291,11 @@ func (a *Adapter) emit(incoming transport.Incoming) {
 // LoadBotToken reads the Discord bot credential only from environment or a
 // mounted secret file. The token is never returned through config APIs or
 // written to application persistence.
+func BotTokenConfigured() bool {
+	return strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")) != "" ||
+		strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN_FILE")) != ""
+}
+
 func LoadBotToken() (string, error) {
 	token := strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN"))
 	secretFile := strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN_FILE"))

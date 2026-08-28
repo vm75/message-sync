@@ -30,8 +30,9 @@ type managedWebhookClient struct {
 	api       webhookAPI
 	botUserID func() string
 
-	mu    sync.RWMutex
-	hooks map[string]managedWebhookCredential
+	mu     sync.RWMutex
+	hooks  map[string]managedWebhookCredential
+	states map[string]WebhookStatus
 }
 
 func newManagedWebhookClient(session *discordgo.Session) *managedWebhookClient {
@@ -43,7 +44,8 @@ func newManagedWebhookClient(session *discordgo.Session) *managedWebhookClient {
 			}
 			return strings.TrimSpace(session.State.User.ID)
 		},
-		hooks: make(map[string]managedWebhookCredential),
+		hooks:  make(map[string]managedWebhookCredential),
+		states: make(map[string]WebhookStatus),
 	}
 }
 
@@ -61,6 +63,7 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 	}
 
 	next := make(map[string]managedWebhookCredential, len(channelIDs))
+	states := make(map[string]WebhookStatus, len(channelIDs))
 	for _, rawChannelID := range channelIDs {
 		channelID := strings.TrimSpace(rawChannelID)
 		if channelID == "" {
@@ -72,6 +75,10 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 			discordgo.WithContext(ctx),
 			discordgo.WithRetryOnRatelimit(true),
 		)
+		if isDiscordForbidden(err) {
+			states[channelID] = WebhookStatusMissingPermission
+			continue
+		}
 		if err != nil {
 			return errors.New("list Discord channel webhooks")
 		}
@@ -99,6 +106,10 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 				discordgo.WithContext(ctx),
 				discordgo.WithRetryOnRatelimit(true),
 			)
+			if isDiscordForbidden(err) {
+				states[channelID] = WebhookStatusMissingPermission
+				continue
+			}
 			if err != nil {
 				return errors.New("create managed Discord webhook")
 			}
@@ -110,12 +121,27 @@ func (m *managedWebhookClient) Prepare(ctx context.Context, channelIDs []string)
 			id:    strings.TrimSpace(managed.ID),
 			token: strings.TrimSpace(managed.Token),
 		}
+		states[channelID] = WebhookStatusReady
 	}
 
 	m.mu.Lock()
 	m.hooks = next
+	m.states = states
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *managedWebhookClient) Readiness(channelID string) WebhookStatus {
+	if m == nil {
+		return WebhookStatusUnavailable
+	}
+	m.mu.RLock()
+	status, ok := m.states[strings.TrimSpace(channelID)]
+	m.mu.RUnlock()
+	if !ok {
+		return WebhookStatusUnavailable
+	}
+	return status
 }
 
 func (m *managedWebhookClient) IsManagedWebhook(channelID, webhookID string) bool {
@@ -239,4 +265,15 @@ func isDiscordNotFound(err error) bool {
 		return false
 	}
 	return restErr.Response.StatusCode == http.StatusNotFound
+}
+
+func isDiscordForbidden(err error) bool {
+	if err == nil {
+		return false
+	}
+	var restErr *discordgo.RESTError
+	if !errors.As(err, &restErr) || restErr == nil || restErr.Response == nil {
+		return false
+	}
+	return restErr.Response.StatusCode == http.StatusForbidden
 }

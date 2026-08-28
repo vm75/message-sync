@@ -31,3 +31,7 @@ type ChannelWebhook interface {
 type webhookPreparer interface {
 	Prepare(context.Context, []string) error
 }
+
+type webhookReadinessProvider interface {
+	Readiness(string) WebhookStatus
+}

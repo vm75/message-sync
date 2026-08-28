@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/safelog"
+	discord "github.com/vm75/message-sync/internal/transport/discord"
 )
 
 type WhatsAppStatus struct {
@@ -49,6 +50,7 @@ type Options struct {
 	Secret         []byte
 	SessionTTL     time.Duration
 	WhatsApp       WhatsAppService
+	Discord        discord.AdminService
 	OnConfigChange func(ctx context.Context) error
 }
 
@@ -60,6 +62,7 @@ type Server struct {
 	db             *sql.DB
 	sessions       *SessionManager
 	whatsapp       WhatsAppService
+	discord        discord.AdminService
 	onConfigChange func(ctx context.Context) error
 	listener       net.Listener
 }
@@ -86,6 +89,7 @@ func NewServer(opts Options) *Server {
 		db:             opts.DB,
 		sessions:       sessions,
 		whatsapp:       opts.WhatsApp,
+		discord:        opts.Discord,
 		onConfigChange: opts.OnConfigChange,
 	}
 
@@ -117,6 +121,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
 	s.mux.HandleFunc("POST /api/whatsapp/logout", s.handleWhatsAppLogout)
 	s.mux.HandleFunc("GET /api/whatsapp/groups", s.handleWhatsAppGroups)
+
+	s.mux.HandleFunc("GET /api/discord/status", s.handleDiscordStatus)
+	s.mux.HandleFunc("GET /api/discord/channels", s.handleDiscordChannels)
 
 	s.mux.HandleFunc("GET /api/endpoints", s.handleListEndpoints)
 	s.mux.HandleFunc("GET /api/endpoints/{alias}", s.handleGetEndpoint)

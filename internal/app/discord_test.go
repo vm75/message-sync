@@ -51,6 +51,12 @@ func (f *fakeDiscordTransport) Close() error {
 }
 
 func (f *fakeDiscordTransport) UpdateConfig(*config.Config) error { return nil }
+func (f *fakeDiscordTransport) AdminStatus(context.Context) discord.AdminStatus {
+	return discord.AdminStatus{Configured: true, Connected: true, Status: "connected"}
+}
+func (f *fakeDiscordTransport) DiscoverChannels(context.Context) ([]discord.DiscoveredChannel, error) {
+	return nil, nil
+}
 
 func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
@@ -246,6 +252,68 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 		t.Fatalf("Discord ingress was not dispatched to WhatsApp adapter: %+v", got)
 	}
 	wa.mu.Unlock()
+
+	cancel()
+	if err := <-errCh; err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(t *testing.T) {
+	t.Setenv("DATA_DIR", t.TempDir())
+	t.Setenv("API_ADDR", "127.0.0.1:0")
+	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("DISCORD_BOT_TOKEN", "test-discovery-token")
+	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
+
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+		},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+		Media:    config.Media{MaxSizeMB: 100},
+		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:  config.Storage{MessageRetentionDays: 90},
+	}
+
+	wa := &fakeWhatsAppTransport{events: make(chan transport.Incoming, 1)}
+	dc := &fakeDiscordTransport{events: make(chan transport.Incoming, 1)}
+
+	originalOpenWhatsApp := openWhatsApp
+	originalOpenDiscord := openDiscord
+	defer func() {
+		openWhatsApp = originalOpenWhatsApp
+		openDiscord = originalOpenDiscord
+	}()
+	openWhatsApp = func(context.Context, whatsapp.Options) (whatsappTransport, error) {
+		return wa, nil
+	}
+
+	openedDiscord := make(chan discord.Options, 1)
+	openDiscord = func(_ context.Context, opts discord.Options) (discordTransport, error) {
+		openedDiscord <- opts
+		return dc, nil
+	}
+
+	logger := slog.New(slog.NewTextHandler(&safeBuffer{}, nil))
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() { errCh <- Run(ctx, cfg, logger) }()
+
+	select {
+	case opts := <-openedDiscord:
+		if len(opts.ChannelIDs) != 0 {
+			cancel()
+			t.Fatalf("discovery-only Discord adapter received configured targets: %+v", opts.ChannelIDs)
+		}
+		if opts.Token != "test-discovery-token" {
+			cancel()
+			t.Fatal("discovery-only Discord adapter did not receive configured environment credential")
+		}
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("Discord gateway did not start for discovery-only configuration")
+	}
 
 	cancel()
 	if err := <-errCh; err != nil {

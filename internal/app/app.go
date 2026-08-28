@@ -50,6 +50,7 @@ type discordTransport interface {
 	Delete(context.Context, transport.MessageRef) error
 	Close() error
 	UpdateConfig(*config.Config) error
+	discord.AdminService
 }
 
 var openDiscord = func(ctx context.Context, opts discord.Options) (discordTransport, error) {
@@ -122,7 +123,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	defer wa.Close()
 
 	var dc discordTransport
-	if len(discordChannelIDs) > 0 {
+	if len(discordChannelIDs) > 0 || discord.BotTokenConfigured() {
 		token, err := discord.LoadBotToken()
 		if err != nil {
 			return err
@@ -208,6 +209,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		DB:             syncStore.DB(),
 		Secret:         []byte(secret),
 		WhatsApp:       waService,
+		Discord:        dc,
 		OnConfigChange: onConfigChange,
 	})
 	if err := apiServer.Start(); err != nil {

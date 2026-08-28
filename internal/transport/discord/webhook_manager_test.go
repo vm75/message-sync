@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"net/http"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
@@ -9,17 +10,25 @@ import (
 
 type fakeWebhookAPI struct {
 	channels    map[string][]*discordgo.Webhook
+	listErr     error
+	createErr   error
 	createCalls int
 	execCalls   int
 	lastParams  *discordgo.WebhookParams
 }
 
 func (f *fakeWebhookAPI) ChannelWebhooks(channelID string, _ ...discordgo.RequestOption) ([]*discordgo.Webhook, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.channels[channelID], nil
 }
 
 func (f *fakeWebhookAPI) WebhookCreate(channelID, name, _ string, _ ...discordgo.RequestOption) (*discordgo.Webhook, error) {
 	f.createCalls++
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
 	webhook := &discordgo.Webhook{
 		ID:        "managed-" + channelID,
 		Type:      discordgo.WebhookTypeIncoming,
@@ -117,5 +126,30 @@ func TestManagedWebhookPrepareCreatesOneAndReusesOnReconnect(t *testing.T) {
 	}
 	if api.lastParams.AllowedMentions == nil || len(api.lastParams.AllowedMentions.Parse) != 0 {
 		t.Fatalf("bridged content must not enable implicit Discord mentions: %#v", api.lastParams.AllowedMentions)
+	}
+}
+
+func TestManagedWebhookPrepareReportsMissingPermissionWithoutLeakingCredentials(t *testing.T) {
+	api := &fakeWebhookAPI{
+		channels: map[string][]*discordgo.Webhook{},
+		listErr: &discordgo.RESTError{
+			Response: &http.Response{StatusCode: http.StatusForbidden},
+		},
+	}
+	manager := &managedWebhookClient{
+		api:       api,
+		botUserID: func() string { return "bridge-bot" },
+		hooks:     make(map[string]managedWebhookCredential),
+		states:    make(map[string]WebhookStatus),
+	}
+
+	if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
+		t.Fatalf("missing Manage Webhooks permission should be a readiness state, got: %v", err)
+	}
+	if got := manager.Readiness(testChannelID); got != WebhookStatusMissingPermission {
+		t.Fatalf("readiness=%q, want %q", got, WebhookStatusMissingPermission)
+	}
+	if _, ok := manager.credential(testChannelID); ok {
+		t.Fatal("missing-permission channel unexpectedly retained a webhook credential")
 	}
 }
