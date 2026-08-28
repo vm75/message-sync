@@ -50,7 +50,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 
 - The canonical router owns cross-endpoint synchronization semantics.
 - Transport adapters own platform protocol details.
-- WhatsApp and Discord both use the canonical router for end-to-end text/media and reply/reaction/edit/delete lifecycle routing. Discord discovery/UI, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and unsupported-format handling are implemented. Dynamic thread endpoints, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional routing remain deferred.
+- WhatsApp and Discord both use the canonical router for end-to-end text/media and reply/reaction/edit/delete lifecycle routing. Telegram Bot API ingress is also registered through the same transport adapter registry and single canonical router loop; Telegram protocol outbound lifecycle support remains staged for its outbound ticket. Discord discovery/UI, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and unsupported-format handling are implemented. Dynamic thread endpoints, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional routing remain deferred.
 - Never use a Discord, Telegram, or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Process ingress deterministically; start with one router worker.
