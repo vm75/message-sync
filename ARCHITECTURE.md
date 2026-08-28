@@ -33,14 +33,16 @@ The previous Node/Baileys project is a behavioral reference only, not the archit
   events ----------------->| Canonical Router |
                            +--------+---------+
                                     |
-                                    v
-                           +------------------+
-                           | WhatsApp Adapter |
-                           | whatsmeow        |
-                           +--------+---------+
-                                    |
-                                    +----------> /data/whatsapp.db
-                                                 sensitive protocol state
+                         +----------+----------+
+                         |                     |
+                         v                     v
+                +------------------+   +------------------+
+                | WhatsApp Adapter |   | Discord Adapter  |
+                | whatsmeow        |   | gateway/webhook  |
+                +--------+---------+   +------------------+
+                         |
+                         +--------------------> /data/whatsapp.db
+                                               sensitive protocol state
 ```
 
 ### `whatsapp.db`
@@ -190,7 +192,7 @@ Discord MESSAGE_CREATE
 
 Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. User mentions are converted at ingress to transient display text, with an HMAC-derived actor fallback when no display name is available; role and channel mention IDs become generic `@role` / `#channel` text. Structured Discord member IDs therefore do not cross the adapter privacy boundary.
 
-The gateway bot is intentionally distinct from WhatsApp → Discord sender rendering. Each configured Discord destination reuses one bridge-managed incoming webhook; only its in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the WhatsApp display name as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp in one select loop and feeds both into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
+The gateway bot is intentionally distinct from WhatsApp → Discord sender rendering. The bot owns gateway ingress, discovery, native reply markers, reactions, and gateway lifecycle; each configured Discord destination reuses one bridge-managed incoming webhook for outbound sender rendering. Only the webhook manager's in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the WhatsApp display name as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. These APP/webhook identities are presentation overrides, not real Discord user accounts, and no per-WhatsApp-user webhook is created. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp in one select loop and feeds both into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
 
 Discord attachments are downloaded only when routing needs them, bounded by the configured media limit, held in memory, and re-uploaded with bridge-generated safe filenames. Source filenames, CDN URLs, and media bytes are never stored in `sync.db`. Native Discord replies require the bot message API because Discord incoming-webhook execution does not accept `message_reference`; when a destination copy exists the adapter emits a minimal native reply marker referencing that copy and sends the actual content under the sender-specific webhook APP identity. If no destination copy exists, an alias-based textual reply fallback is used instead.
 
@@ -212,7 +214,7 @@ Discord administration reuses the transport adapter rather than introducing a se
 
 Managed-webhook preparation tracks only a safe readiness enum per configured channel in addition to the in-memory webhook credential. A Discord REST 403 while listing/creating the bridge webhook is classified as `missing_permission`, allowing the gateway and inbound discovery to remain live while outbound webhook readiness is visibly degraded. The API maps that state back to configured endpoint aliases; it never returns webhook IDs, tokens, URLs, raw Discord errors, or transient guild/channel names in the status response.
 
-The embedded Web UI has no Discord credential form. It only explains the deployment-time `DISCORD_BOT_TOKEN` / `DISCORD_BOT_TOKEN_FILE` configuration, performs authenticated status/discovery calls, and uses transport-neutral endpoint/sync-set APIs for persistence.
+The embedded Web UI has no Discord credential form. It only explains the deployment-time `DISCORD_BOT_TOKEN` / `DISCORD_BOT_TOKEN_FILE` configuration, performs authenticated status/discovery calls, and uses transport-neutral endpoint/sync-set APIs for persistence. DiscordGo performs REST rate-limit retry/backoff for gateway REST, discovery, webhook, reply, reaction, edit, and delete operations. Gateway `READY`, `RESUMED`, and `DISCONNECT` events update only the adapter's in-memory connected flag with fixed safe log fields; raw lifecycle event data is never logged. On reconnect the in-memory webhook credential remains usable, while a process restart runs managed-webhook discovery again and reuses the existing bridge-owned channel webhook instead of creating one per participant or restart.
 
 ## 7. Idempotency and crash recovery
 
