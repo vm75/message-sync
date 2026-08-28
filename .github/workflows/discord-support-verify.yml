@@ -1,6 +1,7 @@
 name: Discord support verify
 
 on:
+  pull_request:
   push:
     branches:
       - agent/discord-support
@@ -26,4 +27,4 @@ jobs:
       - name: Vet
         run: make vet
       - name: Verify VERSION unchanged
-        run: git diff --exit-code HEAD^ -- VERSION
+        run: test "$(cat VERSION)" = "0.1.0"
