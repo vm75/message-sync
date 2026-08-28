@@ -90,11 +90,11 @@ func TestDiscordMediaDisabledPreservesCaptionOnly(t *testing.T) {
 
 func TestDiscordAttachmentKind(t *testing.T) {
 	cases := map[string]string{
-		"image/png":               "image",
-		"video/mp4":               "video",
-		"audio/ogg; codecs=opus":  "audio",
-		"application/pdf":         "document",
-		"":                        "document",
+		"image/png":              "image",
+		"video/mp4":              "video",
+		"audio/ogg; codecs=opus": "audio",
+		"application/pdf":        "document",
+		"":                       "document",
 	}
 	for contentType, want := range cases {
 		if got := discordAttachmentKind(contentType); got != want {
