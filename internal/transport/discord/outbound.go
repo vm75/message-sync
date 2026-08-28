@@ -62,6 +62,14 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if outgoing.ReplyFallback {
 		content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
+	content = sanitizeOutgoingMentions(content, outgoing.Mentions)
+	if outgoing.Kind == "poll" {
+		var err error
+		content, err = discordPollText(content, outgoing.PollOptions, outgoing.PollSelectableCount)
+		if err != nil {
+			return transport.MessageRef{}, err
+		}
+	}
 
 	var file *WebhookFile
 	if len(outgoing.MediaBytes) > 0 {
@@ -324,4 +332,44 @@ func isDiscordMediaKind(kind string) bool {
 	default:
 		return false
 	}
+}
+
+
+func sanitizeOutgoingMentions(content string, mentions []transport.Mention) string {
+	for _, mention := range mentions {
+		remoteID := strings.TrimSpace(mention.RemoteID)
+		if remoteID == "" {
+			continue
+		}
+		name := strings.Join(strings.Fields(mention.Name), " ")
+		if name == "" || name == remoteID {
+			name = "participant"
+		}
+		content = strings.ReplaceAll(content, "@"+remoteID, "@"+name)
+	}
+	return content
+}
+
+func discordPollText(question string, options []string, selectableCount int) (string, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", errors.New("outgoing Discord poll question is required")
+	}
+	if len(options) == 0 {
+		return "", errors.New("outgoing Discord poll options are required")
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Poll: ")
+	builder.WriteString(question)
+	for i, option := range options {
+		builder.WriteString("\n")
+		builder.WriteString(fmt.Sprintf("%d. %s", i+1, strings.TrimSpace(option)))
+	}
+	if selectableCount > 1 {
+		builder.WriteString(fmt.Sprintf("\nChoose up to %d options.", selectableCount))
+	} else {
+		builder.WriteString("\nChoose one option.")
+	}
+	return builder.String(), nil
 }
