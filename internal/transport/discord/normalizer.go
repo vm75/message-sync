@@ -3,12 +3,19 @@ package discord
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
+)
+
+var (
+	discordUserMentionPattern    = regexp.MustCompile(`<@!?([0-9]+)>`)
+	discordRoleMentionPattern    = regexp.MustCompile(`<@&[0-9]+>`)
+	discordChannelMentionPattern = regexp.MustCompile(`<#[0-9]+>`)
 )
 
 // ManagedWebhookChecker identifies bridge-owned channel webhooks transiently.
@@ -65,6 +72,9 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 	if strings.TrimSpace(msg.GuildID) == "" {
 		return transport.Incoming{}, false
 	}
+	if !discordMessageSupported(msg) {
+		return transport.Incoming{}, false
+	}
 	endpoint, configured := n.endpoints[strings.TrimSpace(msg.ChannelID)]
 	if !configured || strings.TrimSpace(msg.ID) == "" || msg.Author == nil || strings.TrimSpace(msg.Author.ID) == "" {
 		return transport.Incoming{}, false
@@ -101,19 +111,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 		}
 	}
 
-	mentions := make([]transport.Mention, 0, len(msg.Mentions))
-	for _, mentioned := range msg.Mentions {
-		if mentioned == nil || strings.TrimSpace(mentioned.ID) == "" {
-			continue
-		}
-		mentions = append(mentions, transport.Mention{
-			RemoteID: strings.TrimSpace(mentioned.ID),
-			Name:     transientUserDisplayName(mentioned),
-		})
-	}
-	if len(mentions) == 0 {
-		mentions = nil
-	}
+	text := sanitizeDiscordMentions(msg.Content, msg.Mentions, n.hasher)
 
 	return transport.Incoming{
 		Endpoint: endpoint,
@@ -123,8 +121,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 			OpaqueID:    n.hasher.UserID("discord:" + authorID),
 		},
 		Kind:       "text",
-		Text:       msg.Content,
-		Mentions:   mentions,
+		Text:       text,
 		ReplyTo:    replyTo,
 		QuotedText: quotedText,
 		Timestamp:  msg.Timestamp,
@@ -151,4 +148,55 @@ func transientUserDisplayName(user *discordgo.User) string {
 		return name
 	}
 	return strings.TrimSpace(user.Username)
+}
+
+
+func discordMessageSupported(msg *discordgo.Message) bool {
+	if msg == nil || msg.Poll != nil {
+		return false
+	}
+	switch msg.Type {
+	case discordgo.MessageTypeDefault, discordgo.MessageTypeReply, discordgo.MessageTypeThreadStarterMessage:
+	default:
+		return false
+	}
+	return strings.TrimSpace(msg.Content) != "" || len(msg.Attachments) > 0
+}
+
+func sanitizeDiscordMentions(content string, mentions []*discordgo.User, hasher *identity.Hasher) string {
+	labels := make(map[string]string, len(mentions))
+	for _, mentioned := range mentions {
+		if mentioned == nil {
+			continue
+		}
+		id := strings.TrimSpace(mentioned.ID)
+		if id == "" {
+			continue
+		}
+		label := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " ")
+		if label == "" && hasher != nil {
+			label = hasher.UserID("discord:" + id)
+		}
+		if label == "" {
+			label = "user"
+		}
+		labels[id] = "@" + label
+	}
+
+	content = discordUserMentionPattern.ReplaceAllStringFunc(content, func(raw string) string {
+		matches := discordUserMentionPattern.FindStringSubmatch(raw)
+		if len(matches) != 2 {
+			return "@user"
+		}
+		if label := labels[matches[1]]; label != "" {
+			return label
+		}
+		if hasher != nil {
+			return "@" + hasher.UserID("discord:" + matches[1])
+		}
+		return "@user"
+	})
+	content = discordRoleMentionPattern.ReplaceAllString(content, "@role")
+	content = discordChannelMentionPattern.ReplaceAllString(content, "#channel")
+	return content
 }
