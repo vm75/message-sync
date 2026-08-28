@@ -115,4 +115,7 @@ func TestManagedWebhookPrepareCreatesOneAndReusesOnReconnect(t *testing.T) {
 	if api.lastParams == nil || api.lastParams.Username != "Alice" || api.lastParams.Content != "private body" || len(api.lastParams.Files) != 1 {
 		t.Fatalf("unexpected webhook params: %#v", api.lastParams)
 	}
+	if api.lastParams.AllowedMentions == nil || len(api.lastParams.AllowedMentions.Parse) != 0 {
+		t.Fatalf("bridged content must not enable implicit Discord mentions: %#v", api.lastParams.AllowedMentions)
+	}
 }
