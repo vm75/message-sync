@@ -6,6 +6,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/transport"
 )
 
 func TestNormalizeDiscordLifecycleEvents(t *testing.T) {
