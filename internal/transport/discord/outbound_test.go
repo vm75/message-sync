@@ -1,0 +1,291 @@
+package discord
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/bwmarrin/discordgo"
+	"github.com/vm75/message-sync/internal/transport"
+)
+
+type fakeChannelWebhook struct {
+	managed  map[string]string
+	nextID   int
+	executed []WebhookMessage
+	channels []string
+	edits    []string
+	deletes  []string
+}
+
+func (f *fakeChannelWebhook) IsManagedWebhook(channelID, webhookID string) bool {
+	return f != nil && f.managed[channelID] == webhookID
+}
+
+func (f *fakeChannelWebhook) Execute(_ context.Context, channelID string, message WebhookMessage) (string, error) {
+	f.nextID++
+	f.channels = append(f.channels, channelID)
+	f.executed = append(f.executed, message)
+	return "discord-copy-" + string(rune('0'+f.nextID)), nil
+}
+
+func (f *fakeChannelWebhook) Edit(_ context.Context, channelID, messageID, content string) error {
+	f.edits = append(f.edits, channelID+"|"+messageID+"|"+content)
+	return nil
+}
+
+func (f *fakeChannelWebhook) Delete(_ context.Context, channelID, messageID string) error {
+	f.deletes = append(f.deletes, channelID+"|"+messageID)
+	return nil
+}
+
+type fakeDiscordAPI struct {
+	replySends []*discordgo.MessageSend
+	adds       []string
+	removes    []string
+	message    *discordgo.Message
+}
+
+func (f *fakeDiscordAPI) ChannelMessage(_ string, _ string, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	return f.message, nil
+}
+
+func (f *fakeDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.replySends = append(f.replySends, data)
+	return &discordgo.Message{ID: "reply-marker"}, nil
+}
+
+func (f *fakeDiscordAPI) MessageReactionAdd(channelID, messageID, emojiID string, _ ...discordgo.RequestOption) error {
+	f.adds = append(f.adds, channelID+"|"+messageID+"|"+emojiID)
+	return nil
+}
+
+func (f *fakeDiscordAPI) MessageReactionRemove(channelID, messageID, emojiID, userID string, _ ...discordgo.RequestOption) error {
+	f.removes = append(f.removes, channelID+"|"+messageID+"|"+emojiID+"|"+userID)
+	return nil
+}
+
+func newOutboundTestAdapter(webhook *fakeChannelWebhook, api *fakeDiscordAPI) *Adapter {
+	return &Adapter{
+		webhook:            webhook,
+		api:                api,
+		targets:            map[transport.EndpointID]string{"discord": testChannelID},
+		mediaEnabled:       true,
+		mediaMaxBytes:      1024,
+		reactionState:      make(map[reactionKey]string),
+		suppressedDeletes:  make(map[string]struct{}),
+	}
+}
+
+func TestWebhookSenderRenderingUsesDistinctTransientNamesAndHashFallback(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	cases := []struct {
+		name     string
+		sender   transport.Sender
+		text     string
+		wantUser string
+	}{
+		{name: "alice", sender: transport.Sender{DisplayName: "Alice Example", OpaqueID: "u_alicehash"}, text: "hello", wantUser: "Alice Example"},
+		{name: "bob", sender: transport.Sender{DisplayName: "Bob Example", OpaqueID: "u_bobhash"}, text: "hi", wantUser: "Bob Example"},
+		{name: "hash fallback", sender: transport.Sender{OpaqueID: "u_fallbackhash"}, text: "fallback", wantUser: "u_fallbackhash"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint:   "discord",
+				Sender:     tc.sender,
+				SourceText: tc.text,
+				Text:       "*_whatsapp/attribution_*: " + tc.text,
+				Kind:       "text",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := webhook.executed[len(webhook.executed)-1]
+			if got.Username != tc.wantUser {
+				t.Fatalf("webhook username = %q, want %q", got.Username, tc.wantUser)
+			}
+			if got.Content != tc.text {
+				t.Fatalf("webhook content = %q, want raw source %q", got.Content, tc.text)
+			}
+			if strings.Contains(got.Content, tc.wantUser) {
+				t.Fatalf("sender identity was duplicated into webhook content: %q", got.Content)
+			}
+		})
+	}
+}
+
+func TestDiscordSuppressesAttributionOnlyCompanion(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:        "discord",
+		AttributionOnly: true,
+		Kind:            "text",
+		Text:            "private attribution",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Endpoint != "discord" || ref.RemoteMessageID != "" {
+		t.Fatalf("unexpected companion ref: %#v", ref)
+	}
+	if len(webhook.executed) != 0 {
+		t.Fatal("Discord emitted a redundant attribution companion")
+	}
+}
+
+func TestDiscordMediaUsesTransientBytesAndSafeGeneratedFilename(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+	media := []byte("private-media-bytes")
+
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:   "discord",
+		Sender:     transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		SourceText: "caption",
+		Text:       "*_wa/Alice_*: caption",
+		Kind:       "document",
+		MediaBytes: media,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.RemoteMessageID == "" {
+		t.Fatal("missing Discord remote copy id")
+	}
+	got := webhook.executed[len(webhook.executed)-1]
+	if got.Username != "Alice" || got.Content != "caption" {
+		t.Fatalf("unexpected webhook rendering: %#v", got)
+	}
+	if got.File == nil || got.File.Name != "document.bin" || string(got.File.Data) != string(media) {
+		t.Fatalf("unexpected transient webhook file: %#v", got.File)
+	}
+	if strings.Contains(got.File.Name, "private") {
+		t.Fatal("source filename/data-derived name leaked into outbound filename")
+	}
+
+	adapter.mediaMaxBytes = 4
+	if _, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord",
+		Sender: transport.Sender{OpaqueID: "u_hash"},
+		Kind: "document",
+		MediaBytes: media,
+	}); err == nil {
+		t.Fatal("expected configured media-size rejection")
+	}
+}
+
+func TestDiscordReplyUsesNativeMarkerAndWebhookSender(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	api := &fakeDiscordAPI{}
+	adapter := newOutboundTestAdapter(webhook, api)
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:   "discord",
+		Sender:     transport.Sender{DisplayName: "Alice"},
+		SourceText: "reply body",
+		Text:       "*_wa/Alice_*: reply body",
+		Kind:       "text",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "discord",
+			RemoteMessageID: "known-discord-copy",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.replySends) != 1 || api.replySends[0].Reference == nil {
+		t.Fatal("native Discord reply marker was not sent")
+	}
+	if api.replySends[0].Reference.MessageID != "known-discord-copy" {
+		t.Fatalf("reply target = %q", api.replySends[0].Reference.MessageID)
+	}
+	if api.replySends[0].Content != replyMarkerText {
+		t.Fatalf("reply marker content = %q", api.replySends[0].Content)
+	}
+	got := webhook.executed[len(webhook.executed)-1]
+	if got.Username != "Alice" || got.Content != "reply body" {
+		t.Fatalf("reply content lost webhook APP rendering: %#v", got)
+	}
+}
+
+func TestDiscordReplyFallbackUsesAliasNotRemoteTarget(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:       "discord",
+		OriginEndpoint: "wa-source",
+		Sender:         transport.Sender{DisplayName: "Alice"},
+		SourceText:     "new body",
+		Text:           "*_wa-source/Alice_*: new body",
+		Kind:           "text",
+		ReplyFallback:  true,
+		QuotedText:     "quoted body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := webhook.executed[len(webhook.executed)-1]
+	if !strings.Contains(got.Content, "reply to wa-source") || !strings.Contains(got.Content, "quoted body") || !strings.Contains(got.Content, "new body") {
+		t.Fatalf("reply fallback = %q", got.Content)
+	}
+	if len(adapter.api.(*fakeDiscordAPI).replySends) != 0 {
+		t.Fatal("missing-copy fallback unexpectedly attempted a native reply")
+	}
+}
+
+func TestDiscordEditDeleteAndReactionLifecycle(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	api := &fakeDiscordAPI{}
+	adapter := newOutboundTestAdapter(webhook, api)
+	ref := transport.MessageRef{Endpoint: "discord", RemoteMessageID: "discord-copy"}
+
+	if err := adapter.Edit(context.Background(), ref, "*_wa/Alice_*: edited body"); err != nil {
+		t.Fatal(err)
+	}
+	if len(webhook.edits) != 1 || !strings.HasSuffix(webhook.edits[0], "|edited body") {
+		t.Fatalf("webhook edit = %#v", webhook.edits)
+	}
+
+	if err := adapter.React(context.Background(), transport.Reaction{Endpoint: "discord", TargetRemoteID: "discord-copy", Emoji: "👍"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.React(context.Background(), transport.Reaction{Endpoint: "discord", TargetRemoteID: "discord-copy", Emoji: "🎉"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.React(context.Background(), transport.Reaction{Endpoint: "discord", TargetRemoteID: "discord-copy", Emoji: ""}); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.adds) != 2 || len(api.removes) != 2 {
+		t.Fatalf("reaction calls adds=%#v removes=%#v", api.adds, api.removes)
+	}
+	if !strings.Contains(api.removes[0], "👍") || !strings.Contains(api.removes[1], "🎉") {
+		t.Fatalf("reaction change/remove did not remove prior emoji: %#v", api.removes)
+	}
+
+	if err := adapter.Delete(context.Background(), ref); err != nil {
+		t.Fatal(err)
+	}
+	if len(webhook.deletes) != 1 {
+		t.Fatalf("webhook delete calls = %#v", webhook.deletes)
+	}
+	if !adapter.consumeSuppressedDelete(testChannelID, "discord-copy") {
+		t.Fatal("bridge-initiated Discord delete was not suppression-tracked")
+	}
+}
+
+func TestSanitizeWebhookUsernameCollapsesControlsAndLimitsLength(t *testing.T) {
+	input := "  Alice\n\tExample  " + strings.Repeat("x", 100)
+	got := sanitizeWebhookUsername(input)
+	if strings.ContainsAny(got, "\n\t\r") {
+		t.Fatalf("control whitespace remained in username %q", got)
+	}
+	if len([]rune(got)) > maxWebhookUsernameRunes {
+		t.Fatalf("username exceeds %d runes: %d", maxWebhookUsernameRunes, len([]rune(got)))
+	}
+}
