@@ -8,13 +8,14 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a privacy-first server for bidirectional synchronization between WhatsApp groups and configured Discord channels through transport-neutral endpoint aliases.
+`message-sync` is a privacy-first server for transport-neutral message synchronization. WhatsApp and Discord are fully wired; the Telegram implementation branch now includes Bot API long-poll ingress foundation and transport-aware endpoint configuration, with application-wide Telegram routing wired in the following implementation phase.
 
 ---
 
 ## Features
 
 - **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same sync sets.
+- **Telegram Bot API Foundation**: Telegram group/supergroup endpoint configuration plus privacy-safe long-poll ingress normalization is implemented on the Telegram support branch; application-wide routing registration and outbound lifecycle follow in later Telegram tickets.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
@@ -29,11 +30,11 @@
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord user IDs or names, guild/channel names, message bodies, media, source filenames, CDN URLs, or contact cards. Configured transport target IDs are the narrow operational addressing exception.
+- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord or Telegram user IDs/names, guild/channel/chat names, message bodies, captions, media, source filenames, CDN/file URLs, or contact cards. Configured transport target IDs are the narrow operational addressing exception.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
-- **Discord Credentials**: Discord bot/webhook credentials come only from environment variables or mounted secrets. They are never stored in `sync.db` or written to application logs.
+- **Transport Credentials**: Discord bot/webhook credentials and Telegram bot credentials come only from environment variables or mounted secrets. They are never stored in `sync.db` or written to application logs.
 
 ---
 
@@ -58,6 +59,11 @@ PORT=8080
 DISCORD_BOT_TOKEN=
 # For a mounted secret instead, set its in-container path and leave DISCORD_BOT_TOKEN empty.
 DISCORD_BOT_TOKEN_FILE=
+
+# Telegram Bot API credential. Use this OR TELEGRAM_BOT_TOKEN_FILE, never both.
+TELEGRAM_BOT_TOKEN=
+# For a mounted secret instead, set its in-container path and leave TELEGRAM_BOT_TOKEN empty.
+TELEGRAM_BOT_TOKEN_FILE=
 ```
 
 ### Discord setup
@@ -67,6 +73,14 @@ Discord credentials are deployment-only. Set exactly one of `DISCORD_BOT_TOKEN` 
 In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In each bridged channel grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
 
 The gateway bot handles Discord ingress, discovery, native reply markers, reactions, and connection lifecycle. For WhatsApp → Discord outbound messages, `message-sync` finds or creates **one bridge-managed incoming webhook per configured channel** and reuses it across participants and restarts. The transient WhatsApp display/push name becomes that message's Discord APP/webhook username; if no display name is available, the HMAC actor ID is used. These APP labels are not real Discord accounts, and no Discord account or webhook is created per WhatsApp participant. Display names remain transient and are never persisted or logged.
+
+### Telegram setup
+
+Create the Telegram bot with BotFather and set exactly one of `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`; mounted-secret mode must point to an in-container secret path. The token never enters endpoint CRUD, `sync.db`, or retained logs.
+
+Add the bot to each intended Telegram group/supergroup. To receive ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required for your deployment. The bridge does not bypass Telegram platform visibility rules.
+
+The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. At this implementation phase, application-wide adapter registration and outbound Telegram sends are intentionally not yet enabled.
 
 ### 2. Docker Compose / Podman Compose
 
