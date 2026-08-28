@@ -1,0 +1,29 @@
+name: Discord support verify
+
+on:
+  push:
+    branches:
+      - agent/discord-support
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format
+        run: make fmt
+      - name: Verify clean formatting
+        run: git diff --check && git diff --exit-code
+      - name: Test
+        run: make test
+      - name: Vet
+        run: make vet
+      - name: Verify VERSION unchanged
+        run: git diff --exit-code HEAD^ -- VERSION
