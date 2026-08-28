@@ -320,7 +320,6 @@ func waitForCount(t *testing.T, count func() int, want int) {
 	t.Fatalf("count = %d, want %d", count(), want)
 }
 
-
 func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
