@@ -290,7 +290,6 @@ func TestSanitizeWebhookUsernameCollapsesControlsAndLimitsLength(t *testing.T) {
 	}
 }
 
-
 func TestDiscordPollUsesDeterministicTextRepresentation(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
