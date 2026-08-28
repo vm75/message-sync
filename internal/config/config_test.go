@@ -93,9 +93,33 @@ func TestValidateTransportAwareEndpoints(t *testing.T) {
 	}
 
 	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-1001234567890"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() with Telegram endpoint failed: %v", err)
+	}
+
+	cfg = validConfig()
 	cfg.Endpoints["b"] = Endpoint{Transport: "unknown", RemoteID: "opaque"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for unknown transport")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "123456789"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for positive Telegram private chat id")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-0"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for invalid Telegram chat id")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-99999999999999999999"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Validate() expected error for overflowing Telegram chat id")
 	}
 
 	cfg = validConfig()
@@ -163,6 +187,40 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		t.Errorf("loaded endpoints mismatch: %+v", loaded.Endpoints)
 	}
 	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" {
+		t.Fatalf("loaded sync sets mismatch: %+v", loaded.SyncSets)
+	}
+}
+
+func TestSaveAndLoadThreeTransportSyncSet(t *testing.T) {
+	st := openTestStore(t)
+	ctx := context.Background()
+
+	cfg := validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "123456789012345678"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportTelegram, RemoteID: "-1001234567890"}
+	cfg.SyncSets[0].Groups = []string{"a", "b", "c"}
+
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(loaded.Endpoints) != 3 {
+		t.Fatalf("got %d endpoints, want 3", len(loaded.Endpoints))
+	}
+	if got := loaded.Endpoints["a"]; got.Transport != TransportWhatsApp || got.RemoteID != "1@g.us" {
+		t.Fatalf("loaded WhatsApp endpoint = %+v", got)
+	}
+	if got := loaded.Endpoints["b"]; got.Transport != TransportDiscord || got.RemoteID != "123456789012345678" {
+		t.Fatalf("loaded Discord endpoint = %+v", got)
+	}
+	if got := loaded.Endpoints["c"]; got.Transport != TransportTelegram || got.RemoteID != "-1001234567890" {
+		t.Fatalf("loaded Telegram endpoint = %+v", got)
+	}
+	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" || len(loaded.SyncSets[0].Groups) != 3 {
 		t.Fatalf("loaded sync sets mismatch: %+v", loaded.SyncSets)
 	}
 }
