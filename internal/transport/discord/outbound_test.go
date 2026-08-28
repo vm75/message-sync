@@ -67,13 +67,13 @@ func (f *fakeDiscordAPI) MessageReactionRemove(channelID, messageID, emojiID, us
 
 func newOutboundTestAdapter(webhook *fakeChannelWebhook, api *fakeDiscordAPI) *Adapter {
 	return &Adapter{
-		webhook:            webhook,
-		api:                api,
-		targets:            map[transport.EndpointID]string{"discord": testChannelID},
-		mediaEnabled:       true,
-		mediaMaxBytes:      1024,
-		reactionState:      make(map[reactionKey]string),
-		suppressedDeletes:  make(map[string]struct{}),
+		webhook:           webhook,
+		api:               api,
+		targets:           map[transport.EndpointID]string{"discord": testChannelID},
+		mediaEnabled:      true,
+		mediaMaxBytes:     1024,
+		reactionState:     make(map[reactionKey]string),
+		suppressedDeletes: make(map[string]struct{}),
 	}
 }
 
@@ -170,9 +170,9 @@ func TestDiscordMediaUsesTransientBytesAndSafeGeneratedFilename(t *testing.T) {
 
 	adapter.mediaMaxBytes = 4
 	if _, err := adapter.Send(context.Background(), transport.Outgoing{
-		Endpoint: "discord",
-		Sender: transport.Sender{OpaqueID: "u_hash"},
-		Kind: "document",
+		Endpoint:   "discord",
+		Sender:     transport.Sender{OpaqueID: "u_hash"},
+		Kind:       "document",
 		MediaBytes: media,
 	}); err == nil {
 		t.Fatal("expected configured media-size rejection")
