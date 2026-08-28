@@ -23,7 +23,7 @@ The following features have already been implemented in the core service:
 
 ### A. Discord Transport Adapter
 - **Description**: Bidirectional synchronization between WhatsApp and Discord (and future platforms).
-- **Implementation status**: Endpoint configuration, privacy-bounded Discord gateway ingress, and transport-aware multi-adapter router/application dispatch are implemented. Webhook outbound lifecycle, discovery/UI, threads/forums, and directional routing remain staged work.
+- **Implementation status**: Endpoint configuration, privacy-bounded Discord gateway ingress, transport-aware dispatch, reusable webhook sender rendering, transient media forwarding, and reply/reaction/edit/delete lifecycle support are implemented. Discovery/UI, threads/forums, polls/richer format semantics, and directional routing remain staged work.
 - **Tracked Capabilities**:
   - WhatsApp &harr; Discord synchronization.
   - Discord gateway bot ingress plus bridge-managed per-channel webhook rendering.
