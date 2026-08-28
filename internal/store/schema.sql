@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS sync_sets (
 
 CREATE TABLE IF NOT EXISTS endpoints (
     alias TEXT PRIMARY KEY,
-    transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord')),
+    transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
     remote_id TEXT NOT NULL,
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
     UNIQUE (transport, remote_id)
@@ -92,4 +92,4 @@ CREATE TABLE IF NOT EXISTS schema_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '11');
+INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '12');
