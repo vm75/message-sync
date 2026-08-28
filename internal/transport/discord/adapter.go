@@ -93,18 +93,18 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		webhook = newManagedWebhookClient(session)
 	}
 	adapter := &Adapter{
-		session:            session,
-		api:                session,
-		normalizer:         normalizer,
-		hasher:             opts.Hasher,
-		webhook:            webhook,
-		targets:            targets,
-		events:             make(chan transport.Incoming, eventBufferSize),
-		logger:             opts.Logger,
-		mediaEnabled:       opts.MediaEnabled,
-		mediaMaxBytes:      opts.MediaMaxBytes,
-		reactionState:      make(map[reactionKey]string),
-		suppressedDeletes:  make(map[string]struct{}),
+		session:           session,
+		api:               session,
+		normalizer:        normalizer,
+		hasher:            opts.Hasher,
+		webhook:           webhook,
+		targets:           targets,
+		events:            make(chan transport.Incoming, eventBufferSize),
+		logger:            opts.Logger,
+		mediaEnabled:      opts.MediaEnabled,
+		mediaMaxBytes:     opts.MediaMaxBytes,
+		reactionState:     make(map[reactionKey]string),
+		suppressedDeletes: make(map[string]struct{}),
 	}
 	session.AddHandler(adapter.handleMessageCreate)
 	session.AddHandler(adapter.handleMessageUpdate)
