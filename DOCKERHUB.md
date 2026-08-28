@@ -8,14 +8,14 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a privacy-first server for transport-neutral message synchronization. WhatsApp and Discord are fully wired; the Telegram implementation branch now includes Bot API long-poll ingress foundation and transport-aware endpoint configuration, with application-wide Telegram routing wired in the following implementation phase.
+`message-sync` is a privacy-first server for transport-neutral message synchronization. WhatsApp and Discord are fully wired; the Telegram implementation branch now includes Bot API long-poll ingress, transport-aware endpoint configuration, and application-wide canonical router registration. Telegram protocol outbound lifecycle support remains staged for the following implementation phase.
 
 ---
 
 ## Features
 
 - **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same sync sets.
-- **Telegram Bot API Foundation**: Telegram group/supergroup endpoint configuration plus privacy-safe long-poll ingress normalization is implemented on the Telegram support branch; application-wide routing registration and outbound lifecycle follow in later Telegram tickets.
+- **Telegram Bot API Routing Foundation**: Telegram group/supergroup endpoint configuration, privacy-safe long-poll ingress normalization, and shared adapter-registry/canonical-router wiring are implemented on the Telegram support branch; Telegram protocol outbound lifecycle follows in the next Telegram ticket.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
@@ -80,7 +80,7 @@ Create the Telegram bot with BotFather and set exactly one of `TELEGRAM_BOT_TOKE
 
 Add the bot to each intended Telegram group/supergroup. To receive ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required for your deployment. The bridge does not bypass Telegram platform visibility rules.
 
-The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. At this implementation phase, application-wide adapter registration and outbound Telegram sends are intentionally not yet enabled.
+The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. Telegram ingress is registered in the shared adapter registry and canonical router loop; destination aliases dispatch by configured transport and runtime reloads update Telegram targets. Telegram protocol outbound sends remain staged for the next Telegram ticket.
 
 ### 2. Docker Compose / Podman Compose
 
