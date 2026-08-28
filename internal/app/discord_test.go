@@ -120,6 +120,10 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		cancel()
 		t.Fatal("Discord privacy options were not initialized")
 	}
+	if gotDiscordOptions.MediaEnabled || gotDiscordOptions.MediaMaxBytes != 100*1024*1024 {
+		cancel()
+		t.Fatalf("Discord media policy was not initialized: enabled=%v max=%d", gotDiscordOptions.MediaEnabled, gotDiscordOptions.MediaMaxBytes)
+	}
 	if !strings.Contains(logBuf.String(), "message-sync started") {
 		cancel()
 		t.Fatalf("application did not start with configured Discord gateway: %s", logBuf.String())
