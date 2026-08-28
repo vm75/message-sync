@@ -53,7 +53,7 @@ func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discord
 	a.emit(incoming)
 }
 
-func (a *Adapter) handleMessageDelete(_ *discordgo.Session, event *discordgo.MessageDelete) {
+func (a *Adapter) handleMessageDelete(session *discordgo.Session, event *discordgo.MessageDelete) {
 	if a == nil || event == nil || event.Message == nil {
 		return
 	}
@@ -66,14 +66,7 @@ func (a *Adapter) handleMessageDelete(_ *discordgo.Session, event *discordgo.Mes
 	if normalizer == nil {
 		return
 	}
-	routeChannelID := configuredIngressChannelID(nil, normalizer, event.ChannelID)
-	if routeChannelID == "" {
-		// Delete events do not always carry enough thread state on their own.
-		// Use the live gateway session state when available via the cached channel.
-		if a.session != nil {
-			routeChannelID = configuredIngressChannelID(a.session, normalizer, event.ChannelID)
-		}
-	}
+	routeChannelID := configuredIngressChannelID(session, normalizer, event.ChannelID)
 	if routeChannelID == "" {
 		return
 	}
