@@ -106,7 +106,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 				RemoteMessageID: strings.TrimSpace(ref.MessageID),
 			}
 			if msg.ReferencedMessage != nil {
-				quotedText = msg.ReferencedMessage.Content
+				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher)
 			}
 		}
 	}
