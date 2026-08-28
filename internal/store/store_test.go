@@ -96,6 +96,12 @@ func TestEndpointSchemaEnforcesAliasAndTransportRemoteUniqueness(t *testing.T) {
 	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('b', 'discord', '1@g.us', 'mesh')`); err != nil {
 		t.Fatalf("same opaque remote id on another transport should be allowed: %v", err)
 	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('t', 'telegram', '-1001234567890', 'mesh')`); err != nil {
+		t.Fatalf("Telegram endpoint should be allowed by schema: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('x', 'unknown', 'opaque', 'mesh')`); err == nil {
+		t.Fatal("expected unknown transport to be rejected by schema")
+	}
 }
 
 func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
@@ -178,6 +184,90 @@ func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
 	}
 	if legacyCount != 0 {
 		t.Fatal("legacy groups table still exists after migration")
+	}
+}
+
+func TestMigrationFromV11AllowsTelegramEndpoints(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync_v11.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := `
+		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
+		INSERT INTO sync_sets(id) VALUES ('mesh');
+		CREATE TABLE endpoints (
+			alias TEXT PRIMARY KEY,
+			transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord')),
+			remote_id TEXT NOT NULL,
+			sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
+			UNIQUE (transport, remote_id)
+		);
+		CREATE UNIQUE INDEX idx_endpoints_remote ON endpoints(transport, remote_id);
+		INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES
+			('wa', 'whatsapp', '1@g.us', 'mesh'),
+			('dc', 'discord', '123456789012345678', 'mesh');
+		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '11');
+	`
+	for _, stmt := range strings.Split(legacy, ";") {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("setup v11 database: %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open v11 database failed: %v", err)
+	}
+	defer st.Close()
+
+	var version int
+	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != SchemaVersion {
+		t.Fatalf("schema version = %d, want %d", version, SchemaVersion)
+	}
+
+	rows, err := st.db.Query(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var preserved []string
+	for rows.Next() {
+		var alias, transportName, remoteID, syncSetID string
+		if err := rows.Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
+			t.Fatal(err)
+		}
+		preserved = append(preserved, alias+"|"+transportName+"|"+remoteID+"|"+syncSetID)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"dc|discord|123456789012345678|mesh",
+		"wa|whatsapp|1@g.us|mesh",
+	}
+	if len(preserved) != len(want) {
+		t.Fatalf("preserved endpoints = %+v, want %+v", preserved, want)
+	}
+	for i := range want {
+		if preserved[i] != want[i] {
+			t.Fatalf("preserved endpoint[%d] = %q, want %q", i, preserved[i], want[i])
+		}
+	}
+
+	if _, err := st.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('tg', 'telegram', '-1001234567890', 'mesh')`); err != nil {
+		t.Fatalf("insert Telegram endpoint after migration: %v", err)
 	}
 }
 
