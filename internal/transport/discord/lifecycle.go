@@ -60,6 +60,9 @@ func (n *Normalizer) NormalizeReaction(reaction *discordgo.MessageReaction, botU
 	}
 
 	actorID := strings.TrimSpace(reaction.UserID)
+	if botID := strings.TrimSpace(botUserID); botID != "" && actorID == botID {
+		return transport.Incoming{}, false
+	}
 	emoji := strings.TrimSpace(reaction.Emoji.APIName())
 	if !removed && emoji == "" {
 		return transport.Incoming{}, false
@@ -74,7 +77,7 @@ func (n *Normalizer) NormalizeReaction(reaction *discordgo.MessageReaction, botU
 		Sender: transport.Sender{
 			OpaqueID: n.hasher.UserID("discord:" + actorID),
 		},
-		FromSelf: actorID == strings.TrimSpace(botUserID),
+		FromSelf: false,
 		Kind:     "reaction",
 		Text:     emoji,
 		ReplyTo: &transport.MessageRef{
