@@ -42,7 +42,11 @@ func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discord
 		message = fetched
 	}
 
-	incoming, ok := normalizer.NormalizeUpdate(message, discordBotUserID(session), webhooks)
+	routeChannelID := configuredIngressChannelID(session, normalizer, message.ChannelID)
+	if routeChannelID == "" {
+		return
+	}
+	incoming, ok := normalizer.NormalizeUpdate(routeDiscordMessage(message, routeChannelID), discordBotUserID(session), webhooks)
 	if !ok {
 		return
 	}
@@ -62,7 +66,20 @@ func (a *Adapter) handleMessageDelete(_ *discordgo.Session, event *discordgo.Mes
 	if normalizer == nil {
 		return
 	}
-	incoming, ok := normalizer.NormalizeDelete(event)
+	routeChannelID := configuredIngressChannelID(nil, normalizer, event.ChannelID)
+	if routeChannelID == "" {
+		// Delete events do not always carry enough thread state on their own.
+		// Use the live gateway session state when available via the cached channel.
+		if a.session != nil {
+			routeChannelID = configuredIngressChannelID(a.session, normalizer, event.ChannelID)
+		}
+	}
+	if routeChannelID == "" {
+		return
+	}
+	routed := *event
+	routed.Message = routeDiscordMessage(event.Message, routeChannelID)
+	incoming, ok := normalizer.NormalizeDelete(&routed)
 	if !ok {
 		return
 	}
@@ -79,7 +96,13 @@ func (a *Adapter) handleMessageReactionAdd(session *discordgo.Session, event *di
 	if normalizer == nil {
 		return
 	}
-	incoming, ok := normalizer.NormalizeReaction(event.MessageReaction, discordBotUserID(session), false)
+	routeChannelID := configuredIngressChannelID(session, normalizer, event.ChannelID)
+	if routeChannelID == "" {
+		return
+	}
+	routedReaction := *event.MessageReaction
+	routedReaction.ChannelID = routeChannelID
+	incoming, ok := normalizer.NormalizeReaction(&routedReaction, discordBotUserID(session), false)
 	if !ok {
 		return
 	}
@@ -96,7 +119,13 @@ func (a *Adapter) handleMessageReactionRemove(session *discordgo.Session, event 
 	if normalizer == nil {
 		return
 	}
-	incoming, ok := normalizer.NormalizeReaction(event.MessageReaction, discordBotUserID(session), true)
+	routeChannelID := configuredIngressChannelID(session, normalizer, event.ChannelID)
+	if routeChannelID == "" {
+		return
+	}
+	routedReaction := *event.MessageReaction
+	routedReaction.ChannelID = routeChannelID
+	incoming, ok := normalizer.NormalizeReaction(&routedReaction, discordBotUserID(session), true)
 	if !ok {
 		return
 	}
