@@ -187,3 +187,72 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 		t.Fatalf("filtered bridge bot event produced a log: %s", logBuf.String())
 	}
 }
+
+
+func TestConfiguredIngressChannelFlattensThreadsToParentAlias(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	state := discordgo.NewState()
+	if err := state.GuildAdd(&discordgo.Guild{ID: testGuildID}); err != nil {
+		t.Fatal(err)
+	}
+	threadID := "133456789012345678"
+	if err := state.ChannelAdd(&discordgo.Channel{
+		ID:       threadID,
+		GuildID:  testGuildID,
+		ParentID: testChannelID,
+		Type:     discordgo.ChannelTypeGuildPublicThread,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session := &discordgo.Session{State: state}
+
+	routeChannelID := configuredIngressChannelID(session, normalizer, threadID)
+	if routeChannelID != testChannelID {
+		t.Fatalf("thread route = %q, want configured parent %q", routeChannelID, testChannelID)
+	}
+
+	evt := testMessage()
+	evt.ChannelID = threadID
+	evt.MessageReference = &discordgo.MessageReference{
+		MessageID: "143456789012345678",
+		ChannelID: threadID,
+		GuildID:   testGuildID,
+	}
+	routed := routeDiscordMessage(evt.Message, routeChannelID)
+	incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routed}, "", nil)
+	if !ok {
+		t.Fatal("thread message was not accepted through configured parent")
+	}
+	if incoming.Endpoint != "team-discord" {
+		t.Fatalf("endpoint = %q, want parent alias", incoming.Endpoint)
+	}
+	if incoming.ReplyTo == nil || incoming.ReplyTo.Endpoint != "team-discord" {
+		t.Fatalf("thread reply did not retain parent alias: %#v", incoming.ReplyTo)
+	}
+	if len(normalizer.endpoints) != 1 {
+		t.Fatalf("thread ingress mutated configured endpoints: %#v", normalizer.endpoints)
+	}
+	if _, exists := normalizer.endpoints[threadID]; exists {
+		t.Fatal("thread id became a persisted/configured endpoint identity")
+	}
+}
+
+func TestConfiguredIngressChannelRejectsUnconfiguredThreadParent(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	state := discordgo.NewState()
+	if err := state.GuildAdd(&discordgo.Guild{ID: testGuildID}); err != nil {
+		t.Fatal(err)
+	}
+	threadID := "153456789012345678"
+	if err := state.ChannelAdd(&discordgo.Channel{
+		ID:       threadID,
+		GuildID:  testGuildID,
+		ParentID: "999999999999999999",
+		Type:     discordgo.ChannelTypeGuildPrivateThread,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := configuredIngressChannelID(&discordgo.Session{State: state}, normalizer, threadID); got != "" {
+		t.Fatalf("unconfigured thread parent unexpectedly routed as %q", got)
+	}
+}
