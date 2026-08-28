@@ -551,6 +551,38 @@ func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	}
 }
 
+func TestReplyFallbackFlagWhenDestinationCopyMissing(t *testing.T) {
+	ctx := context.Background()
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+
+	reply := testIncoming("c1g1", "reply-with-missing-target")
+	reply.Sender.DisplayName = "Alice"
+	reply.Text = "new reply body"
+	reply.ReplyTo = &transport.MessageRef{
+		Endpoint:        "c1g1",
+		RemoteMessageID: "unknown-source-target",
+	}
+	reply.QuotedText = "quoted source body"
+
+	if err := r.Handle(ctx, reply); err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.sent) != 2 {
+		t.Fatalf("reply sent %d destination copies, want 2", len(fake.sent))
+	}
+	for _, sent := range fake.sent {
+		if sent.outgoing.ReplyTo != nil {
+			t.Fatalf("missing destination target unexpectedly resolved in %s", sent.outgoing.Endpoint)
+		}
+		if !sent.outgoing.ReplyFallback {
+			t.Fatalf("missing destination target did not set ReplyFallback in %s", sent.outgoing.Endpoint)
+		}
+		if sent.outgoing.QuotedText != "quoted source body" {
+			t.Fatalf("quoted fallback text = %q", sent.outgoing.QuotedText)
+		}
+	}
+}
+
 func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *store.Store, *fakeSender) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sync.db")
