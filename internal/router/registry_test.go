@@ -161,3 +161,250 @@ func mixedTransportConfig() *config.Config {
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 }
+
+
+type failingOutboundAdapter struct {
+	err      error
+	attempts []transport.Outgoing
+}
+
+func (f *failingOutboundAdapter) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	f.attempts = append(f.attempts, outgoing)
+	return transport.MessageRef{}, f.err
+}
+
+func (f *failingOutboundAdapter) React(context.Context, transport.Reaction) error { return f.err }
+func (f *failingOutboundAdapter) Edit(context.Context, transport.MessageRef, string) error {
+	return f.err
+}
+func (f *failingOutboundAdapter) Delete(context.Context, transport.MessageRef) error { return f.err }
+
+func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+
+	cfg := threeTransportConfig()
+	wa := &fakeSender{}
+	dc := &fakeSender{}
+	tg := &fakeSender{}
+	registry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: wa,
+		config.TransportDiscord:  dc,
+		config.TransportTelegram: tg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(cfg, syncStore, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.Handle(ctx, testIncoming("wa", "wa-source")); err != nil {
+		t.Fatal(err)
+	}
+	if len(dc.sent) != 1 || dc.sent[0].outgoing.Endpoint != "discord" {
+		t.Fatalf("WhatsApp -> Discord sends = %#v", dc.sent)
+	}
+	if len(tg.sent) != 1 || tg.sent[0].outgoing.Endpoint != "telegram" {
+		t.Fatalf("WhatsApp -> Telegram sends = %#v", tg.sent)
+	}
+
+	wa.sent = nil
+	dc.sent = nil
+	tg.sent = nil
+	if err := r.Handle(ctx, testIncoming("telegram", "telegram-source")); err != nil {
+		t.Fatal(err)
+	}
+	if len(wa.sent) != 1 || wa.sent[0].outgoing.Endpoint != "wa" {
+		t.Fatalf("Telegram -> WhatsApp sends = %#v", wa.sent)
+	}
+	if len(dc.sent) != 1 || dc.sent[0].outgoing.Endpoint != "discord" {
+		t.Fatalf("Telegram -> Discord sends = %#v", dc.sent)
+	}
+	if len(tg.sent) != 0 {
+		t.Fatalf("Telegram source looped back through Telegram adapter: %#v", tg.sent)
+	}
+
+	wa.sent = nil
+	dc.sent = nil
+	tg.sent = nil
+	if err := r.Handle(ctx, testIncoming("discord", "discord-source")); err != nil {
+		t.Fatal(err)
+	}
+	if len(wa.sent) != 1 || wa.sent[0].outgoing.Endpoint != "wa" {
+		t.Fatalf("Discord -> WhatsApp sends = %#v", wa.sent)
+	}
+	if len(tg.sent) != 1 || tg.sent[0].outgoing.Endpoint != "telegram" {
+		t.Fatalf("Discord -> Telegram sends = %#v", tg.sent)
+	}
+}
+
+func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+
+	cfg := threeTransportConfig()
+	firstWA := &fakeSender{}
+	firstDC := &fakeSender{}
+	sendFailure := errors.New("simulated Telegram send failure")
+	firstTG := &failingOutboundAdapter{err: sendFailure}
+	firstRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: firstWA,
+		config.TransportDiscord:  firstDC,
+		config.TransportTelegram: firstTG,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstRouter, err := New(cfg, syncStore, firstRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	incoming := testIncoming("wa", "restart-source")
+	if err := firstRouter.Handle(ctx, incoming); !errors.Is(err, sendFailure) {
+		t.Fatalf("first Handle error = %v, want Telegram send failure", err)
+	}
+	if len(firstDC.sent) != 1 || firstDC.sent[0].outgoing.Endpoint != "discord" {
+		t.Fatalf("first Discord sends = %#v, want one successful persisted copy", firstDC.sent)
+	}
+	if len(firstTG.attempts) != 1 || firstTG.attempts[0].Endpoint != "telegram" {
+		t.Fatalf("first Telegram attempts = %#v, want one failed attempt", firstTG.attempts)
+	}
+
+	secondWA := &fakeSender{}
+	secondDC := &fakeSender{}
+	secondTG := &fakeSender{}
+	secondRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: secondWA,
+		config.TransportDiscord:  secondDC,
+		config.TransportTelegram: secondTG,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := New(cfg, syncStore, secondRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.Handle(ctx, incoming); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondDC.sent) != 0 {
+		t.Fatalf("restart resent already-persisted Discord copy: %#v", secondDC.sent)
+	}
+	if len(secondTG.sent) != 1 || secondTG.sent[0].outgoing.Endpoint != "telegram" {
+		t.Fatalf("restart Telegram sends = %#v, want only missing Telegram copy", secondTG.sent)
+	}
+	if len(secondWA.sent) != 0 {
+		t.Fatalf("restart unexpectedly sent to source WhatsApp adapter: %#v", secondWA.sent)
+	}
+}
+
+func TestAdapterRegistryTelegramMessageIDIsOnlyRemoteCopyIdentity(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+
+	cfg := threeTransportConfig()
+	registry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: &fakeSender{},
+		config.TransportDiscord:  &fakeSender{},
+		config.TransportTelegram: &fakeSender{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(cfg, syncStore, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const telegramMessageID = "987654321"
+	incoming := testIncoming("telegram", telegramMessageID)
+	if err := r.Handle(ctx, incoming); err != nil {
+		t.Fatal(err)
+	}
+	canonicalID, err := syncStore.CanonicalForRemote(ctx, "telegram", telegramMessageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonicalID == telegramMessageID || canonicalID == "" {
+		t.Fatalf("canonical ID = %q, must be independent of Telegram message ID", canonicalID)
+	}
+}
+
+func TestAdapterRegistryRuntimeReloadAddsTelegramRoutingAlias(t *testing.T) {
+	initial := mixedTransportConfig()
+	wa := &fakeSender{}
+	dc := &fakeSender{}
+	tg := &fakeSender{}
+	registry, err := NewAdapterRegistry(initial, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: wa,
+		config.TransportDiscord:  dc,
+		config.TransportTelegram: tg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	updated := threeTransportConfig()
+	if err := registry.UpdateConfig(updated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Send(context.Background(), transport.Outgoing{
+		Endpoint: "telegram",
+		Kind:     "text",
+		Text:     "transient test body",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(tg.sent) != 1 || tg.sent[0].outgoing.Endpoint != "telegram" {
+		t.Fatalf("runtime reload did not route Telegram alias to Telegram adapter: %#v", tg.sent)
+	}
+}
+
+func TestAdapterRegistryUnavailableTelegramErrorDoesNotLeakRemoteID(t *testing.T) {
+	cfg := threeTransportConfig()
+	remoteID := cfg.Endpoints["telegram"].RemoteID
+	_, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
+		config.TransportWhatsApp: &fakeSender{},
+		config.TransportDiscord:  &fakeSender{},
+	})
+	if err == nil {
+		t.Fatal("expected unavailable Telegram adapter error")
+	}
+	if !strings.Contains(err.Error(), "telegram") {
+		t.Fatalf("error = %q, want safe transport classification", err)
+	}
+	if strings.Contains(err.Error(), remoteID) {
+		t.Fatalf("error leaked Telegram remote ID: %q", err)
+	}
+}
+
+func threeTransportConfig() *config.Config {
+	return &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa":       {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"discord":  {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
+			"telegram": {Transport: config.TransportTelegram, RemoteID: "-1001234567890"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:     "mesh",
+			Groups: []string{"wa", "discord", "telegram"},
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+}
