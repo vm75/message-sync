@@ -28,7 +28,7 @@
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, participant or Discord user names/IDs, guild/channel names, message bodies, media, source filenames, CDN URLs, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
+- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord or Telegram user names/IDs, guild/channel/chat names, message bodies, media, source filenames, CDN/file URLs, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
@@ -64,6 +64,20 @@ The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISC
 
 If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
 
+The Telegram Bot API adapter foundation uses **long polling** and reads its credential only from one deployment source:
+
+```sh
+# Environment source
+echo "TELEGRAM_BOT_TOKEN=your-bot-token" >> .env
+
+# Or mount a secret file and set its in-container path:
+# TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
+```
+
+Add the bot to each intended Telegram group/supergroup. For ordinary group messages to be visible to the bot, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The bridge does not attempt to bypass Telegram visibility rules. Telegram user/display data and raw Bot API updates remain transient; only configured opaque chat IDs are eligible endpoint addressing.
+
+At this implementation phase, the Telegram package owns Bot API long-poll lifecycle and ingress normalization, but application-wide adapter registration/canonical fan-out is intentionally deferred to the next Telegram wiring ticket; Telegram outbound message lifecycle support is also not part of this phase.
+
 ### 2. Start the Server
 
 Create a `compose.yml` file (see [compose.yml](compose.yml) in this repository for an example) and start the server:
@@ -90,7 +104,7 @@ docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET adm
 
 ## Management API compatibility
 
-The authenticated management API now has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. This configuration support does not add a Telegram bot runtime by itself.
+The authenticated management API has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. The Telegram Bot API adapter foundation now provides long-poll ingress normalization in its transport package, while registration in the application-wide adapter registry is handled by the following implementation phase.
 
 Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp, Discord, or Telegram endpoints.
 
