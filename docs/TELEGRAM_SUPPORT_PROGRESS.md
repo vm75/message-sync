@@ -42,7 +42,7 @@ Do not skip ahead because a later ticket looks easier.
 
 | Order | Issue | Scope | Depends on | Status | Implementation notes |
 |---|---|---|---|---|---|
-| 1 | [#25](https://github.com/vm75/message-sync/issues/25) | Add Telegram as a transport-aware endpoint type | — | Not started | |
+| 1 | [#25](https://github.com/vm75/message-sync/issues/25) | Add Telegram as a transport-aware endpoint type | — | In progress | Started transport/config/API validation work for Telegram endpoints. |
 | 2 | [#26](https://github.com/vm75/message-sync/issues/26) | Telegram Bot adapter foundation and long-poll ingress | #25 | Not started | |
 | 3 | [#27](https://github.com/vm75/message-sync/issues/27) | Wire Telegram into multi-adapter canonical router lifecycle | #25, #26 | Not started | |
 | 4 | [#28](https://github.com/vm75/message-sync/issues/28) | Telegram outbound text/media/replies/reactions/edits/deletes | #26, #27 | Not started | |
