@@ -334,7 +334,6 @@ func isDiscordMediaKind(kind string) bool {
 	}
 }
 
-
 func sanitizeOutgoingMentions(content string, mentions []transport.Mention) string {
 	for _, mention := range mentions {
 		remoteID := strings.TrimSpace(mention.RemoteID)
