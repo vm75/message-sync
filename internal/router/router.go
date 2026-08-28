@@ -443,6 +443,23 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 
+		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
+			_, err := r.sender.Send(ctx, transport.Outgoing{
+				Endpoint:        destination,
+				OriginEndpoint:  incoming.Endpoint,
+				Sender:          incoming.Sender,
+				SourceText:      incoming.Text,
+				AttributionOnly: true,
+				Kind:            "text",
+				Text:            forwardedText,
+				ReplyTo:         outgoingReplyTo,
+				QuotedText:      incoming.QuotedText,
+			})
+			if err != nil {
+				return fmt.Errorf("send companion attribution: %w", err)
+			}
+		}
+
 		ref, err := r.sender.Send(ctx, transport.Outgoing{
 			Endpoint:            destination,
 			OriginEndpoint:      incoming.Endpoint,
