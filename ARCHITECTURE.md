@@ -179,18 +179,32 @@ The Discord adapter uses a gateway bot for ingress and keeps Discord protocol id
 
 ```text
 Discord MESSAGE_CREATE
-   -> reject DM or unconfigured channel
+   -> reject DM, unsupported format, or unconfigured parent
    -> reject bridge bot and bridge-managed webhook copies
-   -> map configured channel ID to safe endpoint alias
+   -> resolve a thread/post channel to its configured parent using live gateway state
+   -> map configured parent channel ID to safe endpoint alias
    -> HMAC "discord:" + transient author ID
-   -> normalize text/reply/mentions into transport.Incoming
+   -> replace Discord mention IDs with privacy-safe text
+   -> normalize supported content into transport.Incoming
 ```
 
-Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. Display names and mention IDs may exist only transiently inside a normalized event while immediate routing semantics require them.
+Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. User mentions are converted at ingress to transient display text, with an HMAC-derived actor fallback when no display name is available; role and channel mention IDs become generic `@role` / `#channel` text. Structured Discord member IDs therefore do not cross the adapter privacy boundary.
 
 The gateway bot is intentionally distinct from WhatsApp → Discord sender rendering. Each configured Discord destination reuses one bridge-managed incoming webhook; only its in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the WhatsApp display name as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp in one select loop and feeds both into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
 
 Discord attachments are downloaded only when routing needs them, bounded by the configured media limit, held in memory, and re-uploaded with bridge-generated safe filenames. Source filenames, CDN URLs, and media bytes are never stored in `sync.db`. Native Discord replies require the bot message API because Discord incoming-webhook execution does not accept `message_reference`; when a destination copy exists the adapter emits a minimal native reply marker referencing that copy and sends the actual content under the sender-specific webhook APP identity. If no destination copy exists, an alias-based textual reply fallback is used instead.
+
+#### Discord threads, forums, mentions, polls, and unsupported formats
+
+Thread behavior deliberately flattens rather than creating dynamic routing identities. A gateway message whose channel is a Discord news/public/private thread is resolved through DiscordGo's live channel state. If that thread's `ParentID` is an already-configured Discord endpoint, the event is normalized under the **parent endpoint alias**. Replies, reactions, edits, and deletes use the same rule. Thread IDs and forum-post IDs are never inserted into `endpoints`, never become canonical IDs, and are retained only when Discord itself supplies a remote message-copy ID required by lifecycle mapping. If the parent cannot be resolved or is not configured, the thread event is ignored.
+
+Discord forum posts are thread channels, so ingress follows the same parent-flattening rule when a forum parent has already been configured. The bridge does not dynamically create forum posts or thread-specific endpoint records, and the admin discovery UI intentionally continues to expose only sendable text/announcement channels. Outbound traffic addressed to an alias always targets that alias's configured parent channel; it does not attempt to return content to the originating thread. Automatic outbound forum-post creation remains outside this mapping.
+
+WhatsApp native polls sent to Discord use a deterministic textual representation: `Poll: <question>`, numbered option lines, and a single-/multi-select hint. Poll question and option labels remain transient; only the existing SHA-256 option hashes used by canonical poll aggregation may be persisted. Native Discord poll objects are ignored because mapping Discord vote state would require additional identity/state semantics not present in this ticket.
+
+WhatsApp stickers sent to Discord use the existing transient-media path and are uploaded with the bridge-generated filename `sticker.webp` and `image/webp` content type. Native Discord sticker-only messages, embed/component-only messages, Discord system messages, and other unsupported message types are ignored deterministically rather than producing empty or ambiguous canonical messages. A normal text/caption plus a supported attachment continues through the standard transient-media path.
+
+For WhatsApp → Discord mentions, the adapter replaces known transient remote mention tokens with a display label; if the supplied label is missing or is itself the raw remote identity, the output uses `@participant`. Discord webhook allowed-mention parsing remains disabled, so fallback text cannot unexpectedly ping Discord identities.
 
 ### Discord admin discovery and webhook readiness boundary
 
@@ -348,4 +362,4 @@ The Discord adapter replaces DiscordGo's default logger with a fixed-field warni
 
 ## 19. Deliberate MVP exclusions
 
-Discord threads/forums, polls, and richer Discord format semantics remain staged work. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional bridge modes remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
