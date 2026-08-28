@@ -255,11 +255,19 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 		return
 	}
 
+	if evt == nil || evt.Message == nil {
+		return
+	}
+	routeChannelID := configuredIngressChannelID(session, normalizer, evt.Message.ChannelID)
+	if routeChannelID == "" {
+		return
+	}
 	botUserID := ""
 	if session != nil && session.State != nil && session.State.User != nil {
 		botUserID = session.State.User.ID
 	}
-	incoming, ok := normalizer.NormalizeMessage(evt, botUserID, webhooks)
+	routedMessage := routeDiscordMessage(evt.Message, routeChannelID)
+	incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routedMessage}, botUserID, webhooks)
 	if !ok {
 		return
 	}
@@ -334,4 +342,58 @@ func discordChannelIDs(targets map[transport.EndpointID]string) []string {
 		channelIDs = append(channelIDs, channelID)
 	}
 	return channelIDs
+}
+
+
+func configuredIngressChannelID(session *discordgo.Session, normalizer *Normalizer, channelID string) string {
+	channelID = strings.TrimSpace(channelID)
+	if normalizer == nil || channelID == "" {
+		return ""
+	}
+	if _, configured := normalizer.endpoints[channelID]; configured {
+		return channelID
+	}
+	if session == nil || session.State == nil {
+		return ""
+	}
+	channel, err := session.State.Channel(channelID)
+	if err != nil || channel == nil || !isDiscordThreadChannel(channel.Type) {
+		return ""
+	}
+	parentID := strings.TrimSpace(channel.ParentID)
+	if _, configured := normalizer.endpoints[parentID]; !configured {
+		return ""
+	}
+	return parentID
+}
+
+func isDiscordThreadChannel(channelType discordgo.ChannelType) bool {
+	switch channelType {
+	case discordgo.ChannelTypeGuildNewsThread, discordgo.ChannelTypeGuildPublicThread, discordgo.ChannelTypeGuildPrivateThread:
+		return true
+	default:
+		return false
+	}
+}
+
+func routeDiscordMessage(message *discordgo.Message, routeChannelID string) *discordgo.Message {
+	if message == nil {
+		return nil
+	}
+	routeChannelID = strings.TrimSpace(routeChannelID)
+	if routeChannelID == "" || routeChannelID == strings.TrimSpace(message.ChannelID) {
+		return message
+	}
+	originalChannelID := strings.TrimSpace(message.ChannelID)
+	copyMessage := *message
+	copyMessage.ChannelID = routeChannelID
+	if message.MessageReference != nil {
+		copyReference := *message.MessageReference
+		referenceChannelID := strings.TrimSpace(copyReference.ChannelID)
+		if referenceChannelID == "" || referenceChannelID == originalChannelID {
+			copyReference.ChannelID = routeChannelID
+		}
+		copyMessage.MessageReference = &copyReference
+	}
+	return &copyMessage
 }
