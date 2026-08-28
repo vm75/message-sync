@@ -329,7 +329,7 @@ configured sync set
 canonical alias-based routing model
 ```
 
-Telegram Bot API execution and adapter registration are introduced by later Telegram tickets; this configuration phase does not create a Telegram-specific router or canonical identity. This prevents platform-specific message identity from becoming the application identity.
+The Telegram Bot API adapter foundation lives behind the same `transport.Adapter` boundary and uses long polling. It maps only configured group/supergroup chat IDs to endpoint aliases, HMAC-normalizes `telegram:<user_id>` immediately, keeps display names/text/captions transient, rejects private/unconfigured chats and bridge-bot echoes, and advances a monotonic in-process update cursor before filtering unsupported updates. Username-only mentions remain transient text; `text_mention` user objects are reduced to HMAC actor IDs plus transient display labels before crossing the adapter boundary. Application-wide Telegram adapter registration remains the responsibility of the next wiring ticket, and outbound Telegram lifecycle operations remain deferred to the outbound ticket. No Telegram-specific router or canonical identity is introduced.
 
 ## 16. Rootless container model
 
@@ -365,6 +365,8 @@ Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
 The Discord adapter replaces DiscordGo's default logger with a fixed-field warning/error classifier because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and safe error classes. The bot token is read only from `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; managed webhook IDs/tokens are discovered or created at runtime and kept only in memory. None of those credentials are copied to `sync.db` or application logs. DiscordGo retry-on-rate-limit behavior is enabled for gateway REST operations and explicitly requested for webhook, reply, reaction, edit, and delete calls.
+
+The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`; ambiguous dual-source configuration is rejected and the token is never written to `sync.db`. The Bot API client's default raw update/error logging is not enabled: application-visible client errors pass through the fixed safe-log classifier, and ingress buffer/lifecycle logs contain only fixed event names, safe endpoint aliases, normalized kinds, and reasons. The long-poll client advances its Bot API `getUpdates` offset and applies bounded retry/backoff (including Telegram `retry_after` responses); the adapter also rejects duplicate/older update IDs within the running process before normalization.
 
 ## 19. Deliberate MVP exclusions
 
