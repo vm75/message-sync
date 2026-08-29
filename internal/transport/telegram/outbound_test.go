@@ -258,6 +258,61 @@ func TestSendMediaUsesGenericNamesAndHostedLimits(t *testing.T) {
 	}
 }
 
+func TestSendMediaMappingsUseHostedBotAPIForms(t *testing.T) {
+	cases := []struct {
+		name         string
+		kind         string
+		data         []byte
+		wantMethod   string
+		wantFilename string
+	}{
+		{name: "image", kind: "image", data: []byte("image-bytes"), wantMethod: "photo", wantFilename: "image.jpg"},
+		{name: "video", kind: "video", data: []byte("video-bytes"), wantMethod: "video", wantFilename: "video.mp4"},
+		{name: "audio", kind: "audio", data: append([]byte("ID3"), []byte("audio-bytes")...), wantMethod: "audio", wantFilename: "audio.mp3"},
+		{name: "voice", kind: "audio", data: append([]byte("OggS"), []byte("voice-bytes")...), wantMethod: "voice", wantFilename: "voice.ogg"},
+		{name: "sticker", kind: "sticker", data: append([]byte("RIFF0000WEBP"), []byte("sticker-bytes")...), wantMethod: "sticker", wantFilename: "sticker.webp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeTelegramAPI{}
+			adapter := newOutboundTestAdapter(t, api)
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint:   "tg",
+				Sender:     transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+				SourceText: "caption",
+				Kind:       tc.kind,
+				MediaBytes: tc.data,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(api.methods) == 0 || api.methods[0] != tc.wantMethod {
+				t.Fatalf("methods = %v, want first method %q", api.methods, tc.wantMethod)
+			}
+			if api.filename != tc.wantFilename {
+				t.Fatalf("filename = %q, want %q", api.filename, tc.wantFilename)
+			}
+			if strings.Contains(api.filename, "source") || strings.Contains(api.filename, "private") {
+				t.Fatalf("source filename leaked into Telegram upload name %q", api.filename)
+			}
+			if string(api.media) != string(tc.data) {
+				t.Fatal("media bytes were not forwarded transiently")
+			}
+			if tc.kind != "sticker" && api.caption != "Alice: caption" {
+				t.Fatalf("caption = %q, want transient sender attribution", api.caption)
+			}
+			if tc.kind == "sticker" {
+				if len(api.methods) < 2 || api.methods[1] != "message" {
+					t.Fatalf("sticker attribution companion methods = %v", api.methods)
+				}
+				if len(api.texts) != 1 || api.texts[0] != "Alice: caption" {
+					t.Fatalf("sticker companion attribution = %q", api.texts)
+				}
+			}
+		})
+	}
+}
+
 func TestReactionEditDeleteAndRateLimitRetry(t *testing.T) {
 	api := &fakeTelegramAPI{}
 	adapter := newOutboundTestAdapter(t, api)
