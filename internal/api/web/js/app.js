@@ -1101,7 +1101,13 @@
       telegramStatusIndicator.className = 'status-indicator indicator-success';
       telegramStatusText.className = 'status-badge badge-success';
       telegramStatusText.textContent = 'Long Polling Active';
-      telegramStatusDesc.textContent = data.visibilityGuidance || 'Telegram long polling is running. Send a group message to make that group appear in transient discovery.';
+      if (data.privacyModeKnown) {
+        telegramStatusDesc.textContent = data.privacyModeEnabled
+          ? 'Bot Privacy Mode is enabled. Disable it or grant appropriate administrator visibility for ordinary group messages, then send a group message to refresh discovery.'
+          : 'Bot Privacy Mode is disabled. Send a group message to make that group appear in transient discovery.';
+      } else {
+        telegramStatusDesc.textContent = data.visibilityGuidance || 'Send a group message to make that group appear in transient discovery.';
+      }
       if (btnTelegramDiscover) btnTelegramDiscover.disabled = false;
     } else {
       telegramStatusIndicator.className = 'status-indicator indicator-warning';
