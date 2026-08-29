@@ -20,7 +20,6 @@ import (
 
 const eventBufferSize = 128
 
-
 type botClient interface {
 	Start(context.Context)
 	ID() int64
