@@ -57,6 +57,9 @@ type Adapter struct {
 	mu           sync.RWMutex
 	lastUpdateID int64
 	haveUpdateID bool
+	observed     map[int64]observedChatEntry
+	observeSeq   uint64
+	polling      bool
 
 	pollCancel context.CancelFunc
 	pollWG     sync.WaitGroup
@@ -103,6 +106,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		mediaMaxBytes: opts.MediaMaxBytes,
 		retryWait:     opts.retryWait,
 		messageKinds:  make(map[messageKindKey]string),
+		observed:      make(map[int64]observedChatEntry),
+		polling:       true,
 		pollCancel:    pollCancel,
 	}
 
@@ -128,6 +133,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		defer adapter.pollWG.Done()
 		opts.Logger.Info("Telegram long polling started", "event", "telegram_poll_started")
 		client.Start(pollCtx)
+		adapter.mu.Lock()
+		adapter.polling = false
+		adapter.mu.Unlock()
 		opts.Logger.Info("Telegram long polling stopped", "event", "telegram_poll_stopped")
 	}()
 
@@ -211,6 +219,7 @@ func (a *Adapter) handleUpdate(_ context.Context, _ *telegrambot.Bot, update *mo
 	if a == nil || update == nil || !a.acceptUpdateID(update.ID) {
 		return
 	}
+	a.observeUpdate(update)
 
 	a.mu.RLock()
 	normalizer := a.normalizer

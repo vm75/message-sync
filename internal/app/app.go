@@ -66,6 +66,7 @@ type telegramTransport interface {
 	Delete(context.Context, transport.MessageRef) error
 	Close() error
 	UpdateConfig(*config.Config) error
+	telegram.AdminService
 }
 
 var openTelegram = func(ctx context.Context, opts telegram.Options) (telegramTransport, error) {
@@ -252,6 +253,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Secret:         []byte(secret),
 		WhatsApp:       waService,
 		Discord:        dc,
+		Telegram:       tg,
 		OnConfigChange: onConfigChange,
 	})
 	if err := apiServer.Start(); err != nil {

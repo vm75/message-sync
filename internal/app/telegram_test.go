@@ -64,6 +64,21 @@ func (f *fakeTelegramTransport) UpdateConfig(cfg *config.Config) error {
 	return nil
 }
 
+func (f *fakeTelegramTransport) AdminStatus(context.Context) telegram.AdminStatus {
+	return telegram.AdminStatus{
+		TokenConfigured:    true,
+		Running:            true,
+		Status:             "running",
+		Endpoints:          []telegram.EndpointReadiness{},
+		PrivacyModeKnown:   false,
+		VisibilityGuidance: telegram.VisibilityGuidance,
+	}
+}
+
+func (f *fakeTelegramTransport) DiscoverChats(context.Context) ([]telegram.DiscoveredChat, error) {
+	return []telegram.DiscoveredChat{}, nil
+}
+
 func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	t.Setenv("DATA_DIR", t.TempDir())
 	t.Setenv("API_ADDR", "127.0.0.1:0")

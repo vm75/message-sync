@@ -14,6 +14,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/safelog"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 )
 
 type WhatsAppStatus struct {
@@ -51,6 +52,7 @@ type Options struct {
 	SessionTTL     time.Duration
 	WhatsApp       WhatsAppService
 	Discord        discord.AdminService
+	Telegram       telegram.AdminService
 	OnConfigChange func(ctx context.Context) error
 }
 
@@ -63,6 +65,7 @@ type Server struct {
 	sessions       *SessionManager
 	whatsapp       WhatsAppService
 	discord        discord.AdminService
+	telegram       telegram.AdminService
 	onConfigChange func(ctx context.Context) error
 	listener       net.Listener
 }
@@ -90,6 +93,7 @@ func NewServer(opts Options) *Server {
 		sessions:       sessions,
 		whatsapp:       opts.WhatsApp,
 		discord:        opts.Discord,
+		telegram:       opts.Telegram,
 		onConfigChange: opts.OnConfigChange,
 	}
 
@@ -124,6 +128,9 @@ func (s *Server) registerRoutes() {
 
 	s.mux.HandleFunc("GET /api/discord/status", s.handleDiscordStatus)
 	s.mux.HandleFunc("GET /api/discord/channels", s.handleDiscordChannels)
+
+	s.mux.HandleFunc("GET /api/telegram/status", s.handleTelegramStatus)
+	s.mux.HandleFunc("GET /api/telegram/chats", s.handleTelegramChats)
 
 	s.mux.HandleFunc("GET /api/endpoints", s.handleListEndpoints)
 	s.mux.HandleFunc("GET /api/endpoints/{alias}", s.handleGetEndpoint)
