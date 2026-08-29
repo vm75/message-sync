@@ -41,6 +41,9 @@ type fakeTelegramAPI struct {
 }
 
 func (f *fakeTelegramAPI) Start(context.Context) {}
+func (f *fakeTelegramAPI) GetMe(context.Context) (*models.User, error) {
+	return &models.User{CanReadAllGroupMessages: true}, nil
+}
 func (f *fakeTelegramAPI) ID() int64 {
 	if f.botID == 0 {
 		return 999
