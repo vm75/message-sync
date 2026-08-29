@@ -223,13 +223,19 @@ func TestHandleUpdateDropsBridgeBotWithoutLoggingProtocolData(t *testing.T) {
 }
 
 type fakeBotClient struct {
-	id      int64
-	started chan struct{}
-	stopped chan struct{}
-	once    sync.Once
+	id       int64
+	me       *models.User
+	getMeErr error
+	started  chan struct{}
+	stopped  chan struct{}
+	once     sync.Once
 }
 
 func (f *fakeBotClient) ID() int64 { return f.id }
+
+func (f *fakeBotClient) GetMe(context.Context) (*models.User, error) {
+	return f.me, f.getMeErr
+}
 
 func (f *fakeBotClient) Start(ctx context.Context) {
 	f.once.Do(func() { close(f.started) })
@@ -246,6 +252,7 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 	}
 	fake := &fakeBotClient{
 		id:      testBotUserID,
+		me:      &models.User{CanReadAllGroupMessages: true},
 		started: make(chan struct{}),
 		stopped: make(chan struct{}),
 	}
@@ -275,6 +282,11 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 	}
 	if capturedHandler == nil || capturedErrors == nil {
 		t.Fatal("Telegram client handlers were not installed")
+	}
+
+	status := adapter.AdminStatus(context.Background())
+	if !status.PrivacyModeKnown || status.PrivacyModeEnabled == nil || *status.PrivacyModeEnabled {
+		t.Fatalf("privacy mode status = %+v, want known and disabled", status)
 	}
 
 	select {
