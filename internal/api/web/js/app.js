@@ -11,6 +11,7 @@
   const ALIAS_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
   const GROUP_JID_REGEX = /^[0-9]+(-[0-9]+)?@g\.us$/;
   const DISCORD_CHANNEL_ID_REGEX = /^[0-9]+$/;
+  const TELEGRAM_CHAT_ID_REGEX = /^-[0-9]+$/;
   const SYNC_SET_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
   // DOM Elements
@@ -26,6 +27,7 @@
     dashboard: document.getElementById('view-dashboard'),
     whatsapp: document.getElementById('view-whatsapp'),
     discord: document.getElementById('view-discord'),
+    telegram: document.getElementById('view-telegram'),
     groups: document.getElementById('view-groups'),
     'sync-sets': document.getElementById('view-sync-sets'),
     settings: document.getElementById('view-settings')
@@ -49,6 +51,7 @@
   // Dashboard Stats Elements
   const dashWaStatus = document.getElementById('dash-wa-status');
   const dashDiscordStatus = document.getElementById('dash-discord-status');
+  const dashTelegramStatus = document.getElementById('dash-telegram-status');
   const dashGroupsCount = document.getElementById('dash-groups-count');
   const dashSyncSetsCount = document.getElementById('dash-sync-sets-count');
   const dashConfigMode = document.getElementById('dash-config-mode');
@@ -78,6 +81,18 @@
   const discordDiscoveryAlert = document.getElementById('discord-discovery-alert');
   const discordDiscoveryBody = document.getElementById('discord-discovery-body');
   const discordDiscoveryEmpty = document.getElementById('discord-discovery-empty');
+
+  // Telegram View Elements
+  const btnTelegramRefresh = document.getElementById('btn-telegram-refresh');
+  const btnTelegramDiscover = document.getElementById('btn-telegram-discover');
+  const telegramStatusIndicator = document.getElementById('telegram-status-indicator');
+  const telegramStatusText = document.getElementById('telegram-status-text');
+  const telegramStatusDesc = document.getElementById('telegram-status-desc');
+  const telegramConfiguredBody = document.getElementById('telegram-configured-body');
+  const telegramConfiguredEmpty = document.getElementById('telegram-configured-empty');
+  const telegramDiscoveryAlert = document.getElementById('telegram-discovery-alert');
+  const telegramDiscoveryBody = document.getElementById('telegram-discovery-body');
+  const telegramDiscoveryEmpty = document.getElementById('telegram-discovery-empty');
 
   // Endpoint View Elements
   const btnOpenAddGroup = document.getElementById('btn-open-add-group');
@@ -155,6 +170,8 @@
   let cachedConfig = null;
   let cachedDiscordChannels = [];
   let cachedDiscordStatus = null;
+  let cachedTelegramChats = [];
+  let cachedTelegramStatus = null;
   let editingGroupAlias = null;
   let editingEndpointTransport = 'whatsapp';
   let editingSyncSetId = null;
@@ -570,6 +587,8 @@
       stopQrCountdown();
       cachedDiscordChannels = [];
       cachedDiscordStatus = null;
+      cachedTelegramChats = [];
+      cachedTelegramStatus = null;
       showToast('Signed out of admin console.', 'success');
       window.Router.navigate('login');
     }
@@ -580,9 +599,10 @@
    */
   async function loadDashboardStats() {
     try {
-      const [waStatus, discordStatus, endpoints, syncSets, cfg] = await Promise.allSettled([
+      const [waStatus, discordStatus, telegramStatus, endpoints, syncSets, cfg] = await Promise.allSettled([
         window.API.getWhatsAppStatus(),
         window.API.getDiscordStatus(),
+        window.API.getTelegramStatus(),
         window.API.getEndpoints(),
         window.API.getSyncSets(),
         window.API.getConfig()
@@ -606,6 +626,16 @@
           dashDiscordStatus.className = s.connected ? 'stat-value text-success' : s.configured ? 'stat-value text-warning' : 'stat-value';
         } else {
           dashDiscordStatus.textContent = 'Standby';
+        }
+      }
+
+      if (dashTelegramStatus) {
+        if (telegramStatus.status === 'fulfilled' && telegramStatus.value) {
+          const s = telegramStatus.value;
+          dashTelegramStatus.textContent = !s.tokenConfigured ? 'Not Configured' : s.running ? 'Polling' : 'Stopped';
+          dashTelegramStatus.className = s.running ? 'stat-value text-success' : s.tokenConfigured ? 'stat-value text-warning' : 'stat-value';
+        } else {
+          dashTelegramStatus.textContent = 'Standby';
         }
       }
 
@@ -1086,7 +1116,9 @@
         : '<span class="badge-unassigned">Unassigned</span>';
       const transportBadge = endpoint.transport === 'discord'
         ? '<span class="badge badge-primary">Discord</span>'
-        : '<span class="badge badge-success">WhatsApp</span>';
+        : endpoint.transport === 'telegram'
+          ? '<span class="badge badge-warning">Telegram</span>'
+          : '<span class="badge badge-success">WhatsApp</span>';
       return `
         <tr data-alias="${escapeHtml(endpoint.alias)}">
           <td><span class="alias-badge">${escapeHtml(endpoint.alias)}</span></td>
@@ -1210,7 +1242,11 @@
     inputGroupJid.value = endpoint.remoteId;
 
     if (selectGroupWA) {
-      const transportLabel = endpoint.transport === 'discord' ? 'Discord channel' : 'WhatsApp group';
+      const transportLabel = endpoint.transport === 'discord'
+        ? 'Discord channel'
+        : endpoint.transport === 'telegram'
+          ? 'Telegram group/supergroup'
+          : 'WhatsApp group';
       selectGroupWA.innerHTML = `<option value="${escapeHtml(endpoint.remoteId)}" selected>${transportLabel} • ${escapeHtml(endpoint.remoteId)}</option>`;
       selectGroupWA.disabled = true;
     }
@@ -1230,8 +1266,13 @@
     const transport = editingGroupAlias ? editingEndpointTransport : 'whatsapp';
 
     if ((transport === 'whatsapp' && (!remoteId || !GROUP_JID_REGEX.test(remoteId))) ||
-        (transport === 'discord' && (!remoteId || !DISCORD_CHANNEL_ID_REGEX.test(remoteId)))) {
-      modalGroupAlert.textContent = transport === 'discord' ? 'Discord channel ID is invalid.' : 'Please select a valid WhatsApp group.';
+        (transport === 'discord' && (!remoteId || !DISCORD_CHANNEL_ID_REGEX.test(remoteId))) ||
+        (transport === 'telegram' && (!remoteId || !TELEGRAM_CHAT_ID_REGEX.test(remoteId)))) {
+      modalGroupAlert.textContent = transport === 'discord'
+        ? 'Discord channel ID is invalid.'
+        : transport === 'telegram'
+          ? 'Telegram group/supergroup chat ID is invalid.'
+          : 'Please select a valid WhatsApp group.';
       modalGroupAlert.classList.remove('hidden');
       return;
     }
@@ -1415,7 +1456,7 @@
 
     const items = Array.from(endpointMap.values());
     if (items.length === 0) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No endpoints available. Pair WhatsApp or configure Discord channels first.</div>';
+      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No endpoints available. Pair WhatsApp or configure Discord/Telegram endpoints first.</div>';
       return;
     }
 
@@ -1436,7 +1477,9 @@
       const aliasBadge = hasAlias ? `<span class="checklist-alias">${escapeHtml(item.alias)}</span>` : '';
       const transportBadge = item.transport === 'discord'
         ? '<span class="badge badge-primary">Discord</span>'
-        : '<span class="badge badge-success">WhatsApp</span>';
+        : item.transport === 'telegram'
+          ? '<span class="badge badge-warning">Telegram</span>'
+          : '<span class="badge badge-success">WhatsApp</span>';
       const defineAliasBtn = !hasAlias && item.transport === 'whatsapp'
         ? `<button type="button" class="btn-inline-alias" data-jid="${escapeHtml(item.remoteId)}" data-name="${escapeHtml(item.name || '')}">+ Define Alias</button>`
         : '';
@@ -1848,6 +1891,10 @@
     if (btnDiscordRefresh) btnDiscordRefresh.addEventListener('click', () => loadDiscordStatus(true));
     if (btnDiscordDiscover) btnDiscordDiscover.addEventListener('click', discoverDiscordChannels);
 
+    // Telegram view
+    if (btnTelegramRefresh) btnTelegramRefresh.addEventListener('click', () => loadTelegramStatus(true));
+    if (btnTelegramDiscover) btnTelegramDiscover.addEventListener('click', discoverTelegramChats);
+
     // Endpoint view
     if (btnOpenAddGroup) btnOpenAddGroup.addEventListener('click', openAddGroupModal);
     if (formGroup) formGroup.addEventListener('submit', handleGroupFormSubmit);
@@ -1947,6 +1994,11 @@
     window.Router.addRoute('discord', () => {
       switchView('discord');
       loadDiscordStatus(true);
+    });
+
+    window.Router.addRoute('telegram', () => {
+      switchView('telegram');
+      loadTelegramStatus(true);
     });
 
     window.Router.addRoute('groups', () => {
