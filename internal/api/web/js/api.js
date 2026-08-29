@@ -190,6 +190,17 @@
     },
 
     /**
+     * Telegram Admin Endpoints
+     */
+    async getTelegramStatus() {
+      return this.request('/api/telegram/status');
+    },
+
+    async getTelegramChats() {
+      return this.request('/api/telegram/chats');
+    },
+
+    /**
      * Transport-neutral Endpoint CRUD
      */
     async getEndpoints() {
