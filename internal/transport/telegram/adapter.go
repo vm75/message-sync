@@ -131,16 +131,6 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	adapter.client = client
 	adapter.botUserID = client.ID()
 
-	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
-	botInfo, probeErr := client.GetMe(probeCtx)
-	probeCancel()
-	if probeErr != nil {
-		safelog.Error(opts.Logger, "Telegram Bot API status probe failed", "telegram_status_probe", probeErr)
-	} else if botInfo != nil {
-		adapter.privacyModeKnown = true
-		adapter.privacyModeEnabled = !botInfo.CanReadAllGroupMessages
-	}
-
 	adapter.pollWG.Add(1)
 	go func() {
 		defer adapter.pollWG.Done()
