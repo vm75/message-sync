@@ -118,6 +118,57 @@ func TestStaticHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("Telegram admin UI uses transient discovery and no credential form", func(t *testing.T) {
+		resp, err := client.Get(ts.URL + "/")
+		if err != nil {
+			t.Fatalf("GET / failed: %v", err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		html := string(body)
+		for _, expected := range []string{
+			`data-tab="telegram"`,
+			"Telegram Bot & Observed Chat Discovery",
+			"TELEGRAM_BOT_TOKEN",
+			"TELEGRAM_BOT_TOKEN_FILE",
+			"Bot Privacy Mode",
+			"Send a group message",
+			"Transient Observed Chats",
+		} {
+			if !strings.Contains(html, expected) {
+				t.Fatalf("Telegram admin HTML missing %q", expected)
+			}
+		}
+		for _, forbidden := range []string{
+			`id="telegram-token"`,
+			`name="telegram-token"`,
+			`type="password" id="telegram`,
+		} {
+			if strings.Contains(html, forbidden) {
+				t.Fatalf("Telegram admin HTML contains credential input marker %q", forbidden)
+			}
+		}
+
+		resp, err = client.Get(ts.URL + "/js/app.js")
+		if err != nil {
+			t.Fatalf("GET /js/app.js failed: %v", err)
+		}
+		js, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		appJS := string(js)
+		for _, expected := range []string{
+			"getTelegramChats",
+			"cachedTelegramChats",
+			"transport: 'telegram'",
+			"TELEGRAM_CHAT_ID_REGEX",
+			"Long Polling Active",
+		} {
+			if !strings.Contains(appJS, expected) {
+				t.Fatalf("Telegram admin JS missing %q", expected)
+			}
+		}
+	})
+
 	t.Run("Serves js scripts", func(t *testing.T) {
 		scripts := []string{"/js/qrcode.js", "/js/api.js", "/js/router.js", "/js/app.js"}
 		for _, s := range scripts {
@@ -141,7 +192,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("SPA route fallback to index.html", func(t *testing.T) {
-		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/discord", "/groups", "/sync-sets", "/settings"}
+		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/discord", "/telegram", "/groups", "/sync-sets", "/settings"}
 		for _, route := range routes {
 			resp, err := client.Get(ts.URL + route)
 			if err != nil {
