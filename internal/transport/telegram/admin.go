@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 const observedChatLimit = 128
@@ -46,7 +48,7 @@ type observedChatEntry struct {
 	seen uint64
 }
 
-func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
+func (a *Adapter) AdminStatus(ctx context.Context) AdminStatus {
 	status := AdminStatus{
 		TokenConfigured:    BotTokenConfigured(),
 		Status:             "not_configured",
@@ -60,6 +62,8 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 		}
 		return status
 	}
+
+	a.refreshPrivacyMode(ctx)
 
 	a.mu.RLock()
 	status.TokenConfigured = true
@@ -92,6 +96,37 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 		status.Endpoints = append(status.Endpoints, EndpointReadiness{Alias: alias, Status: readiness})
 	}
 	return status
+}
+
+func (a *Adapter) refreshPrivacyMode(ctx context.Context) {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	client := a.client
+	logger := a.logger
+	a.mu.RUnlock()
+	if client == nil {
+		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	botInfo, err := client.GetMe(probeCtx)
+	cancel()
+	if err != nil {
+		safelog.Error(logger, "Telegram Bot API status probe failed", "telegram_status_probe", err)
+		return
+	}
+	if botInfo == nil {
+		return
+	}
+
+	a.mu.Lock()
+	a.privacyModeKnown = true
+	a.privacyModeEnabled = !botInfo.CanReadAllGroupMessages
+	a.mu.Unlock()
 }
 
 func (a *Adapter) DiscoverChats(_ context.Context) ([]DiscoveredChat, error) {
