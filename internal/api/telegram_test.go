@@ -85,12 +85,15 @@ func TestTelegramStatusMissingTokenIsSafe(t *testing.T) {
 }
 
 func TestTelegramStatusAndDiscoveryExposeTransientSelectionMetadata(t *testing.T) {
+	privacyModeEnabled := false
 	service := &fakeTelegramAdminService{
 		status: telegram.AdminStatus{
 			TokenConfigured:    true,
 			Running:            true,
 			Status:             "running",
 			Endpoints:          []telegram.EndpointReadiness{{Alias: "tg-ready", Status: "ready"}},
+			PrivacyModeKnown:   true,
+			PrivacyModeEnabled: &privacyModeEnabled,
 			VisibilityGuidance: telegram.VisibilityGuidance,
 		},
 		chats: []telegram.DiscoveredChat{{
@@ -114,6 +117,10 @@ func TestTelegramStatusAndDiscoveryExposeTransientSelectionMetadata(t *testing.T
 		if strings.Contains(statusRec.Body.String(), forbidden) {
 			t.Fatalf("status exposed forbidden field %q: %s", forbidden, statusRec.Body.String())
 		}
+	}
+
+	if !strings.Contains(statusRec.Body.String(), `"privacyModeEnabled":false`) {
+		t.Fatalf("status did not expose safe derived privacy-mode state: %s", statusRec.Body.String())
 	}
 
 	chatsRec := httptest.NewRecorder()
