@@ -174,7 +174,7 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 	}
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"telegram-team","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`,
+		`{"alias":"tg_route_01","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`,
 	))
 	createReq.Header.Set("Authorization", "Bearer "+token)
 	createRec := httptest.NewRecorder()
@@ -188,10 +188,10 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 
 	var alias, transportName, remoteID string
 	var syncSetID *string
-	if err := db.QueryRow(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints WHERE alias = 'telegram-team'`).Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
+	if err := db.QueryRow(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints WHERE alias = 'tg_route_01'`).Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
 		t.Fatal(err)
 	}
-	if alias != "telegram-team" || transportName != "telegram" || remoteID != "-1001234567890" || syncSetID == nil || *syncSetID != "mesh" {
+	if alias != "tg_route_01" || transportName != "telegram" || remoteID != "-1001234567890" || syncSetID == nil || *syncSetID != "mesh" {
 		t.Fatalf("unexpected persisted endpoint: alias=%q transport=%q remote=%q sync=%v", alias, transportName, remoteID, syncSetID)
 	}
 
