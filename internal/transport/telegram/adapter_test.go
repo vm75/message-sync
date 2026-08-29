@@ -323,6 +323,32 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 	}
 }
 
+func TestAdminStatusSanitizesPrivacyProbeError(t *testing.T) {
+	var logBuf bytes.Buffer
+	adapter := &Adapter{
+		client: &fakeBotClient{
+			id:       testBotUserID,
+			getMeErr: errors.New("raw getMe failure bot-user=999 secret-value"),
+		},
+		logger:  slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		polling: true,
+	}
+
+	status := adapter.AdminStatus(context.Background())
+	if status.PrivacyModeKnown || status.PrivacyModeEnabled != nil {
+		t.Fatalf("privacy mode unexpectedly known after failed probe: %+v", status)
+	}
+	logged := logBuf.String()
+	if !strings.Contains(logged, "telegram_status_probe") {
+		t.Fatalf("safe privacy probe event missing: %s", logged)
+	}
+	for _, forbidden := range []string{"bot-user=999", "secret-value"} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("privacy probe log leaked %q: %s", forbidden, logged)
+		}
+	}
+}
+
 func TestOpenSanitizesClientInitializationError(t *testing.T) {
 	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "12345:test-token")
