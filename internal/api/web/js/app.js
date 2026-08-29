@@ -1125,16 +1125,16 @@
     if (telegramConfiguredEmpty) telegramConfiguredEmpty.classList.add('hidden');
     telegramConfiguredBody.innerHTML = endpoints.map((endpoint) => {
       const syncSet = endpoint.syncSetId
-        ? \`<span class="badge-assigned">\${escapeHtml(endpoint.syncSetId)}</span>\`
+        ? `<span class="badge-assigned">${escapeHtml(endpoint.syncSetId)}</span>`
         : '<span class="badge-unassigned">Unassigned</span>';
-      return \`
+      return `
         <tr>
-          <td><span class="alias-badge">\${escapeHtml(endpoint.alias)}</span></td>
-          <td><span class="jid-text">\${escapeHtml(endpoint.remoteId)}</span></td>
-          <td>\${syncSet}</td>
-          <td>\${renderTelegramReadiness(telegramEndpointStatusForAlias(endpoint.alias))}</td>
+          <td><span class="alias-badge">${escapeHtml(endpoint.alias)}</span></td>
+          <td><span class="jid-text">${escapeHtml(endpoint.remoteId)}</span></td>
+          <td>${syncSet}</td>
+          <td>${renderTelegramReadiness(telegramEndpointStatusForAlias(endpoint.alias))}</td>
         </tr>
-      \`;
+      `;
     }).join('');
   }
 
@@ -1168,7 +1168,7 @@
     let suffix = 2;
     const aliases = new Set(cachedEndpoints.map((endpoint) => endpoint.alias));
     while (aliases.has(candidate)) {
-      const suffixText = \`_\${suffix++}\`;
+      const suffixText = `_${suffix++}`;
       candidate = (base.slice(0, Math.max(1, 64 - suffixText.length)) + suffixText).slice(0, 64);
     }
     return candidate;
@@ -1190,45 +1190,45 @@
     telegramDiscoveryBody.innerHTML = cachedTelegramChats.map((chat) => {
       const existing = cachedEndpoints.find((endpoint) => endpoint.transport === 'telegram' && endpoint.remoteId === chat.chatId);
       const title = chat.title || chat.username || 'Observed group';
-      const username = chat.username ? \`@\${escapeHtml(chat.username)}\` : '—';
+      const username = chat.username ? `@${escapeHtml(chat.username)}` : '—';
       if (existing) {
-        const setText = existing.syncSetId ? \` • Sync set: \${escapeHtml(existing.syncSetId)}\` : ' • Unassigned';
-        return \`
+        const setText = existing.syncSetId ? ` • Sync set: ${escapeHtml(existing.syncSetId)}` : ' • Unassigned';
+        return `
           <tr>
-            <td><strong>\${escapeHtml(title)}</strong></td>
-            <td>\${username}</td>
-            <td><span class="badge badge-neutral">\${escapeHtml(chat.type)}</span></td>
-            <td><span class="jid-text">\${escapeHtml(chat.chatId)}</span></td>
-            <td><span class="alias-badge">\${escapeHtml(existing.alias)}</span>\${setText}</td>
+            <td><strong>${escapeHtml(title)}</strong></td>
+            <td>${username}</td>
+            <td><span class="badge badge-neutral">${escapeHtml(chat.type)}</span></td>
+            <td><span class="jid-text">${escapeHtml(chat.chatId)}</span></td>
+            <td><span class="alias-badge">${escapeHtml(existing.alias)}</span>${setText}</td>
           </tr>
-        \`;
+        `;
       }
 
       const syncOptions = ['<option value="">-- Unassigned --</option>']
-        .concat(cachedSyncSets.map((set) => \`<option value="\${escapeHtml(set.id)}">\${escapeHtml(set.id)}</option>\`))
+        .concat(cachedSyncSets.map((set) => `<option value="${escapeHtml(set.id)}">${escapeHtml(set.id)}</option>`))
         .join('');
-      return \`
+      return `
         <tr>
-          <td><strong>\${escapeHtml(title)}</strong></td>
-          <td>\${username}</td>
-          <td><span class="badge badge-neutral">\${escapeHtml(chat.type)}</span></td>
-          <td><span class="jid-text">\${escapeHtml(chat.chatId)}</span></td>
+          <td><strong>${escapeHtml(title)}</strong></td>
+          <td>${username}</td>
+          <td><span class="badge badge-neutral">${escapeHtml(chat.type)}</span></td>
+          <td><span class="jid-text">${escapeHtml(chat.chatId)}</span></td>
           <td>
             <div class="form-grid-2">
-              <input class="form-input font-mono telegram-alias-input" data-chat-id="\${escapeHtml(chat.chatId)}" value="\${escapeHtml(suggestedTelegramAlias(chat))}" aria-label="Endpoint alias">
-              <select class="form-select telegram-sync-set-select" data-chat-id="\${escapeHtml(chat.chatId)}">\${syncOptions}</select>
+              <input class="form-input font-mono telegram-alias-input" data-chat-id="${escapeHtml(chat.chatId)}" value="${escapeHtml(suggestedTelegramAlias(chat))}" aria-label="Endpoint alias">
+              <select class="form-select telegram-sync-set-select" data-chat-id="${escapeHtml(chat.chatId)}">${syncOptions}</select>
             </div>
-            <button type="button" class="btn btn-primary btn-sm btn-configure-telegram-chat" data-chat-id="\${escapeHtml(chat.chatId)}" style="margin-top:.5rem;">Configure Endpoint</button>
+            <button type="button" class="btn btn-primary btn-sm btn-configure-telegram-chat" data-chat-id="${escapeHtml(chat.chatId)}" style="margin-top:.5rem;">Configure Endpoint</button>
           </td>
         </tr>
-      \`;
+      `;
     }).join('');
 
     telegramDiscoveryBody.querySelectorAll('.btn-configure-telegram-chat').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const chatId = btn.getAttribute('data-chat-id');
-        const aliasInput = telegramDiscoveryBody.querySelector(\`.telegram-alias-input[data-chat-id="\${chatId}"]\`);
-        const syncSelect = telegramDiscoveryBody.querySelector(\`.telegram-sync-set-select[data-chat-id="\${chatId}"]\`);
+        const aliasInput = telegramDiscoveryBody.querySelector(`.telegram-alias-input[data-chat-id="${chatId}"]`);
+        const syncSelect = telegramDiscoveryBody.querySelector(`.telegram-sync-set-select[data-chat-id="${chatId}"]`);
         const alias = aliasInput ? aliasInput.value.trim() : '';
         const syncSetId = syncSelect && syncSelect.value ? syncSelect.value : null;
         if (!ALIAS_REGEX.test(alias)) {
@@ -1243,7 +1243,7 @@
         setButtonLoading(btn, true);
         try {
           await window.API.createEndpoint({ alias, transport: 'telegram', remoteId: chatId, syncSetId });
-          showToast(\`Telegram endpoint '\${alias}' configured.\`, 'success');
+          showToast(`Telegram endpoint '${alias}' configured.`, 'success');
           await loadTelegramStatus(false);
           await discoverTelegramChats();
         } catch (err) {
