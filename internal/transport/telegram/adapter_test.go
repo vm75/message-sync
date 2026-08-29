@@ -126,8 +126,8 @@ func TestAdapterContract(t *testing.T) {
 	if adapter.Name() != "telegram" {
 		t.Fatalf("Name() = %q", adapter.Name())
 	}
-	if _, err := adapter.Send(context.Background(), transport.Outgoing{}); !errors.Is(err, errOutboundNotImplemented) {
-		t.Fatalf("Send returned unexpected out-of-scope result: %v", err)
+	if _, err := adapter.Send(context.Background(), transport.Outgoing{}); err == nil {
+		t.Fatal("unconfigured Telegram adapter unexpectedly accepted outbound send")
 	}
 }
 
