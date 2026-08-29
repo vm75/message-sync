@@ -23,6 +23,7 @@ const eventBufferSize = 128
 type botClient interface {
 	Start(context.Context)
 	ID() int64
+	GetMe(context.Context) (*models.User, error)
 }
 
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
@@ -59,7 +60,9 @@ type Adapter struct {
 	haveUpdateID bool
 	observed     map[int64]observedChatEntry
 	observeSeq   uint64
-	polling      bool
+	polling            bool
+	privacyModeKnown   bool
+	privacyModeEnabled bool
 
 	pollCancel context.CancelFunc
 	pollWG     sync.WaitGroup
@@ -127,6 +130,16 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 	adapter.client = client
 	adapter.botUserID = client.ID()
+
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	botInfo, probeErr := client.GetMe(probeCtx)
+	probeCancel()
+	if probeErr != nil {
+		safelog.Error(opts.Logger, "Telegram Bot API status probe failed", "telegram_status_probe", probeErr)
+	} else if botInfo != nil {
+		adapter.privacyModeKnown = true
+		adapter.privacyModeEnabled = !botInfo.CanReadAllGroupMessages
+	}
 
 	adapter.pollWG.Add(1)
 	go func() {
