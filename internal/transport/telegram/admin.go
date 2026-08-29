@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/transport"
 )
 
 const observedChatLimit = 128
@@ -159,4 +158,3 @@ func (a *Adapter) observeChat(chat models.Chat) {
 }
 
 var _ AdminService = (*Adapter)(nil)
-var _ = transport.EndpointID("")
