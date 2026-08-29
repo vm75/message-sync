@@ -330,8 +330,10 @@ func TestAdminStatusSanitizesPrivacyProbeError(t *testing.T) {
 			id:       testBotUserID,
 			getMeErr: errors.New("raw getMe failure bot-user=999 secret-value"),
 		},
-		logger:  slog.New(slog.NewJSONHandler(&logBuf, nil)),
-		polling: true,
+		logger:             slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		polling:            true,
+		privacyModeKnown:   true,
+		privacyModeEnabled: false,
 	}
 
 	status := adapter.AdminStatus(context.Background())
