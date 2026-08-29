@@ -299,3 +299,61 @@ func TestWhatsAppCleanupValidationAndPersistence(t *testing.T) {
 		t.Errorf("loaded whatsappCleanup.retentionDays = %d, want 14", loaded.WhatsAppCleanup.RetentionDays)
 	}
 }
+
+
+func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "sync.db")
+	st, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := validConfig()
+	const oldRemoteID = "-123456789"
+	const newRemoteID = "-1009876543210"
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: oldRemoteID}
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		_ = st.Close()
+		t.Fatal(err)
+	}
+	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", oldRemoteID, newRemoteID); err != nil {
+		_ = st.Close()
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := store.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+
+	loaded, err := Load(ctx, reopened.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := loaded.Endpoints["b"]
+	if endpoint.Transport != TransportTelegram || endpoint.RemoteID != newRemoteID {
+		t.Fatalf("migrated Telegram endpoint = %+v", endpoint)
+	}
+	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" {
+		t.Fatalf("sync-set changed across Telegram migration: %+v", loaded.SyncSets)
+	}
+	foundAlias := false
+	for _, alias := range loaded.SyncSets[0].Groups {
+		if alias == "b" {
+			foundAlias = true
+		}
+	}
+	if !foundAlias {
+		t.Fatalf("Telegram endpoint alias lost sync-set membership: %+v", loaded.SyncSets[0])
+	}
+
+	// Replayed migration events are idempotent after restart.
+	if err := MigrateTelegramEndpoint(ctx, reopened.DB(), "b", oldRemoteID, newRemoteID); err != nil {
+		t.Fatalf("replayed Telegram migration failed: %v", err)
+	}
+}

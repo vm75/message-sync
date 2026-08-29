@@ -458,3 +458,28 @@ func TestNormalizerLifecycleEvents(t *testing.T) {
 
 var _ botClient = (*fakeTelegramAPI)(nil)
 var _ telegramAPI = (*fakeTelegramAPI)(nil)
+
+
+func TestSendPollUsesDeterministicTextFallback(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:            "tg",
+		Sender:              transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		SourceText:          "Lunch?",
+		Kind:                "poll",
+		PollOptions:         []string{"Idli", "Dosa"},
+		PollSelectableCount: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Alice: Poll: Lunch?\n1. Idli\n2. Dosa\nChoose up to 2 options."
+	if len(api.methods) != 1 || api.methods[0] != "message" {
+		t.Fatalf("Telegram poll fallback methods = %v", api.methods)
+	}
+	if len(api.texts) != 1 || api.texts[0] != want {
+		t.Fatalf("Telegram poll fallback text = %q, want %q", api.texts, want)
+	}
+}

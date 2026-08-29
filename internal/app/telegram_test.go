@@ -148,6 +148,10 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 			cancel()
 			t.Fatalf("Telegram media options were not initialized: enabled=%v max=%d", opts.MediaEnabled, opts.MediaMaxBytes)
 		}
+		if opts.MigrateEndpoint == nil {
+			cancel()
+			t.Fatal("Telegram migration persistence callback was not initialized")
+		}
 	case <-time.After(time.Second):
 		cancel()
 		t.Fatal("Telegram adapter was not opened")

@@ -382,3 +382,130 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 		t.Fatalf("Telegram initialization log was not safely classified: %s", logged)
 	}
 }
+
+
+func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	const newChatID int64 = -1009876543210
+	var logBuf bytes.Buffer
+	var (
+		migrationCalls int
+		gotEndpoint    transport.EndpointID
+		gotOldRemoteID string
+		gotNewRemoteID string
+	)
+	adapter := &Adapter{
+		normalizer: normalizer,
+		events:     make(chan transport.Incoming, 2),
+		logger:     slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		botUserID:  testBotUserID,
+		migrateEndpoint: func(_ context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
+			migrationCalls++
+			gotEndpoint = endpoint
+			gotOldRemoteID = oldRemoteID
+			gotNewRemoteID = newRemoteID
+			return nil
+		},
+	}
+
+	migration := testMessage(testGroupID, models.ChatTypeGroup)
+	migration.Text = ""
+	migration.From = nil
+	migration.Chat.Title = "private old Telegram title"
+	migration.MigrateToChatID = newChatID
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 1, Message: migration})
+
+	if migrationCalls != 1 || gotEndpoint != "team-telegram" ||
+		gotOldRemoteID != strconv.FormatInt(testGroupID, 10) ||
+		gotNewRemoteID != strconv.FormatInt(newChatID, 10) {
+		t.Fatalf("migration callback = calls %d endpoint %q", migrationCalls, gotEndpoint)
+	}
+	select {
+	case incoming := <-adapter.events:
+		t.Fatalf("migration service message became canonical ingress: %#v", incoming)
+	default:
+	}
+
+	// Telegram may also emit migrate_from_chat_id in the new supergroup.
+	replay := testMessage(newChatID, models.ChatTypeSupergroup)
+	replay.Text = ""
+	replay.From = nil
+	replay.MigrateFromChatID = testGroupID
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 2, Message: replay})
+	if migrationCalls != 1 {
+		t.Fatalf("migration replay caused duplicate persistence update: %d", migrationCalls)
+	}
+
+	message := testMessage(newChatID, models.ChatTypeSupergroup)
+	message.ID = 202
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 3, Message: message})
+	select {
+	case incoming := <-adapter.events:
+		if incoming.Endpoint != "team-telegram" || incoming.RemoteID != "202" {
+			t.Fatalf("post-migration routing = %#v", incoming)
+		}
+	default:
+		t.Fatal("new supergroup chat did not route through preserved alias")
+	}
+
+	adapter.mu.RLock()
+	runtimeNormalizer := adapter.normalizer
+	adapter.mu.RUnlock()
+	if _, ok := runtimeNormalizer.endpoint(testGroupID); ok {
+		t.Fatal("old Telegram chat id remained active after migration")
+	}
+	if endpoint, ok := runtimeNormalizer.endpoint(newChatID); !ok || endpoint != "team-telegram" {
+		t.Fatalf("new Telegram chat did not preserve alias: endpoint=%q ok=%v", endpoint, ok)
+	}
+
+	logged := logBuf.String()
+	for _, forbidden := range []string{
+		strconv.FormatInt(testGroupID, 10),
+		strconv.FormatInt(newChatID, 10),
+		"private old Telegram title",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("Telegram migration log leaked %q: %s", forbidden, logged)
+		}
+	}
+}
+
+func TestHandleUpdateLogsOnlySafeUnsupportedEventClass(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	var logBuf bytes.Buffer
+	adapter := &Adapter{
+		normalizer: normalizer,
+		events:     make(chan transport.Incoming, 1),
+		logger:     slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		botUserID:  testBotUserID,
+	}
+
+	msg := testMessage(testGroupID, models.ChatTypeGroup)
+	msg.Text = ""
+	msg.Chat.Title = "private chat title sentinel"
+	msg.From.FirstName = "private sender sentinel"
+	msg.NewChatTitle = "private new title sentinel"
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 1, Message: msg})
+
+	select {
+	case incoming := <-adapter.events:
+		t.Fatalf("unsupported service message became ingress: %#v", incoming)
+	default:
+	}
+	logged := logBuf.String()
+	for _, required := range []string{"telegram_message_ignored", "team-telegram", "chat_metadata"} {
+		if !strings.Contains(logged, required) {
+			t.Fatalf("safe unsupported-event log missing %q: %s", required, logged)
+		}
+	}
+	for _, forbidden := range []string{
+		strconv.FormatInt(testGroupID, 10),
+		"private chat title sentinel",
+		"private sender sentinel",
+		"private new title sentinel",
+	} {
+		if strings.Contains(logged, forbidden) {
+			t.Fatalf("unsupported-event log leaked %q: %s", forbidden, logged)
+		}
+	}
+}

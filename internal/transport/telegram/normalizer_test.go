@@ -233,8 +233,11 @@ func TestNormalizeTelegramTextMentionUsesHMACIdentity(t *testing.T) {
 	if strings.Contains(mention.RemoteID, strconv.FormatInt(mentionedID, 10)) {
 		t.Fatalf("raw Telegram mentioned-user ID escaped normalization: %#v", mention)
 	}
-	if !strings.Contains(incoming.Text, "@username_only") {
-		t.Fatalf("username-only mention should remain transient text: %q", incoming.Text)
+	if incoming.Text != "Hello @Bob Example and @mention" {
+		t.Fatalf("privacy-safe mention text = %q", incoming.Text)
+	}
+	if strings.Contains(incoming.Text, "username_only") {
+		t.Fatalf("raw Telegram username crossed the normalization boundary: %q", incoming.Text)
 	}
 }
 
@@ -249,5 +252,118 @@ func TestNewNormalizerRejectsDuplicateTelegramChat(t *testing.T) {
 	}, hasher, config.UsernameModeHash)
 	if err == nil {
 		t.Fatal("expected duplicate configured Telegram chat to be rejected")
+	}
+}
+
+
+func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	msg.IsTopicMessage = true
+	msg.MessageThreadID = 777
+
+	incoming, ok := normalizer.NormalizeMessage(msg, testBotUserID)
+	if !ok {
+		t.Fatal("forum-topic message was ignored")
+	}
+	if incoming.Endpoint != "super-telegram" || incoming.RemoteID != "101" {
+		t.Fatalf("forum-topic message escaped parent endpoint mapping: %#v", incoming)
+	}
+	if len(normalizer.endpoints) != 2 {
+		t.Fatalf("forum topic dynamically changed endpoint set: %#v", normalizer.endpoints)
+	}
+}
+
+func TestNormalizeTelegramPollUsesDeterministicTextFallback(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	msg := testMessage(testGroupID, models.ChatTypeGroup)
+	msg.Text = ""
+	msg.Poll = &models.Poll{
+		ID:                    "raw-private-poll-id",
+		Question:              "Lunch?",
+		Options:               []models.PollOption{{Text: "Idli"}, {Text: "Dosa"}},
+		AllowsMultipleAnswers: true,
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(msg, testBotUserID)
+	if !ok {
+		t.Fatal("Telegram poll was ignored")
+	}
+	want := "Poll: Lunch?\n1. Idli\n2. Dosa\nChoose up to 2 options."
+	if incoming.Kind != "text" || incoming.Text != want {
+		t.Fatalf("Telegram poll fallback = kind %q text %q", incoming.Kind, incoming.Text)
+	}
+	if len(incoming.PollOptions) != 0 || strings.Contains(incoming.Text, msg.Poll.ID) {
+		t.Fatalf("Telegram poll created native/shared poll state: %#v", incoming)
+	}
+}
+
+func TestNormalizeTelegramTextMentionUsesHashFallbackInHashMode(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	msg := testMessage(testGroupID, models.ChatTypeGroup)
+	msg.Text = "Ping Bob"
+	msg.Entities = []models.MessageEntity{{
+		Type:   models.MessageEntityTypeTextMention,
+		Offset: 5,
+		Length: 3,
+		User: &models.User{
+			ID:        523456789,
+			FirstName: "Private",
+			LastName:  "Name",
+		},
+	}}
+
+	incoming, ok := normalizer.NormalizeMessage(msg, testBotUserID)
+	if !ok {
+		t.Fatal("Telegram text mention was ignored")
+	}
+	if !strings.Contains(incoming.Text, "@u_") {
+		t.Fatalf("hash-mode mention did not use HMAC fallback: %q", incoming.Text)
+	}
+	for _, forbidden := range []string{"523456789", "Private", "Name"} {
+		if strings.Contains(incoming.Text, forbidden) {
+			t.Fatalf("hash-mode mention leaked %q: %q", forbidden, incoming.Text)
+		}
+	}
+}
+
+func TestNormalizeIgnoresContactsLocationsAndVenuesEvenWithText(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	tests := []struct {
+		name    string
+		message *models.Message
+	}{
+		{
+			name: "contact",
+			message: func() *models.Message {
+				msg := testMessage(testGroupID, models.ChatTypeGroup)
+				msg.Contact = &models.Contact{}
+				return msg
+			}(),
+		},
+		{
+			name: "location",
+			message: func() *models.Message {
+				msg := testMessage(testGroupID, models.ChatTypeGroup)
+				msg.Location = &models.Location{}
+				return msg
+			}(),
+		},
+		{
+			name: "venue",
+			message: func() *models.Message {
+				msg := testMessage(testGroupID, models.ChatTypeGroup)
+				msg.Venue = &models.Venue{}
+				return msg
+			}(),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, ok := normalizer.NormalizeMessage(tc.message, testBotUserID); ok {
+				t.Fatal("sensitive Telegram payload crossed the normalization boundary")
+			}
+		})
 	}
 }
