@@ -216,7 +216,7 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 func TestTelegramDiscoveryErrorsAreSafeLogged(t *testing.T) {
 	var logs bytes.Buffer
 	service := &fakeTelegramAdminService{
-		status: telegram.AdminStatus{TokenConfigured: true, Running: true, Status: "running"},
+		status:      telegram.AdminStatus{TokenConfigured: true, Running: true, Status: "running"},
 		discoverErr: errors.New("chat -100999 private-title secret-token"),
 	}
 	srv := NewServer(Options{
