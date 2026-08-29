@@ -162,9 +162,18 @@ func TestStaticHandler(t *testing.T) {
 			"transport: 'telegram'",
 			"TELEGRAM_CHAT_ID_REGEX",
 			"Long Polling Active",
+			"const base = 'telegram_group'",
 		} {
 			if !strings.Contains(appJS, expected) {
 				t.Fatalf("Telegram admin JS missing %q", expected)
+			}
+		}
+		for _, forbidden := range []string{
+			"sanitizeAlias(chat.title",
+			"sanitizeAlias(chat.username",
+		} {
+			if strings.Contains(appJS, forbidden) {
+				t.Fatalf("Telegram admin JS derives persistent alias from transient metadata %q", forbidden)
 			}
 		}
 	})
