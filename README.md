@@ -74,7 +74,7 @@ echo "TELEGRAM_BOT_TOKEN=your-bot-token" >> .env
 # TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
 ```
 
-Create the bot with **BotFather**, add it to each intended Telegram group/supergroup, and ensure it can receive the messages you intend to synchronize. For ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. Telegram does not expose the current Privacy Mode setting through the Bot API, so the admin status reports safe operator guidance rather than guessing that state.
+Create the bot with **BotFather**, add it to each intended Telegram group/supergroup, and ensure it can receive the messages you intend to synchronize. For ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The admin status derives Bot Privacy Mode readiness from Telegram's safe `getMe` capability flag when the probe succeeds; it retains only the boolean state, never the returned bot user object. If the probe is unavailable, the UI falls back to fixed operator guidance.
 
 Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. After the bot is added and has suitable visibility, send a message in the target group/supergroup and open **Telegram → Refresh Observed Chats** in the authenticated Web UI. Observed chat titles/usernames live only in a bounded in-memory cache and disappear on process restart; only the selected opaque negative chat ID is persisted as endpoint `remote_id`. The browser never accepts or stores the bot token.
 
