@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
+	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/identity"
 )
 
 func telegramPollText(question string, options []string, selectableCount int) (string, error) {
@@ -35,20 +37,40 @@ func telegramPollText(question string, options []string, selectableCount int) (s
 	return builder.String(), nil
 }
 
-func telegramPollMessageText(poll *models.Poll) (string, bool) {
-	if poll == nil {
+func telegramPollMessageText(poll *models.Poll, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, bool) {
+	if poll == nil || telegramPollHasSensitiveLocation(poll) {
 		return "", false
 	}
+	question, _ := normalizeTelegramMentions(poll.Question, poll.QuestionEntities, hasher, usernameMode)
 	options := make([]string, 0, len(poll.Options))
 	for _, option := range poll.Options {
-		options = append(options, option.Text)
+		optionText, _ := normalizeTelegramMentions(option.Text, option.TextEntities, hasher, usernameMode)
+		options = append(options, optionText)
 	}
 	selectableCount := 1
 	if poll.AllowsMultipleAnswers {
 		selectableCount = len(options)
 	}
-	text, err := telegramPollText(poll.Question, options, selectableCount)
+	text, err := telegramPollText(question, options, selectableCount)
 	return text, err == nil
+}
+
+func telegramPollHasSensitiveLocation(poll *models.Poll) bool {
+	if poll == nil {
+		return false
+	}
+	sensitiveMedia := func(media *models.PollMedia) bool {
+		return media != nil && (media.Location != nil || media.Venue != nil)
+	}
+	if sensitiveMedia(poll.Media) || sensitiveMedia(poll.ExplanationMedia) {
+		return true
+	}
+	for _, option := range poll.Options {
+		if sensitiveMedia(option.Media) {
+			return true
+		}
+	}
+	return false
 }
 
 func telegramSensitivePayload(message *models.Message) bool {

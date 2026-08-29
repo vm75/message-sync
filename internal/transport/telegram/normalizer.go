@@ -130,7 +130,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 	text, entities := telegramTextPayload(msg)
 	if msg.Poll != nil {
 		var ok bool
-		text, ok = telegramPollMessageText(msg.Poll)
+		text, ok = telegramPollMessageText(msg.Poll, n.hasher, n.usernameMode)
 		if !ok {
 			return transport.Incoming{}, false
 		}
@@ -156,7 +156,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			RemoteMessageID: strconv.Itoa(reply.ID),
 		}
 		if reply.Poll != nil {
-			quotedText, _ = telegramPollMessageText(reply.Poll)
+			quotedText, _ = telegramPollMessageText(reply.Poll, n.hasher, n.usernameMode)
 		} else {
 			var quotedEntities []models.MessageEntity
 			quotedText, quotedEntities = telegramTextPayload(reply)
