@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -18,7 +20,6 @@ import (
 
 const eventBufferSize = 128
 
-var errOutboundNotImplemented = errors.New("Telegram outbound lifecycle is not implemented")
 
 type botClient interface {
 	Start(context.Context)
@@ -32,7 +33,11 @@ type Options struct {
 	Hasher        *identity.Hasher
 	UsernameMode  config.UsernameMode
 	Logger        *slog.Logger
+	MediaEnabled  bool
+	MediaMaxBytes uint64
 	clientFactory botClientFactory
+	httpClient    *http.Client
+	retryWait     func(context.Context, time.Duration) error
 }
 
 type Adapter struct {
@@ -42,6 +47,13 @@ type Adapter struct {
 	events     chan transport.Incoming
 	logger     *slog.Logger
 	botUserID  int64
+	token      string
+	httpClient *http.Client
+
+	mediaEnabled  bool
+	mediaMaxBytes uint64
+	retryWait     func(context.Context, time.Duration) error
+	messageKinds  map[messageKindKey]string
 
 	mu           sync.RWMutex
 	lastUpdateID int64
@@ -77,12 +89,22 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 
 	pollCtx, pollCancel := context.WithCancel(ctx)
+	httpClient := opts.httpClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
 	adapter := &Adapter{
-		normalizer: normalizer,
-		hasher:     opts.Hasher,
-		events:     make(chan transport.Incoming, eventBufferSize),
-		logger:     opts.Logger,
-		pollCancel: pollCancel,
+		normalizer:    normalizer,
+		hasher:        opts.Hasher,
+		events:        make(chan transport.Incoming, eventBufferSize),
+		logger:        opts.Logger,
+		token:         token,
+		httpClient:    httpClient,
+		mediaEnabled:  opts.MediaEnabled,
+		mediaMaxBytes: opts.MediaMaxBytes,
+		retryWait:     opts.retryWait,
+		messageKinds:  make(map[messageKindKey]string),
+		pollCancel:    pollCancel,
 	}
 
 	factory := opts.clientFactory
@@ -117,7 +139,11 @@ func newBotClient(token string, handler telegrambot.HandlerFunc, errorsHandler t
 	return telegrambot.New(token,
 		telegrambot.WithDefaultHandler(handler),
 		telegrambot.WithErrorsHandler(errorsHandler),
-		telegrambot.WithAllowedUpdates(telegrambot.AllowedUpdates{models.AllowedUpdateMessage}),
+		telegrambot.WithAllowedUpdates(telegrambot.AllowedUpdates{
+			models.AllowedUpdateMessage,
+			models.AllowedUpdateEditedMessage,
+			models.AllowedUpdateMessageReaction,
+		}),
 		telegrambot.WithNotAsyncHandlers(),
 	)
 }
@@ -140,22 +166,6 @@ func (a *Adapter) Events() <-chan transport.Incoming {
 		return nil
 	}
 	return a.events
-}
-
-func (a *Adapter) Send(context.Context, transport.Outgoing) (transport.MessageRef, error) {
-	return transport.MessageRef{}, errOutboundNotImplemented
-}
-
-func (a *Adapter) React(context.Context, transport.Reaction) error {
-	return errOutboundNotImplemented
-}
-
-func (a *Adapter) Edit(context.Context, transport.MessageRef, string) error {
-	return errOutboundNotImplemented
-}
-
-func (a *Adapter) Delete(context.Context, transport.MessageRef) error {
-	return errOutboundNotImplemented
 }
 
 func (a *Adapter) Close() error {
@@ -192,6 +202,8 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.mediaEnabled = cfg.Media.Enabled
+	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	a.mu.Unlock()
 	return nil
 }
@@ -205,11 +217,27 @@ func (a *Adapter) handleUpdate(_ context.Context, _ *telegrambot.Bot, update *mo
 	normalizer := a.normalizer
 	botUserID := a.botUserID
 	a.mu.RUnlock()
-	if normalizer == nil || update.Message == nil {
+	if normalizer == nil {
 		return
 	}
 
-	incoming, ok := normalizer.NormalizeMessage(update.Message, botUserID)
+	var (
+		incoming transport.Incoming
+		ok       bool
+	)
+	switch {
+	case update.Message != nil:
+		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
+		if ok {
+			incoming, ok = a.withTelegramMedia(incoming, update.Message)
+		}
+	case update.EditedMessage != nil:
+		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)
+	case update.MessageReaction != nil:
+		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
+	default:
+		return
+	}
 	if !ok {
 		return
 	}
