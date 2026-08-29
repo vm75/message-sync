@@ -73,9 +73,9 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 	}
 
 	text, entities := telegramTextPayload(msg)
-	if strings.TrimSpace(text) == "" {
+	if strings.TrimSpace(text) == "" && !hasTelegramMedia(msg) {
 		// Service-only messages and unsupported payloads are intentionally
-		// ignored until the tickets that define their canonical semantics.
+		// ignored. Supported media may legitimately have no caption.
 		return transport.Incoming{}, false
 	}
 
@@ -113,6 +113,81 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		ReplyTo:    replyTo,
 		QuotedText: quotedText,
 		Timestamp:  timestamp,
+	}, true
+}
+
+func (n *Normalizer) NormalizeEditedMessage(msg *models.Message, botUserID int64) (transport.Incoming, bool) {
+	incoming, ok := n.NormalizeMessage(msg, botUserID)
+	if !ok || strings.TrimSpace(incoming.Text) == "" {
+		return transport.Incoming{}, false
+	}
+	incoming.Kind = "edit"
+	incoming.ReplyTo = &transport.MessageRef{
+		Endpoint:        incoming.Endpoint,
+		RemoteMessageID: incoming.RemoteID,
+	}
+	incoming.QuotedText = ""
+	incoming.MediaLoader = nil
+	return incoming, true
+}
+
+func (n *Normalizer) NormalizeReaction(update *models.MessageReactionUpdated, botUserID int64) (transport.Incoming, bool) {
+	if n == nil || update == nil {
+		return transport.Incoming{}, false
+	}
+	if update.Chat.Type != models.ChatTypeGroup && update.Chat.Type != models.ChatTypeSupergroup {
+		return transport.Incoming{}, false
+	}
+	endpoint, configured := n.endpoints[update.Chat.ID]
+	if !configured || update.MessageID <= 0 || update.User == nil || update.User.ID == 0 {
+		return transport.Incoming{}, false
+	}
+	if botUserID != 0 && update.User.ID == botUserID {
+		return transport.Incoming{}, false
+	}
+
+	emoji := ""
+	switch len(update.NewReaction) {
+	case 0:
+		// Empty reaction list represents removal.
+	case 1:
+		reaction := update.NewReaction[0]
+		if reaction.Type != models.ReactionTypeTypeEmoji || reaction.ReactionTypeEmoji == nil {
+			return transport.Incoming{}, false
+		}
+		emoji = strings.TrimSpace(reaction.ReactionTypeEmoji.Emoji)
+		if emoji == "" {
+			return transport.Incoming{}, false
+		}
+	default:
+		// Canonical reaction state currently represents one reaction per actor.
+		// Multiple/custom/paid Telegram reactions are therefore unsupported.
+		return transport.Incoming{}, false
+	}
+
+	displayName := ""
+	if n.usernameMode == config.UsernameModePushName {
+		displayName = transientTelegramDisplayName(update.User)
+	}
+	timestamp := time.Unix(int64(update.Date), 0).UTC()
+	if update.Date == 0 {
+		timestamp = time.Time{}
+	}
+	remoteID := strconv.Itoa(update.MessageID)
+	return transport.Incoming{
+		Endpoint: endpoint,
+		RemoteID: remoteID,
+		Sender: transport.Sender{
+			DisplayName: displayName,
+			OpaqueID:    telegramActorID(n.hasher, update.User.ID),
+		},
+		Kind: "reaction",
+		Text: emoji,
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        endpoint,
+			RemoteMessageID: remoteID,
+		},
+		Timestamp: timestamp,
 	}, true
 }
 
