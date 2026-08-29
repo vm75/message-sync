@@ -208,3 +208,195 @@ func TestSendUsesNativeReplyAndPrivacySafeFallback(t *testing.T) {
 		Kind:       "text",
 		ReplyTo:    &transport.MessageRef{Endpoint: "tg", RemoteMessageID: "42"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.replyID != 42 {
+		t.Fatalf("reply id = %d, want 42", api.replyID)
+	}
+
+	api.replyID = 0
+	api.texts = nil
+	_, err = adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:       "tg",
+		OriginEndpoint: "wa",
+		Sender:         transport.Sender{OpaqueID: "u_hash"},
+		SourceText:     "fallback reply",
+		Kind:           "text",
+		ReplyFallback:  true,
+		QuotedText:     "quoted source body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.replyID != 0 || len(api.texts) != 1 || !strings.Contains(api.texts[0], "reply to wa: quoted source body") || !strings.Contains(api.texts[0], "u_hash: fallback reply") {
+		t.Fatalf("unexpected fallback send: reply=%d text=%q", api.replyID, api.texts)
+	}
+}
+
+func TestSendMediaUsesGenericNamesAndHostedLimits(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:   "tg",
+		Sender:     transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		SourceText: "caption",
+		Kind:       "document",
+		MediaBytes: []byte("MEDIA_SENTINEL"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.filename != "document.bin" || string(api.media) != "MEDIA_SENTINEL" || api.caption != "Alice: caption" {
+		t.Fatalf("document send = filename %q media %q caption %q", api.filename, api.media, api.caption)
+	}
+
+	adapter.mediaMaxBytes = 3
+	_, err = adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", Kind: "image", MediaBytes: []byte("1234")})
+	if err == nil || !strings.Contains(err.Error(), "size limit") {
+		t.Fatalf("oversize error = %v", err)
+	}
+}
+
+func TestReactionEditDeleteAndRateLimitRetry(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", Sender: transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"}, SourceText: "original", Kind: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := adapter.React(context.Background(), transport.Reaction{Endpoint: "tg", TargetRemoteID: ref.RemoteMessageID, Emoji: "👍"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.React(context.Background(), transport.Reaction{Endpoint: "tg", TargetRemoteID: ref.RemoteMessageID}); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.reactions) != 2 || len(api.reactions[0].Reaction) != 1 || len(api.reactions[1].Reaction) != 0 {
+		t.Fatalf("reaction calls = %#v", api.reactions)
+	}
+
+	if err := adapter.Edit(context.Background(), ref, "*_wa/15551234567 (Alice)_*: changed"); err != nil {
+		t.Fatal(err)
+	}
+	if api.editText == nil || api.editText.Text != "Alice: changed" {
+		t.Fatalf("edit text = %#v", api.editText)
+	}
+
+	api.deleteErr = fmt.Errorf("%w, message to delete not found", telegrambot.ErrorBadRequest)
+	if err := adapter.Delete(context.Background(), ref); err != nil {
+		t.Fatalf("idempotent delete error = %v", err)
+	}
+
+	api.deleteErr = nil
+	api.messageErrs = []error{&telegrambot.TooManyRequestsError{Message: "rate limited", RetryAfter: 2}, nil}
+	var waits []time.Duration
+	adapter.retryWait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+	if _, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", Sender: transport.Sender{OpaqueID: "u_hash"}, SourceText: "retry", Kind: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 1 || waits[0] != 2*time.Second {
+		t.Fatalf("retry waits = %v, want [2s]", waits)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestTelegramMediaLoaderIsTransientAndBounded(t *testing.T) {
+	api := &fakeTelegramAPI{getFile: &models.File{FilePath: "photos/file.bin", FileSize: 14}}
+	adapter := newOutboundTestAdapter(t, api)
+	adapter.token = "TOKEN_SENTINEL"
+	adapter.mediaMaxBytes = 1024
+	adapter.httpClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if !strings.Contains(request.URL.Path, "TOKEN_SENTINEL") {
+			t.Fatalf("download URL did not use in-memory token")
+		}
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Body:          io.NopCloser(bytes.NewReader([]byte("MEDIA_SENTINEL"))),
+			ContentLength: int64(len("MEDIA_SENTINEL")),
+			Header:        make(http.Header),
+		}, nil
+	})}
+
+	message := &models.Message{
+		ID:    77,
+		Date:  1_700_000_000,
+		Chat:  models.Chat{ID: -1001234567890, Type: models.ChatTypeSupergroup},
+		From:  &models.User{ID: 12345, FirstName: "Transient", LastName: "Sender"},
+		Photo: []models.PhotoSize{{FileID: "FILE_ID_SENTINEL", FileSize: 14}},
+	}
+	incoming, ok := adapter.normalizer.NormalizeMessage(message, api.ID())
+	if !ok {
+		t.Fatal("media-only Telegram message was rejected")
+	}
+	incoming, ok = adapter.withTelegramMedia(incoming, message)
+	if !ok || incoming.Kind != "image" || incoming.MediaLoader == nil {
+		t.Fatalf("media incoming = %#v ok=%v", incoming, ok)
+	}
+	data, err := incoming.MediaLoader(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "MEDIA_SENTINEL" {
+		t.Fatalf("media bytes = %q", data)
+	}
+	if incoming.RemoteID != "77" || strings.Contains(fmt.Sprintf("%+v", incoming), "FILE_ID_SENTINEL") {
+		t.Fatalf("raw Telegram file id crossed the canonical boundary: %#v", incoming)
+	}
+
+	api.getFile = &models.File{FilePath: "photos/file.bin", FileSize: telegramHostedDownloadMax + 1}
+	_, err = adapter.downloadTelegramMedia(context.Background(), "FILE_ID_SENTINEL", telegramHostedDownloadMax)
+	if err == nil || strings.Contains(err.Error(), "FILE_ID_SENTINEL") || strings.Contains(err.Error(), "TOKEN_SENTINEL") {
+		t.Fatalf("unsafe or missing oversize error: %v", err)
+	}
+}
+
+func TestNormalizerLifecycleEvents(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	n := adapter.normalizer
+
+	edit, ok := n.NormalizeEditedMessage(&models.Message{
+		ID: 88, Date: 1_700_000_010,
+		Chat: models.Chat{ID: -1001234567890, Type: models.ChatTypeGroup},
+		From: &models.User{ID: 12345, FirstName: "Edit", LastName: "Sender"},
+		Text: "changed",
+	}, api.ID())
+	if !ok || edit.Kind != "edit" || edit.ReplyTo == nil || edit.ReplyTo.RemoteMessageID != "88" {
+		t.Fatalf("edit normalization = %#v ok=%v", edit, ok)
+	}
+
+	reaction, ok := n.NormalizeReaction(&models.MessageReactionUpdated{
+		Chat:      models.Chat{ID: -1001234567890, Type: models.ChatTypeSupergroup},
+		MessageID: 88,
+		User:      &models.User{ID: 54321, FirstName: "Reaction", LastName: "Sender"},
+		Date:      1_700_000_020,
+		NewReaction: []models.ReactionType{{
+			Type:              models.ReactionTypeTypeEmoji,
+			ReactionTypeEmoji: &models.ReactionTypeEmoji{Type: models.ReactionTypeTypeEmoji, Emoji: "❤️"},
+		}},
+	}, api.ID())
+	if !ok || reaction.Kind != "reaction" || reaction.Text != "❤️" || reaction.Sender.OpaqueID == "" || strings.Contains(reaction.Sender.OpaqueID, "54321") {
+		t.Fatalf("reaction normalization = %#v ok=%v", reaction, ok)
+	}
+
+	_, ok = n.NormalizeReaction(&models.MessageReactionUpdated{
+		Chat: models.Chat{ID: 12345, Type: models.ChatTypePrivate}, MessageID: 88, User: &models.User{ID: 54321},
+	}, api.ID())
+	if ok {
+		t.Fatal("private-chat reaction was accepted")
+	}
+}
+
+var _ botClient = (*fakeTelegramAPI)(nil)
+var _ telegramAPI = (*fakeTelegramAPI)(nil)
