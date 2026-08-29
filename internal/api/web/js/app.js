@@ -1074,6 +1074,217 @@
   }
 
   /**
+   * Telegram Admin & Transient Discovery Controller
+   */
+  function telegramEndpointStatusForAlias(alias) {
+    if (!cachedTelegramStatus || !Array.isArray(cachedTelegramStatus.endpoints)) return 'unavailable';
+    const item = cachedTelegramStatus.endpoints.find((entry) => entry.alias === alias);
+    return item ? item.status : 'unavailable';
+  }
+
+  function renderTelegramReadiness(status) {
+    if (status === 'ready') return '<span class="badge badge-success">Polling ready</span>';
+    return '<span class="badge badge-neutral">Unavailable</span>';
+  }
+
+  function renderTelegramStatus(data) {
+    if (!data) return;
+    cachedTelegramStatus = data;
+
+    if (!data.tokenConfigured) {
+      telegramStatusIndicator.className = 'status-indicator indicator-neutral';
+      telegramStatusText.className = 'status-badge badge-neutral';
+      telegramStatusText.textContent = 'Not Configured';
+      telegramStatusDesc.textContent = 'Set TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN_FILE on the server and restart message-sync. Credentials are deployment-only and are never entered in this browser.';
+      if (btnTelegramDiscover) btnTelegramDiscover.disabled = true;
+    } else if (data.running) {
+      telegramStatusIndicator.className = 'status-indicator indicator-success';
+      telegramStatusText.className = 'status-badge badge-success';
+      telegramStatusText.textContent = 'Long Polling Active';
+      telegramStatusDesc.textContent = data.visibilityGuidance || 'Telegram long polling is running. Send a group message to make that group appear in transient discovery.';
+      if (btnTelegramDiscover) btnTelegramDiscover.disabled = false;
+    } else {
+      telegramStatusIndicator.className = 'status-indicator indicator-warning';
+      telegramStatusText.className = 'status-badge badge-warning';
+      telegramStatusText.textContent = 'Configured • Polling Stopped';
+      telegramStatusDesc.textContent = 'A Telegram credential source is configured, but long polling is not currently running.';
+      if (btnTelegramDiscover) btnTelegramDiscover.disabled = true;
+    }
+
+    renderConfiguredTelegramEndpoints();
+  }
+
+  function renderConfiguredTelegramEndpoints() {
+    if (!telegramConfiguredBody) return;
+    const endpoints = cachedEndpoints.filter((endpoint) => endpoint.transport === 'telegram');
+    if (endpoints.length === 0) {
+      telegramConfiguredBody.innerHTML = '';
+      if (telegramConfiguredEmpty) telegramConfiguredEmpty.classList.remove('hidden');
+      return;
+    }
+    if (telegramConfiguredEmpty) telegramConfiguredEmpty.classList.add('hidden');
+    telegramConfiguredBody.innerHTML = endpoints.map((endpoint) => {
+      const syncSet = endpoint.syncSetId
+        ? \`<span class="badge-assigned">\${escapeHtml(endpoint.syncSetId)}</span>\`
+        : '<span class="badge-unassigned">Unassigned</span>';
+      return \`
+        <tr>
+          <td><span class="alias-badge">\${escapeHtml(endpoint.alias)}</span></td>
+          <td><span class="jid-text">\${escapeHtml(endpoint.remoteId)}</span></td>
+          <td>\${syncSet}</td>
+          <td>\${renderTelegramReadiness(telegramEndpointStatusForAlias(endpoint.alias))}</td>
+        </tr>
+      \`;
+    }).join('');
+  }
+
+  async function loadTelegramStatus(showSpinner = true) {
+    if (showSpinner && btnTelegramRefresh) setButtonLoading(btnTelegramRefresh, true);
+    try {
+      const [status, endpoints, syncSets] = await Promise.all([
+        window.API.getTelegramStatus(),
+        window.API.getEndpoints(),
+        window.API.getSyncSets()
+      ]);
+      cachedEndpoints = Array.isArray(endpoints) ? endpoints : [];
+      cachedSyncSets = Array.isArray(syncSets) ? syncSets : [];
+      renderTelegramStatus(status);
+      if (cachedTelegramChats.length > 0) renderTelegramDiscovery();
+    } catch (err) {
+      if (telegramStatusIndicator) telegramStatusIndicator.className = 'status-indicator indicator-danger';
+      if (telegramStatusText) {
+        telegramStatusText.className = 'status-badge badge-danger';
+        telegramStatusText.textContent = 'Service Unavailable';
+      }
+      if (telegramStatusDesc) telegramStatusDesc.textContent = err.message || 'Unable to query Telegram status.';
+    } finally {
+      if (showSpinner && btnTelegramRefresh) setButtonLoading(btnTelegramRefresh, false);
+    }
+  }
+
+  function suggestedTelegramAlias(chat) {
+    const base = sanitizeAlias(chat.title || chat.username) || 'telegram_group';
+    let candidate = base;
+    let suffix = 2;
+    const aliases = new Set(cachedEndpoints.map((endpoint) => endpoint.alias));
+    while (aliases.has(candidate)) {
+      const suffixText = \`_\${suffix++}\`;
+      candidate = (base.slice(0, Math.max(1, 64 - suffixText.length)) + suffixText).slice(0, 64);
+    }
+    return candidate;
+  }
+
+  function renderTelegramDiscovery() {
+    if (!telegramDiscoveryBody) return;
+    if (!Array.isArray(cachedTelegramChats) || cachedTelegramChats.length === 0) {
+      telegramDiscoveryBody.innerHTML = '';
+      if (telegramDiscoveryEmpty) {
+        telegramDiscoveryEmpty.classList.remove('hidden');
+        telegramDiscoveryEmpty.querySelector('.empty-title').textContent = 'No Observed Telegram Groups';
+        telegramDiscoveryEmpty.querySelector('.empty-desc').textContent = 'Add the bot to a group/supergroup, ensure it can receive messages, then send a group message and refresh discovery.';
+      }
+      return;
+    }
+    if (telegramDiscoveryEmpty) telegramDiscoveryEmpty.classList.add('hidden');
+
+    telegramDiscoveryBody.innerHTML = cachedTelegramChats.map((chat) => {
+      const existing = cachedEndpoints.find((endpoint) => endpoint.transport === 'telegram' && endpoint.remoteId === chat.chatId);
+      const title = chat.title || chat.username || 'Observed group';
+      const username = chat.username ? \`@\${escapeHtml(chat.username)}\` : '—';
+      if (existing) {
+        const setText = existing.syncSetId ? \` • Sync set: \${escapeHtml(existing.syncSetId)}\` : ' • Unassigned';
+        return \`
+          <tr>
+            <td><strong>\${escapeHtml(title)}</strong></td>
+            <td>\${username}</td>
+            <td><span class="badge badge-neutral">\${escapeHtml(chat.type)}</span></td>
+            <td><span class="jid-text">\${escapeHtml(chat.chatId)}</span></td>
+            <td><span class="alias-badge">\${escapeHtml(existing.alias)}</span>\${setText}</td>
+          </tr>
+        \`;
+      }
+
+      const syncOptions = ['<option value="">-- Unassigned --</option>']
+        .concat(cachedSyncSets.map((set) => \`<option value="\${escapeHtml(set.id)}">\${escapeHtml(set.id)}</option>\`))
+        .join('');
+      return \`
+        <tr>
+          <td><strong>\${escapeHtml(title)}</strong></td>
+          <td>\${username}</td>
+          <td><span class="badge badge-neutral">\${escapeHtml(chat.type)}</span></td>
+          <td><span class="jid-text">\${escapeHtml(chat.chatId)}</span></td>
+          <td>
+            <div class="form-grid-2">
+              <input class="form-input font-mono telegram-alias-input" data-chat-id="\${escapeHtml(chat.chatId)}" value="\${escapeHtml(suggestedTelegramAlias(chat))}" aria-label="Endpoint alias">
+              <select class="form-select telegram-sync-set-select" data-chat-id="\${escapeHtml(chat.chatId)}">\${syncOptions}</select>
+            </div>
+            <button type="button" class="btn btn-primary btn-sm btn-configure-telegram-chat" data-chat-id="\${escapeHtml(chat.chatId)}" style="margin-top:.5rem;">Configure Endpoint</button>
+          </td>
+        </tr>
+      \`;
+    }).join('');
+
+    telegramDiscoveryBody.querySelectorAll('.btn-configure-telegram-chat').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const chatId = btn.getAttribute('data-chat-id');
+        const aliasInput = telegramDiscoveryBody.querySelector(\`.telegram-alias-input[data-chat-id="\${chatId}"]\`);
+        const syncSelect = telegramDiscoveryBody.querySelector(\`.telegram-sync-set-select[data-chat-id="\${chatId}"]\`);
+        const alias = aliasInput ? aliasInput.value.trim() : '';
+        const syncSetId = syncSelect && syncSelect.value ? syncSelect.value : null;
+        if (!ALIAS_REGEX.test(alias)) {
+          showToast('Alias must start with an alphanumeric character and contain up to 64 letters, numbers, hyphens, or underscores.', 'warning');
+          if (aliasInput) aliasInput.focus();
+          return;
+        }
+        if (!TELEGRAM_CHAT_ID_REGEX.test(chatId || '')) {
+          showToast('Observed Telegram chat ID is invalid.', 'danger');
+          return;
+        }
+        setButtonLoading(btn, true);
+        try {
+          await window.API.createEndpoint({ alias, transport: 'telegram', remoteId: chatId, syncSetId });
+          showToast(\`Telegram endpoint '\${alias}' configured.\`, 'success');
+          await loadTelegramStatus(false);
+          await discoverTelegramChats();
+        } catch (err) {
+          showToast(err.message || 'Failed to configure Telegram endpoint', 'danger');
+        } finally {
+          setButtonLoading(btn, false);
+        }
+      });
+    });
+  }
+
+  async function discoverTelegramChats() {
+    if (!btnTelegramDiscover) return;
+    setButtonLoading(btnTelegramDiscover, true);
+    if (telegramDiscoveryAlert) telegramDiscoveryAlert.classList.add('hidden');
+    try {
+      const [chats, endpoints, syncSets, status] = await Promise.all([
+        window.API.getTelegramChats(),
+        window.API.getEndpoints(),
+        window.API.getSyncSets(),
+        window.API.getTelegramStatus()
+      ]);
+      cachedTelegramChats = Array.isArray(chats) ? chats : [];
+      cachedEndpoints = Array.isArray(endpoints) ? endpoints : [];
+      cachedSyncSets = Array.isArray(syncSets) ? syncSets : [];
+      cachedTelegramStatus = status;
+      renderTelegramStatus(status);
+      renderTelegramDiscovery();
+    } catch (err) {
+      cachedTelegramChats = [];
+      renderTelegramDiscovery();
+      if (telegramDiscoveryAlert) {
+        telegramDiscoveryAlert.textContent = err.message || 'Telegram chat discovery failed.';
+        telegramDiscoveryAlert.classList.remove('hidden');
+      }
+    } finally {
+      setButtonLoading(btnTelegramDiscover, false);
+    }
+  }
+
+  /**
    * Endpoint View Controller
    */
   async function loadGroups() {
