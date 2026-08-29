@@ -83,7 +83,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"wa", "discord", "telegram"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
-		Media:    config.Media{MaxSizeMB: 100},
+		Media:    config.Media{Enabled: true, MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
 	}
@@ -128,6 +128,10 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 		if opts.Hasher == nil || opts.UsernameMode != config.UsernameModeHash {
 			cancel()
 			t.Fatal("Telegram privacy options were not initialized")
+		}
+		if !opts.MediaEnabled || opts.MediaMaxBytes != 100*1024*1024 {
+			cancel()
+			t.Fatalf("Telegram media options were not initialized: enabled=%v max=%d", opts.MediaEnabled, opts.MediaMaxBytes)
 		}
 	case <-time.After(time.Second):
 		cancel()
