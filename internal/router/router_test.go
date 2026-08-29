@@ -223,6 +223,10 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 		RemoteID: "discord-transient-member-id",
 		Name:     "Discord Mention Sentinel",
 	}}
+	incoming.Kind = "document"
+	incoming.MediaLoader = func(context.Context) ([]byte, error) {
+		return []byte("TELEGRAM_MEDIA_SENTINEL"), nil
+	}
 
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
@@ -245,6 +249,7 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 		"Discord Mention Sentinel",
 		"discord-transient-member-id",
 		"PRIVACY_SENTINEL_BODY",
+		"TELEGRAM_MEDIA_SENTINEL",
 		"u_abcdefghij",
 	} {
 		if strings.Contains(string(dbBytes), forbidden) {
