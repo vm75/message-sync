@@ -459,7 +459,6 @@ func TestNormalizerLifecycleEvents(t *testing.T) {
 var _ botClient = (*fakeTelegramAPI)(nil)
 var _ telegramAPI = (*fakeTelegramAPI)(nil)
 
-
 func TestSendPollUsesDeterministicTextFallback(t *testing.T) {
 	api := &fakeTelegramAPI{}
 	adapter := newOutboundTestAdapter(t, api)

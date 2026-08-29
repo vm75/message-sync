@@ -29,14 +29,14 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
-	ChatIDs       map[string]string
-	Hasher        *identity.Hasher
-	UsernameMode  config.UsernameMode
-	Logger        *slog.Logger
-	MediaEnabled  bool
-	MediaMaxBytes uint64
-	clientFactory botClientFactory
-	httpClient    *http.Client
+	ChatIDs         map[string]string
+	Hasher          *identity.Hasher
+	UsernameMode    config.UsernameMode
+	Logger          *slog.Logger
+	MediaEnabled    bool
+	MediaMaxBytes   uint64
+	clientFactory   botClientFactory
+	httpClient      *http.Client
 	retryWait       func(context.Context, time.Duration) error
 	MigrateEndpoint func(context.Context, transport.EndpointID, string, string) error
 }
@@ -51,8 +51,8 @@ type Adapter struct {
 	token      string
 	httpClient *http.Client
 
-	mediaEnabled  bool
-	mediaMaxBytes uint64
+	mediaEnabled    bool
+	mediaMaxBytes   uint64
 	retryWait       func(context.Context, time.Duration) error
 	migrateEndpoint func(context.Context, transport.EndpointID, string, string) error
 	messageKinds    map[messageKindKey]string
@@ -101,20 +101,20 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
-		normalizer:    normalizer,
-		hasher:        opts.Hasher,
-		events:        make(chan transport.Incoming, eventBufferSize),
-		logger:        opts.Logger,
-		token:         token,
-		httpClient:    httpClient,
-		mediaEnabled:  opts.MediaEnabled,
-		mediaMaxBytes: opts.MediaMaxBytes,
+		normalizer:      normalizer,
+		hasher:          opts.Hasher,
+		events:          make(chan transport.Incoming, eventBufferSize),
+		logger:          opts.Logger,
+		token:           token,
+		httpClient:      httpClient,
+		mediaEnabled:    opts.MediaEnabled,
+		mediaMaxBytes:   opts.MediaMaxBytes,
 		retryWait:       opts.retryWait,
 		migrateEndpoint: opts.MigrateEndpoint,
 		messageKinds:    make(map[messageKindKey]string),
-		observed:      make(map[int64]observedChatEntry),
-		polling:       true,
-		pollCancel:    pollCancel,
+		observed:        make(map[int64]observedChatEntry),
+		polling:         true,
+		pollCancel:      pollCancel,
 	}
 
 	factory := opts.clientFactory

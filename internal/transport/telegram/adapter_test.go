@@ -383,7 +383,6 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 	}
 }
 
-
 func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	const newChatID int64 = -1009876543210

@@ -255,7 +255,6 @@ func TestNewNormalizerRejectsDuplicateTelegramChat(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModePushName)
 	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)

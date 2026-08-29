@@ -300,7 +300,6 @@ func TestWhatsAppCleanupValidationAndPersistence(t *testing.T) {
 	}
 }
 
-
 func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "sync.db")
