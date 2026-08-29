@@ -155,6 +155,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			Logger:        logger,
 			MediaEnabled:  cfg.Media.Enabled,
 			MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+			MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
+				return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), oldRemoteID, newRemoteID)
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("start Discord transport: %w", err)

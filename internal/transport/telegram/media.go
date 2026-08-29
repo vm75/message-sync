@@ -38,6 +38,16 @@ func telegramMediaDescriptor(message *models.Message) (telegramMedia, bool) {
 			return telegramMedia{kind: "image", fileID: photo.FileID, size: positiveSize(int64(photo.FileSize))}, true
 		}
 	}
+	if message.Animation != nil && strings.TrimSpace(message.Animation.FileID) != "" {
+		kind := "document"
+		if strings.EqualFold(strings.TrimSpace(message.Animation.MimeType), "video/mp4") {
+			kind = "video"
+		}
+		return telegramMedia{kind: kind, fileID: message.Animation.FileID, size: positiveSize(message.Animation.FileSize)}, true
+	}
+	if message.VideoNote != nil && strings.TrimSpace(message.VideoNote.FileID) != "" {
+		return telegramMedia{kind: "video", fileID: message.VideoNote.FileID, size: positiveSize(int64(message.VideoNote.FileSize))}, true
+	}
 	if message.Video != nil && strings.TrimSpace(message.Video.FileID) != "" {
 		return telegramMedia{kind: "video", fileID: message.Video.FileID, size: positiveSize(message.Video.FileSize)}, true
 	}

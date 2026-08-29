@@ -257,6 +257,72 @@ func Load(ctx context.Context, db *sql.DB) (*Config, error) {
 	return cfg, nil
 }
 
+// MigrateTelegramEndpoint atomically replaces only the operational Telegram
+// remote address for an existing endpoint. Alias and sync-set membership are
+// intentionally left untouched so canonical routing identity does not change.
+func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, oldRemoteID, newRemoteID string) error {
+	if db == nil {
+		return errors.New("database connection is required")
+	}
+	if err := ValidateAlias(alias); err != nil {
+		return err
+	}
+	oldRemoteID = strings.TrimSpace(oldRemoteID)
+	newRemoteID = strings.TrimSpace(newRemoteID)
+	if err := ValidateEndpointRemoteID(TransportTelegram, oldRemoteID); err != nil {
+		return errors.New("old Telegram endpoint remote id is invalid")
+	}
+	if err := ValidateEndpointRemoteID(TransportTelegram, newRemoteID); err != nil {
+		return errors.New("new Telegram endpoint remote id is invalid")
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return errors.New("begin Telegram endpoint migration")
+	}
+	defer tx.Rollback()
+
+	var currentRemoteID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ?`,
+		alias, string(TransportTelegram),
+	).Scan(&currentRemoteID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("Telegram endpoint is not configured")
+	}
+	if err != nil {
+		return errors.New("read Telegram endpoint addressing")
+	}
+
+	// Migration service messages may be replayed after Telegram or process
+	// recovery. Treat a previously-applied migration as idempotent.
+	if currentRemoteID == newRemoteID {
+		if err := tx.Commit(); err != nil {
+			return errors.New("commit Telegram endpoint migration")
+		}
+		return nil
+	}
+	if currentRemoteID != oldRemoteID {
+		return errors.New("Telegram endpoint addressing changed concurrently")
+	}
+
+	result, err := tx.ExecContext(ctx,
+		`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND remote_id = ?`,
+		newRemoteID, alias, string(TransportTelegram), oldRemoteID,
+	)
+	if err != nil {
+		return errors.New("update Telegram endpoint addressing")
+	}
+	affected, err := result.RowsAffected()
+	if err != nil || affected != 1 {
+		return errors.New("update Telegram endpoint addressing")
+	}
+	if err := tx.Commit(); err != nil {
+		return errors.New("commit Telegram endpoint migration")
+	}
+	return nil
+}
+
 func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	if db == nil {
 		return errors.New("database connection is required")

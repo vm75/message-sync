@@ -1,0 +1,90 @@
+package telegram
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/go-telegram/bot/models"
+)
+
+func telegramPollText(question string, options []string, selectableCount int) (string, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", errors.New("outgoing Telegram poll question is required")
+	}
+	if len(options) == 0 {
+		return "", errors.New("outgoing Telegram poll options are required")
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Poll: ")
+	builder.WriteString(question)
+	for i, option := range options {
+		builder.WriteString("\n")
+		builder.WriteString(fmt.Sprintf("%d. %s", i+1, strings.TrimSpace(option)))
+	}
+	if selectableCount > 1 {
+		if selectableCount > len(options) {
+			selectableCount = len(options)
+		}
+		builder.WriteString(fmt.Sprintf("\nChoose up to %d options.", selectableCount))
+	} else {
+		builder.WriteString("\nChoose one option.")
+	}
+	return builder.String(), nil
+}
+
+func telegramPollMessageText(poll *models.Poll) (string, bool) {
+	if poll == nil {
+		return "", false
+	}
+	options := make([]string, 0, len(poll.Options))
+	for _, option := range poll.Options {
+		options = append(options, option.Text)
+	}
+	selectableCount := 1
+	if poll.AllowsMultipleAnswers {
+		selectableCount = len(options)
+	}
+	text, err := telegramPollText(poll.Question, options, selectableCount)
+	return text, err == nil
+}
+
+func telegramSensitivePayload(message *models.Message) bool {
+	if message == nil {
+		return false
+	}
+	return message.Contact != nil || message.Location != nil || message.Venue != nil
+}
+
+func ignoredTelegramMessageClass(message *models.Message) (string, bool) {
+	if message == nil {
+		return "", false
+	}
+	switch {
+	case message.Contact != nil:
+		return "contact", true
+	case message.Location != nil || message.Venue != nil:
+		return "location", true
+	case len(message.NewChatMembers) > 0 || message.LeftChatMember != nil:
+		return "membership", true
+	case message.NewChatTitle != "" || len(message.NewChatPhoto) > 0 || message.DeleteChatPhoto:
+		return "chat_metadata", true
+	case message.PinnedMessage != nil:
+		return "pin", true
+	case message.Invoice != nil || message.SuccessfulPayment != nil || message.RefundedPayment != nil:
+		return "payment", true
+	case message.Game != nil:
+		return "game", true
+	case message.ForumTopicCreated != nil || message.ForumTopicEdited != nil ||
+		message.ForumTopicClosed != nil || message.ForumTopicReopened != nil ||
+		message.GeneralForumTopicHidden != nil || message.GeneralForumTopicUnhidden != nil:
+		return "forum_service", true
+	case strings.TrimSpace(message.Text) == "" && strings.TrimSpace(message.Caption) == "" &&
+		message.Poll == nil && !hasTelegramMedia(message):
+		return "unsupported", true
+	default:
+		return "", false
+	}
+}

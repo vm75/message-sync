@@ -37,7 +37,8 @@ type Options struct {
 	MediaMaxBytes uint64
 	clientFactory botClientFactory
 	httpClient    *http.Client
-	retryWait     func(context.Context, time.Duration) error
+	retryWait       func(context.Context, time.Duration) error
+	MigrateEndpoint func(context.Context, transport.EndpointID, string, string) error
 }
 
 type Adapter struct {
@@ -52,8 +53,9 @@ type Adapter struct {
 
 	mediaEnabled  bool
 	mediaMaxBytes uint64
-	retryWait     func(context.Context, time.Duration) error
-	messageKinds  map[messageKindKey]string
+	retryWait       func(context.Context, time.Duration) error
+	migrateEndpoint func(context.Context, transport.EndpointID, string, string) error
+	messageKinds    map[messageKindKey]string
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
@@ -107,8 +109,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient:    httpClient,
 		mediaEnabled:  opts.MediaEnabled,
 		mediaMaxBytes: opts.MediaMaxBytes,
-		retryWait:     opts.retryWait,
-		messageKinds:  make(map[messageKindKey]string),
+		retryWait:       opts.retryWait,
+		migrateEndpoint: opts.MigrateEndpoint,
+		messageKinds:    make(map[messageKindKey]string),
 		observed:      make(map[int64]observedChatEntry),
 		polling:       true,
 		pollCancel:    pollCancel,
@@ -218,7 +221,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	return nil
 }
 
-func (a *Adapter) handleUpdate(_ context.Context, _ *telegrambot.Bot, update *models.Update) {
+func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *models.Update) {
 	if a == nil || update == nil || !a.acceptUpdateID(update.ID) {
 		return
 	}
@@ -238,9 +241,14 @@ func (a *Adapter) handleUpdate(_ context.Context, _ *telegrambot.Bot, update *mo
 	)
 	switch {
 	case update.Message != nil:
+		if a.handleTelegramMigration(ctx, normalizer, update.Message) {
+			return
+		}
 		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
 		if ok {
 			incoming, ok = a.withTelegramMedia(incoming, update.Message)
+		} else {
+			a.logIgnoredTelegramMessage(normalizer, update.Message, botUserID)
 		}
 	case update.EditedMessage != nil:
 		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)

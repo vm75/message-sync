@@ -72,14 +72,23 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if err != nil {
 		return transport.MessageRef{}, err
 	}
-	content := telegramOutgoingText(outgoing)
-	if outgoing.ReplyFallback {
-		content = telegramReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
-	}
 
 	kind := strings.TrimSpace(outgoing.Kind)
 	if kind == "" {
 		kind = "text"
+	}
+	if kind == "poll" {
+		pollText, pollErr := telegramPollText(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount)
+		if pollErr != nil {
+			return transport.MessageRef{}, pollErr
+		}
+		outgoing.SourceText = pollText
+		kind = "text"
+	}
+
+	content := telegramOutgoingText(outgoing)
+	if outgoing.ReplyFallback {
+		content = telegramReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
 
 	var message *models.Message

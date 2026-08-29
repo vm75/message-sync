@@ -3,9 +3,11 @@ package telegram
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/vm75/message-sync/internal/config"
@@ -69,6 +71,43 @@ func (n *Normalizer) chatID(endpoint transport.EndpointID) (int64, bool) {
 	return 0, false
 }
 
+func (n *Normalizer) endpoint(chatID int64) (transport.EndpointID, bool) {
+	if n == nil {
+		return "", false
+	}
+	endpoint, ok := n.endpoints[chatID]
+	return endpoint, ok
+}
+
+func (n *Normalizer) withChatMigration(endpoint transport.EndpointID, oldChatID, newChatID int64) (*Normalizer, error) {
+	if n == nil {
+		return nil, errors.New("Telegram normalizer is not initialized")
+	}
+	if existing, ok := n.endpoints[newChatID]; ok && existing != endpoint {
+		return nil, errors.New("Telegram migration target is already configured")
+	}
+	if existing, ok := n.endpoints[oldChatID]; !ok {
+		if migrated, already := n.endpoints[newChatID]; already && migrated == endpoint {
+			return n, nil
+		}
+		return nil, errors.New("Telegram migration source is not configured")
+	} else if existing != endpoint {
+		return nil, errors.New("Telegram migration source does not match endpoint")
+	}
+
+	endpoints := make(map[int64]transport.EndpointID, len(n.endpoints))
+	for chatID, alias := range n.endpoints {
+		endpoints[chatID] = alias
+	}
+	delete(endpoints, oldChatID)
+	endpoints[newChatID] = endpoint
+	return &Normalizer{
+		endpoints:    endpoints,
+		hasher:       n.hasher,
+		usernameMode: n.usernameMode,
+	}, nil
+}
+
 func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (transport.Incoming, bool) {
 	if n == nil || msg == nil {
 		return transport.Incoming{}, false
@@ -84,7 +123,20 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		return transport.Incoming{}, false
 	}
 
+	if telegramSensitivePayload(msg) {
+		return transport.Incoming{}, false
+	}
+
 	text, entities := telegramTextPayload(msg)
+	if msg.Poll != nil {
+		var ok bool
+		text, ok = telegramPollMessageText(msg.Poll)
+		if !ok {
+			return transport.Incoming{}, false
+		}
+		entities = nil
+	}
+	text, mentions := normalizeTelegramMentions(text, entities, n.hasher, n.usernameMode)
 	if strings.TrimSpace(text) == "" && !hasTelegramMedia(msg) {
 		// Service-only messages and unsupported payloads are intentionally
 		// ignored. Supported media may legitimately have no caption.
@@ -103,7 +155,13 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			Endpoint:        endpoint,
 			RemoteMessageID: strconv.Itoa(reply.ID),
 		}
-		quotedText, _ = telegramTextPayload(reply)
+		if reply.Poll != nil {
+			quotedText, _ = telegramPollMessageText(reply.Poll)
+		} else {
+			var quotedEntities []models.MessageEntity
+			quotedText, quotedEntities = telegramTextPayload(reply)
+			quotedText, _ = normalizeTelegramMentions(quotedText, quotedEntities, n.hasher, n.usernameMode)
+		}
 	}
 
 	timestamp := time.Unix(int64(msg.Date), 0).UTC()
@@ -121,7 +179,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		FromSelf:   false,
 		Kind:       "text",
 		Text:       text,
-		Mentions:   normalizeTelegramMentions(entities, n.hasher, n.usernameMode),
+		Mentions:   mentions,
 		ReplyTo:    replyTo,
 		QuotedText: quotedText,
 		Timestamp:  timestamp,
@@ -233,35 +291,74 @@ func telegramActorID(hasher *identity.Hasher, userID int64) string {
 	return hasher.UserID("telegram:" + strconv.FormatInt(userID, 10))
 }
 
-func normalizeTelegramMentions(entities []models.MessageEntity, hasher *identity.Hasher, usernameMode config.UsernameMode) []transport.Mention {
+type telegramMentionReplacement struct {
+	start int
+	end   int
+	text  string
+}
+
+func normalizeTelegramMentions(content string, entities []models.MessageEntity, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, []transport.Mention) {
 	if len(entities) == 0 || hasher == nil {
-		return nil
+		return content, nil
 	}
 
+	units := utf16.Encode([]rune(content))
+	replacements := make([]telegramMentionReplacement, 0, len(entities))
 	mentions := make([]transport.Mention, 0, len(entities))
 	for _, entity := range entities {
-		// Username-only @mentions do not expose a stable Telegram user ID in
-		// the Bot API message entity, so they stay as transient message text.
-		if entity.Type != models.MessageEntityTypeTextMention || entity.User == nil || entity.User.ID == 0 {
+		start := entity.Offset
+		end := entity.Offset + entity.Length
+		if start < 0 || entity.Length <= 0 || end > len(units) {
 			continue
 		}
-		opaqueID := telegramActorID(hasher, entity.User.ID)
-		if opaqueID == "" {
-			continue
-		}
-		name := opaqueID
-		if usernameMode == config.UsernameModePushName {
-			if displayName := transientTelegramDisplayName(entity.User); displayName != "" {
-				name = displayName
+
+		switch entity.Type {
+		case models.MessageEntityTypeTextMention:
+			if entity.User == nil || entity.User.ID == 0 {
+				continue
 			}
+			opaqueID := telegramActorID(hasher, entity.User.ID)
+			if opaqueID == "" {
+				continue
+			}
+			name := opaqueID
+			if usernameMode == config.UsernameModePushName {
+				if displayName := transientTelegramDisplayName(entity.User); displayName != "" {
+					name = displayName
+				}
+			}
+			mentions = append(mentions, transport.Mention{RemoteID: opaqueID, Name: name})
+			replacements = append(replacements, telegramMentionReplacement{
+				start: start,
+				end:   end,
+				text:  "@" + name,
+			})
+		case models.MessageEntityTypeMention:
+			// Username-only entities carry no stable user ID. Replace the
+			// username with a generic transient label rather than forwarding
+			// or persisting remote identity.
+			replacements = append(replacements, telegramMentionReplacement{
+				start: start,
+				end:   end,
+				text:  "@mention",
+			})
 		}
-		mentions = append(mentions, transport.Mention{
-			RemoteID: opaqueID,
-			Name:     name,
-		})
 	}
+
+	sort.SliceStable(replacements, func(i, j int) bool {
+		return replacements[i].start > replacements[j].start
+	})
+	for _, replacement := range replacements {
+		replacementUnits := utf16.Encode([]rune(replacement.text))
+		next := make([]uint16, 0, len(units)-(replacement.end-replacement.start)+len(replacementUnits))
+		next = append(next, units[:replacement.start]...)
+		next = append(next, replacementUnits...)
+		next = append(next, units[replacement.end:]...)
+		units = next
+	}
+	content = string(utf16.Decode(units))
 	if len(mentions) == 0 {
-		return nil
+		return content, nil
 	}
-	return mentions
+	return content, mentions
 }
