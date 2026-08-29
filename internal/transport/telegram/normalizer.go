@@ -57,6 +57,18 @@ func NewNormalizer(chatIDs map[string]string, hasher *identity.Hasher, usernameM
 	}, nil
 }
 
+func (n *Normalizer) chatID(endpoint transport.EndpointID) (int64, bool) {
+	if n == nil {
+		return 0, false
+	}
+	for chatID, alias := range n.endpoints {
+		if alias == endpoint {
+			return chatID, true
+		}
+	}
+	return 0, false
+}
+
 func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (transport.Incoming, bool) {
 	if n == nil || msg == nil {
 		return transport.Incoming{}, false
