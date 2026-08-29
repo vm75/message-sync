@@ -116,10 +116,16 @@ func (a *Adapter) refreshPrivacyMode(ctx context.Context) {
 	botInfo, err := client.GetMe(probeCtx)
 	cancel()
 	if err != nil {
+		a.mu.Lock()
+		a.privacyModeKnown = false
+		a.mu.Unlock()
 		safelog.Error(logger, "Telegram Bot API status probe failed", "telegram_status_probe", err)
 		return
 	}
 	if botInfo == nil {
+		a.mu.Lock()
+		a.privacyModeKnown = false
+		a.mu.Unlock()
 		return
 	}
 
