@@ -558,3 +558,174 @@ func sanitizeTelegramMentions(content string, mentions []transport.Mention) stri
 			continue
 		}
 		name := sanitizeTelegramAttribution(mention.Name)
+		if name == "" || name == remoteID {
+			name = "participant"
+		}
+		content = strings.ReplaceAll(content, "@"+remoteID, "@"+name)
+	}
+	return content
+}
+
+func telegramReplyFallback(origin transport.EndpointID, quotedText, content string) string {
+	quote := strings.TrimSpace(quotedText)
+	if quote == "" {
+		quote = "message"
+	}
+	quote = strings.ReplaceAll(quote, "\r", " ")
+	quote = strings.ReplaceAll(quote, "\n", " ")
+	quote = truncateTelegramText(quote, telegramReplyFallbackLimit)
+	label := string(origin)
+	if label == "" {
+		label = "source"
+	}
+	if content == "" {
+		return fmt.Sprintf("reply to %s: %s", label, quote)
+	}
+	return fmt.Sprintf("reply to %s: %s\n\n%s", label, quote, content)
+}
+
+func telegramEditContent(text string) string {
+	if !strings.HasPrefix(text, "*_") {
+		return text
+	}
+	marker := strings.Index(text, "_*: ")
+	if marker < 0 {
+		return text
+	}
+	meta := text[2:marker]
+	slash := strings.Index(meta, "/")
+	if slash < 0 || slash == len(meta)-1 {
+		return text[marker+4:]
+	}
+	label := strings.TrimSpace(meta[slash+1:])
+	if open := strings.LastIndex(label, " ("); open >= 0 && strings.HasSuffix(label, ")") {
+		label = strings.TrimSpace(label[open+2 : len(label)-1])
+	}
+	if looksLikePhoneNumber(label) {
+		label = ""
+	} else {
+		label = sanitizeTelegramAttribution(label)
+	}
+	body := text[marker+4:]
+	if label == "" {
+		return body
+	}
+	return label + ": " + body
+}
+
+func looksLikePhoneNumber(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(value, "u_") {
+		return false
+	}
+	digits := 0
+	for _, r := range value {
+		switch {
+		case r >= '0' && r <= '9':
+			digits++
+		case strings.ContainsRune("+-.() ", r):
+		default:
+			return false
+		}
+	}
+	return digits >= 6
+}
+
+func truncateTelegramText(value string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(value) <= limit {
+		return value
+	}
+	runes := []rune(value)
+	if limit == 1 {
+		return "…"
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func telegramUploadLimit(kind string, configured uint64) uint64 {
+	var hosted uint64 = telegramGeneralUploadMax
+	switch kind {
+	case "image":
+		hosted = telegramPhotoUploadMax
+	case "sticker":
+		hosted = telegramStickerUploadMax
+	}
+	if configured > 0 && configured < hosted {
+		return configured
+	}
+	return hosted
+}
+
+func telegramAudioFilename(data []byte) string {
+	switch {
+	case len(data) >= 3 && string(data[:3]) == "ID3":
+		return "audio.mp3"
+	case len(data) >= 12 && string(data[4:8]) == "ftyp":
+		return "audio.m4a"
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WAVE":
+		return "audio.wav"
+	default:
+		return "audio.bin"
+	}
+}
+
+func isOggAudio(data []byte) bool {
+	return len(data) >= 4 && string(data[:4]) == "OggS"
+}
+
+func telegramStickerFilename(data []byte) (string, error) {
+	switch {
+	case len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP":
+		return "sticker.webp", nil
+	case len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b:
+		return "sticker.tgs", nil
+	case len(data) >= 4 && bytes.Equal(data[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}):
+		return "sticker.webm", nil
+	default:
+		return "", errors.New("unsupported Telegram sticker representation")
+	}
+}
+
+func telegramStickerFormatLimit(filename string) uint64 {
+	switch filename {
+	case "sticker.tgs":
+		return 64 * 1024
+	case "sticker.webm":
+		return 256 * 1024
+	default:
+		return telegramStickerUploadMax
+	}
+}
+
+func isTelegramNotModified(err error) bool {
+	return errors.Is(err, telegrambot.ErrorBadRequest) && strings.Contains(strings.ToLower(err.Error()), "message is not modified")
+}
+
+func isTelegramDeleteMissing(err error) bool {
+	if errors.Is(err, telegrambot.ErrorNotFound) {
+		return true
+	}
+	return errors.Is(err, telegrambot.ErrorBadRequest) && strings.Contains(strings.ToLower(err.Error()), "message to delete not found")
+}
+
+func (a *Adapter) rememberMessageKind(endpoint transport.EndpointID, remoteID, kind string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.messageKinds == nil {
+		a.messageKinds = make(map[messageKindKey]string)
+	}
+	a.messageKinds[messageKindKey{endpoint: endpoint, message: remoteID}] = kind
+}
+
+func (a *Adapter) messageKind(endpoint transport.EndpointID, remoteID string) (string, bool) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	kind, ok := a.messageKinds[messageKindKey{endpoint: endpoint, message: remoteID}]
+	return kind, ok
+}
+
+func (a *Adapter) forgetMessageKind(endpoint transport.EndpointID, remoteID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.messageKinds, messageKindKey{endpoint: endpoint, message: remoteID})
+}
