@@ -378,3 +378,183 @@ func (a *Adapter) editTelegramTextRaw(ctx context.Context, api telegramAPI, chat
 	})
 }
 
+func (a *Adapter) editTelegramCaption(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
+	err := a.editTelegramCaptionRaw(ctx, api, chatID, messageID, content)
+	if err == nil || isTelegramNotModified(err) {
+		return nil
+	}
+	return errors.New("edit Telegram caption")
+}
+
+func (a *Adapter) editTelegramCaptionRaw(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
+	content = truncateTelegramText(content, telegramCaptionLimit)
+	return a.callWithRetry(ctx, func() error {
+		_, err := api.EditMessageCaption(ctx, &telegrambot.EditMessageCaptionParams{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Caption:   content,
+		})
+		return err
+	})
+}
+
+func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
+	if a == nil {
+		return errors.New("Telegram transport is not initialized")
+	}
+	if ctx == nil {
+		return errors.New("context is required")
+	}
+	chatID, api, _, _, ok := a.outboundState(ref.Endpoint)
+	if !ok {
+		return errors.New("unknown Telegram endpoint")
+	}
+	if api == nil {
+		return errors.New("Telegram Bot API is unavailable")
+	}
+	messageID, err := telegramMessageID(ref.RemoteMessageID)
+	if err != nil {
+		return errors.New("Telegram delete target is invalid")
+	}
+
+	var deleted bool
+	err = a.callWithRetry(ctx, func() error {
+		var callErr error
+		deleted, callErr = api.DeleteMessage(ctx, &telegrambot.DeleteMessageParams{
+			ChatID:    chatID,
+			MessageID: messageID,
+		})
+		return callErr
+	})
+	if err != nil {
+		if isTelegramDeleteMissing(err) {
+			a.forgetMessageKind(ref.Endpoint, ref.RemoteMessageID)
+			return nil
+		}
+		return errors.New("delete Telegram message")
+	}
+	if !deleted {
+		return errors.New("delete Telegram message")
+	}
+	a.forgetMessageKind(ref.Endpoint, ref.RemoteMessageID)
+	return nil
+}
+
+func (a *Adapter) outboundState(endpoint transport.EndpointID) (int64, telegramAPI, bool, uint64, bool) {
+	a.mu.RLock()
+	normalizer := a.normalizer
+	mediaEnabled := a.mediaEnabled
+	mediaMaxBytes := a.mediaMaxBytes
+	client := a.client
+	a.mu.RUnlock()
+	if normalizer == nil {
+		return 0, nil, mediaEnabled, mediaMaxBytes, false
+	}
+	chatID, ok := normalizer.chatID(endpoint)
+	if !ok {
+		return 0, nil, mediaEnabled, mediaMaxBytes, false
+	}
+	api, _ := client.(telegramAPI)
+	return chatID, api, mediaEnabled, mediaMaxBytes, true
+}
+
+func (a *Adapter) callWithRetry(ctx context.Context, call func() error) error {
+	for attempt := 0; attempt < telegramMaxAPIAttempts; attempt++ {
+		err := call()
+		if err == nil {
+			return nil
+		}
+		var rateLimit *telegrambot.TooManyRequestsError
+		if !errors.As(err, &rateLimit) || attempt == telegramMaxAPIAttempts-1 {
+			return err
+		}
+
+		delay := time.Duration(rateLimit.RetryAfter) * time.Second
+		if delay <= 0 {
+			delay = telegramDefaultRetryDelay * time.Duration(1<<attempt)
+		}
+		if delay > telegramMaxRateLimitWait {
+			return err
+		}
+		wait := a.retryWait
+		if wait == nil {
+			wait = waitTelegramRetry
+		}
+		if err := wait(ctx, delay); err != nil {
+			return err
+		}
+	}
+	return errors.New("Telegram API retry exhausted")
+}
+
+func waitTelegramRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func telegramReplyParameters(ref *transport.MessageRef) (*models.ReplyParameters, error) {
+	if ref == nil {
+		return nil, nil
+	}
+	messageID, err := telegramMessageID(ref.RemoteMessageID)
+	if err != nil {
+		return nil, errors.New("Telegram reply target is invalid")
+	}
+	return &models.ReplyParameters{MessageID: messageID}, nil
+}
+
+func telegramMessageID(value string) (int, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return 0, errors.New("invalid Telegram message id")
+	}
+	return parsed, nil
+}
+
+func telegramOutgoingText(outgoing transport.Outgoing) string {
+	label := telegramSenderLabel(outgoing.Sender)
+	source := sanitizeTelegramMentions(outgoing.SourceText, outgoing.Mentions)
+	if strings.TrimSpace(source) == "" && label == "" {
+		return outgoing.Text
+	}
+	if label == "" {
+		return source
+	}
+	if source == "" {
+		return label + ":"
+	}
+	return label + ": " + source
+}
+
+func telegramSenderLabel(sender transport.Sender) string {
+	label := sanitizeTelegramAttribution(sender.DisplayName)
+	if label == "" {
+		label = sanitizeTelegramAttribution(sender.OpaqueID)
+	}
+	return label
+}
+
+func sanitizeTelegramAttribution(value string) string {
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, value)
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func sanitizeTelegramMentions(content string, mentions []transport.Mention) string {
+	for _, mention := range mentions {
+		remoteID := strings.TrimSpace(mention.RemoteID)
+		if remoteID == "" {
+			continue
+		}
+		name := sanitizeTelegramAttribution(mention.Name)
