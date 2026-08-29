@@ -584,6 +584,95 @@
         </div>
       </section>
 
+      <!-- Telegram Administration & Observed Chat Discovery View -->
+      <section id="view-telegram" class="view hidden">
+        <div class="page-shell">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">Telegram Bot & Observed Chat Discovery</h1>
+              <p class="page-subtitle">Inspect long-poll status and configure groups/supergroups observed from live Bot API updates.</p>
+            </div>
+            <div class="page-actions">
+              <button id="btn-telegram-refresh" class="btn btn-ghost" title="Refresh Telegram status">
+                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                <span>Refresh</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card status-banner-card">
+            <div class="status-banner-main">
+              <div id="telegram-status-indicator" class="status-indicator indicator-neutral"><span class="status-pulse"></span></div>
+              <div class="status-banner-text">
+                <div class="status-banner-header">
+                  <span class="status-label">Current State:</span>
+                  <span id="telegram-status-text" class="status-badge badge-neutral">Checking Status...</span>
+                </div>
+                <p id="telegram-status-desc" class="status-detail">Checking Telegram long polling...</p>
+              </div>
+            </div>
+            <div class="status-banner-actions">
+              <button id="btn-telegram-discover" class="btn btn-primary">
+                <span class="btn-text">Refresh Observed Chats</span>
+                <div class="btn-spinner hidden"></div>
+              </button>
+            </div>
+          </div>
+
+          <div class="card settings-card">
+            <div class="settings-card-header">
+              <div class="icon-avatar icon-avatar-primary">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              </div>
+              <div>
+                <h3 class="settings-card-title">Deployment-only credentials & visibility</h3>
+                <p class="settings-card-subtitle">Set <code>TELEGRAM_BOT_TOKEN</code> or <code>TELEGRAM_BOT_TOKEN_FILE</code> on the server and restart message-sync. This console never accepts or stores a Telegram bot token.</p>
+              </div>
+            </div>
+            <p class="form-hint">Create the bot with BotFather, add it to the target group/supergroup, and ensure it can receive messages intended for synchronization. Telegram does not expose Bot Privacy Mode state through the Bot API; disable Bot Privacy Mode or grant appropriate administrator visibility when needed. Send a group message before refreshing discovery.</p>
+          </div>
+
+          <div class="page-header" style="margin-top:1.5rem;">
+            <div>
+              <h2 class="page-title" style="font-size:1.15rem;">Configured Telegram Endpoints</h2>
+              <p class="page-subtitle">Only the safe endpoint alias and opaque chat ID are persisted. Human-readable Telegram chat metadata stays transient.</p>
+            </div>
+          </div>
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead><tr><th>Alias</th><th>Chat ID</th><th>Sync Set</th><th>Runtime</th></tr></thead>
+                <tbody id="telegram-configured-body"></tbody>
+              </table>
+            </div>
+            <div id="telegram-configured-empty" class="empty-state hidden">
+              <h3 class="empty-title">No Telegram Endpoints Configured</h3>
+              <p class="empty-desc">Use observed-chat discovery below to choose a group and assign a safe alias.</p>
+            </div>
+          </div>
+
+          <div class="page-header" style="margin-top:1.5rem;">
+            <div>
+              <h2 class="page-title" style="font-size:1.15rem;">Transient Observed Chats</h2>
+              <p class="page-subtitle">The Bot API cannot enumerate all groups. This bounded process-memory list contains only group/supergroup chats seen in live updates; titles and usernames are never written to sync.db.</p>
+            </div>
+          </div>
+          <div id="telegram-discovery-alert" class="alert alert-danger hidden" role="alert"></div>
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead><tr><th>Chat</th><th>Username</th><th>Type</th><th>Chat ID</th><th>Configuration</th></tr></thead>
+                <tbody id="telegram-discovery-body"></tbody>
+              </table>
+            </div>
+            <div id="telegram-discovery-empty" class="empty-state">
+              <h3 class="empty-title">Refresh Observed Chats</h3>
+              <p class="empty-desc">Add the bot to a group/supergroup, ensure message visibility, send a group message, then refresh.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Endpoint Management View -->
       <section id="view-groups" class="view hidden">
         <div class="page-shell">
