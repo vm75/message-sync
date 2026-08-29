@@ -55,11 +55,11 @@ type Adapter struct {
 	retryWait     func(context.Context, time.Duration) error
 	messageKinds  map[messageKindKey]string
 
-	mu           sync.RWMutex
-	lastUpdateID int64
-	haveUpdateID bool
-	observed     map[int64]observedChatEntry
-	observeSeq   uint64
+	mu                 sync.RWMutex
+	lastUpdateID       int64
+	haveUpdateID       bool
+	observed           map[int64]observedChatEntry
+	observeSeq         uint64
 	polling            bool
 	privacyModeKnown   bool
 	privacyModeEnabled bool
