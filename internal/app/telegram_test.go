@@ -191,7 +191,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	tg.events <- transport.Incoming{
 		Endpoint:  "telegram",
 		RemoteID:  "telegram-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_tgactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_tgactor0001", DisplayName: "private Telegram display sentinel"},
 		Kind:      "text",
 		Text:      "from telegram",
 		Timestamp: time.Unix(1_700_000_001, 0).UTC(),
@@ -206,6 +206,21 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 		defer dc.mu.Unlock()
 		return len(dc.sent)
 	}, 2)
+
+	dc.mu.Lock()
+	telegramToDiscord := dc.sent[1]
+	dc.mu.Unlock()
+	if telegramToDiscord.Sender.DisplayName != "private Telegram display sentinel" || telegramToDiscord.Sender.OpaqueID != "u_tgactor0001" {
+		cancel()
+		t.Fatalf("Telegram sender attribution was not preserved transiently for Discord rendering: %+v", telegramToDiscord.Sender)
+	}
+	wa.mu.Lock()
+	telegramToWhatsApp := wa.sent[0]
+	wa.mu.Unlock()
+	if telegramToWhatsApp.Sender.DisplayName != "private Telegram display sentinel" || telegramToWhatsApp.Sender.OpaqueID != "u_tgactor0001" {
+		cancel()
+		t.Fatalf("Telegram sender attribution was not preserved transiently for WhatsApp rendering: %+v", telegramToWhatsApp.Sender)
+	}
 
 	dc.events <- transport.Incoming{
 		Endpoint:  "discord",
@@ -228,7 +243,8 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 
 	if strings.Contains(logBuf.String(), telegramRemoteID) ||
 		strings.Contains(logBuf.String(), discordRemoteID) ||
-		strings.Contains(logBuf.String(), "12345:test-telegram-token") {
+		strings.Contains(logBuf.String(), "12345:test-telegram-token") ||
+		strings.Contains(logBuf.String(), "private Telegram display sentinel") {
 		cancel()
 		t.Fatalf("application logs leaked transport credential or remote ID: %s", logBuf.String())
 	}

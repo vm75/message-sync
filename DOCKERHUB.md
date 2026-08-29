@@ -8,14 +8,14 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a privacy-first server for transport-neutral message synchronization. WhatsApp and Discord are fully wired; the Telegram implementation branch now includes Bot API long-poll ingress, transport-aware endpoint configuration, and application-wide canonical router registration. Telegram protocol outbound lifecycle support remains staged for the following implementation phase.
+`message-sync` is a privacy-first server for transport-neutral message synchronization across WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one canonical router.
 
 ---
 
 ## Features
 
-- **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same sync sets.
-- **Telegram Bot API Routing Foundation**: Telegram group/supergroup endpoint configuration, privacy-safe long-poll ingress normalization, and shared adapter-registry/canonical-router wiring are implemented on the Telegram support branch; Telegram protocol outbound lifecycle follows in the next Telegram ticket.
+- **Mixed-Transport Synchronization**: Connect WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups in the same alias-based sync sets.
+- **Telegram Bot API Transport**: Long-poll ingress, transient observed-chat discovery, text/transient media, replies/reactions/edits/deletes, safe sender attribution, forum-topic flattening, deterministic poll/format fallbacks, and group-to-supergroup migration all use the shared canonical/message-copy model.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
@@ -80,7 +80,11 @@ Create the Telegram bot with BotFather and set exactly one of `TELEGRAM_BOT_TOKE
 
 Add the bot to each intended Telegram group/supergroup. To receive ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required for your deployment. The bridge does not bypass Telegram platform visibility rules.
 
-The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. Telegram ingress is registered in the shared adapter registry and canonical router loop; destination aliases dispatch by configured transport and runtime reloads update Telegram targets. Telegram protocol outbound sends remain staged for the next Telegram ticket.
+The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. The pinned Bot API client retries transient `getUpdates` failures with bounded backoff and honors `retry_after`; the adapter additionally rejects duplicate/older update IDs in-process and shuts polling down with the application context.
+
+Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. Send activity in the target group, then use the authenticated Web UI to refresh observed chats and assign a safe alias. Titles/usernames remain in a bounded in-memory cache only; only the selected opaque chat ID becomes endpoint `remote_id`.
+
+Telegram text/media plus replies, reactions, edits, and deletes use the same canonical/message-copy lifecycle as WhatsApp and Discord. WhatsApp/Discord senders are rendered in Telegram content with a transient display name or HMAC fallback; Telegram sender display identity can flow transiently to Discord's existing managed-webhook APP rendering. Forum topics flatten to the configured parent alias, basic-group to supergroup migration updates only endpoint addressing, and polls use deterministic text instead of a separate vote-state system. Contacts/locations and unsupported service-only payloads are ignored. Hosted Bot API uploads are conservatively limited to 10 MiB photos, 50 MiB general files, and Telegram's tighter sticker format caps; over-limit media fails deterministically.
 
 ### 2. Docker Compose / Podman Compose
 
@@ -122,7 +126,7 @@ services:
 2. Open `http://localhost:8080` in your browser.
 3. Complete initial admin password setup.
 4. Navigate to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp (**Linked Devices** → **Link a Device**).
-5. Discover/configure Discord channels with safe aliases as needed, then configure mixed sync sets in the web console!
+5. Discover/configure Discord channels and transiently observed Telegram groups with safe aliases, then configure mixed WhatsApp/Discord/Telegram sync sets in the web console.
 
 ---
 

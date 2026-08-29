@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -195,6 +197,86 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 	}
 	if adapter.lastUpdateID != 11 {
 		t.Fatalf("last update ID = %d, want 11", adapter.lastUpdateID)
+	}
+}
+
+
+func TestPinnedBotClientLongPollReconnectUsesBackoff(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		requestTimes []time.Time
+		requests     int
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handled := make(chan struct{})
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			t.Errorf("unexpected Telegram test API path %q", r.URL.Path)
+			http.Error(w, "unexpected Telegram test API path", http.StatusNotFound)
+			return
+		}
+
+		mu.Lock()
+		requests++
+		requestTimes = append(requestTimes, time.Now())
+		attempt := requests
+		mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		if attempt == 1 {
+			_, _ = w.Write([]byte(`{"ok":false,"error_code":500,"description":"temporary"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":2}]}`))
+	}))
+	defer server.Close()
+
+	var handledOnce sync.Once
+	client, err := telegrambot.New(
+		"12345:test-token",
+		telegrambot.WithSkipGetMe(),
+		telegrambot.WithServerURL(server.URL),
+		telegrambot.WithErrorsHandler(func(error) {}),
+		telegrambot.WithDefaultHandler(func(context.Context, *telegrambot.Bot, *models.Update) {
+			handledOnce.Do(func() {
+				close(handled)
+				cancel()
+			})
+		}),
+		telegrambot.WithNotAsyncHandlers(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		client.Start(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-handled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Telegram long polling did not recover after a transient getUpdates failure")
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Telegram long polling did not stop after recovered handler canceled context")
+	}
+
+	mu.Lock()
+	gotRequests := requests
+	times := append([]time.Time(nil), requestTimes...)
+	mu.Unlock()
+	if gotRequests < 2 || len(times) < 2 {
+		t.Fatalf("getUpdates requests = %d, want at least 2", gotRequests)
+	}
+	if delay := times[1].Sub(times[0]); delay < 90*time.Millisecond {
+		t.Fatalf("getUpdates retry delay = %v, want bounded backoff instead of a busy loop", delay)
 	}
 }
 

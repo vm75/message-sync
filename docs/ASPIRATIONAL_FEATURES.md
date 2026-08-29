@@ -15,7 +15,7 @@ The following features have already been implemented in the core service:
 - **WhatsApp Native Polls & Aggregated Summaries**: Cross-group poll forwarding, vote tracking, and `aggregate-response` summary reporting.
 - **Full Message Lifecycle**: Text, transient media (images, videos, audio/voice, documents, stickers), native clickable replies (with attribution fallback), reactions, edits, and deletes.
 - **Discord Transport Adapter**: Bidirectional WhatsApp ↔ Discord synchronization through endpoint aliases, gateway ingress, one reusable bridge-managed webhook per channel for sender-specific APP rendering, text/transient media, replies/reactions/edits/deletes, authenticated discovery/readiness, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and deterministic unsupported-format handling.
-- **Telegram Transport Foundation + Router Wiring**: Transport-aware group/supergroup endpoint configuration, privacy-safe Bot API long-poll ingress, and registration in the shared adapter registry/single canonical router loop are implemented; Telegram protocol outbound lifecycle remains staged in the Telegram support sequence.
+- **Telegram Transport Adapter**: Bidirectional Bot API long-poll synchronization through endpoint aliases, bounded transient chat discovery, text/transient media, replies/reactions/edits/deletes, transient sender attribution with HMAC fallback, forum-topic flattening, deterministic poll/mention/format fallbacks, and transactional group-to-supergroup addressing migration are implemented through the shared canonical router.
 - **Privacy Core**: Ephemeral media streaming, transient push names, deterministic HMAC user pseudonyms, zero PII in SQLite `sync.db`.
 - **Hardened Rootless Container**: Non-root UID `1000`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
 
@@ -109,6 +109,17 @@ The following features have already been implemented in the core service:
 - **Tracked Capabilities**:
   - Cloud database adapter (e.g., Firestore / PostgreSQL).
   - External blob storage for transient media caching (e.g., GCS / S3) if media size exceeds memory limits.
+
+
+### M. Telegram Transport Extensions
+- **Description**: Optional Telegram capabilities beyond the implemented Bot API long-poll transport.
+- **Deferred Capabilities**:
+  - Webhook ingestion as an alternative deployment mode to long polling.
+  - Optional Local Bot API server deployment for larger platform file limits.
+  - Dynamically configured forum-topic endpoints or automatic outbound topic creation.
+  - Native cross-platform Telegram poll/vote-state bridging rather than deterministic text fallback.
+  - Telegram user-account/MTProto session support.
+- **Architectural Requirement**: Any extension must preserve endpoint aliases as routing identity, keep Telegram platform IDs out of canonical identity, and retain the zero-PII/PHI persistence/logging boundary.
 
 ---
 
