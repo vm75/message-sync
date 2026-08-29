@@ -7,8 +7,8 @@
 1. no PII/PHI in application persistence or application logs;
 2. deterministic, restart-safe synchronization;
 3. simple rootless self-hosting;
-4. WhatsApp transport through `tulir/whatsmeow`;
-5. transport-neutral canonical IDs so Discord and future adapters do not become canonical identity.
+4. transport adapters for WhatsApp (`tulir/whatsmeow`), Discord (gateway/webhooks), and Telegram (Bot API long polling);
+5. transport-neutral canonical IDs so transport adapters do not become canonical identity.
 
 The previous Node/Baileys project is a behavioral reference only, not the architecture baseline.
 
@@ -85,7 +85,7 @@ Configuration is stored in SQLite (`sync.db`) and managed programmatically via G
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
 - `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp`, `discord`, and `telegram`; all configured transports route through the shared adapter registry and canonical router.
 
-The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, while Discord channel IDs may be stored when Discord configuration is introduced. Human-readable guild/channel/group metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
+The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, for Discord it is the channel ID, and for Telegram it is the negative group/supergroup chat ID. Human-readable guild/channel/group/chat metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
 Each validated configured endpoint must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
 
@@ -104,13 +104,15 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 - `GET /api/endpoints`, `POST /api/endpoints`, `GET /api/endpoints/{alias}`, `PUT /api/endpoints/{alias}`, `DELETE /api/endpoints/{alias}`: Manage transport-neutral endpoint configuration. Endpoint DTOs contain only the safe alias, transport, opaque `remoteId`, and optional `syncSetId`; credentials and tokens are not part of this API.
 - `GET /api/discord/status`: Authenticated safe Discord runtime state. It reports configured/connected state plus per-endpoint-alias managed-webhook readiness (`ready`, `missing_permission`, or `unavailable`) and never returns bot/webhook credentials or raw Discord names/IDs beyond already configured endpoint fields.
 - `GET /api/discord/channels`: Authenticated on-demand live discovery of guild text/announcement channels. Guild/channel display names and discovery IDs exist only in the request/response/UI lifetime; selecting a channel persists only its operational channel ID through `/api/endpoints`.
-- `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Legacy WhatsApp-only compatibility wrappers. They continue using the existing `jid` payload shape, list and mutate only `transport=whatsapp` endpoints, and treat a Discord alias as not found.
-- `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections across all configured transports. The JSON member field remains named `groups` for compatibility, but every value is an endpoint alias and may identify a WhatsApp or Discord endpoint.
+- `GET /api/telegram/status`: Authenticated safe Telegram runtime state. It reports configured/token-source state, long-poll status, endpoint readiness, and Bot Privacy Mode readiness derived from `getMe.can_read_all_group_messages`, never exposing tokens or raw Bot API user objects.
+- `GET /api/telegram/chats`: Authenticated on-demand discovery returning the bounded in-memory cache of observed group/supergroup chats. Chat titles and usernames exist only transiently in memory; selecting a chat persists only its opaque negative chat ID through `/api/endpoints`.
+- `GET /api/groups`, `POST /api/groups`, `GET /api/groups/{alias}`, `PUT /api/groups/{alias}`, `DELETE /api/groups/{alias}`: Legacy WhatsApp-only compatibility wrappers. They continue using the existing `jid` payload shape, list and mutate only `transport=whatsapp` endpoints, and treat a non-WhatsApp alias as not found.
+- `GET /api/sync-sets`, `POST /api/sync-sets`, `GET /api/sync-sets/{id}`, `PUT /api/sync-sets/{id}`, `DELETE /api/sync-sets/{id}`: Manage sync set collections across all configured transports. The JSON member field remains named `groups` for compatibility, but every value is an endpoint alias and may identify a WhatsApp, Discord, or Telegram endpoint.
 - `GET /api/config`, `PUT /api/config`: Read and modify global configuration options with immediate reload notifications to the router.
 
 Auth middleware protects all other `/api/*` endpoints, including both endpoint-management API shapes, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Endpoint request bodies are never logged, and validation/error responses never echo a transport remote target. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
-The management and runtime routing models are transport-aware. Discord endpoints can be configured and placed in mixed sync sets, and the Discord gateway adapter starts when either a Discord endpoint exists or a deployment-time Discord token source is configured so discovery can occur before the first endpoint is created. The application dispatches each destination alias through the adapter registered for that endpoint's configured transport. Discord outbound text/media plus reply/reaction/edit/delete lifecycle operations are implemented behind that adapter boundary; the canonical router still addresses only endpoint aliases and remote message copies.
+The management and runtime routing models are transport-aware. Discord and Telegram endpoints can be configured and placed in mixed sync sets. The Discord gateway adapter and Telegram long-poll adapter start when endpoints for their respective transport exist or deployment-time token sources are configured, enabling discovery before the first endpoint is created. The application dispatches each destination alias through the adapter registered for that endpoint's configured transport. Outbound text/media plus reply/reaction/edit/delete lifecycle operations are implemented behind those adapter boundaries; the canonical router still addresses only endpoint aliases and remote message copies.
 
 ## 4. Canonical message model
 
@@ -144,7 +146,9 @@ Attribution modes:
 
 Push names are never persisted.
 
-## 6. WhatsApp ingress and router event flow
+## 6. Ingress and router event flow
+
+### WhatsApp ingress boundary
 
 The WhatsApp ingress boundary normalizes incoming events before fan-out:
 
@@ -192,7 +196,7 @@ Discord MESSAGE_CREATE
 
 Only **Guild Messages** plus **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. User mentions are converted at ingress to transient display text, with an HMAC-derived actor fallback when no display name is available; role and channel mention IDs become generic `@role` / `#channel` text. Structured Discord member IDs therefore do not cross the adapter privacy boundary.
 
-The gateway bot is intentionally distinct from WhatsApp → Discord sender rendering. The bot owns gateway ingress, discovery, native reply markers, reactions, and gateway lifecycle; each configured Discord destination reuses one bridge-managed incoming webhook for outbound sender rendering. Only the webhook manager's in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the WhatsApp display name as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. These APP/webhook identities are presentation overrides, not real Discord user accounts, and no per-WhatsApp-user webhook is created. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp in one select loop and feeds both into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
+The gateway bot is intentionally distinct from outbound Discord sender rendering. The bot owns gateway ingress, discovery, native reply markers, reactions, and gateway lifecycle; each configured Discord destination reuses one bridge-managed incoming webhook for outbound sender rendering. Only the webhook manager's in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the sender's transient display name (from WhatsApp or Telegram) as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. These APP/webhook identities are presentation overrides, not real Discord user accounts, and no per-user webhook is created. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp and Telegram in one select loop and feeds all into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
 
 Discord attachments are downloaded only when routing needs them, bounded by the configured media limit, held in memory, and re-uploaded with bridge-generated safe filenames. Source filenames, CDN URLs, and media bytes are never stored in `sync.db`. Native Discord replies require the bot message API because Discord incoming-webhook execution does not accept `message_reference`; when a destination copy exists the adapter emits a minimal native reply marker referencing that copy and sends the actual content under the sender-specific webhook APP identity. If no destination copy exists, an alias-based textual reply fallback is used instead.
 
@@ -206,7 +210,7 @@ WhatsApp native polls sent to Discord use a deterministic textual representation
 
 WhatsApp stickers sent to Discord use the existing transient-media path and are uploaded with the bridge-generated filename `sticker.webp` and `image/webp` content type. Native Discord sticker-only messages, embed/component-only messages, Discord system messages, and other unsupported message types are ignored deterministically rather than producing empty or ambiguous canonical messages. A normal text/caption plus a supported attachment continues through the standard transient-media path.
 
-For WhatsApp → Discord mentions, the adapter replaces known transient remote mention tokens with a display label; if the supplied label is missing or is itself the raw remote identity, the output uses `@participant`. Discord webhook allowed-mention parsing remains disabled, so fallback text cannot unexpectedly ping Discord identities.
+For bridged mentions toward Discord, the adapter replaces known transient remote mention tokens with a display label; if the supplied label is missing or is itself the raw remote identity, the output uses `@participant`. Discord webhook allowed-mention parsing remains disabled, so fallback text cannot unexpectedly ping Discord identities.
 
 ### Discord admin discovery and webhook readiness boundary
 
@@ -215,6 +219,41 @@ Discord administration reuses the transport adapter rather than introducing a se
 Managed-webhook preparation tracks only a safe readiness enum per configured channel in addition to the in-memory webhook credential. A Discord REST 403 while listing/creating the bridge webhook is classified as `missing_permission`, allowing the gateway and inbound discovery to remain live while outbound webhook readiness is visibly degraded. The API maps that state back to configured endpoint aliases; it never returns webhook IDs, tokens, URLs, raw Discord errors, or transient guild/channel names in the status response.
 
 The embedded Web UI has no Discord credential form. It only explains the deployment-time `DISCORD_BOT_TOKEN` / `DISCORD_BOT_TOKEN_FILE` configuration, performs authenticated status/discovery calls, and uses transport-neutral endpoint/sync-set APIs for persistence. DiscordGo performs REST rate-limit retry/backoff for gateway REST, discovery, webhook, reply, reaction, edit, and delete operations. Gateway `READY`, `RESUMED`, and `DISCONNECT` events update only the adapter's in-memory connected flag with fixed safe log fields; raw lifecycle event data is never logged. On reconnect the in-memory webhook credential remains usable, while a process restart runs managed-webhook discovery again and reuses the existing bridge-owned channel webhook instead of creating one per participant or restart.
+
+### Telegram Bot API ingress boundary
+
+The Telegram Bot API adapter lives behind the same `transport.Adapter` boundary and uses long polling:
+
+```text
+Telegram Update
+   -> reject non-message / unsupported update types
+   -> map group/supergroup chat ID to safe endpoint alias
+   -> HMAC "telegram:" + transient user ID
+   -> replace text_mention and username entities with safe fallbacks
+   -> normalize supported content into transport.Incoming
+```
+
+It maps only configured group/supergroup chat IDs to endpoint aliases, HMAC-normalizes `telegram:<user_id>` immediately, keeps display names/text/captions transient, rejects private/unconfigured chats and bridge-bot echoes, and advances a monotonic in-process update cursor before filtering unsupported updates. `text_mention` user objects are reduced to HMAC actor IDs plus transient display labels before crossing the adapter boundary, while username-only mention entities are rewritten to the generic `@mention` fallback so raw Telegram usernames are not carried into canonical content.
+
+The application registers Telegram in the existing transport adapter registry and consumes its event channel in the same single canonical router loop as WhatsApp and Discord. Runtime config reload updates the registry and Telegram alias-to-chat mapping without changing canonical/message-copy state. Telegram message IDs remain opaque remote-copy IDs only; Telegram outbound text/media and reply/reaction/edit/delete lifecycle operations use the same canonical/message-copy model.
+
+#### Telegram forum topics, group migration, mentions, polls, and media handling
+
+Telegram forum topics deliberately flatten into the configured parent group/supergroup alias. `message_thread_id` and forum-topic names stay transient and never become endpoint, canonical, or database keys. Ordinary cross-platform outbound messages target the configured parent/general chat context; mapped replies use only the existing remote-copy reply reference and do not create a persisted topic mapping.
+
+A basic-group to supergroup migration is handled as addressing maintenance: the adapter recognizes Telegram's migration service message, transactionally changes only the matching Telegram endpoint `remote_id`, preserves alias and `sync_set_id`, then replaces its in-memory chat mapping so subsequent messages from the supergroup continue routing under the same alias. Migration logs never include old/new chat IDs.
+
+Telegram polls intentionally do not add a second poll state machine. Existing native poll content routed toward Telegram becomes deterministic text containing the question, numbered options, and selection guidance. A Telegram poll is normalized to that same text form before it reaches the canonical router, so other transports receive text rather than Telegram poll identity or vote state.
+
+Media formats reuse canonical kinds where practical: sticker → `sticker`, voice note → `audio`, video note → `video`, MP4 animation → `video`, and non-MP4 animation → generic `document`. Hosted Bot API media handling enforces 10 MiB for photos, 50 MiB for general uploads, and Telegram sticker format caps (512 KiB static WebP, 64 KiB TGS, 256 KiB WebM), further bounded by the configured media limit. Contacts, locations/venues, payments/games, membership/title/photo/pin/forum service messages, and otherwise unsupported service-only payloads do not create canonical content; configured-chat ignores may log only fixed event classes and safe endpoint aliases.
+
+### Telegram admin discovery and privacy readiness boundary
+
+Telegram administration is also adapter-owned rather than router-owned. Because the Bot API cannot enumerate every group a bot belongs to, the adapter observes group/supergroup chats from live long-poll updates before configured-endpoint filtering and keeps only a bounded process-memory cache of safe selection metadata: opaque chat ID plus transient title/username/type. Private chats never enter this cache.
+
+The authenticated admin API exposes safe long-poll/endpoint-readiness state at `/api/telegram/status` and the current transient observation cache at `/api/telegram/chats`; it never returns bot credentials or raw Bot API objects. Selecting a chat still creates an ordinary transport-neutral endpoint through `/api/endpoints`, so only the alias, `transport=telegram`, opaque chat ID, and optional sync-set membership enter `sync.db`. Chat titles/usernames are neither logged nor persisted and disappear on restart.
+
+On authenticated status requests the adapter derives current Bot Privacy Mode readiness from the safe `getMe.can_read_all_group_messages` capability, retains only the resulting boolean, and discards the returned bot user object. If that probe fails, the failure is safe-logged, readiness is marked unknown, and status/UI falls back to fixed operator guidance.
 
 ## 7. Idempotency and crash recovery
 
@@ -275,7 +314,7 @@ This permits add/change/remove semantics without raw identity. A native reaction
 
 ## 11. Polls and vote aggregation
 
-Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`; Discord textual copies do not introduce a second vote-state model.
+Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord and Telegram destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`; Discord and Telegram textual copies do not introduce a second vote-state model. Incoming Telegram polls are likewise normalized to deterministic text before entering the canonical router.
 
 Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
 - the router intercepts the trigger (it is not fanned out);
@@ -311,13 +350,13 @@ WhatsApp chat history on the sync account can optionally be cleared on a daily s
 
 `whatsapp.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
 
-## 15. Transport abstraction
+## 15. Transport abstraction and adapter registry
 
-The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. WhatsApp and configured Discord channels both support end-to-end text/media routing and the shared reply/reaction/edit/delete lifecycle through the same application loop and canonical copy model.
+The core transport interface uses endpoint IDs and remote message IDs, not platform-specific canonical keys. WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups all support end-to-end text/media routing and the shared reply/reaction/edit/delete lifecycle through the same application loop and canonical copy model.
 
-Outbound routing uses a small adapter registry keyed by configured transport type. The registry maintains only the safe endpoint-alias → transport mapping; the canonical router still emits operations addressed by alias and never switches on Discord or WhatsApp remote message IDs. Config reload updates the alias mapping without changing canonical/message-copy state.
+Outbound routing uses a small adapter registry (`internal/router/registry.go`) keyed by configured transport type. The registry maintains only the safe endpoint-alias → transport mapping; the canonical router still emits operations addressed by alias and never switches on Discord, Telegram, or WhatsApp remote message IDs. Config reload updates the alias mapping without changing canonical/message-copy state.
 
-The persisted configuration is transport-aware so Discord and Telegram endpoint records can participate in alias-based sync-set configuration without changing canonical identity. The endpoint schema accepts `transport=whatsapp|discord|telegram`; Telegram stores only the opaque negative Bot API group/supergroup chat ID required for operational addressing. Human-readable Telegram chat metadata and Telegram credentials are not part of the endpoint schema.
+The persisted configuration is transport-aware so Discord and Telegram endpoint records can participate in alias-based sync-set configuration without changing canonical identity. The endpoint schema accepts `transport=whatsapp|discord|telegram`; Telegram stores only the opaque negative Bot API group/supergroup chat ID required for operational addressing. Human-readable platform metadata and credentials are not part of the endpoint schema.
 
 ```text
 configured sync set
@@ -329,13 +368,7 @@ configured sync set
 canonical alias-based routing model
 ```
 
-The Telegram Bot API adapter lives behind the same `transport.Adapter` boundary and uses long polling. It maps only configured group/supergroup chat IDs to endpoint aliases, HMAC-normalizes `telegram:<user_id>` immediately, keeps display names/text/captions transient, rejects private/unconfigured chats and bridge-bot echoes, and advances a monotonic in-process update cursor before filtering unsupported updates. `text_mention` user objects are reduced to HMAC actor IDs plus transient display labels before crossing the adapter boundary, while username-only mention entities are rewritten to the generic `@mention` fallback so raw Telegram usernames are not carried into canonical content. The application registers Telegram in the existing transport adapter registry and consumes its event channel in the same single canonical router loop as WhatsApp and Discord. Runtime config reload updates the registry and Telegram alias-to-chat mapping without changing canonical/message-copy state. Telegram message IDs remain opaque remote-copy IDs only; Telegram outbound text/media and reply/reaction/edit/delete lifecycle operations use the same canonical/message-copy model. No Telegram-specific router or canonical identity is introduced.
-
-Telegram forum topics deliberately flatten into the configured parent group/supergroup alias. `message_thread_id` and forum-topic names stay transient and never become endpoint, canonical, or database keys. Ordinary cross-platform outbound messages target the configured parent/general chat context; mapped replies use only the existing remote-copy reply reference and do not create a persisted topic mapping. A basic-group to supergroup migration is handled as addressing maintenance: the adapter recognizes Telegram's migration service message, transactionally changes only the matching Telegram endpoint `remote_id`, preserves alias and `sync_set_id`, then replaces its in-memory chat mapping so subsequent messages from the supergroup continue routing under the same alias. Migration logs never include old/new chat IDs.
-
-Telegram polls intentionally do not add a second poll state machine. Existing native poll content routed toward Telegram becomes deterministic text containing the question, numbered options, and selection guidance. A Telegram poll is normalized to that same text form before it reaches the canonical router, so other transports receive text rather than Telegram poll identity or vote state. Media formats reuse canonical kinds where practical: sticker → `sticker`, voice note → `audio`, video note → `video`, MP4 animation → `video`, and non-MP4 animation → generic `document`. Contacts, locations/venues, payments/games, membership/title/photo/pin/forum service messages, and otherwise unsupported service-only payloads do not create canonical content; configured-chat ignores may log only fixed event classes and safe endpoint aliases.
-
-Telegram administration is also adapter-owned rather than router-owned. Because the Bot API cannot enumerate every group a bot belongs to, the adapter observes group/supergroup chats from live long-poll updates before configured-endpoint filtering and keeps only a bounded process-memory cache of safe selection metadata: opaque chat ID plus transient title/username/type. Private chats never enter this cache. The authenticated admin API exposes safe long-poll/endpoint-readiness state at `/api/telegram/status` and the current transient observation cache at `/api/telegram/chats`; it never returns bot credentials or raw Bot API objects. Selecting a chat still creates an ordinary transport-neutral endpoint through `/api/endpoints`, so only the alias, `transport=telegram`, opaque chat ID, and optional sync-set membership enter `sync.db`. Chat titles/usernames are neither logged nor persisted and disappear on restart. On authenticated status requests the adapter derives current Bot Privacy Mode readiness from the safe `getMe.can_read_all_group_messages` capability, retains only the resulting boolean, and discards the returned bot user object. If that probe fails, the failure is safe-logged, readiness is marked unknown, and status/UI falls back to fixed operator guidance.
+All transport adapters feed normalized `transport.Incoming` events into the same single ordered router worker. Outbound fan-out dispatches each copy through the adapter registered for that destination's transport type, recording remote message IDs in `message_copies` for bidirectional reply/reaction/edit/delete lifecycle synchronization.
 
 ## 16. Rootless container model
 
@@ -376,4 +409,4 @@ The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or 
 
 ## 19. Deliberate MVP exclusions
 
-Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional bridge modes remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, native cross-platform Telegram poll/vote bridging, and MTProto user-account sessions also remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.

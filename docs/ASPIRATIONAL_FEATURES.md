@@ -6,22 +6,7 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ---
 
-## 1. Features Already Implemented in `message-sync`
-
-The following features have already been implemented in the core service:
-
-- **Embedded Web Administration Console**: Zero-dependency dark-mode Web UI served on `:8080`.
-- **REST Management & Status API**: Group management, sync set CRUD, QR pairing endpoints, runtime status, health check (`GET /health`), and bcrypt-authenticated admin sessions.
-- **WhatsApp Native Polls & Aggregated Summaries**: Cross-group poll forwarding, vote tracking, and `aggregate-response` summary reporting.
-- **Full Message Lifecycle**: Text, transient media (images, videos, audio/voice, documents, stickers), native clickable replies (with attribution fallback), reactions, edits, and deletes.
-- **Discord Transport Adapter**: Bidirectional WhatsApp ↔ Discord synchronization through endpoint aliases, gateway ingress, one reusable bridge-managed webhook per channel for sender-specific APP rendering, text/transient media, replies/reactions/edits/deletes, authenticated discovery/readiness, parent-flattened thread/forum ingress, mention fallbacks, textual WhatsApp-poll rendering, and deterministic unsupported-format handling.
-- **Telegram Transport Adapter**: Bidirectional Bot API long-poll synchronization through endpoint aliases, bounded transient chat discovery, text/transient media, replies/reactions/edits/deletes, transient sender attribution with HMAC fallback, forum-topic flattening, deterministic poll/mention/format fallbacks, and transactional group-to-supergroup addressing migration are implemented through the shared canonical router.
-- **Privacy Core**: Ephemeral media streaming, transient push names, deterministic HMAC user pseudonyms, zero PII in SQLite `sync.db`.
-- **Hardened Rootless Container**: Non-root UID `1000`, read-only rootfs, dropped capabilities, and multi-arch builds (`linux/amd64`, `linux/arm64`).
-
----
-
-## 2. Aspirational Features Backlog
+## Aspirational Features Backlog
 
 ### A. Discord Transport Extensions
 - **Description**: Optional capabilities beyond the implemented bidirectional Discord transport.
@@ -123,7 +108,7 @@ The following features have already been implemented in the core service:
 
 ---
 
-## 3. Guiding Principles for Adoption
+## Guiding Principles for Adoption
 
 Before pulling any item from this backlog into implementation:
 

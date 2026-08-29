@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`message-sync` is a privacy-first message synchronization service written in Go. WhatsApp groups and configured Discord channels synchronize through the same canonical transport boundary; Discord must remain a transport adapter rather than becoming the application’s central identity.
+`message-sync` is a privacy-first message synchronization service written in Go. WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups synchronize through the same canonical transport boundary; Discord and Telegram must remain transport adapters rather than becoming the application’s central identity.
 
 Use **KISS** and **YAGNI** aggressively. Prefer standard-library Go, explicit data flow, small packages, and simple SQLite transactions. Do not port legacy functionality merely because it existed before.
 

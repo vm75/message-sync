@@ -21,7 +21,7 @@
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
-- **Embedded Web UI**: Zero-dependency management console for WhatsApp pairing, Discord status/channel discovery, endpoint aliases, and mixed sync sets.
+- **Embedded Web UI**: Zero-dependency management console for WhatsApp pairing, Discord status/channel discovery, transient Telegram observed-chat discovery, endpoint aliases, and mixed sync sets.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
 ---
@@ -72,7 +72,7 @@ Discord credentials are deployment-only. Set exactly one of `DISCORD_BOT_TOKEN` 
 
 In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In each bridged channel grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
 
-The gateway bot handles Discord ingress, discovery, native reply markers, reactions, and connection lifecycle. For WhatsApp → Discord outbound messages, `message-sync` finds or creates **one bridge-managed incoming webhook per configured channel** and reuses it across participants and restarts. The transient WhatsApp display/push name becomes that message's Discord APP/webhook username; if no display name is available, the HMAC actor ID is used. These APP labels are not real Discord accounts, and no Discord account or webhook is created per WhatsApp participant. Display names remain transient and are never persisted or logged.
+The gateway bot handles Discord ingress, discovery, native reply markers, reactions, and connection lifecycle. For outbound bridged messages toward Discord (from WhatsApp or Telegram), `message-sync` finds or creates **one bridge-managed incoming webhook per configured channel** and reuses it across participants and restarts. The sender's transient display name becomes that message's Discord APP/webhook username; if no display name is available, the HMAC actor ID is used. These APP labels are presentation metadata rather than real Discord accounts, and no Discord account or webhook is created per bridged participant. Display names remain transient and are never persisted or logged.
 
 ### Telegram setup
 
@@ -143,4 +143,5 @@ Mount a persistent volume to `/data`:
 
 - **GitHub Repository**: [github.com/vm75/message-sync](https://github.com/vm75/message-sync)
 - **Architecture & Invariants**: [ARCHITECTURE.md](https://github.com/vm75/message-sync/blob/main/ARCHITECTURE.md)
+- **Testing Guide**: [docs/TESTING_GUIDE.md](https://github.com/vm75/message-sync/blob/main/docs/TESTING_GUIDE.md)
 - **GHCR Image Mirror**: `ghcr.io/vm75/message-sync:latest`
