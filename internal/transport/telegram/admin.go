@@ -12,7 +12,7 @@ import (
 
 const observedChatLimit = 128
 
-const VisibilityGuidance = "Telegram does not expose Bot Privacy Mode state through the Bot API. Disable Bot Privacy Mode or grant appropriate bot admin visibility, then send a group message so the chat can be observed."
+const VisibilityGuidance = "Send a group message so the chat can be observed. If ordinary group messages are not visible, disable Bot Privacy Mode or grant appropriate bot administrator visibility."
 
 type EndpointReadiness struct {
 	Alias  string `json:"alias"`
@@ -25,6 +25,7 @@ type AdminStatus struct {
 	Status             string              `json:"status"`
 	Endpoints          []EndpointReadiness `json:"endpoints"`
 	PrivacyModeKnown   bool                `json:"privacyModeKnown"`
+	PrivacyModeEnabled *bool               `json:"privacyModeEnabled,omitempty"`
 	VisibilityGuidance string              `json:"visibilityGuidance"`
 }
 
@@ -63,6 +64,11 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 	a.mu.RLock()
 	status.TokenConfigured = true
 	status.Running = a.polling
+	status.PrivacyModeKnown = a.privacyModeKnown
+	if a.privacyModeKnown {
+		enabled := a.privacyModeEnabled
+		status.PrivacyModeEnabled = &enabled
+	}
 	aliases := make([]string, 0)
 	if a.normalizer != nil {
 		aliases = make([]string, 0, len(a.normalizer.endpoints))
