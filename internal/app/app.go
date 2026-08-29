@@ -164,10 +164,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	var tg telegramTransport
 	if len(telegramChatIDs) > 0 || telegram.BotTokenConfigured() {
 		tg, err = openTelegram(ctx, telegram.Options{
-			ChatIDs:      telegramChatIDs,
-			Hasher:       hasher,
-			UsernameMode: cfg.Identity.UsernameMode,
-			Logger:       logger,
+			ChatIDs:       telegramChatIDs,
+			Hasher:        hasher,
+			UsernameMode:  cfg.Identity.UsernameMode,
+			Logger:        logger,
+			MediaEnabled:  cfg.Media.Enabled,
+			MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 		})
 		if err != nil {
 			return fmt.Errorf("start Telegram transport: %w", err)
