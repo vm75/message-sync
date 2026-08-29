@@ -200,7 +200,6 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 	}
 }
 
-
 func TestPinnedBotClientLongPollReconnectUsesBackoff(t *testing.T) {
 	var (
 		mu           sync.Mutex
