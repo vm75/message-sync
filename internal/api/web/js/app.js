@@ -1162,14 +1162,13 @@
     }
   }
 
-  function suggestedTelegramAlias(chat) {
-    const base = sanitizeAlias(chat.title || chat.username) || 'telegram_group';
+  function suggestedTelegramAlias() {
+    const base = 'telegram_group';
     let candidate = base;
     let suffix = 2;
     const aliases = new Set(cachedEndpoints.map((endpoint) => endpoint.alias));
     while (aliases.has(candidate)) {
-      const suffixText = `_${suffix++}`;
-      candidate = (base.slice(0, Math.max(1, 64 - suffixText.length)) + suffixText).slice(0, 64);
+      candidate = `${base}_${suffix++}`;
     }
     return candidate;
   }
@@ -1215,7 +1214,7 @@
           <td><span class="jid-text">${escapeHtml(chat.chatId)}</span></td>
           <td>
             <div class="form-grid-2">
-              <input class="form-input font-mono telegram-alias-input" data-chat-id="${escapeHtml(chat.chatId)}" value="${escapeHtml(suggestedTelegramAlias(chat))}" aria-label="Endpoint alias">
+              <input class="form-input font-mono telegram-alias-input" data-chat-id="${escapeHtml(chat.chatId)}" value="${escapeHtml(suggestedTelegramAlias())}" aria-label="Endpoint alias">
               <select class="form-select telegram-sync-set-select" data-chat-id="${escapeHtml(chat.chatId)}">${syncOptions}</select>
             </div>
             <button type="button" class="btn btn-primary btn-sm btn-configure-telegram-chat" data-chat-id="${escapeHtml(chat.chatId)}" style="margin-top:.5rem;">Configure Endpoint</button>
