@@ -59,6 +59,13 @@
             </svg>
             Discord
           </button>
+          <button class="nav-tab" data-tab="telegram">
+            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 2L11 13"></path>
+              <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
+            </svg>
+            Telegram
+          </button>
           <button class="nav-tab" data-tab="groups">
             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
@@ -300,6 +307,20 @@
               </div>
             </div>
 
+            <div class="card stat-card" data-action="telegram">
+              <div class="stat-icon-wrapper icon-groups">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 2L11 13"></path>
+                  <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
+                </svg>
+              </div>
+              <div class="stat-content">
+                <h3 class="stat-title">Telegram Bot</h3>
+                <p id="dash-telegram-status" class="stat-value">Checking...</p>
+                <p class="stat-desc">Inspect long polling and observed groups.</p>
+              </div>
+            </div>
+
             <div class="card stat-card" data-action="groups">
               <div class="stat-icon-wrapper icon-groups">
                 <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -312,7 +333,7 @@
               <div class="stat-content">
                 <h3 class="stat-title">Configured Endpoints</h3>
                 <p id="dash-groups-count" class="stat-value">0 Endpoints</p>
-                <p class="stat-desc">Manage WhatsApp and Discord routing aliases.</p>
+                <p class="stat-desc">Manage WhatsApp, Discord, and Telegram routing aliases.</p>
               </div>
             </div>
 
@@ -569,7 +590,7 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Configured Endpoints</h1>
-              <p class="page-subtitle">Manage transport-neutral aliases for WhatsApp groups and Discord channels.</p>
+              <p class="page-subtitle">Manage transport-neutral aliases for WhatsApp groups, Discord channels, and Telegram groups/supergroups.</p>
             </div>
             <div class="page-actions">
               <button id="btn-open-add-group" class="btn btn-primary">
@@ -639,7 +660,7 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Sync Sets</h1>
-              <p class="page-subtitle">Assemble WhatsApp and Discord endpoints into all-to-all synchronization sets. Each endpoint belongs to at most one sync set.</p>
+              <p class="page-subtitle">Assemble WhatsApp, Discord, and Telegram endpoints into all-to-all synchronization sets. Each endpoint belongs to at most one sync set.</p>
             </div>
             <div class="page-actions">
               <button id="btn-open-add-sync-set" class="btn btn-primary">
@@ -1075,7 +1096,7 @@
 
           <div class="form-group">
             <label class="form-label">Select Member Endpoints</label>
-            <p class="form-hint">Select configured WhatsApp or Discord endpoint aliases to synchronize together.</p>
+            <p class="form-hint">Select configured WhatsApp, Discord, or Telegram endpoint aliases to synchronize together.</p>
             <div id="sync-set-groups-checklist" class="groups-checklist">
               <!-- Rendered dynamically -->
             </div>
