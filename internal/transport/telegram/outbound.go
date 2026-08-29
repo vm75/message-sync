@@ -188,3 +188,193 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 				message, callErr = api.SendAudio(ctx, &telegrambot.SendAudioParams{
 					ChatID: chatID,
 					Audio: &models.InputFileUpload{
+						Filename: telegramAudioFilename(data),
+						Data:     bytes.NewReader(data),
+					},
+					Caption:         caption,
+					ReplyParameters: reply,
+				})
+				return callErr
+			})
+		}
+	case "document":
+		err = a.callWithRetry(ctx, func() error {
+			var callErr error
+			message, callErr = api.SendDocument(ctx, &telegrambot.SendDocumentParams{
+				ChatID: chatID,
+				Document: &models.InputFileUpload{
+					Filename: "document.bin",
+					Data:     bytes.NewReader(data),
+				},
+				Caption:         caption,
+				ReplyParameters: reply,
+			})
+			return callErr
+		})
+	case "sticker":
+		filename, filenameErr := telegramStickerFilename(data)
+		if filenameErr != nil {
+			return nil, filenameErr
+		}
+		if formatLimit := telegramStickerFormatLimit(filename); uint64(len(data)) > formatLimit {
+			return nil, errors.New("Telegram sticker exceeds hosted Bot API format size limit")
+		}
+		err = a.callWithRetry(ctx, func() error {
+			var callErr error
+			message, callErr = api.SendSticker(ctx, &telegrambot.SendStickerParams{
+				ChatID: chatID,
+				Sticker: &models.InputFileUpload{
+					Filename: filename,
+					Data:     bytes.NewReader(data),
+				},
+				ReplyParameters: reply,
+			})
+			return callErr
+		})
+		if err == nil {
+			// Telegram stickers have no caption. Emit attribution only after the
+			// sticker succeeds so a failed sticker cannot leave a duplicate
+			// companion on router retry. A companion failure does not invalidate
+			// the already-created canonical destination copy.
+			companion := strings.TrimSpace(caption)
+			if companion == "" {
+				companion = "[sticker]"
+			} else if strings.HasSuffix(companion, ":") {
+				companion += " [sticker]"
+			}
+			companion = truncateTelegramText(companion, telegramTextLimit)
+			_ = a.callWithRetry(ctx, func() error {
+				_, sendErr := api.SendMessage(ctx, &telegrambot.SendMessageParams{
+					ChatID: chatID,
+					Text:   companion,
+				})
+				return sendErr
+			})
+		}
+	}
+	if err != nil {
+		return nil, errors.New("send Telegram media")
+	}
+	return message, nil
+}
+
+func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error {
+	if a == nil {
+		return errors.New("Telegram transport is not initialized")
+	}
+	if ctx == nil {
+		return errors.New("context is required")
+	}
+	chatID, api, _, _, ok := a.outboundState(reaction.Endpoint)
+	if !ok {
+		return errors.New("unknown Telegram endpoint")
+	}
+	if api == nil {
+		return errors.New("Telegram Bot API is unavailable")
+	}
+	messageID, err := telegramMessageID(reaction.TargetRemoteID)
+	if err != nil {
+		return errors.New("Telegram reaction target is invalid")
+	}
+
+	var reactions []models.ReactionType
+	emoji := strings.TrimSpace(reaction.Emoji)
+	if emoji != "" {
+		if strings.ContainsAny(emoji, " \t\r\n") || utf8.RuneCountInString(emoji) > 16 {
+			return errors.New("unsupported Telegram reaction value")
+		}
+		reactions = []models.ReactionType{{
+			Type: models.ReactionTypeTypeEmoji,
+			ReactionTypeEmoji: &models.ReactionTypeEmoji{
+				Type:  models.ReactionTypeTypeEmoji,
+				Emoji: emoji,
+			},
+		}}
+	}
+
+	var applied bool
+	err = a.callWithRetry(ctx, func() error {
+		var callErr error
+		applied, callErr = api.SetMessageReaction(ctx, &telegrambot.SetMessageReactionParams{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Reaction:  reactions,
+		})
+		return callErr
+	})
+	if err != nil || !applied {
+		return errors.New("set Telegram reaction")
+	}
+	return nil
+}
+
+func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	if a == nil {
+		return errors.New("Telegram transport is not initialized")
+	}
+	if ctx == nil {
+		return errors.New("context is required")
+	}
+	chatID, api, _, _, ok := a.outboundState(ref.Endpoint)
+	if !ok {
+		return errors.New("unknown Telegram endpoint")
+	}
+	if api == nil {
+		return errors.New("Telegram Bot API is unavailable")
+	}
+	messageID, err := telegramMessageID(ref.RemoteMessageID)
+	if err != nil {
+		return errors.New("Telegram edit target is invalid")
+	}
+	content := telegramEditContent(text)
+	if strings.TrimSpace(content) == "" {
+		return errors.New("outgoing Telegram edit text is required")
+	}
+
+	kind, known := a.messageKind(ref.Endpoint, ref.RemoteMessageID)
+	if known && kind == "sticker" {
+		return errors.New("Telegram sticker messages do not support text edits")
+	}
+	if known && kind != "text" {
+		return a.editTelegramCaption(ctx, api, chatID, messageID, content)
+	}
+	if known {
+		return a.editTelegramText(ctx, api, chatID, messageID, content)
+	}
+
+	// Message kind is intentionally not persisted. After restart, try the
+	// text form first and fall back to caption only for a Bot API bad request.
+	err = a.editTelegramTextRaw(ctx, api, chatID, messageID, content)
+	if err == nil || isTelegramNotModified(err) {
+		return nil
+	}
+	if !errors.Is(err, telegrambot.ErrorBadRequest) {
+		return errors.New("edit Telegram message")
+	}
+	err = a.editTelegramCaptionRaw(ctx, api, chatID, messageID, content)
+	if err == nil || isTelegramNotModified(err) {
+		return nil
+	}
+	return errors.New("edit Telegram message")
+}
+
+func (a *Adapter) editTelegramText(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
+	err := a.editTelegramTextRaw(ctx, api, chatID, messageID, content)
+	if err == nil || isTelegramNotModified(err) {
+		return nil
+	}
+	return errors.New("edit Telegram text")
+}
+
+func (a *Adapter) editTelegramTextRaw(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
+	content = truncateTelegramText(content, telegramTextLimit)
+	return a.callWithRetry(ctx, func() error {
+		_, err := api.EditMessageText(ctx, &telegrambot.EditMessageTextParams{
+			ChatID:    chatID,
+			MessageID: messageID,
+			Text:      content,
+		})
+		return err
+	})
+}
+
