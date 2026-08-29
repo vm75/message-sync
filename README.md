@@ -9,19 +9,19 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
 
-`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups and configured Discord channels through one transport-neutral canonical router; authenticated Discord discovery and mixed-transport administration are available in the embedded Web UI, with deterministic parent-channel flattening and privacy-safe fallbacks for Discord threads and richer formats.
+`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one transport-neutral canonical router. The authenticated Web UI provides Discord channel discovery plus transient Telegram observed-chat discovery without persisting human-readable remote names.
 
 *Note: This project is inspired by earlier explorations and prototypes in multi-platform message synchronization and bridging.*
 
 ## Features
 
-- **Mixed-Transport Synchronization**: Connect WhatsApp groups and configured Discord channels in the same alias-based sync sets.
+- **Mixed-Transport Synchronization**: Connect WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups in the same alias-based sync sets.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
-- **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord status, discover Discord channels on demand, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
+- **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord/Telegram status, discover Discord channels and transiently observed Telegram groups, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
 ## Privacy Model
@@ -64,7 +64,7 @@ The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISC
 
 If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
 
-The Telegram Bot API adapter foundation uses **long polling** and reads its credential only from one deployment source:
+The Telegram Bot API adapter uses **long polling** and reads its credential only from one deployment source:
 
 ```sh
 # Environment source
@@ -74,9 +74,11 @@ echo "TELEGRAM_BOT_TOKEN=your-bot-token" >> .env
 # TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
 ```
 
-Add the bot to each intended Telegram group/supergroup. For ordinary group messages to be visible to the bot, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The bridge does not attempt to bypass Telegram visibility rules. Telegram user/display data and raw Bot API updates remain transient; only configured opaque chat IDs are eligible endpoint addressing.
+Create the bot with **BotFather**, add it to each intended Telegram group/supergroup, and ensure it can receive the messages you intend to synchronize. For ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. Telegram does not expose the current Privacy Mode setting through the Bot API, so the admin status reports safe operator guidance rather than guessing that state.
 
-Telegram long-poll ingress is now registered in the application-wide adapter registry and consumed by the same single canonical router loop as WhatsApp and Discord. Destination aliases dispatch by configured transport, and runtime config reloads update Telegram targets. The Telegram adapter starts when Telegram endpoints are configured or a Telegram token source is present; deployments with neither remain unaffected. Telegram outbound protocol delivery remains staged for the next Telegram ticket, so full end-to-end Telegram delivery is not yet enabled.
+Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. After the bot is added and has suitable visibility, send a message in the target group/supergroup and open **Telegram → Refresh Observed Chats** in the authenticated Web UI. Observed chat titles/usernames live only in a bounded in-memory cache and disappear on process restart; only the selected opaque negative chat ID is persisted as endpoint `remote_id`. The browser never accepts or stores the bot token.
+
+Telegram ingress and outbound text/media plus reply/reaction/edit/delete lifecycle operations use the same adapter registry, canonical router, and message-copy model as WhatsApp and Discord. Cross-transport delivery uses transient sender attribution where Telegram cannot impersonate another platform's participant, while Telegram sender identity remains HMAC-normalized at the adapter boundary. Runtime configuration reload updates Telegram targets without creating a Telegram-specific router or persistence model.
 
 ### 2. Start the Server
 
@@ -92,7 +94,7 @@ docker compose up -d
 1. Open `http://localhost:8080` in your web browser.
 2. Complete the initial admin password setup.
 3. Go to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp on your phone (**Linked Devices** → **Link a Device**).
-4. Configure your groups and sync sets right in the web console!
+4. Configure WhatsApp, Discord, and Telegram endpoints and sync sets in the web console. For Telegram, send a group message first so the Bot API observation cache can discover the chat.
 
 ## Resetting Admin Password
 
@@ -104,9 +106,9 @@ docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET adm
 
 ## Management API compatibility
 
-The authenticated management API has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. The Telegram Bot API adapter now provides long-poll ingress normalization and is registered in the existing application-wide adapter registry. Telegram ingress uses the same canonical router path as WhatsApp and Discord, destination aliases dispatch by configured transport, and runtime reload updates Telegram routing targets. Telegram protocol outbound delivery remains staged for the following implementation phase.
+The authenticated management API has transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. Telegram ingress and outbound lifecycle operations use the same canonical router path and message-copy model as WhatsApp and Discord, and runtime reload updates Telegram routing targets.
 
-Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp, Discord, or Telegram endpoints.
+Transport-neutral endpoint CRUD is available under `/api/endpoints`. Authenticated Discord administration adds `GET /api/discord/status` for safe connection/webhook-readiness state and `GET /api/discord/channels` for on-demand live discovery. Authenticated Telegram administration adds `GET /api/telegram/status` for safe token-source/long-poll/endpoint-readiness state and `GET /api/telegram/chats` for the bounded in-memory list of observed groups/supergroups. Telegram status never returns the token or raw Bot API state; Telegram chat titles/usernames returned by discovery are transient selection metadata and are never persisted. Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the existing `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp, Discord, or Telegram endpoints.
 
 The Discord adapter provides bidirectional text/media synchronization plus replies, reactions, edits, deletes, authenticated channel discovery, and safe managed-webhook readiness through the same canonical/message-copy model used by WhatsApp. The **gateway bot** owns Discord ingress, discovery, reply markers, reactions, and connection lifecycle; the **bridge-managed incoming webhook** owns WhatsApp → Discord message rendering. WhatsApp → Discord messages reuse one managed webhook per destination channel: the transient WhatsApp display/push name is supplied only as that message's webhook APP username, with the HMAC actor ID as fallback, while the message body remains separate. An APP/webhook username is only Discord presentation metadata—it is not a real Discord user account—and the bridge never creates a Discord account or webhook per WhatsApp participant. Discord attachment bytes and CDN URLs stay transient and are bounded by the configured media size limit. Discord's incoming-webhook API does not support `message_reference`, so a mapped reply emits a minimal bot-authored native reply marker and sends the actual bridged content under the sender-specific webhook APP identity; if the destination copy is unavailable, the content uses an alias-based textual reply fallback instead.
 
