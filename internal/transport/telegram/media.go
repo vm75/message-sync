@@ -76,7 +76,7 @@ func (a *Adapter) withTelegramMedia(incoming transport.Incoming, message *models
 		return incoming, strings.TrimSpace(incoming.Text) != ""
 	}
 
-	maxBytes := telegramHostedDownloadMax
+	maxBytes := uint64(telegramHostedDownloadMax)
 	if configuredMax > 0 && configuredMax < maxBytes {
 		maxBytes = configuredMax
 	}
