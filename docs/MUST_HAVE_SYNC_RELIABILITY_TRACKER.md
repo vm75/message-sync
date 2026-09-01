@@ -1,14 +1,14 @@
 # Must-Have Sync Reliability Tracker
 
 Last updated: 2026-09-01  
-Program status: **Ready to implement**  
+Program status: **Complete**  
 Branch: `agent/sync-reliability`  
 Plan: [MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md](MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md)  
-Branch head when tracker was created: `4c4dc923c5da3c04f8802b9572b7374283f92a16`
+Branch head at final gate: `8ccbd23b6fd5d085ab13dbe0f9e4bf224c57e7de`
 
 ## Next action
 
-Start [#32 — Remove pre-release SQLite migration machinery](https://github.com/vm75/message-sync/issues/32). Do not start a dependent issue until every dependency in its row is closed and its documentation/tracker update is committed.
+All must-have issues #32–#44 are complete. The branch is ready for owner review; do not merge it into `main` without a separate request.
 
 ## Status legend
 
@@ -35,7 +35,7 @@ Only one issue should be `In progress` on the shared branch unless the work is d
 | Discord recovery | [#41 Add bounded Discord channel history recovery](https://github.com/vm75/message-sync/issues/41) | Done | #38, #39 | `8de581c` | `make fmt`; `git diff --check`; `GOCACHE=/tmp/message-sync-go-cache make test`; `GOCACHE=/tmp/message-sync-go-cache make vet`; `GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/transport/discord ./internal/recovery ./internal/router ./internal/delivery`; `git diff --exit-code VERSION` — PASS | `ARCHITECTURE.md`, `README.md`, `docs/TESTING_GUIDE.md`, `docs/MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md`, `internal/transport/discord`, `docs/MUST_HAVE_SYNC_RELIABILITY_TRACKER.md` | Bounded per-channel snowflake recovery, oldest-first normalization, edit reconciliation, filtering, permission status, cancellation/rate-limit-safe REST, and startup/RESUMED signals complete; privacy review PASS; no follow-up; Next: #42 |
 | WhatsApp recovery | [#42 Reconcile WhatsApp HistorySync through recovery checkpoints](https://github.com/vm75/message-sync/issues/42) | Done | #39 | `9a91231` | `make fmt`; `git diff --check`; `GOCACHE=/tmp/message-sync-go-cache make test`; `GOCACHE=/tmp/message-sync-go-cache make vet`; `GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/transport/whatsapp ./internal/recovery ./internal/router ./internal/delivery`; `git diff --exit-code VERSION` — PASS | `ARCHITECTURE.md`, `README.md`, `docs/MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md`, `internal/transport/whatsapp/adapter.go`, `internal/transport/whatsapp/adapter_test.go`, `docs/MUST_HAVE_SYNC_RELIABILITY_TRACKER.md` | Timestamp checkpoints on live/history events, bounded oldest-first HistorySync replay, ingress serialization, and coordinator idempotency path complete; privacy review PASS; no `whatsapp.db` changes, no follow-up; Next: #43 |
 | Operations | [#43 Expose privacy-safe delivery health in the admin UI](https://github.com/vm75/message-sync/issues/43) | Done | #35, #37, #39-#42 | `1b6df71` | `make fmt`; `git diff --check`; `GOCACHE=/tmp/message-sync-go-cache make test`; `GOCACHE=/tmp/message-sync-go-cache make vet`; `GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/api ./internal/delivery ./internal/router ./internal/store`; `node --check internal/api/web/js/app.js`; `node --check internal/api/web/js/api.js`; `git diff --exit-code VERSION` — PASS | `README.md`, `ARCHITECTURE.md`, `internal/api/api.go`, `internal/api/delivery.go`, `internal/api/delivery_test.go`, `internal/api/web/index.html`, `internal/api/web/js/api.js`, `internal/api/web/js/app.js`, `internal/app/app.go`, `internal/delivery/lanes.go`, `internal/router/router.go`, `internal/store/store.go` | Authenticated privacy-safe lane/ledger health read model and polling dashboard complete; privacy review PASS; no migration/backward compatibility; no follow-up; Next: #44 |
-| Integration | [#44 Run end-to-end reliability and privacy hardening](https://github.com/vm75/message-sync/issues/44) | In progress | #32-#43 | — | — | — | Starting from `3287da85ee85a05fc48cd48ecb3e9de8f988fc5f`; audit existing cross-transport coverage, add only missing final-gate integration/privacy checks, and run full binary/container verification. |
+| Integration | [#44 Run end-to-end reliability and privacy hardening](https://github.com/vm75/message-sync/issues/44) | Done | `8ccbd23b6fd5d085ab13dbe0f9e4bf224c57e7de` | `make fmt`; `git diff --check`; `GOCACHE=/tmp/message-sync-go-cache make test`; `GOCACHE=/tmp/message-sync-go-cache make vet`; `GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp`; `GOCACHE=/tmp/message-sync-go-cache GOMODCACHE=/tmp/message-sync-modcache go build -trimpath -o /tmp/message-sync-final ./cmd/message-sync`; binary fresh-directory start; `podman build -f Containerfile -t message-sync:dev .`; `podman compose config`; fresh-volume read-only container start; `git diff --exit-code VERSION` — PASS | `ARCHITECTURE.md`, `TESTING.md`, `docs/ASPIRATIONAL_FEATURES.md`, `docs/MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md`, `docs/MUST_HAVE_SYNC_RELIABILITY_TRACKER.md`, `internal/api`, `internal/integration`, `internal/transport/discord`, `internal/transport/whatsapp` | Final gate complete; privacy review PASS; residual provider limits remain documented; no follow-up |
 
 ## Program invariants
 
@@ -135,9 +135,9 @@ Completion commit: `<sha>`
 
 The program is complete only when:
 
-- [ ] issues #32-#44 are closed as completed;
-- [ ] every tracker row is **Done** with commit/tests/docs evidence;
-- [ ] [#44](https://github.com/vm75/message-sync/issues/44) records the final branch head and residual provider limitations;
-- [ ] permanent docs match the tested implementation;
-- [ ] `git diff main...agent/sync-reliability -- VERSION` is empty;
-- [ ] the branch is ready for owner review but has not been merged without a separate request.
+- [x] issues #32-#44 are closed as completed;
+- [x] every tracker row is **Done** with commit/tests/docs evidence;
+- [x] [#44](https://github.com/vm75/message-sync/issues/44) records the final branch head and residual provider limitations;
+- [x] permanent docs match the tested implementation;
+- [x] `git diff main...agent/sync-reliability -- VERSION` is empty;
+- [x] the branch is ready for owner review but has not been merged without a separate request.
