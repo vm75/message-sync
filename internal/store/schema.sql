@@ -87,9 +87,3 @@ CREATE TABLE IF NOT EXISTS suppressed_reactions (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (endpoint_id, remote_message_id, emoji)
 );
-
-CREATE TABLE IF NOT EXISTS schema_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-INSERT OR IGNORE INTO schema_meta(key, value) VALUES ('schema_version', '12');

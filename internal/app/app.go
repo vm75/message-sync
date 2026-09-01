@@ -291,7 +291,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	logger.Info("message-sync started",
 		"endpoints", len(cfg.Endpoints),
 		"sync_sets", len(cfg.SyncSets),
-		"sync_schema", store.SchemaVersion,
 	)
 
 	pruneTicker := time.NewTicker(24 * time.Hour)

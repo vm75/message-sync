@@ -15,8 +15,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 12
-
 var (
 	//go:embed schema.sql
 	schemaSQL string
@@ -92,7 +90,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 			return nil, fmt.Errorf("configure sync database: %w", err)
 		}
 	}
-	if err := migrate(ctx, db); err != nil {
+	if err := initialize(ctx, db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -103,10 +101,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
-func migrate(ctx context.Context, db *sql.DB) error {
+func initialize(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin sync migration: %w", err)
+		return fmt.Errorf("begin sync schema initialization: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -116,249 +114,13 @@ func migrate(ctx context.Context, db *sql.DB) error {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("migrate sync database: %w", err)
+			return fmt.Errorf("initialize sync schema: %w", err)
 		}
-	}
-
-	var version int
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
-		return fmt.Errorf("read sync schema version: %w", err)
-	}
-	if version == 1 {
-		hasCol, err := tableHasColumn(ctx, tx, "message_copies", "from_self")
-		if err != nil {
-			return fmt.Errorf("check message_copies column: %w", err)
-		}
-		if !hasCol {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE message_copies ADD COLUMN from_self BOOLEAN NOT NULL DEFAULT 0`); err != nil {
-				return fmt.Errorf("migrate schema v1 to v2: add from_self: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '2' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v1 to v2: update version: %w", err)
-		}
-		version = 2
-	}
-	if version == 2 {
-		// Retroactively mark destination copies as from_self=1.
-		// For each canonical, the earliest copy is the source; all others
-		// were sent by the bridge account.
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE message_copies SET from_self = 1
-			WHERE rowid NOT IN (
-				SELECT MIN(rowid) FROM message_copies GROUP BY canonical_id
-			)`); err != nil {
-			return fmt.Errorf("migrate schema v2 to v3: fix from_self: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '3' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v2 to v3: update version: %w", err)
-		}
-		version = 3
-	}
-	if version == 3 {
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '4' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v3 to v4: update version: %w", err)
-		}
-		version = 4
-	}
-	if version == 4 {
-		hasCol, err := tableHasColumn(ctx, tx, "global_config", "admin_password_hash")
-		if err != nil {
-			return fmt.Errorf("check global_config column: %w", err)
-		}
-		if !hasCol {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN admin_password_hash TEXT NOT NULL DEFAULT ''`); err != nil {
-				return fmt.Errorf("migrate schema v4 to v5: add admin_password_hash: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '5' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v4 to v5: update version: %w", err)
-		}
-		version = 5
-	}
-	if version == 5 {
-		if _, err := tx.ExecContext(ctx, `
-			CREATE TABLE IF NOT EXISTS poll_options (
-				canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-				option_index INTEGER NOT NULL,
-				option_hash TEXT NOT NULL,
-				PRIMARY KEY (canonical_id, option_index)
-			);
-			CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
-
-			CREATE TABLE IF NOT EXISTS poll_votes (
-				canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-				endpoint_id TEXT NOT NULL,
-				actor_hash TEXT NOT NULL,
-				option_hash TEXT NOT NULL,
-				updated_at INTEGER NOT NULL,
-				PRIMARY KEY (canonical_id, endpoint_id, actor_hash, option_hash)
-			);
-			CREATE INDEX IF NOT EXISTS idx_poll_votes_canonical ON poll_votes(canonical_id);
-		`); err != nil {
-			return fmt.Errorf("migrate schema v5 to v6: add poll tables: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '6' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v5 to v6: update version: %w", err)
-		}
-		version = 6
-	}
-	if version == 6 {
-		hasGroups, err := tableExists(ctx, tx, "groups")
-		if err != nil {
-			return fmt.Errorf("check legacy groups table: %w", err)
-		}
-		if hasGroups {
-			if _, err := tx.ExecContext(ctx, `
-				CREATE UNIQUE INDEX IF NOT EXISTS idx_groups_jid ON groups(jid);
-			`); err != nil {
-				return fmt.Errorf("migrate schema v6 to v7: add unique groups jid index: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '7' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v6 to v7: update version: %w", err)
-		}
-		version = 7
-	}
-	if version == 7 {
-		hasCol, err := tableHasColumn(ctx, tx, "global_config", "poll_aggregation_trigger")
-		if err != nil {
-			return fmt.Errorf("check global_config column: %w", err)
-		}
-		if !hasCol {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response'`); err != nil {
-				return fmt.Errorf("migrate schema v7 to v8: add poll_aggregation_trigger: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '8' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v7 to v8: update version: %w", err)
-		}
-		version = 8
-	}
-	if version == 8 {
-		if _, err := tx.ExecContext(ctx, `
-			CREATE TABLE IF NOT EXISTS suppressed_reactions (
-				endpoint_id TEXT NOT NULL,
-				remote_message_id TEXT NOT NULL,
-				emoji TEXT NOT NULL,
-				created_at INTEGER NOT NULL,
-				PRIMARY KEY (endpoint_id, remote_message_id, emoji)
-			);
-		`); err != nil {
-			return fmt.Errorf("migrate schema v8 to v9: add suppressed_reactions table: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '9' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v8 to v9: update version: %w", err)
-		}
-		version = 9
-	}
-	if version == 9 {
-		hasCol, err := tableHasColumn(ctx, tx, "global_config", "whatsapp_chat_cleanup_enabled")
-		if err != nil {
-			return fmt.Errorf("check global_config column: %w", err)
-		}
-		if !hasCol {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN whatsapp_chat_cleanup_enabled BOOLEAN NOT NULL DEFAULT 0`); err != nil {
-				return fmt.Errorf("migrate schema v9 to v10: add whatsapp_chat_cleanup_enabled: %w", err)
-			}
-		}
-		hasCol2, err := tableHasColumn(ctx, tx, "global_config", "whatsapp_chat_retention_days")
-		if err != nil {
-			return fmt.Errorf("check global_config column: %w", err)
-		}
-		if !hasCol2 {
-			if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30`); err != nil {
-				return fmt.Errorf("migrate schema v9 to v10: add whatsapp_chat_retention_days: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '10' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v9 to v10: update version: %w", err)
-		}
-		version = 10
-	}
-	if version == 10 {
-		hasGroups, err := tableExists(ctx, tx, "groups")
-		if err != nil {
-			return fmt.Errorf("check legacy groups table: %w", err)
-		}
-		if hasGroups {
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO endpoints(alias, transport, remote_id, sync_set_id)
-				SELECT alias, 'whatsapp', jid, sync_set_id FROM groups
-			`); err != nil {
-				return fmt.Errorf("migrate schema v10 to v11: copy WhatsApp endpoints: %w", err)
-			}
-			if _, err := tx.ExecContext(ctx, `DROP TABLE groups`); err != nil {
-				return fmt.Errorf("migrate schema v10 to v11: drop groups table: %w", err)
-			}
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '11' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v10 to v11: update version: %w", err)
-		}
-		version = 11
-	}
-	if version == 11 {
-		if _, err := tx.ExecContext(ctx, `
-			ALTER TABLE endpoints RENAME TO endpoints_v11;
-			CREATE TABLE endpoints (
-				alias TEXT PRIMARY KEY,
-				transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
-				remote_id TEXT NOT NULL,
-				sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
-				UNIQUE (transport, remote_id)
-			);
-			INSERT INTO endpoints(alias, transport, remote_id, sync_set_id)
-			SELECT alias, transport, remote_id, sync_set_id FROM endpoints_v11;
-			DROP TABLE endpoints_v11;
-			CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);
-		`); err != nil {
-			return fmt.Errorf("migrate schema v11 to v12: allow Telegram transport: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `UPDATE schema_meta SET value = '12' WHERE key = 'schema_version'`); err != nil {
-			return fmt.Errorf("migrate schema v11 to v12: update version: %w", err)
-		}
-		version = 12
-	}
-	if version != SchemaVersion {
-		return fmt.Errorf("unsupported sync schema version %d", version)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sync migration: %w", err)
+		return fmt.Errorf("commit sync schema initialization: %w", err)
 	}
 	return nil
-}
-
-func tableExists(ctx context.Context, tx *sql.Tx, table string) (bool, error) {
-	var name string
-	err := tx.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
-func tableHasColumn(ctx context.Context, tx *sql.Tx, table, column string) (bool, error) {
-	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%s)", table))
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var name, ctype string
-		var notnull, pk int
-		var dfltValue sql.NullString
-		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
-			return false, err
-		}
-		if strings.EqualFold(name, column) {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
 }
 
 func (s *Store) Close() error {

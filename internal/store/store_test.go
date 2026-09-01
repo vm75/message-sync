@@ -22,7 +22,7 @@ func openTestStore(t *testing.T) (*Store, string) {
 	return store, path
 }
 
-func TestOpenMigratesSchemaAndEnablesForeignKeys(t *testing.T) {
+func TestOpenInitializesSchemaAndEnablesForeignKeys(t *testing.T) {
 	store, _ := openTestStore(t)
 	var enabled int
 	if err := store.db.QueryRow(`PRAGMA foreign_keys`).Scan(&enabled); err != nil {
@@ -31,12 +31,12 @@ func TestOpenMigratesSchemaAndEnablesForeignKeys(t *testing.T) {
 	if enabled != 1 {
 		t.Fatalf("foreign_keys = %d, want 1", enabled)
 	}
-	var version int
-	if err := store.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
+	var schemaMetaCount int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_meta'`).Scan(&schemaMetaCount); err != nil {
 		t.Fatal(err)
 	}
-	if version != SchemaVersion {
-		t.Fatalf("schema version = %d, want %d", version, SchemaVersion)
+	if schemaMetaCount != 0 {
+		t.Fatal("fresh schema unexpectedly contains schema metadata")
 	}
 }
 
@@ -101,173 +101,6 @@ func TestEndpointSchemaEnforcesAliasAndTransportRemoteUniqueness(t *testing.T) {
 	}
 	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('x', 'unknown', 'opaque', 'mesh')`); err == nil {
 		t.Fatal("expected unknown transport to be rejected by schema")
-	}
-}
-
-func TestMigrationFromV10ConvertsGroupsToWhatsAppEndpoints(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync_v10.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy := `
-		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
-		INSERT INTO sync_sets(id) VALUES ('mesh');
-		CREATE TABLE groups (
-			alias TEXT PRIMARY KEY,
-			jid TEXT NOT NULL UNIQUE,
-			sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL
-		);
-		INSERT INTO groups(alias, jid, sync_set_id) VALUES
-			('alpha', '1@g.us', 'mesh'),
-			('beta', '2@g.us', 'mesh');
-		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '10');
-	`
-	for _, stmt := range strings.Split(legacy, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatalf("setup v10 database: %v", err)
-		}
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	st, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("Open v10 database failed: %v", err)
-	}
-	defer st.Close()
-
-	rows, err := st.db.Query(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias`)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	type endpointRow struct {
-		alias, transport, remoteID, syncSetID string
-	}
-	var got []endpointRow
-	for rows.Next() {
-		var row endpointRow
-		if err := rows.Scan(&row.alias, &row.transport, &row.remoteID, &row.syncSetID); err != nil {
-			t.Fatal(err)
-		}
-		got = append(got, row)
-	}
-	want := []endpointRow{
-		{alias: "alpha", transport: "whatsapp", remoteID: "1@g.us", syncSetID: "mesh"},
-		{alias: "beta", transport: "whatsapp", remoteID: "2@g.us", syncSetID: "mesh"},
-	}
-	if len(got) != len(want) {
-		t.Fatalf("migrated endpoints = %+v, want %+v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("migrated endpoint[%d] = %+v, want %+v", i, got[i], want[i])
-		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	var legacyCount int
-	if err := st.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='groups'`).Scan(&legacyCount); err != nil {
-		t.Fatal(err)
-	}
-	if legacyCount != 0 {
-		t.Fatal("legacy groups table still exists after migration")
-	}
-}
-
-func TestMigrationFromV11AllowsTelegramEndpoints(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync_v11.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy := `
-		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
-		INSERT INTO sync_sets(id) VALUES ('mesh');
-		CREATE TABLE endpoints (
-			alias TEXT PRIMARY KEY,
-			transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord')),
-			remote_id TEXT NOT NULL,
-			sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
-			UNIQUE (transport, remote_id)
-		);
-		CREATE UNIQUE INDEX idx_endpoints_remote ON endpoints(transport, remote_id);
-		INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES
-			('wa', 'whatsapp', '1@g.us', 'mesh'),
-			('dc', 'discord', '123456789012345678', 'mesh');
-		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '11');
-	`
-	for _, stmt := range strings.Split(legacy, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatalf("setup v11 database: %v", err)
-		}
-	}
-	if err := db.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	st, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("Open v11 database failed: %v", err)
-	}
-	defer st.Close()
-
-	var version int
-	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
-		t.Fatal(err)
-	}
-	if version != SchemaVersion {
-		t.Fatalf("schema version = %d, want %d", version, SchemaVersion)
-	}
-
-	rows, err := st.db.Query(`SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var preserved []string
-	for rows.Next() {
-		var alias, transportName, remoteID, syncSetID string
-		if err := rows.Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
-			t.Fatal(err)
-		}
-		preserved = append(preserved, alias+"|"+transportName+"|"+remoteID+"|"+syncSetID)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"dc|discord|123456789012345678|mesh",
-		"wa|whatsapp|1@g.us|mesh",
-	}
-	if len(preserved) != len(want) {
-		t.Fatalf("preserved endpoints = %+v, want %+v", preserved, want)
-	}
-	for i := range want {
-		if preserved[i] != want[i] {
-			t.Fatalf("preserved endpoint[%d] = %q, want %q", i, preserved[i], want[i])
-		}
-	}
-
-	if _, err := st.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('tg', 'telegram', '-1001234567890', 'mesh')`); err != nil {
-		t.Fatalf("insert Telegram endpoint after migration: %v", err)
 	}
 }
 
@@ -404,93 +237,6 @@ func TestMissingLookupPreservesSQLNotFound(t *testing.T) {
 	}
 }
 
-func TestMigrationFromV4ToV5(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync_v4.db")
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Setup v4 database schema without admin_password_hash
-	v4Statements := `
-		CREATE TABLE canonical_messages (
-			canonical_id TEXT PRIMARY KEY,
-			created_at INTEGER NOT NULL,
-			tombstoned_at INTEGER
-		);
-		CREATE TABLE message_copies (
-			canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-			endpoint_id TEXT NOT NULL,
-			remote_message_id TEXT NOT NULL,
-			created_at INTEGER NOT NULL,
-			from_self BOOLEAN NOT NULL DEFAULT 0,
-			PRIMARY KEY (endpoint_id, remote_message_id),
-			UNIQUE (canonical_id, endpoint_id)
-		);
-		CREATE TABLE reactions (
-			canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-			source_endpoint_id TEXT NOT NULL,
-			actor_hash TEXT NOT NULL,
-			emoji TEXT NOT NULL,
-			updated_at INTEGER NOT NULL,
-			PRIMARY KEY (canonical_id, source_endpoint_id, actor_hash)
-		);
-		CREATE TABLE recovery_cursors (
-			endpoint_id TEXT PRIMARY KEY,
-			remote_message_id TEXT,
-			message_timestamp INTEGER,
-			updated_at INTEGER NOT NULL
-		);
-		CREATE TABLE global_config (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
-			username_mode TEXT NOT NULL DEFAULT 'push_name',
-			media_enabled BOOLEAN NOT NULL DEFAULT 1,
-			media_max_size_mb INTEGER NOT NULL DEFAULT 100,
-			recovery_enabled BOOLEAN NOT NULL DEFAULT 1,
-			recovery_max_age_hours INTEGER NOT NULL DEFAULT 24,
-			recovery_max_messages_per_group INTEGER NOT NULL DEFAULT 200,
-			storage_message_retention_days INTEGER NOT NULL DEFAULT 90
-		);
-		INSERT INTO global_config (id) VALUES (1);
-		CREATE TABLE sync_sets (id TEXT PRIMARY KEY);
-		CREATE TABLE groups (alias TEXT PRIMARY KEY, jid TEXT NOT NULL, sync_set_id TEXT);
-		CREATE TABLE schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-		INSERT INTO schema_meta(key, value) VALUES ('schema_version', '4');
-	`
-	for _, stmt := range strings.Split(v4Statements, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		if _, err := db.Exec(stmt); err != nil {
-			t.Fatalf("setup v4 db: %v", err)
-		}
-	}
-	_ = db.Close()
-
-	// Open with Store.Open to trigger migration
-	st, err := Open(context.Background(), path)
-	if err != nil {
-		t.Fatalf("Open v4 db failed: %v", err)
-	}
-	defer st.Close()
-
-	var version int
-	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key='schema_version'`).Scan(&version); err != nil {
-		t.Fatal(err)
-	}
-	if version != SchemaVersion {
-		t.Fatalf("expected migrated schema version %d, got %d", SchemaVersion, version)
-	}
-
-	var hash string
-	if err := st.db.QueryRow(`SELECT admin_password_hash FROM global_config WHERE id=1`).Scan(&hash); err != nil {
-		t.Fatalf("expected admin_password_hash column to exist: %v", err)
-	}
-	if hash != "" {
-		t.Fatalf("expected empty default hash, got %q", hash)
-	}
-}
-
 func TestPollOptionsAndVotes(t *testing.T) {
 	store, _ := openTestStore(t)
 	ctx := context.Background()
@@ -575,76 +321,6 @@ func TestPollOptionsAndVotes(t *testing.T) {
 	}
 	if counts["hash1"] != 0 || counts["hash2"] != 0 || counts["hash3"] != 1 {
 		t.Fatalf("unexpected counts after actor 2 cleared: %+v", counts)
-	}
-}
-
-func TestMigrationFromV3ToV6(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "sync.db")
-	rawDB, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Create v3 schema manually
-	v3SQL := `
-CREATE TABLE canonical_messages (
-    canonical_id TEXT PRIMARY KEY,
-    created_at INTEGER NOT NULL,
-    tombstoned_at INTEGER
-);
-CREATE TABLE message_copies (
-    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-    endpoint_id TEXT NOT NULL,
-    remote_message_id TEXT NOT NULL,
-    created_at INTEGER NOT NULL,
-    from_self BOOLEAN NOT NULL DEFAULT 0,
-    PRIMARY KEY (endpoint_id, remote_message_id),
-    UNIQUE (canonical_id, endpoint_id)
-);
-CREATE TABLE reactions (
-    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
-    source_endpoint_id TEXT NOT NULL,
-    actor_hash TEXT NOT NULL,
-    emoji TEXT NOT NULL,
-    updated_at INTEGER NOT NULL,
-    PRIMARY KEY (canonical_id, source_endpoint_id, actor_hash)
-);
-CREATE TABLE recovery_cursors (
-    endpoint_id TEXT PRIMARY KEY,
-    remote_message_id TEXT,
-    message_timestamp INTEGER,
-    updated_at INTEGER NOT NULL
-);
-CREATE TABLE schema_meta (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-INSERT INTO schema_meta(key, value) VALUES ('schema_version', '3');
-`
-	for _, stmt := range strings.Split(v3SQL, ";") {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-		if _, err := rawDB.Exec(stmt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	_ = rawDB.Close()
-
-	// Open via store.Open -> should migrate v3 -> v6 successfully
-	st, err := Open(context.Background(), dbPath)
-	if err != nil {
-		t.Fatalf("Open v3 database failed: %v", err)
-	}
-	defer st.Close()
-
-	var version int
-	if err := st.db.QueryRow(`SELECT CAST(value AS INTEGER) FROM schema_meta WHERE key = 'schema_version'`).Scan(&version); err != nil {
-		t.Fatal(err)
-	}
-	if version != SchemaVersion {
-		t.Fatalf("expected migrated schema version %d, got %d", SchemaVersion, version)
 	}
 }
 

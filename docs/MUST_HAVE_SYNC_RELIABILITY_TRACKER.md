@@ -23,7 +23,7 @@ Only one issue should be `In progress` on the shared branch unless the work is d
 
 | Phase | Issue | Status | Dependencies | Completion commit | Tests | Docs updated | Next action / blocker |
 |---|---|---|---|---|---|---|---|
-| Clean baseline | [#32 Remove pre-release SQLite migration machinery](https://github.com/vm75/message-sync/issues/32) | Open | — | — | — | — | Implement first |
+| Clean baseline | [#32 Remove pre-release SQLite migration machinery](https://github.com/vm75/message-sync/issues/32) | In progress | — | — | `internal/store` focused tests pending full verification | `ARCHITECTURE.md` pending final review | Starting from `e3118b0`; remove schema-version/migration machinery and historical migration tests |
 | Clean baseline | [#33 Remove legacy groups API and naming compatibility](https://github.com/vm75/message-sync/issues/33) | Open | #32 | — | — | — | Wait for #32 |
 | Failure contract | [#34 Add privacy-safe delivery failure classification](https://github.com/vm75/message-sync/issues/34) | Open | #32, #33 | — | — | — | Wait for #32-#33 |
 | State | [#35 Add a content-free delivery ledger](https://github.com/vm75/message-sync/issues/35) | Open | #32, #33; coordinate states with #34 | — | — | — | Wait for #32-#33 |

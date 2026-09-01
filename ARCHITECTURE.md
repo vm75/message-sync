@@ -63,6 +63,8 @@ The daemon opens the database with the CGO-free SQLite driver, enables SQLite fo
 
 Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in `internal/store/schema.sql`.
 
+The application initializes this schema only for a fresh database. The product is pre-release, so the store has no schema-version table, historical migrations, upgrade dispatcher, or legacy-database compatibility path; incompatible development changes use a fresh `sync.db`.
+
 It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and recovery cursors. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
