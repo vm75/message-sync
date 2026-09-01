@@ -20,6 +20,7 @@
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
+- **Bounded Recovery**: WhatsApp HistorySync snapshots are replayed oldest-first through the same checkpointed routing path as live messages; recovery is bounded and does not promise offline delete/reaction reconstruction.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
 - **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord/Telegram status, discover Discord channels and transiently observed Telegram groups, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.

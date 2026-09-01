@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -64,6 +65,7 @@ type Adapter struct {
 	currentQRExpires time.Time
 	pairingCodeChan  chan string
 	mu               sync.Mutex
+	ingressMu        sync.Mutex
 	closeOnce        sync.Once
 	closeErr         error
 	mediaEnabled     bool
@@ -72,6 +74,21 @@ type Adapter struct {
 	recoveryMaxAge   time.Duration
 	recoveryMaxCount int
 	pcache           *participantCache
+}
+
+type parsedHistoryMessage struct {
+	message *events.Message
+	order   uint64
+}
+
+func sortHistoryMessages(messages []parsedHistoryMessage) {
+	sort.SliceStable(messages, func(i, j int) bool {
+		left, right := messages[i].message.Info.Timestamp, messages[j].message.Info.Timestamp
+		if !left.Equal(right) {
+			return left.Before(right)
+		}
+		return messages[i].order < messages[j].order
+	})
 }
 
 func Open(ctx context.Context, opts Options) (*Adapter, error) {
@@ -854,6 +871,8 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 func (a *Adapter) handleEvent(raw any) {
 	switch evt := raw.(type) {
 	case *events.Message:
+		a.ingressMu.Lock()
+		defer a.ingressMu.Unlock()
 		a.mu.Lock()
 		normalizer := a.normalizer
 		mediaEnabled := a.mediaEnabled
@@ -875,6 +894,7 @@ func (a *Adapter) handleEvent(raw any) {
 		if !ok {
 			return
 		}
+		incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
 		select {
 		case a.events <- incoming:
 		default:
@@ -885,6 +905,8 @@ func (a *Adapter) handleEvent(raw any) {
 			)
 		}
 	case *events.HistorySync:
+		a.ingressMu.Lock()
+		defer a.ingressMu.Unlock()
 		a.mu.Lock()
 		normalizer := a.normalizer
 		mediaEnabled := a.mediaEnabled
@@ -907,11 +929,8 @@ func (a *Adapter) handleEvent(raw any) {
 			if _, ok := normalizer.endpoints[chatJID.String()]; !ok {
 				continue
 			}
-			count := 0
+			parsedMessages := make([]parsedHistoryMessage, 0, len(conv.GetMessages()))
 			for _, historyMsg := range conv.GetMessages() {
-				if recoveryMaxCount > 0 && count >= recoveryMaxCount {
-					break
-				}
 				webMsg := historyMsg.GetMessage()
 				if webMsg == nil {
 					continue
@@ -923,6 +942,15 @@ func (a *Adapter) handleEvent(raw any) {
 				if recoveryMaxAge > 0 && !parsed.Info.Timestamp.IsZero() && time.Since(parsed.Info.Timestamp) > recoveryMaxAge {
 					continue
 				}
+				parsedMessages = append(parsedMessages, parsedHistoryMessage{message: parsed, order: historyMsg.GetMsgOrderID()})
+			}
+			sortHistoryMessages(parsedMessages)
+			count := 0
+			for _, history := range parsedMessages {
+				if recoveryMaxCount > 0 && count >= recoveryMaxCount {
+					break
+				}
+				parsed := history.message
 				if !parsed.Info.MessageSource.Sender.IsEmpty() {
 					a.pcache.Add(parsed.Info.ID, parsed.Info.MessageSource.Sender.ToNonAD().String())
 				}
@@ -930,6 +958,7 @@ func (a *Adapter) handleEvent(raw any) {
 				if !ok {
 					continue
 				}
+				incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
 				select {
 				case a.events <- incoming:
 					count++
@@ -948,6 +977,22 @@ func (a *Adapter) handleEvent(raw any) {
 		a.logger.Warn("WhatsApp disconnected", "event", "whatsapp_disconnected")
 	case *events.LoggedOut:
 		a.logger.Warn("WhatsApp logged out", "event", "whatsapp_logged_out")
+	}
+}
+
+// WhatsApp does not expose a durable application-level update sequence for
+// live messages. Its message timestamp is the common ordered boundary shared
+// by live and protocol HistorySync snapshots; the canonical remote ID remains
+// the idempotency key for messages sharing a timestamp.
+func whatsappCheckpoint(endpoint transport.EndpointID, timestamp time.Time) transport.Checkpoint {
+	if timestamp.IsZero() {
+		return transport.Checkpoint{}
+	}
+	return transport.Checkpoint{
+		StreamKey:      string(endpoint),
+		Position:       timestamp.UnixNano(),
+		EventTimestamp: timestamp,
+		Valid:          true,
 	}
 }
 

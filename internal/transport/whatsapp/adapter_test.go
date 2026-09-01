@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,7 +16,25 @@ import (
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 )
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
 
 func TestDisablePlaintextPersistence(t *testing.T) {
 	client := &whatsmeow.Client{
@@ -28,6 +47,33 @@ func TestDisablePlaintextPersistence(t *testing.T) {
 	}
 	if client.UseRetryMessageStore {
 		t.Fatal("retry plaintext message store must be disabled")
+	}
+}
+
+func TestWhatsAppCheckpointUsesEndpointAndMessageTimestamp(t *testing.T) {
+	timestamp := time.Unix(1_700_000_123, 456).UTC()
+	cp := whatsappCheckpoint("wa-team", timestamp)
+	if !cp.Valid || cp.StreamKey != "wa-team" || cp.Position != timestamp.UnixNano() || !cp.EventTimestamp.Equal(timestamp) {
+		t.Fatalf("checkpoint = %#v", cp)
+	}
+	if got := whatsappCheckpoint("wa-team", time.Time{}); got.Valid {
+		t.Fatalf("zero timestamp unexpectedly produced checkpoint: %#v", got)
+	}
+}
+
+func TestSortHistoryMessagesOldestFirstWithProtocolOrderTieBreak(t *testing.T) {
+	newMessage := func(timestamp time.Time) *events.Message {
+		return &events.Message{Info: types.MessageInfo{Timestamp: timestamp}}
+	}
+	old := time.Unix(100, 0)
+	messages := []parsedHistoryMessage{
+		{message: newMessage(old.Add(time.Hour)), order: 1},
+		{message: newMessage(old), order: 2},
+		{message: newMessage(old), order: 1},
+	}
+	sortHistoryMessages(messages)
+	if !messages[0].message.Info.Timestamp.Equal(old) || messages[0].order != 1 || messages[1].order != 2 || !messages[2].message.Info.Timestamp.Equal(old.Add(time.Hour)) {
+		t.Fatalf("history order = %#v", messages)
 	}
 }
 
@@ -94,7 +140,7 @@ func TestAdapterUnauthenticatedStartupDoesNotBlock(t *testing.T) {
 }
 
 func TestAdapterConsumeQREventsAndLifecycle(t *testing.T) {
-	var logBuf bytes.Buffer
+	var logBuf lockedBuffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
 
 	adapter := &Adapter{

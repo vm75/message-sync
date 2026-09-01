@@ -164,6 +164,8 @@ whatsmeow callback
 
 The normalized event may temporarily carry message text/caption and push-name data because the router needs them for immediate forwarding, but those fields are explicitly transient and must never be persisted or logged. DMs and unconfigured groups are discarded before an internal event is produced.
 
+Live messages and protocol HistorySync snapshots carry the same per-endpoint checkpoint stream, using the provider message timestamp as the ordered position. HistorySync snapshots are parsed in memory, filtered by the configured age/count bounds, sorted oldest-first (with the protocol order as a tie-breaker), and serialized with live WhatsApp ingress. They then enter the ordinary recovery coordinator and router, so an accepted replay repairs only missing copies and advances the cursor only after routing intent is recorded. WhatsApp does not provide a durable application-level sequence for every live message; messages sharing a timestamp remain idempotent by remote-copy ID.
+
 For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
 
 The router processes ingress events via an ordered worker:
@@ -346,7 +348,7 @@ Deletes mark a canonical message tombstoned before/while propagation so offline 
 
 ## 13. Offline recovery
 
-Recovery is bounded and best effort. Use WhatsApp offline/history events and, where appropriate, whatsmeow history-sync primitives.
+Recovery is bounded and best effort. WhatsApp uses only the existing whatsmeow protocol HistorySync event; it does not scrape arbitrary chat history or query `whatsapp.db` for application data. HistorySync cannot reliably reconstruct offline delete or reaction transitions, so the adapter does not guess those mutations. Provider availability and completeness remain controlled by WhatsApp's protocol history behavior.
 
 Config bounds:
 
