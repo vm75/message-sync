@@ -18,9 +18,23 @@ const (
 	WebhookStatusUnavailable       WebhookStatus = "unavailable"
 )
 
+type HistoryStatus string
+
+const (
+	HistoryStatusUnknown           HistoryStatus = "unknown"
+	HistoryStatusReady             HistoryStatus = "ready"
+	HistoryStatusMissingPermission HistoryStatus = "missing_permission"
+	HistoryStatusUnavailable       HistoryStatus = "unavailable"
+)
+
 type EndpointWebhookStatus struct {
 	Alias  string        `json:"alias"`
 	Status WebhookStatus `json:"status"`
+}
+
+type EndpointHistoryStatus struct {
+	Alias  string        `json:"alias"`
+	Status HistoryStatus `json:"status"`
 }
 
 type AdminStatus struct {
@@ -28,6 +42,7 @@ type AdminStatus struct {
 	Connected  bool                    `json:"connected"`
 	Status     string                  `json:"status"`
 	Webhooks   []EndpointWebhookStatus `json:"webhooks"`
+	History    []EndpointHistoryStatus `json:"history"`
 }
 
 type DiscoveredChannel struct {
@@ -52,6 +67,7 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 		Configured: true,
 		Status:     "disconnected",
 		Webhooks:   []EndpointWebhookStatus{},
+		History:    []EndpointHistoryStatus{},
 	}
 	if a == nil {
 		status.Configured = false
@@ -66,6 +82,9 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 		targets[alias] = channelID
 	}
 	webhook := a.webhook
+	for alias, historyStatus := range a.historyStatus {
+		status.History = append(status.History, EndpointHistoryStatus{Alias: alias, Status: historyStatus})
+	}
 	a.mu.RUnlock()
 
 	if status.Connected {
@@ -85,6 +104,9 @@ func (a *Adapter) AdminStatus(_ context.Context) AdminStatus {
 	}
 	sort.Slice(status.Webhooks, func(i, j int) bool {
 		return status.Webhooks[i].Alias < status.Webhooks[j].Alias
+	})
+	sort.Slice(status.History, func(i, j int) bool {
+		return status.History[i].Alias < status.History[j].Alias
 	})
 	return status
 }

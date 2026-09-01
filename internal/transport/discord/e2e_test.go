@@ -101,6 +101,10 @@ func (f *e2eDiscordAPI) ChannelMessage(_ string, _ string, _ ...discordgo.Reques
 	return nil, nil
 }
 
+func (f *e2eDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...discordgo.RequestOption) ([]*discordgo.Message, error) {
+	return nil, nil
+}
+
 func (f *e2eDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
 	if data != nil && data.Reference != nil {
 		f.replyTargets = append(f.replyTargets, data.Reference.MessageID)

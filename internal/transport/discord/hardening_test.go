@@ -26,6 +26,10 @@ type retryDiscordAPI struct {
 	removeRetry bool
 }
 
+func (f *retryDiscordAPI) ChannelMessages(string, int, string, string, string, ...discordgo.RequestOption) ([]*discordgo.Message, error) {
+	return nil, nil
+}
+
 func (f *retryDiscordAPI) ChannelMessage(string, string, ...discordgo.RequestOption) (*discordgo.Message, error) {
 	return nil, nil
 }

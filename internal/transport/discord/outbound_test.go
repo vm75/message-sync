@@ -46,6 +46,10 @@ type fakeDiscordAPI struct {
 	message    *discordgo.Message
 }
 
+func (f *fakeDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...discordgo.RequestOption) ([]*discordgo.Message, error) {
+	return nil, nil
+}
+
 func (f *fakeDiscordAPI) ChannelMessage(_ string, _ string, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
 	return f.message, nil
 }

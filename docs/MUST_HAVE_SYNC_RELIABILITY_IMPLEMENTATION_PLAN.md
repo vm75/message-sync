@@ -205,7 +205,7 @@ The shared Go contract is `transport.RecoverySource`: it supplies safe stream ke
 | Transport | Recovery source | Cursor scope | Must handle | Known limitation |
 |---|---|---|---|---|
 | Telegram | Bot API `getUpdates` | one global bot update stream | start at accepted `update_id + 1`, preserve gaps, dedupe replay | Telegram retains updates for a limited provider window |
-| Discord | bounded channel history after snowflake | one stream per configured channel endpoint | oldest-first creates; current edited snapshot reconciliation; startup/reconnect | offline deletes and reaction transitions are not a complete history |
+| Discord | bounded channel history after snowflake | one stream per configured channel endpoint | oldest-first creates; current edited snapshot reconciliation; startup/reconnect; safe per-endpoint history readiness | offline deletes and reaction transitions are not a complete history; missing `VIEW_CHANNEL` or `READ_MESSAGE_HISTORY` is reported as `missing_permission` |
 | WhatsApp | existing protocol HistorySync | one stream per configured endpoint | accepted cursor filtering, oldest-first missing-copy reconciliation | availability/completeness is controlled by WhatsApp protocol history sync |
 
 Do not persist source snapshots to compensate for provider limitations.

@@ -17,6 +17,7 @@ const (
 )
 
 type discordAPI interface {
+	ChannelMessages(channelID string, limit int, beforeID, afterID, aroundID string, options ...discordgo.RequestOption) ([]*discordgo.Message, error)
 	ChannelMessage(channelID, messageID string, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	ChannelMessageSendComplex(channelID string, data *discordgo.MessageSend, options ...discordgo.RequestOption) (*discordgo.Message, error)
 	MessageReactionAdd(channelID, messageID, emojiID string, options ...discordgo.RequestOption) error

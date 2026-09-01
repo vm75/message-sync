@@ -44,10 +44,12 @@ type Adapter struct {
 	reactionState     map[reactionKey]string
 	suppressedDeletes map[string]struct{}
 
-	mu        sync.RWMutex
-	connected bool
-	closeOnce sync.Once
-	closeErr  error
+	mu              sync.RWMutex
+	connected       bool
+	closeOnce       sync.Once
+	closeErr        error
+	recoverySignals chan struct{}
+	historyStatus   map[string]HistoryStatus
 }
 
 var _ transport.Adapter = (*Adapter)(nil)
@@ -108,6 +110,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		mediaMaxBytes:     opts.MediaMaxBytes,
 		reactionState:     make(map[reactionKey]string),
 		suppressedDeletes: make(map[string]struct{}),
+		recoverySignals:   make(chan struct{}, 1),
+		historyStatus:     make(map[string]HistoryStatus),
 	}
 	session.AddHandler(adapter.handleReady)
 	session.AddHandler(adapter.handleResumed)
@@ -196,10 +200,22 @@ func (a *Adapter) Close() error {
 
 func (a *Adapter) handleReady(_ *discordgo.Session, _ *discordgo.Ready) {
 	a.setConnected(true, "discord_connected")
+	a.signalRecovery()
 }
 
 func (a *Adapter) handleResumed(_ *discordgo.Session, _ *discordgo.Resumed) {
 	a.setConnected(true, "discord_reconnected")
+	a.signalRecovery()
+}
+
+func (a *Adapter) signalRecovery() {
+	if a == nil || a.recoverySignals == nil {
+		return
+	}
+	select {
+	case a.recoverySignals <- struct{}{}:
+	default:
+	}
 }
 
 func (a *Adapter) handleDisconnect(_ *discordgo.Session, _ *discordgo.Disconnect) {
@@ -265,6 +281,12 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	a.mu.Lock()
 	a.normalizer = normalizer
 	a.targets = targets
+	if a.historyStatus == nil {
+		a.historyStatus = make(map[string]HistoryStatus)
+	}
+	for alias := range channelIDs {
+		a.historyStatus[alias] = HistoryStatusUnknown
+	}
 	a.mediaEnabled = cfg.Media.Enabled
 	a.mediaMaxBytes = maxBytes
 	a.mu.Unlock()

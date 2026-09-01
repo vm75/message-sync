@@ -247,6 +247,7 @@ You should see logs indicating the HTTP API is listening on port 8080 and that D
 2. Verify the status:
    - **Gateway Status**: `Connected`
    - **Webhook Readiness**: `Ready`
+   - **History Readiness**: `Ready` (or `Missing Permission` if the bot lacks View Channel/Read Message History)
 3. Click **Discover Channels**.
 4. Find your `#sync-test` channel from the list, assign an alias (e.g., `dc_test`), and click **Add Endpoint**.
 
