@@ -110,6 +110,8 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ## Guiding Principles for Adoption
 
+The must-have sync reliability program (#32–#44) is implemented on `agent/sync-reliability`. Its bounded lanes, content-free delivery ledger, accepted checkpoints, provider recovery bounds, managed-webhook repair, and privacy-safe operator health view are current MVP behavior rather than aspirational work. The capabilities below remain explicitly deferred and must not be added as part of routine reliability maintenance.
+
 Before pulling any item from this backlog into implementation:
 
 1. **KISS & YAGNI**: Avoid adding architectural complexity for hypothetical use cases.

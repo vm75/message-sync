@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vm75/message-sync/internal/safelog"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -148,7 +149,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	var hash string
 	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&hash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("query auth status failed", "error", err.Error())
+		safelog.Error(s.logger, "query auth status failed", "auth_status", err)
 		WriteError(w, http.StatusInternalServerError, "failed to check auth status")
 		return
 	}
@@ -177,7 +178,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	var existingHash string
 	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&existingHash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		s.logger.Error("check existing password failed", "error", err.Error())
+		safelog.Error(s.logger, "check existing password failed", "auth_setup_check", err)
 		WriteError(w, http.StatusInternalServerError, "failed to check existing auth setup")
 		return
 	}
@@ -188,7 +189,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 
 	hashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		s.logger.Error("password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "password hash failed", "auth_password_hash", err)
 		WriteError(w, http.StatusInternalServerError, "failed to process password")
 		return
 	}
@@ -198,7 +199,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT(id) DO UPDATE SET admin_password_hash = excluded.admin_password_hash
 	`, string(hashBytes))
 	if err != nil {
-		s.logger.Error("save password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "save password hash failed", "auth_password_save", err)
 		WriteError(w, http.StatusInternalServerError, "failed to save password")
 		return
 	}
@@ -207,7 +208,7 @@ func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 
 	token, err := s.sessions.CreateToken()
 	if err != nil {
-		s.logger.Error("generate session token failed", "error", err.Error())
+		safelog.Error(s.logger, "generate session token failed", "auth_session", err)
 		WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
@@ -240,7 +241,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		s.logger.Error("fetch password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "fetch password hash failed", "auth_login_lookup", err)
 		WriteError(w, http.StatusInternalServerError, "authentication failed")
 		return
 	}
@@ -255,7 +256,7 @@ func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	token, err := s.sessions.CreateToken()
 	if err != nil {
-		s.logger.Error("generate session token failed", "error", err.Error())
+		safelog.Error(s.logger, "generate session token failed", "auth_session", err)
 		WriteError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
@@ -303,7 +304,7 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err != nil {
-		s.logger.Error("fetch password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "fetch password hash failed", "auth_password_lookup", err)
 		WriteError(w, http.StatusInternalServerError, "failed to verify password")
 		return
 	}
@@ -316,14 +317,14 @@ func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request
 
 	newHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
-		s.logger.Error("password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "password hash failed", "auth_password_hash", err)
 		WriteError(w, http.StatusInternalServerError, "failed to process new password")
 		return
 	}
 
 	_, err = s.db.ExecContext(r.Context(), `UPDATE global_config SET admin_password_hash = ? WHERE id = 1`, string(newHashBytes))
 	if err != nil {
-		s.logger.Error("update password hash failed", "error", err.Error())
+		safelog.Error(s.logger, "update password hash failed", "auth_password_update", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update password")
 		return
 	}

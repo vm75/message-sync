@@ -19,6 +19,7 @@ import (
 )
 
 type e2eDiscordAPI struct {
+	mu           sync.Mutex
 	channels     map[string][]*discordgo.Webhook
 	createCalls  int
 	executeCalls int
@@ -33,13 +34,25 @@ type e2eDiscordAPI struct {
 func waitForWebhookSends(t *testing.T, api *e2eDiscordAPI, want int) {
 	t.Helper()
 	deadline := time.After(time.Second)
-	for api.executeCalls < want {
+	for api.executeCount() < want {
 		select {
 		case <-deadline:
-			t.Fatalf("Discord webhook sends=%d, want %d", api.executeCalls, want)
+			t.Fatalf("Discord webhook sends=%d, want %d", api.executeCount(), want)
 		case <-time.After(time.Millisecond):
 		}
 	}
+}
+
+func (f *e2eDiscordAPI) executeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.executeCalls
+}
+
+func (f *e2eDiscordAPI) snapshot() (int, int, []WebhookMessage, []string, []string, []string, []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.createCalls, f.executeCalls, append([]WebhookMessage(nil), f.messages...), append([]string(nil), f.replyTargets...), append([]string(nil), f.edits...), append([]string(nil), f.deletes...), append([]string(nil), f.reactions...)
 }
 
 func waitForWebhookCount(t *testing.T, count func() int, want int, label string) {
@@ -55,10 +68,14 @@ func waitForWebhookCount(t *testing.T, count func() int, want int, label string)
 }
 
 func (f *e2eDiscordAPI) ChannelWebhooks(channelID string, _ ...discordgo.RequestOption) ([]*discordgo.Webhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	return f.channels[channelID], nil
 }
 
 func (f *e2eDiscordAPI) WebhookCreate(channelID, name, _ string, _ ...discordgo.RequestOption) (*discordgo.Webhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.createCalls++
 	webhook := &discordgo.Webhook{
 		ID:        "managed-" + channelID,
@@ -73,6 +90,8 @@ func (f *e2eDiscordAPI) WebhookCreate(channelID, name, _ string, _ ...discordgo.
 }
 
 func (f *e2eDiscordAPI) WebhookExecute(_ string, _ string, _ bool, data *discordgo.WebhookParams, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.executeCalls++
 	f.nextMessage++
 	message := WebhookMessage{Username: data.Username, Content: data.Content}
@@ -84,6 +103,8 @@ func (f *e2eDiscordAPI) WebhookExecute(_ string, _ string, _ bool, data *discord
 }
 
 func (f *e2eDiscordAPI) WebhookMessageEdit(_ string, _ string, messageID string, data *discordgo.WebhookEdit, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	content := ""
 	if data != nil && data.Content != nil {
 		content = *data.Content
@@ -93,6 +114,8 @@ func (f *e2eDiscordAPI) WebhookMessageEdit(_ string, _ string, messageID string,
 }
 
 func (f *e2eDiscordAPI) WebhookMessageDelete(_ string, _ string, messageID string, _ ...discordgo.RequestOption) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deletes = append(f.deletes, messageID)
 	return nil
 }
@@ -106,6 +129,8 @@ func (f *e2eDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...di
 }
 
 func (f *e2eDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if data != nil && data.Reference != nil {
 		f.replyTargets = append(f.replyTargets, data.Reference.MessageID)
 	}
@@ -113,11 +138,15 @@ func (f *e2eDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.Mess
 }
 
 func (f *e2eDiscordAPI) MessageReactionAdd(_ string, messageID, emojiID string, _ ...discordgo.RequestOption) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reactions = append(f.reactions, messageID+"|"+emojiID)
 	return nil
 }
 
 func (f *e2eDiscordAPI) MessageReactionRemove(_ string, messageID, emojiID, _ string, _ ...discordgo.RequestOption) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reactions = append(f.reactions, messageID+"|-"+emojiID)
 	return nil
 }
@@ -197,8 +226,9 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := webhook.Prepare(ctx, []string{testChannelID}); err != nil {
 		t.Fatal(err)
 	}
-	if discordAPI.createCalls != 1 {
-		t.Fatalf("managed webhook create calls=%d, want exactly one shared channel webhook", discordAPI.createCalls)
+	createCalls, _, _, _, _, _, _ := discordAPI.snapshot()
+	if createCalls != 1 {
+		t.Fatalf("managed webhook create calls=%d, want exactly one shared channel webhook", createCalls)
 	}
 
 	discordAdapter := &Adapter{
@@ -244,33 +274,36 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		}
 	}
 	waitForWebhookSends(t, discordAPI, 3)
-	if discordAPI.executeCalls != 3 || len(discordAPI.messages) != 3 {
-		t.Fatalf("Discord webhook sends=%d messages=%d, want 3", discordAPI.executeCalls, len(discordAPI.messages))
+	_, executeCalls, messagesSnapshot, _, _, _, _ := discordAPI.snapshot()
+	if executeCalls != 3 || len(messagesSnapshot) != 3 {
+		t.Fatalf("Discord webhook sends=%d messages=%d, want 3", executeCalls, len(messagesSnapshot))
 	}
 	wantUsers := []string{"Vidhya Private", "Ravi Private", "u_cdefg23456"}
 	for i, want := range wantUsers {
-		if got := discordAPI.messages[i].Username; got != want {
+		if got := messagesSnapshot[i].Username; got != want {
 			t.Fatalf("webhook username[%d]=%q, want %q", i, got, want)
 		}
-		if discordAPI.messages[i].Username == "message-sync" {
+		if messagesSnapshot[i].Username == "message-sync" {
 			t.Fatal("WhatsApp participant was rendered under one generic Discord bot identity")
 		}
 	}
-	if discordAPI.messages[0].Username == discordAPI.messages[1].Username {
+	if messagesSnapshot[0].Username == messagesSnapshot[1].Username {
 		t.Fatal("distinct WhatsApp participants did not render as distinct Discord APP usernames")
 	}
-	if discordAPI.messages[0].Content != "PRIVATE_BODY_ONE" || strings.Contains(discordAPI.messages[0].Content, "Vidhya Private") {
-		t.Fatalf("sender identity was not kept separate from webhook message body: %#v", discordAPI.messages[0])
+	if messagesSnapshot[0].Content != "PRIVATE_BODY_ONE" || strings.Contains(messagesSnapshot[0].Content, "Vidhya Private") {
+		t.Fatalf("sender identity was not kept separate from webhook message body: %#v", messagesSnapshot[0])
 	}
-	if discordAPI.createCalls != 1 {
+	createCalls, _, _, _, _, _, _ = discordAPI.snapshot()
+	if createCalls != 1 {
 		t.Fatal("per-user webhooks were created for WhatsApp participants")
 	}
 
 	if err := mesh.Handle(ctx, messages[0]); err != nil {
 		t.Fatal(err)
 	}
-	if discordAPI.executeCalls != 3 {
-		t.Fatalf("duplicate ingress created another Discord copy: sends=%d", discordAPI.executeCalls)
+	_, executeCalls, _, _, _, _, _ = discordAPI.snapshot()
+	if executeCalls != 3 {
+		t.Fatalf("duplicate ingress created another Discord copy: sends=%d", executeCalls)
 	}
 
 	canonicalID, err := syncStore.CanonicalForRemote(ctx, "wa-one", "wa-source-1")
@@ -296,10 +329,11 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		t.Fatal(err)
 	}
 	waitForWebhookSends(t, discordAPI, 4)
-	if len(discordAPI.replyTargets) != 1 || discordAPI.replyTargets[0] != "discord-copy-1" {
-		t.Fatalf("Discord reply target=%#v, want webhook-created canonical copy", discordAPI.replyTargets)
+	_, _, messagesSnapshot, replyTargets, _, _, _ := discordAPI.snapshot()
+	if len(replyTargets) != 1 || replyTargets[0] != "discord-copy-1" {
+		t.Fatalf("Discord reply target=%#v, want webhook-created canonical copy", replyTargets)
 	}
-	if got := discordAPI.messages[len(discordAPI.messages)-1].Username; got != "Vidhya Private" {
+	if got := messagesSnapshot[len(messagesSnapshot)-1].Username; got != "Vidhya Private" {
 		t.Fatalf("reply lost sender-specific APP username: %q", got)
 	}
 
@@ -313,9 +347,10 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, edit); err != nil {
 		t.Fatal(err)
 	}
-	waitForWebhookCount(t, func() int { return len(discordAPI.edits) }, 1, "edits")
-	if len(discordAPI.edits) != 1 || !strings.HasPrefix(discordAPI.edits[0], "discord-copy-1|") {
-		t.Fatalf("Discord edit did not target webhook-created canonical copy: %#v", discordAPI.edits)
+	waitForWebhookCount(t, func() int { _, _, _, _, edits, _, _ := discordAPI.snapshot(); return len(edits) }, 1, "edits")
+	_, _, _, _, edits, _, _ := discordAPI.snapshot()
+	if len(edits) != 1 || !strings.HasPrefix(edits[0], "discord-copy-1|") {
+		t.Fatalf("Discord edit did not target webhook-created canonical copy: %#v", edits)
 	}
 
 	reaction := transport.Incoming{
@@ -327,9 +362,10 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, reaction); err != nil {
 		t.Fatal(err)
 	}
-	waitForWebhookCount(t, func() int { return len(discordAPI.reactions) }, 1, "reactions")
-	if len(discordAPI.reactions) != 1 || discordAPI.reactions[0] != "discord-copy-1|👍" {
-		t.Fatalf("Discord reaction did not target webhook-created canonical copy: %#v", discordAPI.reactions)
+	waitForWebhookCount(t, func() int { _, _, _, _, _, _, reactions := discordAPI.snapshot(); return len(reactions) }, 1, "reactions")
+	_, _, _, _, _, _, reactions := discordAPI.snapshot()
+	if len(reactions) != 1 || reactions[0] != "discord-copy-1|👍" {
+		t.Fatalf("Discord reaction did not target webhook-created canonical copy: %#v", reactions)
 	}
 
 	deleteEvent := transport.Incoming{
@@ -340,9 +376,10 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, deleteEvent); err != nil {
 		t.Fatal(err)
 	}
-	waitForWebhookCount(t, func() int { return len(discordAPI.deletes) }, 1, "deletes")
-	if len(discordAPI.deletes) != 1 || discordAPI.deletes[0] != "discord-copy-1" {
-		t.Fatalf("Discord delete did not target webhook-created canonical copy: %#v", discordAPI.deletes)
+	waitForWebhookCount(t, func() int { _, _, _, _, _, deletes, _ := discordAPI.snapshot(); return len(deletes) }, 1, "deletes")
+	_, _, _, _, _, deletes, _ := discordAPI.snapshot()
+	if len(deletes) != 1 || deletes[0] != "discord-copy-1" {
+		t.Fatalf("Discord delete did not target webhook-created canonical copy: %#v", deletes)
 	}
 
 	beforeDiscordIngress := whatsAppAdapter.sentCount()

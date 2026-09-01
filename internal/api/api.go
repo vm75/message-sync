@@ -146,11 +146,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/endpoints", s.handleCreateEndpoint)
 	s.mux.HandleFunc("PUT /api/endpoints/{alias}", s.handleUpdateEndpoint)
 	s.mux.HandleFunc("DELETE /api/endpoints/{alias}", s.handleDeleteEndpoint)
-	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
-		s.mux.HandleFunc(method+" /api/groups", s.handleRemovedGroups)
-		s.mux.HandleFunc(method+" /api/groups/{alias}", s.handleRemovedGroups)
-	}
-
 	s.mux.HandleFunc("GET /api/sync-sets", s.handleListSyncSets)
 	s.mux.HandleFunc("GET /api/sync-sets/{id}", s.handleGetSyncSet)
 	s.mux.HandleFunc("POST /api/sync-sets", s.handleCreateSyncSet)
@@ -161,10 +156,6 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("PUT /api/config", s.handleUpdateConfig)
 
 	s.mux.Handle("GET /", StaticHandler())
-}
-
-func (s *Server) handleRemovedGroups(w http.ResponseWriter, r *http.Request) {
-	WriteError(w, http.StatusNotFound, "route not found")
 }
 
 func (s *Server) notifyConfigChange(ctx context.Context) {
@@ -193,7 +184,7 @@ func (s *Server) Start() error {
 
 	go func() {
 		if err := s.httpServer.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			s.logger.Error("api server error", "error", err.Error())
+			safelog.Error(s.logger, "api server error", "api_server", err)
 		}
 	}()
 	return nil

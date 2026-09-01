@@ -261,7 +261,7 @@ Even if agents are available concurrently, do not start a dependent issue until 
 
 ## 10. Testing strategy
 
-Each issue adds the smallest focused tests needed for its boundary. The final gate composes them with fake transports.
+Each issue adds the smallest focused tests needed for its boundary. The final gate composes them with fake transports in `internal/integration/reliability_test.go`; the harness uses the real registry, router, lanes, and SQLite store while keeping provider behavior entirely in memory.
 
 Required scenarios:
 

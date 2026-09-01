@@ -769,7 +769,7 @@ func (a *Adapter) Logout(ctx context.Context) error {
 	if a.client != nil {
 		if a.client.IsLoggedIn() {
 			if err := a.client.Logout(ctx); err != nil {
-				a.logger.Warn("WhatsApp server logout failed, forcing disconnect and session deletion", "error", err.Error())
+				safelog.Error(a.logger, "WhatsApp server logout failed, forcing disconnect and session deletion", "whatsapp_logout", err)
 				a.client.Disconnect()
 				if a.client.Store != nil {
 					_ = a.client.Store.Delete(ctx)

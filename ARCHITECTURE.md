@@ -428,3 +428,7 @@ The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or 
 ## 19. Deliberate MVP exclusions
 
 Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, native Discord poll/vote bridging, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, native cross-platform Telegram poll/vote bridging, and MTProto user-account sessions also remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+
+## 20. Reliability verification
+
+The final integration harness in `internal/integration` connects fake WhatsApp, Discord, and Telegram adapters to the real alias registry, SQLite store, canonical router, and destination lanes. It verifies all-to-all fan-out, slow-destination isolation, transient retry, and ordered create/edit/reaction/delete delivery. Package-level tests compose this with bounded queue behavior, restart/replay state, accepted checkpoints, provider recovery/reconnect, configuration reload, webhook repair, and privacy canaries. Runtime and container smoke tests use a fresh disposable `/data` volume; no deployed database is upgraded.

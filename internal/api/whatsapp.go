@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 func (s *Server) handleWhatsAppStatus(w http.ResponseWriter, r *http.Request) {
@@ -20,7 +22,7 @@ func (s *Server) handleWhatsAppPair(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := s.whatsapp.Pair(r.Context())
 	if err != nil {
-		s.logger.Error("whatsapp pair failed", "error", err.Error())
+		safelog.Error(s.logger, "whatsapp pair failed", "whatsapp_pair", err)
 		WriteError(w, http.StatusInternalServerError, "failed to initiate pairing")
 		return
 	}
@@ -33,7 +35,7 @@ func (s *Server) handleWhatsAppCancelPair(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.whatsapp.CancelPair(r.Context()); err != nil {
-		s.logger.Error("whatsapp cancel pair failed", "error", err.Error())
+		safelog.Error(s.logger, "whatsapp cancel pair failed", "whatsapp_cancel_pair", err)
 		WriteError(w, http.StatusInternalServerError, "failed to cancel pairing")
 		return
 	}
@@ -46,7 +48,7 @@ func (s *Server) handleWhatsAppLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.whatsapp.Logout(r.Context()); err != nil {
-		s.logger.Error("whatsapp logout failed", "error", err.Error())
+		safelog.Error(s.logger, "whatsapp logout failed", "whatsapp_logout", err)
 		WriteError(w, http.StatusInternalServerError, "failed to logout whatsapp session")
 		return
 	}
@@ -60,7 +62,7 @@ func (s *Server) handleWhatsAppGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	groups, err := s.whatsapp.GetJoinedGroups(r.Context())
 	if err != nil {
-		s.logger.Error("get joined groups failed", "error", err.Error())
+		safelog.Error(s.logger, "get joined groups failed", "whatsapp_groups", err)
 		WriteError(w, http.StatusInternalServerError, "failed to get joined groups")
 		return
 	}

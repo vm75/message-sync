@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/safelog"
 )
 
 type GlobalConfigDTO struct {
@@ -33,7 +34,7 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	cfg, err := config.LoadRaw(r.Context(), s.db)
 	if err != nil {
-		s.logger.Error("load config failed", "error", err.Error())
+		safelog.Error(s.logger, "load config failed", "config_load", err)
 		WriteError(w, http.StatusInternalServerError, "failed to load config")
 		return
 	}
@@ -64,7 +65,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 
 	currentCfg, err := config.LoadRaw(r.Context(), s.db)
 	if err != nil {
-		s.logger.Error("load current config failed", "error", err.Error())
+		safelog.Error(s.logger, "load current config failed", "config_load", err)
 		WriteError(w, http.StatusInternalServerError, "failed to load current config")
 		return
 	}
@@ -147,7 +148,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days
 	`, string(mode), media.Enabled, media.MaxSizeMB, recovery.Enabled, recovery.MaxAgeHours, recovery.MaxMessagesPerGroup, storage.MessageRetentionDays, polls.AggregationTrigger, whatsappCleanup.Enabled, whatsappCleanup.RetentionDays)
 	if err != nil {
-		s.logger.Error("save global_config failed", "error", err.Error())
+		safelog.Error(s.logger, "save global_config failed", "config_save", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update config")
 		return
 	}

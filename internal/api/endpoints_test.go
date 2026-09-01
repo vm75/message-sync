@@ -292,23 +292,6 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	}
 }
 
-func TestLegacyGroupsRoutesReturnNotFound(t *testing.T) {
-	srv := setupTestServer(t, setupTestDB(t))
-	token, err := srv.sessions.CreateToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
-		req := httptest.NewRequest(method, "/api/groups", strings.NewReader(`{"alias":"ops","jid":"1@g.us"}`))
-		req.Header.Set("Authorization", "Bearer "+token)
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s /api/groups status = %d, want 404", method, rec.Code)
-		}
-	}
-}
-
 func TestEndpointErrorsDoNotLogRemoteIDs(t *testing.T) {
 	db := setupTestDB(t)
 	var logs bytes.Buffer
