@@ -543,6 +543,20 @@ func (s *Store) ClaimDeliveryOperation(ctx context.Context, operation DeliveryOp
 	return count == 1, nil
 }
 
+// BeginDeliveryAttempt records an attempt without changing the operation's
+// identity or retaining any payload.
+func (s *Store) BeginDeliveryAttempt(ctx context.Context, operation DeliveryOperation, now time.Time) error {
+	if err := validateDeliveryIdentity(operation); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE delivery_operations
+		SET state = ?, attempt_count = attempt_count + 1, updated_at = ?
+		WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?`,
+		DeliveryRetrying, unixMillis(now), operation.CanonicalID, operation.EndpointID, operation.OperationKind, operation.OperationRevision)
+	return wrapDB("begin delivery attempt", err)
+}
+
 func (s *Store) SetDeliveryOperationState(ctx context.Context, operation DeliveryOperation, state string, nextAttemptAt time.Time, failureClass string, updatedAt time.Time) error {
 	if err := validateDeliveryIdentity(operation); err != nil {
 		return err

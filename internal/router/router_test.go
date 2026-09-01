@@ -95,6 +95,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
@@ -163,6 +164,7 @@ func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("new self-origin message produced %d sends, want 2", len(fake.sent))
 	}
@@ -176,6 +178,7 @@ func TestDuplicateAndBridgeEchoDoNotCreateCopies(t *testing.T) {
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
@@ -209,6 +212,7 @@ func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatalf("first handle error = %v", err)
 	}
+	waitForSent(t, first, 2)
 	waitForSent(t, first, 2)
 	if len(first.sent) != 2 {
 		t.Fatalf("first run sends = %#v", first.sent)
@@ -256,6 +260,7 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, first, 2)
 	if len(first.sent) != 2 {
 		t.Fatalf("first run sends = %d, want 2", len(first.sent))
 	}
@@ -310,6 +315,7 @@ func TestEditPropagationToDestinationCopies(t *testing.T) {
 	if err := r.Handle(ctx, orig); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
@@ -368,6 +374,7 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	if err := r.Handle(ctx, orig); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
@@ -448,6 +455,7 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	if err := r.Handle(ctx, orig); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
@@ -551,6 +559,7 @@ func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	if err := r.Handle(ctx, orig); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
@@ -577,6 +586,7 @@ func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	if err := r.Handle(ctx, reply); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 
 	if len(fake.sent) != 2 {
 		t.Fatalf("reply sent %d destination copies, want 2", len(fake.sent))
@@ -610,6 +620,7 @@ func TestReplyFallbackFlagWhenDestinationCopyMissing(t *testing.T) {
 	if err := r.Handle(ctx, reply); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("reply sent %d destination copies, want 2", len(fake.sent))
 	}
@@ -679,6 +690,7 @@ func TestRouterUpdateConfig(t *testing.T) {
 	if err := r.Handle(ctx, inc); err != nil {
 		t.Fatalf("Handle error = %v", err)
 	}
+	waitForSent(t, fake, 2)
 	if len(fake.sent) != 2 {
 		t.Fatalf("expected 2 forwarded messages, got %d", len(fake.sent))
 	}
@@ -740,6 +752,7 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 	if err := r.Handle(ctx, inc); err != nil {
 		t.Fatalf("Handle poll error: %v", err)
 	}
+	waitForSent(t, fake, 2)
 
 	if len(fake.sent) != 2 {
 		t.Fatalf("expected 2 fan-out copies, got %d", len(fake.sent))
@@ -789,6 +802,7 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 	if err := r.Handle(ctx, pollInc); err != nil {
 		t.Fatalf("Handle poll creation error: %v", err)
 	}
+	waitForSent(t, fake, 2)
 
 	// Option hashes
 	hPizza := hex.EncodeToString(cryptoSHA256("Pizza"))

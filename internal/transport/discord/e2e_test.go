@@ -304,6 +304,14 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	}); err != nil {
 		t.Fatal(err)
 	}
+	deadline := time.After(time.Second)
+	for len(whatsAppAdapter.sent)-beforeDiscordIngress < 2 {
+		select {
+		case <-deadline:
+			t.Fatalf("Discord ingress fanout to WhatsApp endpoints=%d, want 2", len(whatsAppAdapter.sent)-beforeDiscordIngress)
+		case <-time.After(time.Millisecond):
+		}
+	}
 	if got := len(whatsAppAdapter.sent) - beforeDiscordIngress; got != 2 {
 		t.Fatalf("Discord ingress fanout to WhatsApp endpoints=%d, want 2", got)
 	}

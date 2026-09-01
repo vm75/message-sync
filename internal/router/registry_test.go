@@ -53,6 +53,7 @@ func TestAdapterRegistryMixedTransportFanout(t *testing.T) {
 	if err := r.Handle(ctx, testIncoming("discord", "discord-source")); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, wa, 2)
 	if len(dc.sent) != 0 {
 		t.Fatalf("Discord source looped back through Discord adapter: %#v", dc.sent)
 	}
@@ -212,6 +213,8 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 	if err := r.Handle(ctx, testIncoming("wa", "wa-source")); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, dc, 1)
+	waitForSent(t, tg, 1)
 	if len(dc.sent) != 1 || dc.sent[0].outgoing.Endpoint != "discord" {
 		t.Fatalf("WhatsApp -> Discord sends = %#v", dc.sent)
 	}
@@ -225,6 +228,8 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 	if err := r.Handle(ctx, testIncoming("telegram", "telegram-source")); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, wa, 1)
+	waitForSent(t, dc, 1)
 	if len(wa.sent) != 1 || wa.sent[0].outgoing.Endpoint != "wa" {
 		t.Fatalf("Telegram -> WhatsApp sends = %#v", wa.sent)
 	}
@@ -241,6 +246,8 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 	if err := r.Handle(ctx, testIncoming("discord", "discord-source")); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, wa, 1)
+	waitForSent(t, tg, 1)
 	if len(wa.sent) != 1 || wa.sent[0].outgoing.Endpoint != "wa" {
 		t.Fatalf("Discord -> WhatsApp sends = %#v", wa.sent)
 	}
@@ -328,6 +335,7 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	if err := restarted.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, secondTG, 1)
 	if len(secondDC.sent) != 0 {
 		t.Fatalf("restart resent already-persisted Discord copy: %#v", secondDC.sent)
 	}

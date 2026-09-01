@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -14,6 +15,38 @@ var (
 )
 
 type Job func(context.Context)
+type RetryJob func(context.Context, int) error
+
+type RetryPolicy struct {
+	MaxAttempts int
+	MaxWindow   time.Duration
+	BaseDelay   time.Duration
+	MaxDelay    time.Duration
+	Wait        func(context.Context, time.Duration) error
+	OnExhausted func(context.Context, error)
+}
+
+func DefaultRetryPolicy() RetryPolicy {
+	return RetryPolicy{
+		MaxAttempts: 4,
+		MaxWindow:   10 * time.Second,
+		BaseDelay:   10 * time.Millisecond,
+		MaxDelay:    160 * time.Millisecond,
+		Wait:        wait,
+		OnExhausted: func(context.Context, error) {},
+	}
+}
+
+func wait(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 type lane struct {
 	jobs chan Job
@@ -55,6 +88,7 @@ type Manager struct {
 	capacity int
 	lanes    map[transport.EndpointID]*lane
 	closed   bool
+	policy   RetryPolicy
 }
 
 func New(ctx context.Context, capacity int, endpoints []transport.EndpointID) (*Manager, error) {
@@ -64,11 +98,24 @@ func New(ctx context.Context, capacity int, endpoints []transport.EndpointID) (*
 	if capacity <= 0 {
 		return nil, errors.New("delivery lane capacity must be positive")
 	}
-	m := &Manager{parent: ctx, capacity: capacity, lanes: make(map[transport.EndpointID]*lane)}
+	m := &Manager{parent: ctx, capacity: capacity, lanes: make(map[transport.EndpointID]*lane), policy: DefaultRetryPolicy()}
 	if err := m.Update(endpoints); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (m *Manager) SetRetryPolicy(policy RetryPolicy) error {
+	if policy.MaxAttempts <= 0 || policy.MaxWindow <= 0 || policy.BaseDelay <= 0 || policy.MaxDelay < policy.BaseDelay || policy.Wait == nil || policy.OnExhausted == nil {
+		return errors.New("invalid delivery retry policy")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return errors.New("delivery manager is closed")
+	}
+	m.policy = policy
+	return nil
 }
 
 func (m *Manager) Update(endpoints []transport.EndpointID) error {
@@ -126,6 +173,47 @@ func (m *Manager) Enqueue(ctx context.Context, endpoint transport.EndpointID, jo
 		m.mu.Unlock()
 		return ErrFull
 	}
+}
+
+func (m *Manager) EnqueueRetry(ctx context.Context, endpoint transport.EndpointID, job RetryJob) error {
+	if job == nil {
+		return errors.New("delivery retry job is required")
+	}
+	m.mu.Lock()
+	policy := m.policy
+	m.mu.Unlock()
+	return m.Enqueue(ctx, endpoint, func(jobCtx context.Context) {
+		started := time.Now()
+		for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+			err := job(jobCtx, attempt)
+			if err == nil {
+				return
+			}
+			failure := transport.Classify(err)
+			if !failure.Retryable || attempt == policy.MaxAttempts || time.Since(started) >= policy.MaxWindow {
+				policy.OnExhausted(jobCtx, err)
+				return
+			}
+			delay := failure.RetryAfter
+			if delay <= 0 {
+				delay = policy.BaseDelay
+				for i := 1; i < attempt; i++ {
+					delay *= 2
+					if delay >= policy.MaxDelay {
+						delay = policy.MaxDelay
+						break
+					}
+				}
+			}
+			if delay > policy.MaxDelay {
+				delay = policy.MaxDelay
+			}
+			if err := policy.Wait(jobCtx, delay); err != nil {
+				policy.OnExhausted(jobCtx, err)
+				return
+			}
+		}
+	})
 }
 
 func (m *Manager) Close() {

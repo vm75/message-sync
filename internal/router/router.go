@@ -491,10 +491,33 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 	if err := r.store.UpsertDeliveryOperation(ctx, operation); err != nil {
 		return fmt.Errorf("queue delivery operation: %w", err)
 	}
-	job := func(jobCtx context.Context) {
-		fail := func(err error) {
+	job := func(jobCtx context.Context, attempt int) error {
+		tombstoned, err := r.store.IsTombstoned(jobCtx, canonicalID)
+		if err != nil {
+			return err
+		}
+		if tombstoned {
+			_ = r.store.DeleteDeliveryOperation(jobCtx, operation)
+			return nil
+		}
+		if err := r.store.BeginDeliveryAttempt(jobCtx, operation, time.Now().UTC()); err != nil {
+			return err
+		}
+		finishFailure := func(err error) error {
 			failure := transport.Classify(err)
-			_ = r.store.MarkDeliveryOperationFailed(jobCtx, operation, string(failure.Class), time.Now().UTC())
+			if !failure.Retryable || attempt >= delivery.DefaultRetryPolicy().MaxAttempts || jobCtx.Err() != nil {
+				stateErr := error(nil)
+				if failure.Retryable && jobCtx.Err() != nil || failure.Retryable && attempt >= delivery.DefaultRetryPolicy().MaxAttempts {
+					stateErr = r.store.MarkDeliveryOperationAwaitingReplay(jobCtx, operation, time.Now().UTC())
+				} else {
+					stateErr = r.store.MarkDeliveryOperationFailed(jobCtx, operation, string(failure.Class), time.Now().UTC())
+				}
+				if stateErr != nil {
+					return stateErr
+				}
+				return nil
+			}
+			return err
 		}
 		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
 			if _, err := r.sender.Send(jobCtx, transport.Outgoing{
@@ -503,8 +526,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
 				ReplyTo: replyTo, QuotedText: incoming.QuotedText,
 			}); err != nil {
-				fail(err)
-				return
+				return finishFailure(err)
 			}
 		}
 		ref, err := r.sender.Send(jobCtx, transport.Outgoing{
@@ -515,19 +537,16 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 		})
 		if err != nil {
-			fail(err)
-			return
+			return finishFailure(err)
 		}
 		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
-			fail(errors.New("transport returned invalid destination message reference"))
-			return
+			return finishFailure(errors.New("transport returned invalid destination message reference"))
 		}
 		if err := r.store.AddMessageCopy(jobCtx, store.MessageCopy{
 			CanonicalID: canonicalID, EndpointID: string(destination), RemoteMessageID: ref.RemoteMessageID,
 			CreatedAt: time.Now().UTC(), FromSelf: true,
 		}); err != nil {
-			fail(err)
-			return
+			return finishFailure(err)
 		}
 		r.mu.Lock()
 		r.knownCopies[copyKey{endpoint: destination, remoteID: ref.RemoteMessageID}] = canonicalID
@@ -536,8 +555,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		if r.afterPersist != nil {
 			_ = r.afterPersist(destination)
 		}
+		return nil
 	}
-	if err := r.lanes.Enqueue(ctx, destination, job); err != nil {
+	if err := r.lanes.EnqueueRetry(ctx, destination, job); err != nil {
 		_ = r.store.MarkDeliveryOperationAwaitingReplay(ctx, operation, time.Now().UTC())
 		return fmt.Errorf("enqueue destination delivery: %w", err)
 	}

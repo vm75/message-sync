@@ -90,3 +90,72 @@ func TestFullLaneIsExplicitAndReloadRemovesEndpoint(t *testing.T) {
 		t.Fatalf("removed endpoint error = %v, want ErrUnavailable", err)
 	}
 }
+
+func TestRetryLaneUsesSafeClassificationAndBoundedAttempts(t *testing.T) {
+	manager, err := New(context.Background(), 2, []transport.EndpointID{"one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	policy := DefaultRetryPolicy()
+	policy.Wait = func(context.Context, time.Duration) error { return nil }
+	if err := manager.SetRetryPolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	attempts := 0
+	done := make(chan struct{})
+	if err := manager.EnqueueRetry(context.Background(), "one", func(context.Context, int) error {
+		mu.Lock()
+		attempts++
+		current := attempts
+		mu.Unlock()
+		if current < 3 {
+			return transport.NewFailure(transport.FailureTransient, 0, errors.New("provider detail"))
+		}
+		close(done)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("retry job did not succeed")
+	}
+	mu.Lock()
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	mu.Unlock()
+}
+
+func TestRetryLaneDoesNotRetryPermanentFailure(t *testing.T) {
+	manager, err := New(context.Background(), 2, []transport.EndpointID{"one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	policy := DefaultRetryPolicy()
+	policy.Wait = func(context.Context, time.Duration) error { return errors.New("wait should not run") }
+	if err := manager.SetRetryPolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	var attempts int
+	if err := manager.EnqueueRetry(context.Background(), "one", func(context.Context, int) error {
+		attempts++
+		close(done)
+		return transport.NewFailure(transport.FailurePermissionDenied, 0, errors.New("provider detail"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("permanent failure job did not execute")
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
