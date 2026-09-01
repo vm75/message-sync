@@ -29,6 +29,18 @@ type e2eDiscordAPI struct {
 	reactions    []string
 }
 
+func waitForWebhookSends(t *testing.T, api *e2eDiscordAPI, want int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for api.executeCalls < want {
+		select {
+		case <-deadline:
+			t.Fatalf("Discord webhook sends=%d, want %d", api.executeCalls, want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func (f *e2eDiscordAPI) ChannelWebhooks(channelID string, _ ...discordgo.RequestOption) ([]*discordgo.Webhook, error) {
 	return f.channels[channelID], nil
 }
@@ -199,6 +211,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 			t.Fatal(err)
 		}
 	}
+	waitForWebhookSends(t, discordAPI, 3)
 	if discordAPI.executeCalls != 3 || len(discordAPI.messages) != 3 {
 		t.Fatalf("Discord webhook sends=%d messages=%d, want 3", discordAPI.executeCalls, len(discordAPI.messages))
 	}

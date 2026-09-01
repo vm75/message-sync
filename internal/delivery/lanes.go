@@ -68,7 +68,16 @@ func (l *lane) run() {
 	for {
 		select {
 		case <-l.ctx.Done():
-			return
+			for {
+				select {
+				case job := <-l.jobs:
+					if job != nil {
+						job(l.ctx)
+					}
+				default:
+					return
+				}
+			}
 		case job := <-l.jobs:
 			if job != nil {
 				job(l.ctx)

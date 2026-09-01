@@ -68,12 +68,34 @@ func waitForSent(t *testing.T, f *fakeSender, want int) {
 	}
 }
 
+func waitForMutations(t *testing.T, f *fakeSender, edits, reactions, deletes int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		f.mu.Lock()
+		ready := len(f.edited) >= edits && len(f.reacted) >= reactions && len(f.deleted) >= deletes
+		f.mu.Unlock()
+		if ready {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("mutation counts did not reach edits=%d reactions=%d deletes=%d", edits, reactions, deletes)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func (f *fakeSender) React(_ context.Context, r transport.Reaction) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reacted = append(f.reacted, r)
 	return nil
 }
 
 func (f *fakeSender) Edit(_ context.Context, ref transport.MessageRef, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.edited = append(f.edited, struct {
 		ref  transport.MessageRef
 		text string
@@ -82,6 +104,8 @@ func (f *fakeSender) Edit(_ context.Context, ref transport.MessageRef, text stri
 }
 
 func (f *fakeSender) Delete(_ context.Context, ref transport.MessageRef) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, ref)
 	return nil
 }
@@ -339,6 +363,7 @@ func TestEditPropagationToDestinationCopies(t *testing.T) {
 	if err := r.Handle(ctx, editEvt); err != nil {
 		t.Fatal(err)
 	}
+	waitForMutations(t, fake, 2, 0, 0)
 
 	if len(fake.edited) != 2 {
 		t.Fatalf("edited %d messages, want 2", len(fake.edited))
@@ -397,6 +422,7 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	if err := r.Handle(ctx, delEvt); err != nil {
 		t.Fatal(err)
 	}
+	waitForMutations(t, fake, 0, 0, 2)
 
 	if len(fake.deleted) != 2 {
 		t.Fatalf("deleted %d messages, want 2", len(fake.deleted))
@@ -479,6 +505,7 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	if err := r.Handle(ctx, reaction); err != nil {
 		t.Fatal(err)
 	}
+	waitForMutations(t, fake, 0, 2, 0)
 
 	if len(fake.reacted) != 2 {
 		t.Fatalf("reacted %d times, want 2", len(fake.reacted))
@@ -513,6 +540,7 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	if err := r.Handle(ctx, userReaction); err != nil {
 		t.Fatal(err)
 	}
+	waitForMutations(t, fake, 0, 2, 0)
 	if len(fake.reacted) != 2 {
 		t.Fatalf("user self-reaction propagated %d times, want 2", len(fake.reacted))
 	}

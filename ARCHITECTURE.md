@@ -276,7 +276,7 @@ The content-free `delivery_operations` table tracks current payload-dependent wo
 
 Normal create fan-out uses one bounded in-memory FIFO lane per configured endpoint. The router performs canonicalization, loop prevention, reply resolution, and outgoing construction before enqueueing independent destination jobs; the lane only invokes the transport boundary and records the resulting copy. A slow lane therefore cannot hold up a healthy destination, while each destination remains ordered. Lane membership follows configuration reloads, and a full lane leaves its content-free operation row awaiting replay rather than dropping the event.
 
-Lane create jobs retry only safe transient and rate-limit failures. Provider retry-after values take precedence over the fixed bounded exponential schedule; permanent failures become `failed`, while exhaustion or cancellation becomes `awaiting_replay`. Each attempt updates only ledger metadata. Lifecycle mutations still require an existing destination copy, so they cannot overtake an undelivered create.
+Lane create and lifecycle jobs retry only safe transient and rate-limit failures. Provider retry-after values take precedence over the fixed bounded exponential schedule; permanent failures become `failed`, while exhaustion or cancellation becomes `awaiting_replay`. Each attempt updates only ledger metadata. Lifecycle mutations are held in process when a destination copy is missing, coalesced by canonical/destination identity, and flushed behind the successful create; deletes tombstone first and cancel pending dependent work.
 
 ## 8. Text and media
 

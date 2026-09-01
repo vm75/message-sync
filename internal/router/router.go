@@ -36,18 +36,38 @@ type pollMeta struct {
 	Hashes   []string
 }
 
+type mutationKey struct {
+	canonical string
+	endpoint  transport.EndpointID
+}
+
+type pendingEdit struct {
+	revision int64
+	text     string
+}
+
+type pendingReaction struct {
+	revision int64
+	actor    string
+	emoji    string
+	fallback string
+}
+
 type Router struct {
-	store        *store.Store
-	sender       sender
-	lanes        *delivery.Manager
-	routes       map[transport.EndpointID][]transport.EndpointID
-	usernameMode config.UsernameMode
-	aggTrigger   string
-	knownCopies  map[copyKey]string
-	pollCache    map[string]pollMeta
-	newCanonical func() (string, error)
-	afterPersist func(transport.EndpointID) error
-	mu           sync.RWMutex
+	store            *store.Store
+	sender           sender
+	lanes            *delivery.Manager
+	routes           map[transport.EndpointID][]transport.EndpointID
+	usernameMode     config.UsernameMode
+	aggTrigger       string
+	knownCopies      map[copyKey]string
+	pollCache        map[string]pollMeta
+	pendingEdits     map[mutationKey]pendingEdit
+	pendingReactions map[mutationKey]map[string]pendingReaction
+	nextRevision     int64
+	newCanonical     func() (string, error)
+	afterPersist     func(transport.EndpointID) error
+	mu               sync.RWMutex
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
@@ -84,15 +104,17 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		return nil, fmt.Errorf("create delivery lanes: %w", err)
 	}
 	return &Router{
-		store:        syncStore,
-		sender:       transportSender,
-		lanes:        lanes,
-		routes:       routes,
-		usernameMode: cfg.Identity.UsernameMode,
-		aggTrigger:   cfg.Polls.AggregationTrigger,
-		knownCopies:  make(map[copyKey]string),
-		pollCache:    make(map[string]pollMeta),
-		newCanonical: newCanonicalID,
+		store:            syncStore,
+		sender:           transportSender,
+		lanes:            lanes,
+		routes:           routes,
+		usernameMode:     cfg.Identity.UsernameMode,
+		aggTrigger:       cfg.Polls.AggregationTrigger,
+		knownCopies:      make(map[copyKey]string),
+		pollCache:        make(map[string]pollMeta),
+		pendingEdits:     make(map[mutationKey]pendingEdit),
+		pendingReactions: make(map[mutationKey]map[string]pendingReaction),
+		newCanonical:     newCanonicalID,
 	}, nil
 }
 
@@ -220,13 +242,16 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
+				r.mu.Lock()
+				delete(r.pendingEdits, mutationKey{canonical: targetCanonical, endpoint: destination})
+				delete(r.pendingReactions, mutationKey{canonical: targetCanonical, endpoint: destination})
+				r.mu.Unlock()
 				continue
 			}
-			if err := r.sender.Delete(ctx, transport.MessageRef{
-				Endpoint:        destination,
-				RemoteMessageID: targetCopy.RemoteMessageID,
-				IsTargetFromMe:  targetCopy.FromSelf,
-			}); err != nil {
+			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "delete", OperationRevision: r.nextMutationRevision(), State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			if err := r.enqueueMutation(ctx, op, func() bool { return true }, func(jobCtx context.Context) error {
+				return r.sender.Delete(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf})
+			}, nil); err != nil {
 				return fmt.Errorf("send destination delete: %w", err)
 			}
 		}
@@ -270,13 +295,28 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
+				key := mutationKey{canonical: targetCanonical, endpoint: destination}
+				r.mu.Lock()
+				r.pendingEdits[key] = pendingEdit{revision: r.nextRevision + 1, text: forwardedText}
+				r.nextRevision++
+				r.mu.Unlock()
 				continue
 			}
-			if err := r.sender.Edit(ctx, transport.MessageRef{
-				Endpoint:        destination,
-				RemoteMessageID: targetCopy.RemoteMessageID,
-				IsTargetFromMe:  targetCopy.FromSelf,
-			}, forwardedText); err != nil {
+			key := mutationKey{canonical: targetCanonical, endpoint: destination}
+			revision := r.nextMutationRevision()
+			r.mu.Lock()
+			r.pendingEdits[key] = pendingEdit{revision: revision, text: forwardedText}
+			r.mu.Unlock()
+			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			if err := r.enqueueMutation(ctx, op, func() bool { return r.pendingEditCurrent(key, revision) }, func(jobCtx context.Context) error {
+				return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf}, forwardedText)
+			}, func() {
+				r.mu.Lock()
+				if current, ok := r.pendingEdits[key]; ok && current.revision == revision {
+					delete(r.pendingEdits, key)
+				}
+				r.mu.Unlock()
+			}); err != nil {
 				return fmt.Errorf("send destination edit: %w", err)
 			}
 		}
@@ -360,21 +400,38 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				continue
 			}
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
+			key := mutationKey{canonical: targetCanonical, endpoint: destination}
+			revision := r.nextMutationRevision()
+			pending := pendingReaction{revision: revision, actor: incoming.Sender.OpaqueID, emoji: emoji, fallback: fallbackText}
 			if err != nil {
-				continue // Don't forward reaction if target copy missing
+				r.mu.Lock()
+				if r.pendingReactions[key] == nil {
+					r.pendingReactions[key] = make(map[string]pendingReaction)
+				}
+				r.pendingReactions[key][pending.actor] = pending
+				r.mu.Unlock()
+				continue
 			}
-
-			if err := r.sender.React(ctx, transport.Reaction{
-				Endpoint:       destination,
-				TargetRemoteID: targetCopy.RemoteMessageID,
-				IsTargetFromMe: targetCopy.FromSelf,
-				Emoji:          emoji,
-				FallbackText:   fallbackText,
+			r.mu.Lock()
+			if r.pendingReactions[key] == nil {
+				r.pendingReactions[key] = make(map[string]pendingReaction)
+			}
+			r.pendingReactions[key][pending.actor] = pending
+			r.mu.Unlock()
+			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "reaction", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			if err := r.enqueueMutation(ctx, op, func() bool { return r.pendingReactionCurrent(key, pending.actor, revision) }, func(jobCtx context.Context) error {
+				if err := r.sender.React(jobCtx, transport.Reaction{Endpoint: destination, TargetRemoteID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf, Emoji: emoji, FallbackText: fallbackText}); err != nil {
+					return err
+				}
+				return r.store.RecordSuppressedReaction(context.Background(), string(destination), targetCopy.RemoteMessageID, emoji, time.Now().UTC())
+			}, func() {
+				r.mu.Lock()
+				if current, ok := r.pendingReactions[key][pending.actor]; ok && current.revision == revision {
+					delete(r.pendingReactions[key], pending.actor)
+				}
+				r.mu.Unlock()
 			}); err != nil {
 				return fmt.Errorf("send reaction copy: %w", err)
-			}
-			if err := r.store.RecordSuppressedReaction(ctx, string(destination), targetCopy.RemoteMessageID, emoji, time.Now().UTC()); err != nil {
-				return fmt.Errorf("record suppressed reaction: %w", err)
 			}
 		}
 		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
@@ -542,6 +599,15 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
 			return finishFailure(errors.New("transport returned invalid destination message reference"))
 		}
+		tombstoned, err = r.store.IsTombstoned(jobCtx, canonicalID)
+		if err != nil {
+			return finishFailure(err)
+		}
+		if tombstoned {
+			_ = r.sender.Delete(jobCtx, ref)
+			_ = r.store.DeleteDeliveryOperation(context.Background(), operation)
+			return nil
+		}
 		if err := r.store.AddMessageCopy(jobCtx, store.MessageCopy{
 			CanonicalID: canonicalID, EndpointID: string(destination), RemoteMessageID: ref.RemoteMessageID,
 			CreatedAt: time.Now().UTC(), FromSelf: true,
@@ -555,6 +621,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		if r.afterPersist != nil {
 			_ = r.afterPersist(destination)
 		}
+		r.flushPendingMutations(context.Background(), canonicalID, destination)
 		return nil
 	}
 	if err := r.lanes.EnqueueRetry(ctx, destination, job); err != nil {
@@ -562,6 +629,112 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		return fmt.Errorf("enqueue destination delivery: %w", err)
 	}
 	return nil
+}
+
+func (r *Router) enqueueMutation(ctx context.Context, operation store.DeliveryOperation, current func() bool, execute func(context.Context) error, succeeded func()) error {
+	if err := r.store.UpsertDeliveryOperation(ctx, operation); err != nil {
+		return fmt.Errorf("queue delivery operation: %w", err)
+	}
+	job := func(jobCtx context.Context, attempt int) error {
+		if !current() {
+			_ = r.store.DeleteDeliveryOperation(context.Background(), operation)
+			return nil
+		}
+		stateCtx := jobCtx
+		if stateCtx.Err() != nil {
+			stateCtx = context.Background()
+		}
+		if err := r.store.BeginDeliveryAttempt(stateCtx, operation, time.Now().UTC()); err != nil {
+			return err
+		}
+		if err := execute(jobCtx); err != nil {
+			failure := transport.Classify(err)
+			if !failure.Retryable {
+				_ = r.store.MarkDeliveryOperationFailed(context.Background(), operation, string(failure.Class), time.Now().UTC())
+				return nil
+			}
+			if attempt >= delivery.DefaultRetryPolicy().MaxAttempts || jobCtx.Err() != nil {
+				_ = r.store.MarkDeliveryOperationAwaitingReplay(context.Background(), operation, time.Now().UTC())
+				return nil
+			}
+			return err
+		}
+		_ = r.store.DeleteDeliveryOperation(context.Background(), operation)
+		if succeeded != nil {
+			succeeded()
+		}
+		return nil
+	}
+	if err := r.lanes.EnqueueRetry(ctx, transport.EndpointID(operation.EndpointID), job); err != nil {
+		_ = r.store.MarkDeliveryOperationAwaitingReplay(context.Background(), operation, time.Now().UTC())
+		return fmt.Errorf("enqueue destination mutation: %w", err)
+	}
+	return nil
+}
+
+func (r *Router) nextMutationRevision() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextRevision++
+	return r.nextRevision
+}
+
+func (r *Router) flushPendingMutations(ctx context.Context, canonicalID string, destination transport.EndpointID) {
+	key := mutationKey{canonical: canonicalID, endpoint: destination}
+	r.mu.Lock()
+	edit, hasEdit := r.pendingEdits[key]
+	reactions := r.pendingReactions[key]
+	r.mu.Unlock()
+	if hasEdit {
+		copy, err := r.store.MessageCopyForEndpoint(ctx, canonicalID, string(destination))
+		if err == nil {
+			op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "edit", OperationRevision: edit.revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+			_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingEditCurrent(key, edit.revision) }, func(jobCtx context.Context) error {
+				return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf}, edit.text)
+			}, func() {
+				r.mu.Lock()
+				if current, ok := r.pendingEdits[key]; ok && current.revision == edit.revision {
+					delete(r.pendingEdits, key)
+				}
+				r.mu.Unlock()
+			})
+		}
+	}
+	for _, reaction := range reactions {
+		copy, err := r.store.MessageCopyForEndpoint(ctx, canonicalID, string(destination))
+		if err != nil {
+			continue
+		}
+		op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "reaction", OperationRevision: reaction.revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		current := reaction
+		_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingReactionCurrent(key, current.actor, current.revision) }, func(jobCtx context.Context) error {
+			err := r.sender.React(jobCtx, transport.Reaction{Endpoint: destination, TargetRemoteID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf, Emoji: current.emoji, FallbackText: current.fallback})
+			if err == nil {
+				err = r.store.RecordSuppressedReaction(context.Background(), string(destination), copy.RemoteMessageID, current.emoji, time.Now().UTC())
+			}
+			return err
+		}, func() {
+			r.mu.Lock()
+			if pending, ok := r.pendingReactions[key][current.actor]; ok && pending.revision == current.revision {
+				delete(r.pendingReactions[key], current.actor)
+			}
+			r.mu.Unlock()
+		})
+	}
+}
+
+func (r *Router) pendingEditCurrent(key mutationKey, revision int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	edit, ok := r.pendingEdits[key]
+	return ok && edit.revision == revision
+}
+
+func (r *Router) pendingReactionCurrent(key mutationKey, actor string, revision int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	reaction, ok := r.pendingReactions[key][actor]
+	return ok && reaction.revision == revision
 }
 
 func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.Incoming, canonicalID string, members []transport.EndpointID) error {
