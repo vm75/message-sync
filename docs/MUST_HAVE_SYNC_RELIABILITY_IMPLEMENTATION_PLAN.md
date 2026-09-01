@@ -42,7 +42,7 @@ Consequences:
 - retries depend on the source event being replayed;
 - create/edit/delete can arrive out of order after partial failure;
 - Telegram's update offset is in process memory;
-- Discord prepares managed webhooks at startup/reload but does not repair a deleted cached webhook;
+- Discord prepares managed webhooks at startup/reload and repairs a deleted or invalid cached webhook once at the failing operation;
 - existing cursors do not define a common accepted-event boundary;
 - the admin UI cannot show queued, retrying, awaiting-replay, or failed delivery work.
 

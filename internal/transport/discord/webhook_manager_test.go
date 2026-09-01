@@ -3,34 +3,49 @@ package discord
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/vm75/message-sync/internal/transport"
 )
 
 type fakeWebhookAPI struct {
+	mu          sync.Mutex
 	channels    map[string][]*discordgo.Webhook
 	listErr     error
 	createErr   error
 	createCalls int
 	execCalls   int
+	execErr     error
+	invalidID   string
+	editErr     error
+	deleteErr   error
 	lastParams  *discordgo.WebhookParams
 }
 
 func (f *fakeWebhookAPI) ChannelWebhooks(channelID string, _ ...discordgo.RequestOption) ([]*discordgo.Webhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	return f.channels[channelID], nil
+	return append([]*discordgo.Webhook(nil), f.channels[channelID]...), nil
 }
 
 func (f *fakeWebhookAPI) WebhookCreate(channelID, name, _ string, _ ...discordgo.RequestOption) (*discordgo.Webhook, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.createCalls++
 	if f.createErr != nil {
 		return nil, f.createErr
 	}
+	id := "managed-" + channelID
+	if f.createCalls > 1 {
+		id += "-replacement"
+	}
 	webhook := &discordgo.Webhook{
-		ID:        "managed-" + channelID,
+		ID:        id,
 		Type:      discordgo.WebhookTypeIncoming,
 		ChannelID: channelID,
 		User:      &discordgo.User{ID: "bridge-bot"},
@@ -41,18 +56,37 @@ func (f *fakeWebhookAPI) WebhookCreate(channelID, name, _ string, _ ...discordgo
 	return webhook, nil
 }
 
-func (f *fakeWebhookAPI) WebhookExecute(_ string, _ string, _ bool, data *discordgo.WebhookParams, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+func (f *fakeWebhookAPI) WebhookExecute(webhookID string, _ string, _ bool, data *discordgo.WebhookParams, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.execCalls++
 	f.lastParams = data
+	if f.execErr != nil && (f.invalidID == "" || f.invalidID == webhookID) {
+		return nil, f.execErr
+	}
 	return &discordgo.Message{ID: "created-message"}, nil
 }
 
 func (f *fakeWebhookAPI) WebhookMessageEdit(_ string, _ string, messageID string, _ *discordgo.WebhookEdit, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.editErr != nil {
+		return nil, f.editErr
+	}
 	return &discordgo.Message{ID: messageID}, nil
 }
 
 func (f *fakeWebhookAPI) WebhookMessageDelete(_ string, _ string, _ string, _ ...discordgo.RequestOption) error {
-	return nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.deleteErr
+}
+
+func discordRESTError(status, code int) error {
+	return &discordgo.RESTError{
+		Response: &http.Response{StatusCode: status},
+		Message:  &discordgo.APIErrorMessage{Code: code},
+	}
 }
 
 func TestManagedWebhookPrepareReusesExistingBridgeWebhook(t *testing.T) {
@@ -173,5 +207,75 @@ func TestManagedWebhookPrepareReportsMissingPermissionWithoutLeakingCredentials(
 				t.Fatal("missing-permission channel unexpectedly retained a webhook credential")
 			}
 		})
+	}
+}
+
+func TestManagedWebhookRepairsDeletedWebhookAndRetriesOnce(t *testing.T) {
+	api := &fakeWebhookAPI{channels: map[string][]*discordgo.Webhook{}}
+	manager := &managedWebhookClient{api: api, botUserID: func() string { return "bridge-bot" }, hooks: make(map[string]managedWebhookCredential), states: make(map[string]WebhookStatus), repair: make(map[string]*sync.Mutex)}
+	if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
+		t.Fatal(err)
+	}
+	old := api.channels[testChannelID][0]
+	api.channels[testChannelID] = nil
+	api.execErr = discordRESTError(http.StatusNotFound, discordgo.ErrCodeUnknownWebhook)
+	api.invalidID = old.ID
+	messageID, err := manager.Execute(context.Background(), testChannelID, WebhookMessage{Content: "body"})
+	if err != nil || messageID != "created-message" {
+		t.Fatalf("repaired execute = %q, %v", messageID, err)
+	}
+	api.execErr = nil
+	if api.createCalls != 2 || api.execCalls != 2 {
+		t.Fatalf("create calls=%d execute calls=%d", api.createCalls, api.execCalls)
+	}
+	if manager.IsManagedWebhook(testChannelID, old.ID) {
+		t.Fatal("deleted webhook remained registered")
+	}
+	if manager.Readiness(testChannelID) != WebhookStatusReady {
+		t.Fatalf("readiness=%q", manager.Readiness(testChannelID))
+	}
+}
+
+func TestManagedWebhookRepairIsSingleFlightPerChannel(t *testing.T) {
+	api := &fakeWebhookAPI{channels: map[string][]*discordgo.Webhook{}}
+	manager := &managedWebhookClient{api: api, botUserID: func() string { return "bridge-bot" }, hooks: make(map[string]managedWebhookCredential), states: make(map[string]WebhookStatus), repair: make(map[string]*sync.Mutex)}
+	if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
+		t.Fatal(err)
+	}
+	api.channels[testChannelID] = nil
+	api.execErr = discordRESTError(http.StatusNotFound, discordgo.ErrCodeUnknownWebhook)
+	api.invalidID = "managed-" + testChannelID
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = manager.Execute(context.Background(), testChannelID, WebhookMessage{Content: "body"})
+		}()
+	}
+	wg.Wait()
+	if api.createCalls != 2 {
+		t.Fatalf("repair created %d webhooks, want 1 replacement", api.createCalls-1)
+	}
+}
+
+func TestManagedWebhookEditDeleteDistinguishUnknownMessageAndWebhook(t *testing.T) {
+	api := &fakeWebhookAPI{channels: map[string][]*discordgo.Webhook{}}
+	manager := &managedWebhookClient{api: api, botUserID: func() string { return "bridge-bot" }, hooks: make(map[string]managedWebhookCredential), states: make(map[string]WebhookStatus), repair: make(map[string]*sync.Mutex)}
+	if err := manager.Prepare(context.Background(), []string{testChannelID}); err != nil {
+		t.Fatal(err)
+	}
+	api.editErr = discordRESTError(http.StatusNotFound, discordgo.ErrCodeUnknownMessage)
+	api.deleteErr = discordRESTError(http.StatusNotFound, discordgo.ErrCodeUnknownMessage)
+	if err := manager.Edit(context.Background(), testChannelID, "missing-message", "edited"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Delete(context.Background(), testChannelID, "missing-message"); err != nil {
+		t.Fatal(err)
+	}
+	api.editErr = discordRESTError(http.StatusNotFound, discordgo.ErrCodeUnknownWebhook)
+	api.channels[testChannelID] = nil
+	if err := manager.Edit(context.Background(), testChannelID, "message", "edited"); err == nil || transport.Classify(err).Class != transport.FailureDestinationMissing {
+		t.Fatalf("unknown webhook edit error=%v", err)
 	}
 }

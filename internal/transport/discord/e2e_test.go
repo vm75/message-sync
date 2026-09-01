@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,6 +107,7 @@ func (f *e2eDiscordAPI) MessageReactionRemove(_ string, messageID, emojiID, _ st
 }
 
 type e2eWhatsAppOutbound struct {
+	mu        sync.Mutex
 	nextID    int
 	sent      []transport.Outgoing
 	edits     []transport.MessageRef
@@ -114,24 +116,38 @@ type e2eWhatsAppOutbound struct {
 }
 
 func (f *e2eWhatsAppOutbound) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.nextID++
 	f.sent = append(f.sent, outgoing)
 	return transport.MessageRef{Endpoint: outgoing.Endpoint, RemoteMessageID: fmt.Sprintf("wa-copy-%d", f.nextID), IsTargetFromMe: true}, nil
 }
 
 func (f *e2eWhatsAppOutbound) React(_ context.Context, reaction transport.Reaction) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reactions = append(f.reactions, reaction)
 	return nil
 }
 
 func (f *e2eWhatsAppOutbound) Edit(_ context.Context, ref transport.MessageRef, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.edits = append(f.edits, ref)
 	return nil
 }
 
 func (f *e2eWhatsAppOutbound) Delete(_ context.Context, ref transport.MessageRef) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.deletes = append(f.deletes, ref)
 	return nil
+}
+
+func (f *e2eWhatsAppOutbound) sentCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sent)
 }
 
 func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T) {
@@ -309,7 +325,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		t.Fatalf("Discord delete did not target webhook-created canonical copy: %#v", discordAPI.deletes)
 	}
 
-	beforeDiscordIngress := len(whatsAppAdapter.sent)
+	beforeDiscordIngress := whatsAppAdapter.sentCount()
 	if err := mesh.Handle(ctx, transport.Incoming{
 		Endpoint: "discord", RemoteID: "discord-source-external", Kind: "text",
 		Sender: transport.Sender{OpaqueID: "u_defgh23456"}, Text: "PRIVATE_DISCORD_BODY",
@@ -318,14 +334,14 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		t.Fatal(err)
 	}
 	deadline := time.After(time.Second)
-	for len(whatsAppAdapter.sent)-beforeDiscordIngress < 2 {
+	for whatsAppAdapter.sentCount()-beforeDiscordIngress < 2 {
 		select {
 		case <-deadline:
-			t.Fatalf("Discord ingress fanout to WhatsApp endpoints=%d, want 2", len(whatsAppAdapter.sent)-beforeDiscordIngress)
+			t.Fatalf("Discord ingress fanout to WhatsApp endpoints=%d, want 2", whatsAppAdapter.sentCount()-beforeDiscordIngress)
 		case <-time.After(time.Millisecond):
 		}
 	}
-	if got := len(whatsAppAdapter.sent) - beforeDiscordIngress; got != 2 {
+	if got := whatsAppAdapter.sentCount() - beforeDiscordIngress; got != 2 {
 		t.Fatalf("Discord ingress fanout to WhatsApp endpoints=%d, want 2", got)
 	}
 
