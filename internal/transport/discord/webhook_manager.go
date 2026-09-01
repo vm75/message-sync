@@ -182,7 +182,7 @@ func (m *managedWebhookClient) Execute(ctx context.Context, channelID string, me
 		discordgo.WithRetryOnRatelimit(true),
 	)
 	if err != nil {
-		return "", errors.New("execute managed Discord webhook")
+		return "", classifyDiscordFailure(err)
 	}
 	if created == nil || strings.TrimSpace(created.ID) == "" {
 		return "", errors.New("Discord webhook did not return a message id")
@@ -215,7 +215,7 @@ func (m *managedWebhookClient) Edit(ctx context.Context, channelID, messageID, c
 		return nil
 	}
 	if err != nil {
-		return errors.New("edit managed Discord webhook message")
+		return classifyDiscordFailure(err)
 	}
 	return nil
 }
@@ -241,7 +241,7 @@ func (m *managedWebhookClient) Delete(ctx context.Context, channelID, messageID 
 		return nil
 	}
 	if err != nil {
-		return errors.New("delete managed Discord webhook message")
+		return classifyDiscordFailure(err)
 	}
 	return nil
 }

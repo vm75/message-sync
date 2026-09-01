@@ -103,7 +103,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		File:     file,
 	})
 	if err != nil {
-		return transport.MessageRef{}, errors.New("send Discord webhook message")
+		return transport.MessageRef{}, err
 	}
 	if strings.TrimSpace(remoteID) == "" {
 		return transport.MessageRef{}, errors.New("Discord webhook returned an empty message id")
@@ -147,7 +147,7 @@ func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error 
 			discordgo.WithContext(ctx),
 			discordgo.WithRetryOnRatelimit(true),
 		); err != nil && !isDiscordNotFound(err) {
-			return errors.New("remove Discord reaction")
+			return classifyDiscordFailure(err)
 		}
 		a.mu.Lock()
 		delete(a.reactionState, key)
@@ -167,7 +167,7 @@ func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error 
 		discordgo.WithContext(ctx),
 		discordgo.WithRetryOnRatelimit(true),
 	); err != nil {
-		return errors.New("add Discord reaction")
+		return classifyDiscordFailure(err)
 	}
 	a.mu.Lock()
 	a.reactionState[key] = emoji
@@ -192,7 +192,7 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	}
 
 	if err := webhook.Edit(ctx, channelID, messageID, sourceBodyFromForwarded(text)); err != nil {
-		return errors.New("edit Discord webhook message")
+		return err
 	}
 	return nil
 }
@@ -216,7 +216,7 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 	a.markSuppressedDelete(channelID, messageID)
 	if err := webhook.Delete(ctx, channelID, messageID); err != nil {
 		a.consumeSuppressedDelete(channelID, messageID)
-		return errors.New("delete Discord webhook message")
+		return err
 	}
 	return nil
 }
@@ -248,7 +248,7 @@ func sendNativeReplyMarker(ctx context.Context, api discordAPI, channelID, messa
 		discordgo.WithRetryOnRatelimit(true),
 	)
 	if err != nil {
-		return errors.New("send Discord native reply marker")
+		return classifyDiscordFailure(err)
 	}
 	return nil
 }

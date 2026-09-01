@@ -427,20 +427,22 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 	}
 
 	var deleted bool
+	var lastDeleteErr error
 	err = a.callWithRetry(ctx, func() error {
 		var callErr error
 		deleted, callErr = api.DeleteMessage(ctx, &telegrambot.DeleteMessageParams{
 			ChatID:    chatID,
 			MessageID: messageID,
 		})
+		lastDeleteErr = callErr
 		return callErr
 	})
 	if err != nil {
-		if isTelegramDeleteMissing(err) {
+		if isTelegramDeleteMissing(lastDeleteErr) {
 			a.forgetMessageKind(ref.Endpoint, ref.RemoteMessageID)
 			return nil
 		}
-		return errors.New("delete Telegram message")
+		return err
 	}
 	if !deleted {
 		return errors.New("delete Telegram message")
@@ -475,7 +477,7 @@ func (a *Adapter) callWithRetry(ctx context.Context, call func() error) error {
 		}
 		var rateLimit *telegrambot.TooManyRequestsError
 		if !errors.As(err, &rateLimit) || attempt == telegramMaxAPIAttempts-1 {
-			return err
+			return classifyTelegramFailure(err)
 		}
 
 		delay := time.Duration(rateLimit.RetryAfter) * time.Second
@@ -483,17 +485,17 @@ func (a *Adapter) callWithRetry(ctx context.Context, call func() error) error {
 			delay = telegramDefaultRetryDelay * time.Duration(1<<attempt)
 		}
 		if delay > telegramMaxRateLimitWait {
-			return err
+			return classifyTelegramFailure(err)
 		}
 		wait := a.retryWait
 		if wait == nil {
 			wait = waitTelegramRetry
 		}
 		if err := wait(ctx, delay); err != nil {
-			return err
+			return classifyTelegramFailure(err)
 		}
 	}
-	return errors.New("Telegram API retry exhausted")
+	return classifyTelegramFailure(errors.New("telegram API retry exhausted"))
 }
 
 func waitTelegramRetry(ctx context.Context, delay time.Duration) error {

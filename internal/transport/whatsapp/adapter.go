@@ -288,7 +288,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 		uploadResp, err := a.client.Upload(ctx, outgoing.MediaBytes, mediaType)
 		if err != nil {
-			return transport.MessageRef{}, fmt.Errorf("upload WhatsApp media: %w", err)
+			return transport.MessageRef{}, classifyWhatsAppFailure(fmt.Errorf("upload WhatsApp media: %w", err))
 		}
 
 		msg = &waE2E.Message{}
@@ -299,7 +299,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	response, err := a.client.SendMessage(ctx, target, msg)
 	if err != nil {
-		return transport.MessageRef{}, fmt.Errorf("send WhatsApp %s: %w", outgoing.Kind, err)
+		return transport.MessageRef{}, classifyWhatsAppFailure(fmt.Errorf("send WhatsApp %s: %w", outgoing.Kind, err))
 	}
 	return transport.MessageRef{
 		Endpoint:        outgoing.Endpoint,
@@ -348,7 +348,7 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 	}
 	_, err := a.client.SendMessage(ctx, target, reactionMsg)
 	if err != nil {
-		return fmt.Errorf("send WhatsApp native reaction: %w", err)
+		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp native reaction: %w", err))
 	}
 	return nil
 }
@@ -375,7 +375,7 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	editMsg := a.client.BuildEdit(target, types.MessageID(ref.RemoteMessageID), editContent)
 	_, err := a.client.SendMessage(ctx, target, editMsg)
 	if err != nil {
-		return fmt.Errorf("send WhatsApp edit: %w", err)
+		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp edit: %w", err))
 	}
 	return nil
 }
@@ -399,7 +399,7 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 	revokeMsg := a.client.BuildRevoke(target, types.EmptyJID, types.MessageID(ref.RemoteMessageID))
 	_, err := a.client.SendMessage(ctx, target, revokeMsg)
 	if err != nil {
-		return fmt.Errorf("send WhatsApp delete: %w", err)
+		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp delete: %w", err))
 	}
 	return nil
 }

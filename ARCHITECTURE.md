@@ -256,6 +256,8 @@ The authenticated admin API exposes safe long-poll/endpoint-readiness state at `
 
 On authenticated status requests the adapter derives current Bot Privacy Mode readiness from the safe `getMe.can_read_all_group_messages` capability, retains only the resulting boolean, and discards the returned bot user object. If that probe fails, the failure is safe-logged, readiness is marked unknown, and status/UI falls back to fixed operator guidance.
 
+Transport send, edit, delete, and reaction boundaries return the shared `transport.Failure` contract. It exposes only one of `transient`, `rate_limited`, `permission_denied`, `destination_missing`, `payload_rejected`, or `unsupported`, plus retryability and an optional retry-after duration. The original provider error remains available only through in-process `errors.Is`/`errors.As`; its text is never serialized or logged. Unknown failures default to retryable `transient`.
+
 ## 7. Idempotency and crash recovery
 
 Persist each successful destination copy immediately.

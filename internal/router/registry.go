@@ -88,7 +88,7 @@ func (r *AdapterRegistry) adapterFor(endpoint transport.EndpointID) (OutboundAda
 	transportType, ok := r.endpoints[endpoint]
 	if !ok {
 		r.mu.RUnlock()
-		return nil, errors.New("destination endpoint is not configured")
+		return nil, transport.NewFailure(transport.FailureDestinationMissing, 0, errors.New("destination endpoint is not configured"))
 	}
 	adapter := r.adapters[transportType]
 	r.mu.RUnlock()
