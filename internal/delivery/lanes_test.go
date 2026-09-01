@@ -159,3 +159,38 @@ func TestRetryLaneDoesNotRetryPermanentFailure(t *testing.T) {
 		t.Fatalf("attempts = %d, want 1", attempts)
 	}
 }
+
+func TestRetryLaneHonorsProviderRetryAfter(t *testing.T) {
+	manager, err := New(context.Background(), 1, []transport.EndpointID{"one"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+	policy := DefaultRetryPolicy()
+	var delays []time.Duration
+	policy.Wait = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	if err := manager.SetRetryPolicy(policy); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	if err := manager.EnqueueRetry(context.Background(), "one", func(context.Context, int) error {
+		if len(delays) == 0 {
+			return transport.NewFailure(transport.FailureRateLimited, 37*time.Millisecond, errors.New("provider detail"))
+		}
+		close(done)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("rate-limited retry did not complete")
+	}
+	if len(delays) != 1 || delays[0] != 37*time.Millisecond {
+		t.Fatalf("retry delays = %v, want [37ms]", delays)
+	}
+}
