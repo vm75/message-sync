@@ -190,7 +190,7 @@ func TestAdapterUpdateConfig(t *testing.T) {
 			"t2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{
-			{ID: "ss", Groups: []string{"t1", "t2"}},
+			{ID: "ss", Endpoints: []string{"t1", "t2"}},
 		},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 50, Enabled: true},

@@ -126,7 +126,7 @@
   const formSyncSet = document.getElementById('form-sync-set');
   const modalSyncSetAlert = document.getElementById('modal-sync-set-alert');
   const inputSyncSetId = document.getElementById('input-sync-set-id');
-  const syncSetGroupsChecklist = document.getElementById('sync-set-groups-checklist');
+  const syncSetEndpointsChecklist = document.getElementById('sync-set-groups-checklist');
   const btnSubmitSyncSet = document.getElementById('btn-submit-sync-set');
 
   // Settings View Elements
@@ -1369,7 +1369,7 @@
     cachedSyncSets.forEach((set) => {
       const opt = document.createElement('option');
       opt.value = set.id;
-      opt.textContent = `${set.id} (${set.groups ? set.groups.length : 0} members)`;
+      opt.textContent = `${set.id} (${set.endpoints ? set.endpoints.length : 0} members)`;
       if (set.id === selectedId) opt.selected = true;
       selectGroupSyncSet.appendChild(opt);
     });
@@ -1537,13 +1537,13 @@
    */
   async function loadSyncSets() {
     try {
-      const [syncSetsRes, groupsRes] = await Promise.all([
+      const [syncSetsRes, endpointsRes] = await Promise.all([
         window.API.getSyncSets(),
         window.API.getEndpoints()
       ]);
 
       cachedSyncSets = Array.isArray(syncSetsRes) ? syncSetsRes : [];
-      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : [];
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : [];
       renderSyncSetsGrid(searchSyncSetsInput ? searchSyncSetsInput.value : '');
     } catch (err) {
       console.error('Failed to load sync sets', err);
@@ -1558,7 +1558,7 @@
     const filtered = cachedSyncSets.filter((set) => {
       if (!q) return true;
       const matchId = set.id && set.id.toLowerCase().includes(q);
-      const matchMember = Array.isArray(set.groups) && set.groups.some((g) => g.toLowerCase().includes(q));
+      const matchMember = Array.isArray(set.endpoints) && set.endpoints.some((g) => g.toLowerCase().includes(q));
       return matchId || matchMember;
     });
 
@@ -1575,9 +1575,9 @@
     if (syncSetsEmptyState) syncSetsEmptyState.classList.add('hidden');
 
     syncSetsContainer.innerHTML = filtered.map((set) => {
-      const groups = Array.isArray(set.groups) ? set.groups : [];
-      const memberChips = groups.length > 0
-        ? groups.map((g) => `<span class="group-chip-tag"><svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>${escapeHtml(g)}</span>`).join('')
+      const endpoints = Array.isArray(set.endpoints) ? set.endpoints : [];
+      const memberChips = endpoints.length > 0
+        ? endpoints.map((g) => `<span class="group-chip-tag"><svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>${escapeHtml(g)}</span>`).join('')
         : `<span class="no-members-text">No member endpoints assigned yet</span>`;
 
       return `
@@ -1611,14 +1611,14 @@
           </div>
 
           <div class="sync-set-members">
-            <span class="sync-set-members-label">Connected Endpoints (${groups.length})</span>
+            <span class="sync-set-members-label">Connected Endpoints (${endpoints.length})</span>
             <div class="group-chips-container">
               ${memberChips}
             </div>
           </div>
 
           <div class="sync-set-footer">
-            <span class="sync-set-count-pill">${groups.length >= 2 ? '<span class="text-success">● Active All-to-All Sync</span>' : '<span class="text-warning">● Need 2+ groups to sync</span>'}</span>
+            <span class="sync-set-count-pill">${endpoints.length >= 2 ? '<span class="text-success">● Active All-to-All Sync</span>' : '<span class="text-warning">● Need 2+ groups to sync</span>'}</span>
             <button class="btn btn-ghost btn-sm btn-edit-sync-set" data-id="${escapeHtml(set.id)}">Manage</button>
           </div>
         </div>
@@ -1641,8 +1641,8 @@
     });
   }
 
-  function renderSyncSetGroupChecklist(waGroups = [], endpoints = [], selectedEndpointAliases = [], currentSetId = '') {
-    if (!syncSetGroupsChecklist) return;
+  function renderSyncSetEndpointChecklist(waGroups = [], endpoints = [], selectedEndpointAliases = [], currentSetId = '') {
+    if (!syncSetEndpointsChecklist) return;
 
     const endpointMap = new Map();
     endpoints.forEach((endpoint) => {
@@ -1672,11 +1672,11 @@
 
     const items = Array.from(endpointMap.values());
     if (items.length === 0) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty">No endpoints available. Pair WhatsApp or configure Discord/Telegram endpoints first.</div>';
+      syncSetEndpointsChecklist.innerHTML = '<div class="checklist-empty">No endpoints available. Pair WhatsApp or configure Discord/Telegram endpoints first.</div>';
       return;
     }
 
-    syncSetGroupsChecklist.innerHTML = items.map((item) => {
+    syncSetEndpointsChecklist.innerHTML = items.map((item) => {
       const hasAlias = Boolean(item.alias);
       const isSelected = hasAlias && selectedEndpointAliases.includes(item.alias);
       const isAssignedOther = hasAlias && item.syncSetId && item.syncSetId !== currentSetId;
@@ -1723,10 +1723,10 @@
       `;
     }).join('');
 
-    syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox').forEach((cb) => {
+    syncSetEndpointsChecklist.querySelectorAll('.checklist-checkbox').forEach((cb) => {
       cb.addEventListener('change', () => cb.closest('.checklist-item').classList.toggle('selected', cb.checked));
     });
-    syncSetGroupsChecklist.querySelectorAll('.btn-inline-alias').forEach((btn) => {
+    syncSetEndpointsChecklist.querySelectorAll('.btn-inline-alias').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         const jid = btn.getAttribute('data-jid');
@@ -1738,13 +1738,13 @@
         }
       });
     });
-    syncSetGroupsChecklist.querySelectorAll('.btn-cancel-inline-alias').forEach((btn) => {
+    syncSetEndpointsChecklist.querySelectorAll('.btn-cancel-inline-alias').forEach((btn) => {
       btn.addEventListener('click', () => {
         const box = btn.closest('.inline-alias-box');
         if (box) box.classList.add('hidden');
       });
     });
-    syncSetGroupsChecklist.querySelectorAll('.btn-save-inline-alias').forEach((btn) => {
+    syncSetEndpointsChecklist.querySelectorAll('.btn-save-inline-alias').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const jid = btn.getAttribute('data-jid');
         const box = btn.closest('.inline-alias-box');
@@ -1764,9 +1764,9 @@
             window.API.getEndpoints()
           ]);
           cachedEndpoints = endpointsRes;
-          const currentSelected = Array.from(syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox:checked')).map((checkbox) => checkbox.value);
+          const currentSelected = Array.from(syncSetEndpointsChecklist.querySelectorAll('.checklist-checkbox:checked')).map((checkbox) => checkbox.value);
           currentSelected.push(alias);
-          renderSyncSetGroupChecklist(waGroupsRes, cachedEndpoints, currentSelected, currentSetId);
+          renderSyncSetEndpointChecklist(waGroupsRes, cachedEndpoints, currentSelected, currentSetId);
         } catch (err) {
           showToast(err.message || 'Failed to save alias', 'danger');
         } finally {
@@ -1783,23 +1783,23 @@
     inputSyncSetId.value = '';
     inputSyncSetId.disabled = false;
 
-    if (syncSetGroupsChecklist) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
+    if (syncSetEndpointsChecklist) {
+      syncSetEndpointsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
     }
     openModal(modalSyncSet);
     inputSyncSetId.focus();
 
     try {
-      const [waGroupsRes, groupsRes] = await Promise.all([
+      const [waGroupsRes, endpointsRes] = await Promise.all([
         window.API.getWhatsAppJoinedGroups().catch(() => []),
         window.API.getEndpoints().catch(() => [])
       ]);
-      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : cachedEndpoints;
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : cachedEndpoints;
       const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
-      renderSyncSetGroupChecklist(waGroups, cachedEndpoints, [], '');
+      renderSyncSetEndpointChecklist(waGroups, cachedEndpoints, [], '');
     } catch (err) {
-      if (syncSetGroupsChecklist) {
-        syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
+      if (syncSetEndpointsChecklist) {
+        syncSetEndpointsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
       }
     }
   }
@@ -1814,22 +1814,22 @@
     inputSyncSetId.value = set.id;
     inputSyncSetId.disabled = true;
 
-    if (syncSetGroupsChecklist) {
-      syncSetGroupsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
+    if (syncSetEndpointsChecklist) {
+      syncSetEndpointsChecklist.innerHTML = '<div class="checklist-empty"><div class="btn-spinner" style="display:inline-block; vertical-align:middle; margin-right:8px;"></div> Fetching endpoints...</div>';
     }
     openModal(modalSyncSet);
 
     try {
-      const [waGroupsRes, groupsRes] = await Promise.all([
+      const [waGroupsRes, endpointsRes] = await Promise.all([
         window.API.getWhatsAppJoinedGroups().catch(() => []),
         window.API.getEndpoints().catch(() => [])
       ]);
-      cachedEndpoints = Array.isArray(groupsRes) ? groupsRes : cachedEndpoints;
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : cachedEndpoints;
       const waGroups = Array.isArray(waGroupsRes) ? waGroupsRes : [];
-      renderSyncSetGroupChecklist(waGroups, cachedEndpoints, set.groups || [], id);
+      renderSyncSetEndpointChecklist(waGroups, cachedEndpoints, set.endpoints || [], id);
     } catch (err) {
-      if (syncSetGroupsChecklist) {
-        syncSetGroupsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
+      if (syncSetEndpointsChecklist) {
+        syncSetEndpointsChecklist.innerHTML = `<div class="checklist-empty text-danger">${escapeHtml(err.message || 'Failed to load groups')}</div>`;
       }
     }
   }
@@ -1846,20 +1846,20 @@
       return;
     }
 
-    const selectedGroups = [];
-    if (syncSetGroupsChecklist) {
-      syncSetGroupsChecklist.querySelectorAll('.checklist-checkbox:checked').forEach((cb) => {
-        selectedGroups.push(cb.value);
+    const selectedEndpoints = [];
+    if (syncSetEndpointsChecklist) {
+      syncSetEndpointsChecklist.querySelectorAll('.checklist-checkbox:checked').forEach((cb) => {
+        selectedEndpoints.push(cb.value);
       });
     }
 
     setButtonLoading(btnSubmitSyncSet, true);
     try {
       if (editingSyncSetId) {
-        await window.API.updateSyncSet(editingSyncSetId, { groups: selectedGroups });
+        await window.API.updateSyncSet(editingSyncSetId, { endpoints: selectedEndpoints });
         showToast(`Sync set '${editingSyncSetId}' updated successfully.`, 'success');
       } else {
-        await window.API.createSyncSet({ id, groups: selectedGroups });
+        await window.API.createSyncSet({ id, endpoints: selectedEndpoints });
         showToast(`Sync set '${id}' created successfully.`, 'success');
       }
       closeModal(modalSyncSet);

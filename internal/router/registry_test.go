@@ -155,8 +155,8 @@ func mixedTransportConfig() *config.Config {
 			"wa2":     {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{
-			ID:     "mesh",
-			Groups: []string{"wa1", "discord", "wa2"},
+			ID:        "mesh",
+			Endpoints: []string{"wa1", "discord", "wa2"},
 		}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
@@ -415,8 +415,8 @@ func threeTransportConfig() *config.Config {
 			"telegram": {Transport: config.TransportTelegram, RemoteID: "-1001234567890"},
 		},
 		SyncSets: []config.SyncSet{{
-			ID:     "mesh",
-			Groups: []string{"wa", "discord", "telegram"},
+			ID:        "mesh",
+			Endpoints: []string{"wa", "discord", "telegram"},
 		}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}

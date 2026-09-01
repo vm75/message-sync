@@ -14,7 +14,7 @@ func validConfig() Config {
 			"a": {Transport: TransportWhatsApp, RemoteID: "1@g.us"},
 			"b": {Transport: TransportWhatsApp, RemoteID: "2@g.us"},
 		},
-		SyncSets: []SyncSet{{ID: "mesh", Groups: []string{"a", "b"}}},
+		SyncSets: []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
 		Identity: Identity{UsernameMode: UsernameModeHash},
 		Media:    Media{MaxSizeMB: 100},
 		Recovery: Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -65,7 +65,7 @@ func TestValidateUsernameModeEnum(t *testing.T) {
 func TestValidateRejectsGroupInMultipleSets(t *testing.T) {
 	cfg := validConfig()
 	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
-	cfg.SyncSets = append(cfg.SyncSets, SyncSet{ID: "two", Groups: []string{"a", "c"}})
+	cfg.SyncSets = append(cfg.SyncSets, SyncSet{ID: "two", Endpoints: []string{"a", "c"}})
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error")
 	}
@@ -161,7 +161,7 @@ func TestValidateRejectsInvalidSyncSetAndDuplicateMembership(t *testing.T) {
 	}
 
 	cfg = validConfig()
-	cfg.SyncSets[0].Groups = []string{"a", "a"}
+	cfg.SyncSets[0].Endpoints = []string{"a", "a"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected duplicate endpoint membership error")
 	}
@@ -204,7 +204,7 @@ func TestSaveAndLoadThreeTransportSyncSet(t *testing.T) {
 	cfg := validConfig()
 	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "123456789012345678"}
 	cfg.Endpoints["c"] = Endpoint{Transport: TransportTelegram, RemoteID: "-1001234567890"}
-	cfg.SyncSets[0].Groups = []string{"a", "b", "c"}
+	cfg.SyncSets[0].Endpoints = []string{"a", "b", "c"}
 
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -226,7 +226,7 @@ func TestSaveAndLoadThreeTransportSyncSet(t *testing.T) {
 	if got := loaded.Endpoints["c"]; got.Transport != TransportTelegram || got.RemoteID != "-1001234567890" {
 		t.Fatalf("loaded Telegram endpoint = %+v", got)
 	}
-	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" || len(loaded.SyncSets[0].Groups) != 3 {
+	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" || len(loaded.SyncSets[0].Endpoints) != 3 {
 		t.Fatalf("loaded sync sets mismatch: %+v", loaded.SyncSets)
 	}
 }
@@ -342,7 +342,7 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 		t.Fatalf("sync-set changed across Telegram migration: %+v", loaded.SyncSets)
 	}
 	foundAlias := false
-	for _, alias := range loaded.SyncSets[0].Groups {
+	for _, alias := range loaded.SyncSets[0].Endpoints {
 		if alias == "b" {
 			foundAlias = true
 		}

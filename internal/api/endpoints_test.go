@@ -292,54 +292,19 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	}
 }
 
-func TestLegacyGroupsRemainWhatsAppOnly(t *testing.T) {
-	db := setupTestDB(t)
-	srv := setupTestServer(t, db)
+func TestLegacyGroupsRoutesReturnNotFound(t *testing.T) {
+	srv := setupTestServer(t, setupTestDB(t))
 	token, err := srv.sessions.CreateToken()
 	if err != nil {
 		t.Fatal(err)
 	}
-	authHeader := "Bearer " + token
-
-	if _, err := db.Exec(`
-		INSERT INTO endpoints (alias, transport, remote_id)
-		VALUES ('wa', 'whatsapp', '1@g.us'),
-		       ('discord', 'discord', '123456789012345678'),
-		       ('telegram', 'telegram', '-1001234567890')
-	`); err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/groups", nil)
-	req.Header.Set("Authorization", authHeader)
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET /api/groups status = %d, want 200", rec.Code)
-	}
-	var groups []GroupDTO
-	if err := json.NewDecoder(rec.Body).Decode(&groups); err != nil {
-		t.Fatal(err)
-	}
-	if len(groups) != 1 || groups[0].Alias != "wa" {
-		t.Fatalf("legacy groups exposed non-WhatsApp endpoint: %+v", groups)
-	}
-
-	for _, alias := range []string{"discord", "telegram"} {
-		for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
-			var body *strings.Reader
-			if method == http.MethodPut {
-				body = strings.NewReader(`{"jid":"2@g.us"}`)
-			} else {
-				body = strings.NewReader("")
-			}
-			req := httptest.NewRequest(method, "/api/groups/"+alias, body)
-			req.Header.Set("Authorization", authHeader)
-			rec := httptest.NewRecorder()
-			srv.Handler().ServeHTTP(rec, req)
-			if rec.Code != http.StatusNotFound {
-				t.Fatalf("%s legacy %s alias status = %d, want 404", method, alias, rec.Code)
-			}
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/groups", strings.NewReader(`{"alias":"ops","jid":"1@g.us"}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s /api/groups status = %d, want 404", method, rec.Code)
 		}
 	}
 }

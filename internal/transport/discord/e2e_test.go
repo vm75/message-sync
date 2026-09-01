@@ -136,7 +136,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 			"discord": {Transport: config.TransportDiscord, RemoteID: testChannelID},
 			"wa-two":  {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"wa-one", "discord", "wa-two"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa-one", "discord", "wa-two"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 

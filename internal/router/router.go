@@ -64,8 +64,8 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 
 	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Endpoints))
 	for _, set := range cfg.SyncSets {
-		members := make([]transport.EndpointID, 0, len(set.Groups))
-		for _, alias := range set.Groups {
+		members := make([]transport.EndpointID, 0, len(set.Endpoints))
+		for _, alias := range set.Endpoints {
 			members = append(members, transport.EndpointID(alias))
 		}
 		for _, member := range members {
@@ -95,8 +95,8 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 
 	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Endpoints))
 	for _, set := range cfg.SyncSets {
-		members := make([]transport.EndpointID, 0, len(set.Groups))
-		for _, alias := range set.Groups {
+		members := make([]transport.EndpointID, 0, len(set.Endpoints))
+		for _, alias := range set.Endpoints {
 			members = append(members, transport.EndpointID(alias))
 		}
 		for _, member := range members {

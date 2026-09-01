@@ -393,7 +393,7 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 	// Extract distinct group JIDs configured in sync-sets
 	syncSetGroupAliases := make(map[string]struct{})
 	for _, set := range cfg.SyncSets {
-		for _, alias := range set.Groups {
+		for _, alias := range set.Endpoints {
 			syncSetGroupAliases[alias] = struct{}{}
 		}
 	}

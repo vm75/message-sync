@@ -20,8 +20,8 @@ func TestSyncSetsAuthRequired(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/sync-sets", ""},
 		{http.MethodGet, "/api/sync-sets/mesh", ""},
-		{http.MethodPost, "/api/sync-sets", `{"id":"mesh","groups":["g1","d1"]}`},
-		{http.MethodPut, "/api/sync-sets/mesh", `{"groups":["g1","d1"]}`},
+		{http.MethodPost, "/api/sync-sets", `{"id":"mesh","endpoints":["g1","d1"]}`},
+		{http.MethodPut, "/api/sync-sets/mesh", `{"endpoints":["g1","d1"]}`},
 		{http.MethodDelete, "/api/sync-sets/mesh", ""},
 	}
 
@@ -68,7 +68,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 			('g3', 'whatsapp', '3@g.us')
 	`)
 	if err != nil {
-		t.Fatalf("insert test groups: %v", err)
+		t.Fatalf("insert test endpoints: %v", err)
 	}
 
 	// 1. Initial GET /api/sync-sets should be empty
@@ -94,10 +94,10 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		name string
 		body string
 	}{
-		{"empty id", `{"id":"","groups":["g1","d1"]}`},
-		{"invalid id characters", `{"id":"set 1!","groups":["g1","d1"]}`},
-		{"unknown group", `{"id":"s1","groups":["g1","unknown_group"]}`},
-		{"duplicate group in request", `{"id":"s1","groups":["g1","g1"]}`},
+		{"empty id", `{"id":"","endpoints":["g1","d1"]}`},
+		{"invalid id characters", `{"id":"set 1!","endpoints":["g1","d1"]}`},
+		{"unknown endpoint", `{"id":"s1","endpoints":["g1","unknown_endpoint"]}`},
+		{"duplicate endpoint in request", `{"id":"s1","endpoints":["g1","g1"]}`},
 	}
 
 	for _, tc := range invalidCases {
@@ -114,7 +114,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// 3. POST valid creation of set1 with WhatsApp + Discord + Telegram endpoints.
 	{
-		body := `{"id":"set1","groups":["g1","d1","t1"]}`
+		body := `{"id":"set1","endpoints":["g1","d1","t1"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -126,7 +126,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 			t.Fatalf("decode created sync set: %v", err)
 		}
-		if created.ID != "set1" || len(created.Groups) != 3 {
+		if created.ID != "set1" || len(created.Endpoints) != 3 {
 			t.Fatalf("created sync set mismatch: %+v", created)
 		}
 		if configChanges != 1 {
@@ -136,7 +136,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// 4. POST duplicate sync set ID
 	{
-		body := `{"id":"set1","groups":["g3"]}`
+		body := `{"id":"set1","endpoints":["g3"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -146,15 +146,15 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		}
 	}
 
-	// 5. POST overlapping group assignment (g1 already belongs to set1)
+	// 5. POST overlapping endpoint assignment (g1 already belongs to set1)
 	{
-		body := `{"id":"set2","groups":["g1","g3"]}`
+		body := `{"id":"set2","endpoints":["g1","g3"]}`
 		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("POST overlapping group status = %d, want 400", rec.Code)
+			t.Fatalf("POST overlapping endpoint status = %d, want 400", rec.Code)
 		}
 	}
 
@@ -171,7 +171,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&s); err != nil {
 			t.Fatalf("decode sync set: %v", err)
 		}
-		if s.ID != "set1" || len(s.Groups) != 3 {
+		if s.ID != "set1" || len(s.Endpoints) != 3 {
 			t.Fatalf("sync set mismatch: %+v", s)
 		}
 
@@ -188,7 +188,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 	// 7. PUT /api/sync-sets/{id}
 	{
 		// Update set1 to keep Discord + Telegram and replace the WhatsApp endpoint.
-		body := `{"groups":["d1","t1","g3"]}`
+		body := `{"endpoints":["d1","t1","g3"]}`
 		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(body)))
 		req.Header.Set("Authorization", authHeader)
 		rec := httptest.NewRecorder()
@@ -200,7 +200,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
 			t.Fatalf("decode updated sync set: %v", err)
 		}
-		if updated.ID != "set1" || len(updated.Groups) != 3 {
+		if updated.ID != "set1" || len(updated.Endpoints) != 3 {
 			t.Fatalf("updated sync set mismatch: %+v", updated)
 		}
 
@@ -215,7 +215,7 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		}
 
 		// PUT non-existent sync set
-		reqNotFound := httptest.NewRequest(http.MethodPut, "/api/sync-sets/missing", bytes.NewReader([]byte(`{"groups":["g1"]}`)))
+		reqNotFound := httptest.NewRequest(http.MethodPut, "/api/sync-sets/missing", bytes.NewReader([]byte(`{"endpoints":["g1"]}`)))
 		reqNotFound.Header.Set("Authorization", authHeader)
 		recNotFound := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(recNotFound, reqNotFound)
@@ -223,13 +223,13 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 			t.Fatalf("PUT non-existent sync set status = %d, want 404", recNotFound.Code)
 		}
 
-		// PUT invalid group
-		reqInvalid := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(`{"groups":["unknown_group"]}`)))
+		// PUT invalid endpoint
+		reqInvalid := httptest.NewRequest(http.MethodPut, "/api/sync-sets/set1", bytes.NewReader([]byte(`{"endpoints":["unknown_endpoint"]}`)))
 		reqInvalid.Header.Set("Authorization", authHeader)
 		recInvalid := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(recInvalid, reqInvalid)
 		if recInvalid.Code != http.StatusBadRequest {
-			t.Fatalf("PUT invalid group status = %d, want 400", recInvalid.Code)
+			t.Fatalf("PUT invalid endpoint status = %d, want 400", recInvalid.Code)
 		}
 	}
 
@@ -268,6 +268,29 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 		srv.Handler().ServeHTTP(recNotFound, reqNotFound)
 		if recNotFound.Code != http.StatusNotFound {
 			t.Fatalf("DELETE non-existent sync set status = %d, want 404", recNotFound.Code)
+		}
+	}
+}
+
+func TestSyncSetRejectsLegacyGroupsField(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		url := "/api/sync-sets"
+		if method == http.MethodPut {
+			url = "/api/sync-sets/mesh"
+		}
+		req := httptest.NewRequest(method, url, bytes.NewReader([]byte(`{"id":"mesh","groups":["a","b"]}`)))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s legacy groups field status = %d, want 400", method, rec.Code)
 		}
 	}
 }

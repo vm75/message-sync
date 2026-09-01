@@ -12,18 +12,18 @@ import (
 )
 
 type SyncSetDTO struct {
-	ID     string   `json:"id"`
-	Groups []string `json:"groups"`
+	ID        string   `json:"id"`
+	Endpoints []string `json:"endpoints"`
 }
 
 type CreateSyncSetRequest struct {
-	ID     string   `json:"id"`
-	Groups []string `json:"groups"`
+	ID        string   `json:"id"`
+	Endpoints []string `json:"endpoints"`
 }
 
 type UpdateSyncSetRequest struct {
-	ID     string   `json:"id,omitempty"`
-	Groups []string `json:"groups"`
+	ID        string   `json:"id,omitempty"`
+	Endpoints []string `json:"endpoints"`
 }
 
 func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
@@ -58,39 +58,39 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	}
 	setRows.Close()
 
-	groupRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE sync_set_id IS NOT NULL ORDER BY alias ASC`)
+	endpointRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE sync_set_id IS NOT NULL ORDER BY alias ASC`)
 	if err != nil {
-		safelog.Error(s.logger, "query groups for sync_sets failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query groups")
+		safelog.Error(s.logger, "query endpoints for sync_sets failed", "sync_set_api", err)
+		WriteError(w, http.StatusInternalServerError, "failed to query endpoints")
 		return
 	}
-	defer groupRows.Close()
+	defer endpointRows.Close()
 
-	syncSetGroups := make(map[string][]string)
-	for groupRows.Next() {
+	syncSetEndpoints := make(map[string][]string)
+	for endpointRows.Next() {
 		var alias, syncSetID string
-		if err := groupRows.Scan(&alias, &syncSetID); err != nil {
-			safelog.Error(s.logger, "scan group alias failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to read group memberships")
+		if err := endpointRows.Scan(&alias, &syncSetID); err != nil {
+			safelog.Error(s.logger, "scan endpoint alias failed", "sync_set_api", err)
+			WriteError(w, http.StatusInternalServerError, "failed to read endpoint memberships")
 			return
 		}
-		syncSetGroups[syncSetID] = append(syncSetGroups[syncSetID], alias)
+		syncSetEndpoints[syncSetID] = append(syncSetEndpoints[syncSetID], alias)
 	}
-	if err := groupRows.Err(); err != nil {
-		safelog.Error(s.logger, "iterate groups failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to iterate groups")
+	if err := endpointRows.Err(); err != nil {
+		safelog.Error(s.logger, "iterate endpoints failed", "sync_set_api", err)
+		WriteError(w, http.StatusInternalServerError, "failed to iterate endpoints")
 		return
 	}
 
 	syncSets := make([]SyncSetDTO, 0, len(setIDs))
 	for _, id := range setIDs {
-		groups := syncSetGroups[id]
-		if groups == nil {
-			groups = []string{}
+		endpoints := syncSetEndpoints[id]
+		if endpoints == nil {
+			endpoints = []string{}
 		}
 		syncSets = append(syncSets, SyncSetDTO{
-			ID:     id,
-			Groups: groups,
+			ID:        id,
+			Endpoints: endpoints,
 		})
 	}
 
@@ -122,26 +122,26 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE sync_set_id = ? ORDER BY alias ASC`, id)
 	if err != nil {
-		safelog.Error(s.logger, "query sync set groups failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query sync set groups")
+		safelog.Error(s.logger, "query sync set endpoints failed", "sync_set_api", err)
+		WriteError(w, http.StatusInternalServerError, "failed to query sync set endpoints")
 		return
 	}
 	defer rows.Close()
 
-	groups := make([]string, 0)
+	endpoints := make([]string, 0)
 	for rows.Next() {
 		var alias string
 		if err := rows.Scan(&alias); err != nil {
-			safelog.Error(s.logger, "scan sync set group failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to read group")
+			safelog.Error(s.logger, "scan sync set endpoint failed", "sync_set_api", err)
+			WriteError(w, http.StatusInternalServerError, "failed to read endpoint")
 			return
 		}
-		groups = append(groups, alias)
+		endpoints = append(endpoints, alias)
 	}
 
 	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:     id,
-		Groups: groups,
+		ID:        id,
+		Endpoints: endpoints,
 	})
 }
 
@@ -175,8 +175,8 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate groups in request
-	if err := s.validateSyncSetGroups(r, req.ID, req.Groups, true); err != nil {
+	// Validate endpoints in request
+	if err := s.validateSyncSetEndpoints(r, req.ID, req.Endpoints, true); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -195,11 +195,11 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, alias := range req.Groups {
+	for _, alias := range req.Endpoints {
 		alias = strings.TrimSpace(alias)
 		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, req.ID, alias); err != nil {
-			safelog.Error(s.logger, "assign group to sync set failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
+			safelog.Error(s.logger, "assign endpoint to sync set failed", "sync_set_api", err)
+			WriteError(w, http.StatusInternalServerError, "failed to assign endpoints")
 			return
 		}
 	}
@@ -212,13 +212,13 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 
-	groups := req.Groups
-	if groups == nil {
-		groups = []string{}
+	endpoints := req.Endpoints
+	if endpoints == nil {
+		endpoints = []string{}
 	}
 	_ = WriteJSON(w, http.StatusCreated, SyncSetDTO{
-		ID:     req.ID,
-		Groups: groups,
+		ID:        req.ID,
+		Endpoints: endpoints,
 	})
 }
 
@@ -257,8 +257,8 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate groups
-	if err := s.validateSyncSetGroups(r, id, req.Groups, false); err != nil {
+	// Validate endpoints
+	if err := s.validateSyncSetEndpoints(r, id, req.Endpoints, false); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -279,11 +279,11 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Assign new members
-	for _, alias := range req.Groups {
+	for _, alias := range req.Endpoints {
 		alias = strings.TrimSpace(alias)
 		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, id, alias); err != nil {
-			safelog.Error(s.logger, "assign group to sync set failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to assign groups")
+			safelog.Error(s.logger, "assign endpoint to sync set failed", "sync_set_api", err)
+			WriteError(w, http.StatusInternalServerError, "failed to assign endpoints")
 			return
 		}
 	}
@@ -296,13 +296,13 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 
-	groups := req.Groups
-	if groups == nil {
-		groups = []string{}
+	endpoints := req.Endpoints
+	if endpoints == nil {
+		endpoints = []string{}
 	}
 	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:     id,
-		Groups: groups,
+		ID:        id,
+		Endpoints: endpoints,
 	})
 }
 
@@ -326,9 +326,9 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Unassign groups
+	// Unassign endpoints
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
-		safelog.Error(s.logger, "unassign sync set groups failed", "sync_set_api", err)
+		safelog.Error(s.logger, "unassign sync set endpoints failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
@@ -361,9 +361,9 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *Server) validateSyncSetGroups(r *http.Request, currentSetID string, groups []string, isNew bool) error {
-	seen := make(map[string]struct{}, len(groups))
-	for _, alias := range groups {
+func (s *Server) validateSyncSetEndpoints(r *http.Request, currentSetID string, endpoints []string, isNew bool) error {
+	seen := make(map[string]struct{}, len(endpoints))
+	for _, alias := range endpoints {
 		alias = strings.TrimSpace(alias)
 		if alias == "" {
 			return errors.New("endpoint alias cannot be empty")

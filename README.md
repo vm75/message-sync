@@ -109,7 +109,7 @@ The authenticated management API provides transport-neutral endpoint CRUD at `/a
 - **Endpoint Management**: `GET`, `POST`, `PUT`, `DELETE` at `/api/endpoints`.
 - **Discord Administration**: `GET /api/discord/status` reports safe connection/webhook-readiness state; `GET /api/discord/channels` provides on-demand live discovery of guild text/announcement channels.
 - **Telegram Administration**: `GET /api/telegram/status` reports safe token-source/long-poll/endpoint-readiness and Bot Privacy Mode status; `GET /api/telegram/chats` returns the bounded in-memory list of observed groups/supergroups.
-- **Backward Compatibility**: Existing `/api/groups` routes remain available as WhatsApp-only compatibility wrappers using the legacy `jid` payload shape. Sync-set payloads continue to use the `groups` field name for compatibility, but those values are endpoint aliases and may refer to WhatsApp, Discord, or Telegram endpoints.
+- **Sync-set API**: Sync-set payloads use the `endpoints` field for endpoint aliases across WhatsApp, Discord, and Telegram. Generic `/api/groups` CRUD routes are not supported; use `/api/endpoints` for configuration and `/api/whatsapp/groups` for joined-group discovery.
 
 Transport credentials, tokens, and raw protocol update payloads are never returned by the API or persisted in `sync.db`.
 

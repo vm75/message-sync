@@ -624,7 +624,7 @@ func testConfig(usernameMode config.UsernameMode) *config.Config {
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 			"c1g3": {Transport: config.TransportWhatsApp, RemoteID: "333@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2", "c1g3"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2", "c1g3"}}},
 		Identity: config.Identity{UsernameMode: usernameMode},
 	}
 }
@@ -666,7 +666,7 @@ func TestRouterUpdateConfig(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 	if err := r.UpdateConfig(newCfg); err != nil {
@@ -884,7 +884,7 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 	path := filepath.Join(t.TempDir(), "sync.db")

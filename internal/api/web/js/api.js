@@ -232,37 +232,6 @@
     },
 
     /**
-     * WhatsApp-only compatibility group CRUD
-     */
-    async getGroups() {
-      return this.request('/api/groups');
-    },
-
-    async getGroup(alias) {
-      return this.request(`/api/groups/${encodeURIComponent(alias)}`);
-    },
-
-    async createGroup(groupData) {
-      return this.request('/api/groups', {
-        method: 'POST',
-        body: groupData
-      });
-    },
-
-    async updateGroup(alias, groupData) {
-      return this.request(`/api/groups/${encodeURIComponent(alias)}`, {
-        method: 'PUT',
-        body: groupData
-      });
-    },
-
-    async deleteGroup(alias) {
-      return this.request(`/api/groups/${encodeURIComponent(alias)}`, {
-        method: 'DELETE'
-      });
-    },
-
-    /**
      * Sync Sets CRUD Endpoints
      */
     async getSyncSets() {

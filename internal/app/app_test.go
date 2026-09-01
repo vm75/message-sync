@@ -149,7 +149,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -267,7 +267,7 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -368,7 +368,7 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -431,7 +431,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -571,7 +571,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -678,17 +678,17 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	fake.sent = nil
 	fake.mu.Unlock()
 
-	// 2. Add group c1g3 via POST /api/groups
-	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/groups", apiAddr), strings.NewReader(`{"alias":"c1g3","jid":"333333333@g.us"}`))
+	// 2. Add endpoint c1g3 via POST /api/endpoints
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/endpoints", apiAddr), strings.NewReader(`{"alias":"c1g3","transport":"whatsapp","remoteId":"333333333@g.us"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /api/groups failed: err=%v, code=%d", err, resp.StatusCode)
+		t.Fatalf("POST /api/endpoints failed: err=%v, code=%d", err, resp.StatusCode)
 	}
 	resp.Body.Close()
 
 	// 3. Update sync-set mesh via PUT /api/sync-sets/mesh to include [c1g1, c1g2, c1g3]
-	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"groups":["c1g1","c1g2","c1g3"]}`))
+	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"endpoints":["c1g1","c1g2","c1g3"]}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -762,7 +762,7 @@ func TestApp_WebUIServing(t *testing.T) {
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
 		},
-		SyncSets: []config.SyncSet{{ID: "mesh", Groups: []string{"c1g1", "c1g2"}}},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -906,7 +906,7 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 			"g2": {Transport: config.TransportWhatsApp, RemoteID: "222222222222222222@g.us"},
 		},
 		SyncSets: []config.SyncSet{
-			{ID: "set1", Groups: []string{"g1", "g2"}},
+			{ID: "set1", Endpoints: []string{"g1", "g2"}},
 		},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 		Media:    config.Media{MaxSizeMB: 100},

@@ -118,8 +118,8 @@ type Endpoint struct {
 }
 
 type SyncSet struct {
-	ID     string   `json:"id"`
-	Groups []string `json:"groups"`
+	ID        string   `json:"id"`
+	Endpoints []string `json:"endpoints"`
 }
 
 type Identity struct {
@@ -230,13 +230,13 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		if err := setRows.Scan(&id); err != nil {
 			return nil, fmt.Errorf("scan sync_set: %w", err)
 		}
-		groups := syncSetMap[id]
-		if groups == nil {
-			groups = []string{}
+		endpoints := syncSetMap[id]
+		if endpoints == nil {
+			endpoints = []string{}
 		}
 		cfg.SyncSets = append(cfg.SyncSets, SyncSet{
-			ID:     id,
-			Groups: groups,
+			ID:        id,
+			Endpoints: endpoints,
 		})
 	}
 	if err := setRows.Err(); err != nil {
@@ -362,7 +362,7 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 
 	endpointToSyncSet := make(map[string]string)
 	for _, set := range cfg.SyncSets {
-		for _, alias := range set.Groups {
+		for _, alias := range set.Endpoints {
 			endpointToSyncSet[alias] = set.ID
 		}
 	}
@@ -463,11 +463,11 @@ func (c Config) Validate() error {
 		if err := ValidateSyncSetID(set.ID); err != nil {
 			return err
 		}
-		if len(set.Groups) < 2 {
+		if len(set.Endpoints) < 2 {
 			return fmt.Errorf("sync set %q must contain at least two endpoints", set.ID)
 		}
-		seen := make(map[string]struct{}, len(set.Groups))
-		for _, alias := range set.Groups {
+		seen := make(map[string]struct{}, len(set.Endpoints))
+		for _, alias := range set.Endpoints {
 			if _, ok := c.Endpoints[alias]; !ok {
 				return fmt.Errorf("sync set %q references unknown endpoint %q", set.ID, alias)
 			}
