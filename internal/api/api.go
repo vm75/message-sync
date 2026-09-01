@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/safelog"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
 	telegram "github.com/vm75/message-sync/internal/transport/telegram"
@@ -45,27 +46,33 @@ type WhatsAppService interface {
 }
 
 type Options struct {
-	Addr           string
-	Logger         *slog.Logger
-	DB             *sql.DB
-	Secret         []byte
-	SessionTTL     time.Duration
-	WhatsApp       WhatsAppService
-	Discord        discord.AdminService
-	Telegram       telegram.AdminService
+	Addr       string
+	Logger     *slog.Logger
+	DB         *sql.DB
+	Secret     []byte
+	SessionTTL time.Duration
+	WhatsApp   WhatsAppService
+	Discord    discord.AdminService
+	Telegram   telegram.AdminService
+	Delivery   interface {
+		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
+	}
 	OnConfigChange func(ctx context.Context) error
 }
 
 type Server struct {
-	httpServer     *http.Server
-	mux            *http.ServeMux
-	handler        http.Handler
-	logger         *slog.Logger
-	db             *sql.DB
-	sessions       *SessionManager
-	whatsapp       WhatsAppService
-	discord        discord.AdminService
-	telegram       telegram.AdminService
+	httpServer *http.Server
+	mux        *http.ServeMux
+	handler    http.Handler
+	logger     *slog.Logger
+	db         *sql.DB
+	sessions   *SessionManager
+	whatsapp   WhatsAppService
+	discord    discord.AdminService
+	telegram   telegram.AdminService
+	delivery   interface {
+		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
+	}
 	onConfigChange func(ctx context.Context) error
 	listener       net.Listener
 }
@@ -94,6 +101,7 @@ func NewServer(opts Options) *Server {
 		whatsapp:       opts.WhatsApp,
 		discord:        opts.Discord,
 		telegram:       opts.Telegram,
+		delivery:       opts.Delivery,
 		onConfigChange: opts.OnConfigChange,
 	}
 
@@ -131,6 +139,7 @@ func (s *Server) registerRoutes() {
 
 	s.mux.HandleFunc("GET /api/telegram/status", s.handleTelegramStatus)
 	s.mux.HandleFunc("GET /api/telegram/chats", s.handleTelegramChats)
+	s.mux.HandleFunc("GET /api/delivery/status", s.handleDeliveryStatus)
 
 	s.mux.HandleFunc("GET /api/endpoints", s.handleListEndpoints)
 	s.mux.HandleFunc("GET /api/endpoints/{alias}", s.handleGetEndpoint)

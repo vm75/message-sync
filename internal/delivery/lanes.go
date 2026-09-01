@@ -17,6 +17,21 @@ var (
 type Job func(context.Context)
 type RetryJob func(context.Context, int) error
 
+// EndpointStatus is the content-free operational view exposed to local
+// administrators. EndpointID is an application alias, never a provider ID.
+type EndpointStatus struct {
+	EndpointID      string
+	QueueDepth      int
+	QueueCapacity   int
+	LaneState       string
+	Queued          int64
+	Retrying        int64
+	AwaitingReplay  int64
+	Failed          int64
+	OldestActiveAge time.Duration
+	FailureClass    string
+}
+
 type RetryPolicy struct {
 	MaxAttempts int
 	MaxWindow   time.Duration
@@ -244,4 +259,23 @@ func (m *Manager) Close() {
 	for _, l := range lanes {
 		l.close()
 	}
+}
+
+// Status returns a point-in-time, content-free snapshot of every configured
+// lane. SQLite ledger values are joined by the router, which owns that read
+// model's cross-component semantics.
+func (m *Manager) Status() map[transport.EndpointID]EndpointStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	result := make(map[transport.EndpointID]EndpointStatus, len(m.lanes))
+	for endpoint, l := range m.lanes {
+		state := "healthy"
+		if m.closed {
+			state = "stopped"
+		} else if len(l.jobs) > 0 {
+			state = "queued"
+		}
+		result[endpoint] = EndpointStatus{EndpointID: string(endpoint), QueueDepth: len(l.jobs), QueueCapacity: cap(l.jobs), LaneState: state}
+	}
+	return result
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -161,6 +162,44 @@ func (r *Router) Close() {
 		return
 	}
 	r.lanes.Close()
+}
+
+// DeliveryStatus returns the single content-free operational read model used
+// by administration. The router joins its in-memory lanes with the SQLite
+// ledger so live queue state and durable retry state cannot drift in the API.
+func (r *Router) DeliveryStatus(ctx context.Context) ([]delivery.EndpointStatus, error) {
+	if r == nil || r.store == nil || r.lanes == nil {
+		return nil, errors.New("delivery status is unavailable")
+	}
+	now := time.Now().UTC()
+	ledger, err := r.store.DeliverySummaries(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	lanes := r.lanes.Status()
+	result := make([]delivery.EndpointStatus, 0, len(lanes))
+	for endpoint, status := range lanes {
+		if summary, ok := ledger[string(endpoint)]; ok {
+			status.Queued = summary.Queued
+			status.Retrying = summary.Retrying
+			status.AwaitingReplay = summary.AwaitingReplay
+			status.Failed = summary.Failed
+			status.OldestActiveAge = summary.OldestActiveAge
+			status.FailureClass = summary.FailureClass
+			if summary.AwaitingReplay > 0 {
+				status.LaneState = store.DeliveryAwaitingReplay
+			} else if summary.Retrying > 0 {
+				status.LaneState = store.DeliveryRetrying
+			} else if summary.Queued > 0 {
+				status.LaneState = store.DeliveryQueued
+			} else if summary.Failed > 0 {
+				status.LaneState = store.DeliveryFailed
+			}
+		}
+		result = append(result, status)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].EndpointID < result[j].EndpointID })
+	return result, nil
 }
 
 // HandleEvent processes live and recovered normalized events through the same

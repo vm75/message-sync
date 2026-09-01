@@ -367,6 +367,26 @@
                 <p class="stat-desc">Adjust privacy, media, and retention limits.</p>
               </div>
             </div>
+
+            <div class="card table-card delivery-health-card">
+              <div class="page-header">
+                <div>
+                  <h2 class="page-title" style="font-size:1.15rem;">Delivery Health</h2>
+                  <p class="page-subtitle">Live queue and retry state. Endpoint aliases are the only identifiers shown.</p>
+                </div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead><tr><th>Endpoint</th><th>Transport</th><th>State</th><th>Queue</th><th>Ledger</th><th>Oldest active</th><th>Transport</th></tr></thead>
+                  <tbody id="delivery-health-body"></tbody>
+                </table>
+              </div>
+              <div id="delivery-health-empty" class="empty-state hidden">
+                <h3 class="empty-title">No Endpoints Configured</h3>
+                <p class="empty-desc">Delivery health appears here after an endpoint is configured.</p>
+              </div>
+              <div id="delivery-health-error" class="alert alert-danger hidden" role="alert"></div>
+            </div>
           </div>
         </div>
       </section>

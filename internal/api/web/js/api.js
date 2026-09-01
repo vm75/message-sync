@@ -200,6 +200,10 @@
       return this.request('/api/telegram/chats');
     },
 
+    async getDeliveryStatus() {
+      return this.request('/api/delivery/status');
+    },
+
     /**
      * Transport-neutral Endpoint CRUD
      */

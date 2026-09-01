@@ -274,6 +274,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		WhatsApp:       waService,
 		Discord:        dc,
 		Telegram:       tg,
+		Delivery:       mesh,
 		OnConfigChange: onConfigChange,
 	})
 	if err := apiServer.Start(); err != nil {

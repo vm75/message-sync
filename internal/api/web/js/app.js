@@ -55,6 +55,9 @@
   const dashGroupsCount = document.getElementById('dash-groups-count');
   const dashSyncSetsCount = document.getElementById('dash-sync-sets-count');
   const dashConfigMode = document.getElementById('dash-config-mode');
+  const deliveryHealthBody = document.getElementById('delivery-health-body');
+  const deliveryHealthEmpty = document.getElementById('delivery-health-empty');
+  const deliveryHealthError = document.getElementById('delivery-health-error');
 
   // WhatsApp View Elements
   const btnWaRefresh = document.getElementById('btn-wa-refresh');
@@ -181,6 +184,7 @@
   let waPollTimer = null;
   let waCountdownTimer = null;
   let qrExpiresAt = null;
+  let deliveryPollTimer = null;
 
   /**
    * Escape HTML to prevent XSS
@@ -584,6 +588,7 @@
     } finally {
       isAuthenticated = false;
       stopWhatsAppPolling();
+      stopDeliveryPolling();
       stopQrCountdown();
       cachedDiscordChannels = [];
       cachedDiscordStatus = null;
@@ -653,9 +658,45 @@
         cachedConfig = cfg.value;
         dashConfigMode.textContent = cfg.value.usernameMode === 'hash' ? 'Hash (Zero-PII)' : 'Push Name';
       }
+      loadDeliveryStatus();
     } catch (e) {
       console.warn('Dashboard stats error', e);
     }
+  }
+
+  function deliveryLabel(state) {
+    return ({ healthy: 'Healthy', queued: 'Queued', retrying: 'Retrying', awaiting_replay: 'Awaiting replay', failed: 'Failed', stopped: 'Stopped' })[state] || 'Unknown';
+  }
+
+  async function loadDeliveryStatus() {
+    if (!deliveryHealthBody) return;
+    try {
+      const data = await window.API.getDeliveryStatus();
+      const endpoints = data && Array.isArray(data.endpoints) ? data.endpoints : [];
+      deliveryHealthBody.innerHTML = endpoints.map((item) => {
+        const ledger = `Q ${item.queued} · R ${item.retrying} · A ${item.awaitingReplay} · F ${item.failed}`;
+        const queue = `${item.queueDepth}/${item.queueCapacity}`;
+        const age = item.oldestActiveAgeSeconds > 0 ? `${item.oldestActiveAgeSeconds}s` : '—';
+        const failure = item.lastFailureClass ? ` · ${escapeHtml(item.lastFailureClass)}` : '';
+        return `<tr><td><span class="alias-badge">${escapeHtml(item.alias)}</span></td><td>${escapeHtml(item.transport)}</td><td>${escapeHtml(deliveryLabel(item.laneState))}${failure}</td><td>${queue}</td><td>${ledger}</td><td>${age}</td><td>${escapeHtml(item.transportStatus || 'Unavailable')}</td></tr>`;
+      }).join('');
+      deliveryHealthEmpty.classList.toggle('hidden', endpoints.length !== 0);
+      deliveryHealthError.classList.add('hidden');
+    } catch (err) {
+      deliveryHealthError.textContent = 'Unable to load delivery health.';
+      deliveryHealthError.classList.remove('hidden');
+    }
+  }
+
+  function startDeliveryPolling() {
+    if (deliveryPollTimer) clearInterval(deliveryPollTimer);
+    deliveryPollTimer = setInterval(() => {
+      if (window.Router.getRoute() === 'dashboard') loadDeliveryStatus();
+    }, 3000);
+  }
+
+  function stopDeliveryPolling() {
+    if (deliveryPollTimer) { clearInterval(deliveryPollTimer); deliveryPollTimer = null; }
   }
 
   /**
@@ -2200,6 +2241,7 @@
     window.Router.addRoute('dashboard', () => {
       switchView('dashboard');
       loadDashboardStats();
+      startDeliveryPolling();
     });
 
     window.Router.addRoute('whatsapp', () => {

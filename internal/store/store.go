@@ -84,6 +84,7 @@ type DeliverySummary struct {
 	AwaitingReplay  int64
 	Failed          int64
 	OldestActiveAge time.Duration
+	FailureClass    string
 }
 
 type StorageMetrics struct {
@@ -594,7 +595,7 @@ func (s *Store) DeliverySummaries(ctx context.Context, now time.Time) (map[strin
 		return nil, errors.New("sync store is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT endpoint_id, state, updated_at
+		SELECT endpoint_id, state, updated_at, failure_class
 		FROM delivery_operations
 		ORDER BY endpoint_id ASC, updated_at ASC`)
 	if err != nil {
@@ -605,7 +606,8 @@ func (s *Store) DeliverySummaries(ctx context.Context, now time.Time) (map[strin
 	for rows.Next() {
 		var endpointID, state string
 		var updatedAt int64
-		if err := rows.Scan(&endpointID, &state, &updatedAt); err != nil {
+		var failureClass sql.NullString
+		if err := rows.Scan(&endpointID, &state, &updatedAt, &failureClass); err != nil {
 			return nil, wrapDB("scan delivery summary", err)
 		}
 		summary := result[endpointID]
@@ -628,6 +630,9 @@ func (s *Store) DeliverySummaries(ctx context.Context, now time.Time) (map[strin
 			if age > summary.OldestActiveAge {
 				summary.OldestActiveAge = age
 			}
+		}
+		if state == DeliveryFailed && failureClass.Valid {
+			summary.FailureClass = failureClass.String
 		}
 		result[endpointID] = summary
 	}
