@@ -2,6 +2,7 @@
 /dist/
 /data/
 /config.json
+ref/
 /.env
 *.db
 *.db-shm

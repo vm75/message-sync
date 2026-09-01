@@ -57,6 +57,35 @@ type RecoveryCursor struct {
 	UpdatedAt        time.Time
 }
 
+const (
+	DeliveryQueued         = "queued"
+	DeliveryRetrying       = "retrying"
+	DeliveryAwaitingReplay = "awaiting_replay"
+	DeliveryFailed         = "failed"
+)
+
+type DeliveryOperation struct {
+	CanonicalID       string
+	EndpointID        string
+	OperationKind     string
+	OperationRevision int64
+	State             string
+	AttemptCount      int
+	NextAttemptAt     time.Time
+	FailureClass      string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type DeliverySummary struct {
+	EndpointID      string
+	Queued          int64
+	Retrying        int64
+	AwaitingReplay  int64
+	Failed          int64
+	OldestActiveAge time.Duration
+}
+
 type StorageMetrics struct {
 	CanonicalMessages int64
 	MessageCopies     int64
@@ -94,11 +123,30 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if _, err := markDeliveryOperationsAwaitingReplay(ctx, db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := os.Chmod(path, 0o600); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("secure sync database permissions: %w", err)
 	}
 	return &Store{db: db}, nil
+}
+
+func markDeliveryOperationsAwaitingReplay(ctx context.Context, db *sql.DB) (int64, error) {
+	result, err := db.ExecContext(ctx, `
+		UPDATE delivery_operations
+		SET state = ?, updated_at = ?
+		WHERE state IN (?, ?)`, DeliveryAwaitingReplay, time.Now().UTC().UnixMilli(), DeliveryQueued, DeliveryRetrying)
+	if err != nil {
+		return 0, fmt.Errorf("mark delivery operations awaiting replay: %w", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count delivery operations awaiting replay: %w", err)
+	}
+	return count, nil
 }
 
 func initialize(ctx context.Context, db *sql.DB) error {
@@ -436,6 +484,151 @@ func (s *Store) RecoveryCursor(ctx context.Context, endpointID string) (Recovery
 	return cursor, nil
 }
 
+// MarkDeliveryOperationsAwaitingReplay makes payload-dependent work safe after
+// restart. Payloads are intentionally not stored, so queued work cannot resume
+// without a source replay.
+func (s *Store) MarkDeliveryOperationsAwaitingReplay(ctx context.Context) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, errors.New("sync store is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE delivery_operations
+		SET state = ?, updated_at = ?
+		WHERE state IN (?, ?)`, DeliveryAwaitingReplay, unixMillis(time.Now().UTC()), DeliveryQueued, DeliveryRetrying)
+	if err != nil {
+		return 0, wrapDB("mark delivery operations awaiting replay", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, wrapDB("count delivery operations awaiting replay", err)
+	}
+	return count, nil
+}
+
+func (s *Store) UpsertDeliveryOperation(ctx context.Context, operation DeliveryOperation) error {
+	if err := validateDeliveryOperation(operation); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO delivery_operations(
+			canonical_id, endpoint_id, operation_kind, operation_revision,
+			state, attempt_count, next_attempt_at, failure_class, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(canonical_id, endpoint_id, operation_kind, operation_revision) DO NOTHING`,
+		operation.CanonicalID, operation.EndpointID, operation.OperationKind, operation.OperationRevision,
+		operation.State, operation.AttemptCount, nullableMillis(operation.NextAttemptAt), nullableString(operation.FailureClass),
+		unixMillis(operation.CreatedAt), unixMillis(operation.UpdatedAt))
+	return wrapDB("upsert delivery operation", err)
+}
+
+// ClaimDeliveryOperation advances a queued operation to retrying and increments
+// its attempt count atomically. It returns false when another worker claimed it.
+func (s *Store) ClaimDeliveryOperation(ctx context.Context, operation DeliveryOperation, now time.Time) (bool, error) {
+	if err := validateDeliveryIdentity(operation); err != nil {
+		return false, err
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE delivery_operations
+		SET state = ?, attempt_count = attempt_count + 1, updated_at = ?
+		WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?
+		  AND state = ?`, DeliveryRetrying, unixMillis(now), operation.CanonicalID, operation.EndpointID,
+		operation.OperationKind, operation.OperationRevision, DeliveryQueued)
+	if err != nil {
+		return false, wrapDB("claim delivery operation", err)
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return false, wrapDB("count claimed delivery operation", err)
+	}
+	return count == 1, nil
+}
+
+func (s *Store) SetDeliveryOperationState(ctx context.Context, operation DeliveryOperation, state string, nextAttemptAt time.Time, failureClass string, updatedAt time.Time) error {
+	if err := validateDeliveryIdentity(operation); err != nil {
+		return err
+	}
+	if !validDeliveryState(state) {
+		return errors.New("invalid delivery operation state")
+	}
+	if failureClass != "" && !validDeliveryFailureClass(failureClass) {
+		return errors.New("invalid delivery failure class")
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE delivery_operations
+		SET state = ?, next_attempt_at = ?, failure_class = ?, updated_at = ?
+		WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?`,
+		state, nullableMillis(nextAttemptAt), nullableString(failureClass), unixMillis(updatedAt), operation.CanonicalID,
+		operation.EndpointID, operation.OperationKind, operation.OperationRevision)
+	return wrapDB("set delivery operation state", err)
+}
+
+func (s *Store) MarkDeliveryOperationAwaitingReplay(ctx context.Context, operation DeliveryOperation, updatedAt time.Time) error {
+	return s.SetDeliveryOperationState(ctx, operation, DeliveryAwaitingReplay, time.Time{}, "", updatedAt)
+}
+
+func (s *Store) MarkDeliveryOperationFailed(ctx context.Context, operation DeliveryOperation, failureClass string, updatedAt time.Time) error {
+	return s.SetDeliveryOperationState(ctx, operation, DeliveryFailed, time.Time{}, failureClass, updatedAt)
+}
+
+func (s *Store) DeleteDeliveryOperation(ctx context.Context, operation DeliveryOperation) error {
+	if err := validateDeliveryIdentity(operation); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM delivery_operations
+		WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?`,
+		operation.CanonicalID, operation.EndpointID, operation.OperationKind, operation.OperationRevision)
+	return wrapDB("delete delivery operation", err)
+}
+
+func (s *Store) DeliverySummaries(ctx context.Context, now time.Time) (map[string]DeliverySummary, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("sync store is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT endpoint_id, state, updated_at
+		FROM delivery_operations
+		ORDER BY endpoint_id ASC, updated_at ASC`)
+	if err != nil {
+		return nil, wrapDB("query delivery summaries", err)
+	}
+	defer rows.Close()
+	result := make(map[string]DeliverySummary)
+	for rows.Next() {
+		var endpointID, state string
+		var updatedAt int64
+		if err := rows.Scan(&endpointID, &state, &updatedAt); err != nil {
+			return nil, wrapDB("scan delivery summary", err)
+		}
+		summary := result[endpointID]
+		summary.EndpointID = endpointID
+		switch state {
+		case DeliveryQueued:
+			summary.Queued++
+		case DeliveryRetrying:
+			summary.Retrying++
+		case DeliveryAwaitingReplay:
+			summary.AwaitingReplay++
+		case DeliveryFailed:
+			summary.Failed++
+		}
+		if state != DeliveryFailed {
+			age := now.Sub(fromUnixMillis(updatedAt))
+			if age < 0 {
+				age = 0
+			}
+			if age > summary.OldestActiveAge {
+				summary.OldestActiveAge = age
+			}
+		}
+		result[endpointID] = summary
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapDB("iterate delivery summaries", err)
+	}
+	return result, nil
+}
+
 func (s *Store) SavePollOptions(ctx context.Context, canonicalID string, optionHashes []string) error {
 	if err := requireOpaque("canonical id", canonicalID); err != nil {
 		return err
@@ -602,6 +795,51 @@ func validateCopy(copy MessageCopy) error {
 		return err
 	}
 	return requireOpaque("remote message id", copy.RemoteMessageID)
+}
+
+func validateDeliveryIdentity(operation DeliveryOperation) error {
+	if err := requireOpaque("canonical id", operation.CanonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(operation.EndpointID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(operation.OperationKind) == "" || strings.ContainsAny(operation.OperationKind, "\r\n\x00") {
+		return errors.New("delivery operation kind is required")
+	}
+	if operation.OperationRevision < 0 {
+		return errors.New("delivery operation revision must not be negative")
+	}
+	return nil
+}
+
+func validateDeliveryOperation(operation DeliveryOperation) error {
+	if err := validateDeliveryIdentity(operation); err != nil {
+		return err
+	}
+	if !validDeliveryState(operation.State) {
+		return errors.New("invalid delivery operation state")
+	}
+	if operation.AttemptCount < 0 {
+		return errors.New("delivery attempt count must not be negative")
+	}
+	if operation.FailureClass != "" && !validDeliveryFailureClass(operation.FailureClass) {
+		return errors.New("invalid delivery failure class")
+	}
+	return nil
+}
+
+func validDeliveryState(state string) bool {
+	return state == DeliveryQueued || state == DeliveryRetrying || state == DeliveryAwaitingReplay || state == DeliveryFailed
+}
+
+func validDeliveryFailureClass(class string) bool {
+	switch class {
+	case "transient", "rate_limited", "permission_denied", "destination_missing", "payload_rejected", "unsupported":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateEndpoint(endpointID string) error {

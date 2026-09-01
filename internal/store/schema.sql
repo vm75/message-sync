@@ -87,3 +87,19 @@ CREATE TABLE IF NOT EXISTS suppressed_reactions (
     created_at INTEGER NOT NULL,
     PRIMARY KEY (endpoint_id, remote_message_id, emoji)
 );
+
+CREATE TABLE IF NOT EXISTS delivery_operations (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    operation_kind TEXT NOT NULL CHECK (length(operation_kind) > 0),
+    operation_revision INTEGER NOT NULL CHECK (operation_revision >= 0),
+    state TEXT NOT NULL CHECK (state IN ('queued', 'retrying', 'awaiting_replay', 'failed')),
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    next_attempt_at INTEGER,
+    failure_class TEXT CHECK (failure_class IS NULL OR failure_class IN ('transient', 'rate_limited', 'permission_denied', 'destination_missing', 'payload_rejected', 'unsupported')),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, operation_kind, operation_revision)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_operations_endpoint_state ON delivery_operations(endpoint_id, state);
+CREATE INDEX IF NOT EXISTS idx_delivery_operations_active_age ON delivery_operations(state, updated_at);

@@ -272,6 +272,8 @@ source A
 
 On replay after restart, the router sees that c1g2 already has a copy and sends only c1g3. The in-memory sent-ID cache is only an optimization; SQLite mapping is authoritative across restarts.
 
+The content-free `delivery_operations` table tracks current payload-dependent work by canonical ID, destination alias, operation kind, and revision. It stores only state, retry timing/counts, safe failure classes, and timestamps; the payload remains in memory. Queued and retrying rows become `awaiting_replay` during startup because their payloads cannot survive a process restart. Successful work is represented by `message_copies` or the resulting mutation and its ledger row is deleted, so the table is not an audit history. Per-endpoint summaries expose only state counts and the oldest active age.
+
 ## 8. Text and media
 
 Supported MVP message classes:

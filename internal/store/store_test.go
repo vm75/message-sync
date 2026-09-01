@@ -78,6 +78,182 @@ func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
 	}
 }
 
+func TestDeliveryLedgerSchemaIsContentFree(t *testing.T) {
+	store, _ := openTestStore(t)
+
+	rows, err := store.db.Query(`PRAGMA table_info(delivery_operations)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns := make(map[string]bool)
+	for rows.Next() {
+		var cid, notNull, pk int
+		var name, typ string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+			t.Fatal(err)
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"canonical_id": true, "endpoint_id": true, "operation_kind": true,
+		"operation_revision": true, "state": true, "attempt_count": true,
+		"next_attempt_at": true, "failure_class": true, "created_at": true,
+		"updated_at": true,
+	}
+	if len(columns) != len(want) {
+		t.Fatalf("delivery ledger columns = %v, want exactly %v", columns, want)
+	}
+	for name := range want {
+		if !columns[name] {
+			t.Fatalf("delivery ledger missing column %q", name)
+		}
+	}
+	for name := range columns {
+		lower := strings.ToLower(name)
+		for _, forbidden := range []string{"body", "text", "media", "phone", "jid", "name", "token", "secret", "error", "url"} {
+			if strings.Contains(lower, forbidden) {
+				t.Fatalf("content, identity, secret, or raw error column %q", name)
+			}
+		}
+	}
+}
+
+func TestDeliveryLedgerUpsertIsIdempotent(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	operation := DeliveryOperation{
+		CanonicalID: "canon-delivery", EndpointID: "endpoint1", OperationKind: "send", OperationRevision: 1,
+		State: DeliveryQueued, AttemptCount: 0, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateCanonical(ctx, operation.CanonicalID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDeliveryOperation(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	operation.State = DeliveryFailed
+	operation.AttemptCount = 4
+	operation.FailureClass = "transient"
+	if err := store.UpsertDeliveryOperation(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var state string
+	var attempts int
+	if err := store.db.QueryRow(`SELECT COUNT(*), MAX(state), MAX(attempt_count) FROM delivery_operations`).Scan(&count, &state, &attempts); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || state != DeliveryQueued || attempts != 0 {
+		t.Fatalf("ledger row = count %d, state %q, attempts %d; want one unchanged queued row", count, state, attempts)
+	}
+}
+
+func TestDeliveryLedgerRestartAwaitsReplayOnlyActiveWork(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	for i, state := range []string{DeliveryQueued, DeliveryRetrying, DeliveryFailed} {
+		canonicalID := "canon-restart-" + string(rune('a'+i))
+		if err := store.CreateCanonical(ctx, canonicalID, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertDeliveryOperation(ctx, DeliveryOperation{
+			CanonicalID: canonicalID, EndpointID: "endpoint1", OperationKind: "send", OperationRevision: 1,
+			State: state, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.db.Query(`SELECT canonical_id, state FROM delivery_operations ORDER BY canonical_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	got := make(map[string]string)
+	for rows.Next() {
+		var canonicalID, state string
+		if err := rows.Scan(&canonicalID, &state); err != nil {
+			t.Fatal(err)
+		}
+		got[canonicalID] = state
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if got["canon-restart-a"] != DeliveryAwaitingReplay || got["canon-restart-b"] != DeliveryAwaitingReplay || got["canon-restart-c"] != DeliveryFailed {
+		t.Fatalf("restart states = %v", got)
+	}
+}
+
+func TestDeliveryLedgerStateAndSummaryLifecycle(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	operation := DeliveryOperation{
+		CanonicalID: "canon-lifecycle", EndpointID: "endpoint1", OperationKind: "send", OperationRevision: 1,
+		State: DeliveryQueued, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now.Add(-10 * time.Minute),
+	}
+	if err := store.CreateCanonical(ctx, operation.CanonicalID, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertDeliveryOperation(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := store.ClaimDeliveryOperation(ctx, operation, now.Add(-5*time.Minute))
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, %v", claimed, err)
+	}
+	if err := store.MarkDeliveryOperationFailed(ctx, operation, "permission_denied", now.Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteDeliveryOperation(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+
+	for i, state := range []string{DeliveryQueued, DeliveryRetrying, DeliveryAwaitingReplay, DeliveryFailed} {
+		canonicalID := "canon-summary-" + string(rune('a'+i))
+		if err := store.CreateCanonical(ctx, canonicalID, now); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertDeliveryOperation(ctx, DeliveryOperation{
+			CanonicalID: canonicalID, EndpointID: "endpoint1", OperationKind: "send", OperationRevision: 1,
+			State: state, CreatedAt: now, UpdatedAt: now.Add(-time.Duration(i+1) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	summaries, err := store.DeliverySummaries(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := summaries["endpoint1"]
+	if summary.Queued != 1 || summary.Retrying != 1 || summary.AwaitingReplay != 1 || summary.Failed != 1 {
+		t.Fatalf("summary = %+v", summary)
+	}
+	if summary.OldestActiveAge != 3*time.Minute {
+		t.Fatalf("oldest active age = %s, want 3m", summary.OldestActiveAge)
+	}
+}
+
 func TestEndpointSchemaEnforcesAliasAndTransportRemoteUniqueness(t *testing.T) {
 	store, _ := openTestStore(t)
 
