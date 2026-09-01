@@ -4,6 +4,8 @@ This guide provides step-by-step instructions to set up, configure, and test mul
 
 No prior experience with Discord bot setup or the Telegram Bot API is required.
 
+For the local automated gate, including the fake three-transport integration harness, race checks, and fresh-volume smoke tests, see [TESTING.md](../TESTING.md).
+
 ---
 
 ## Table of Contents
@@ -278,6 +280,26 @@ All three platforms are now bridged!
 
 Execute the following test scenarios to verify full lifecycle functionality across all three platforms.
 
+### Automated reliability gate
+
+Run the automated checks before manual provider testing:
+
+```sh
+make fmt
+git diff --check
+GOCACHE=/tmp/message-sync-go-cache make test
+GOCACHE=/tmp/message-sync-go-cache make vet
+GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp
+```
+
+The integration harness uses fake WhatsApp, Discord, and Telegram adapters to verify all-to-all fan-out, slow-destination isolation, transient retry, and ordered create/edit/reaction/delete delivery. The package tests additionally cover queue saturation, restart/replay state, checkpoint gaps and duplicates, provider reconnect/history behavior, configuration reload, managed-webhook replacement, and privacy canaries.
+
+Use a fresh `sync.db` for local verification. The current product has no database migration or backward-compatibility path. Never use or inspect `whatsapp.db` as application data; it is protocol state owned by whatsmeow.
+
+When validating recovery, keep the provider bounds in mind: Telegram can only replay updates retained by Bot API, Discord recovery is bounded channel history and cannot reconstruct every offline delete or reaction, and WhatsApp recovery depends on bounded protocol HistorySync and does not promise offline lifecycle reconstruction. Recovered events must produce the same user-visible behavior as live events.
+
+In the authenticated Web UI, check **Delivery Health** after inducing a slow or unavailable destination. It should show only endpoint aliases, queue/lane state, bounded counts, safe failure classes, and transport readiness; it must not expose message content, provider IDs, identities, timestamps, credentials, or raw errors.
+
 ### Scenario 1: Plain Text Messages
 - [ ] **WhatsApp &rarr; Discord & Telegram**: Send `Hello from WhatsApp` in the WhatsApp group.
   - **Verify Discord**: Message appears in `#sync-test` posted by the bridge webhook with the sender's WhatsApp display name as the username.
@@ -361,7 +383,7 @@ Execute the following test scenarios to verify full lifecycle functionality acro
 | **Telegram group does not appear in "Refresh Observed Chats"** | No messages have been sent in the group since the bot was added, or bot has not processed any update yet. | Send an ordinary message (e.g. `test`) in the Telegram group. Then click **Refresh Observed Chats** in the Web UI. |
 | **Bot only sees messages starting with `/` (commands), ignoring regular chat messages** | Telegram **Bot Privacy Mode** is enabled. | In Telegram, message `@BotFather`, send `/setprivacy`, choose your bot, and select **Disable**. |
 | **Web UI Telegram status says Bot Privacy Mode: `Unknown`** | The runtime `getMe` capability probe failed or could not connect to Telegram Bot API. | Check internet connectivity or firewall rules. The Web UI will still function based on your manual BotFather configuration. |
-| **Large video or document fails to forward to Telegram** | Hosted Telegram Bot API limits uploads to 50 MiB (and photos to 10 MiB). | Send files within platform limits or adjust `media_max_size_mb` in `message-sync` configuration. |
+| **Large video or document fails to forward to Telegram** | Hosted Telegram Bot API limits uploads to 50 MiB (and photos to 10 MiB). | Send files within platform limits or lower/raise the configured **Media Max Size (MB)** in the authenticated Settings view, while staying within Telegram's platform limits. |
 
 ### WhatsApp Issues
 
