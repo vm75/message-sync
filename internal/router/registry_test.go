@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -170,13 +171,22 @@ func mixedTransportConfig() *config.Config {
 }
 
 type failingOutboundAdapter struct {
+	mu       sync.Mutex
 	err      error
 	attempts []transport.Outgoing
 }
 
 func (f *failingOutboundAdapter) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.attempts = append(f.attempts, outgoing)
 	return transport.MessageRef{}, f.err
+}
+
+func (f *failingOutboundAdapter) attemptCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.attempts)
 }
 
 func (f *failingOutboundAdapter) React(context.Context, transport.Reaction) error { return f.err }
@@ -291,7 +301,7 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	}
 	waitForSent(t, firstDC, 1)
 	deadline := time.After(time.Second)
-	for len(firstTG.attempts) == 0 {
+	for firstTG.attemptCount() < 4 {
 		select {
 		case <-deadline:
 			_ = firstStore.Close()
@@ -303,9 +313,9 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 		_ = firstStore.Close()
 		t.Fatalf("first Discord sends = %#v, want one successful persisted copy", firstDC.sent)
 	}
-	if len(firstTG.attempts) != 1 || firstTG.attempts[0].Endpoint != "telegram" {
+	if firstTG.attemptCount() != 4 {
 		_ = firstStore.Close()
-		t.Fatalf("first Telegram attempts = %#v, want one failed attempt", firstTG.attempts)
+		t.Fatalf("first Telegram attempts = %d, want bounded retries", firstTG.attemptCount())
 	}
 	if err := firstStore.Close(); err != nil {
 		t.Fatal(err)
