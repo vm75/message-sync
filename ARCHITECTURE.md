@@ -274,6 +274,8 @@ On replay after restart, the router sees that c1g2 already has a copy and sends 
 
 The content-free `delivery_operations` table tracks current payload-dependent work by canonical ID, destination alias, operation kind, and revision. It stores only state, retry timing/counts, safe failure classes, and timestamps; the payload remains in memory. Queued and retrying rows become `awaiting_replay` during startup because their payloads cannot survive a process restart. Successful work is represented by `message_copies` or the resulting mutation and its ledger row is deleted, so the table is not an audit history. Per-endpoint summaries expose only state counts and the oldest active age.
 
+Normal create fan-out uses one bounded in-memory FIFO lane per configured endpoint. The router performs canonicalization, loop prevention, reply resolution, and outgoing construction before enqueueing independent destination jobs; the lane only invokes the transport boundary and records the resulting copy. A slow lane therefore cannot hold up a healthy destination, while each destination remains ordered. Lane membership follows configuration reloads, and a full lane leaves its content-free operation row awaiting replay rather than dropping the event.
+
 ## 8. Text and media
 
 Supported MVP message classes:

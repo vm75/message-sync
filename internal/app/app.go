@@ -204,6 +204,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create canonical router: %w", err)
 	}
+	defer mesh.Close()
 
 	onConfigChange := func(updateCtx context.Context) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())

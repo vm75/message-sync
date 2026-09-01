@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -38,6 +39,7 @@ type pollMeta struct {
 type Router struct {
 	store        *store.Store
 	sender       sender
+	lanes        *delivery.Manager
 	routes       map[transport.EndpointID][]transport.EndpointID
 	usernameMode config.UsernameMode
 	aggTrigger   string
@@ -63,6 +65,10 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 	}
 
 	routes := make(map[transport.EndpointID][]transport.EndpointID, len(cfg.Endpoints))
+	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
+	for alias := range cfg.Endpoints {
+		endpoints = append(endpoints, transport.EndpointID(alias))
+	}
 	for _, set := range cfg.SyncSets {
 		members := make([]transport.EndpointID, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
@@ -73,9 +79,14 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		}
 	}
 
+	lanes, err := delivery.New(context.Background(), 32, endpoints)
+	if err != nil {
+		return nil, fmt.Errorf("create delivery lanes: %w", err)
+	}
 	return &Router{
 		store:        syncStore,
 		sender:       transportSender,
+		lanes:        lanes,
 		routes:       routes,
 		usernameMode: cfg.Identity.UsernameMode,
 		aggTrigger:   cfg.Polls.AggregationTrigger,
@@ -103,13 +114,26 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 			routes[member] = members
 		}
 	}
-
+	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
+	for alias := range cfg.Endpoints {
+		endpoints = append(endpoints, transport.EndpointID(alias))
+	}
+	if err := r.lanes.Update(endpoints); err != nil {
+		return fmt.Errorf("update delivery lanes: %w", err)
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.routes = routes
 	r.usernameMode = cfg.Identity.UsernameMode
 	r.aggTrigger = cfg.Polls.AggregationTrigger
+	r.mu.Unlock()
 	return nil
+}
+
+func (r *Router) Close() {
+	if r == nil || r.lanes == nil {
+		return
+	}
+	r.lanes.Close()
 }
 
 func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error {
@@ -425,7 +449,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 		copy, err := r.store.MessageCopyForEndpoint(ctx, canonicalID, string(destination))
 		if err == nil {
+			r.mu.Lock()
 			r.knownCopies[copyKey{endpoint: destination, remoteID: copy.RemoteMessageID}] = canonicalID
+			r.mu.Unlock()
 			continue
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -443,60 +469,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 
-		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
-			_, err := r.sender.Send(ctx, transport.Outgoing{
-				Endpoint:        destination,
-				OriginEndpoint:  incoming.Endpoint,
-				Sender:          incoming.Sender,
-				SourceText:      incoming.Text,
-				AttributionOnly: true,
-				ReplyFallback:   incoming.ReplyTo != nil && outgoingReplyTo == nil,
-				Kind:            "text",
-				Text:            forwardedText,
-				ReplyTo:         outgoingReplyTo,
-				QuotedText:      incoming.QuotedText,
-			})
-			if err != nil {
-				return fmt.Errorf("send companion attribution: %w", err)
-			}
-		}
-
-		ref, err := r.sender.Send(ctx, transport.Outgoing{
-			Endpoint:            destination,
-			OriginEndpoint:      incoming.Endpoint,
-			Sender:              incoming.Sender,
-			SourceText:          incoming.Text,
-			ReplyFallback:       incoming.ReplyTo != nil && outgoingReplyTo == nil,
-			Kind:                incoming.Kind,
-			Text:                forwardedText,
-			Mentions:            incoming.Mentions,
-			MediaBytes:          mediaBytes,
-			ReplyTo:             outgoingReplyTo,
-			QuotedText:          incoming.QuotedText,
-			PollOptions:         incoming.PollOptions,
-			PollSelectableCount: incoming.PollSelectableCount,
-		})
-		if err != nil {
-			return fmt.Errorf("send destination copy: %w", err)
-		}
-		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
-			return errors.New("transport returned invalid destination message reference")
-		}
-
-		if err := r.store.AddMessageCopy(ctx, store.MessageCopy{
-			CanonicalID:     canonicalID,
-			EndpointID:      string(destination),
-			RemoteMessageID: ref.RemoteMessageID,
-			CreatedAt:       time.Now().UTC(),
-			FromSelf:        true,
-		}); err != nil {
-			return fmt.Errorf("persist destination copy: %w", err)
-		}
-		r.knownCopies[copyKey{endpoint: destination, remoteID: ref.RemoteMessageID}] = canonicalID
-		if r.afterPersist != nil {
-			if err := r.afterPersist(destination); err != nil {
-				return err
-			}
+		if err := r.enqueueCreate(ctx, canonicalID, incoming, destination, forwardedText, outgoingReplyTo, mediaBytes); err != nil {
+			return err
 		}
 	}
 	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
@@ -505,6 +479,68 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		MessageTimestamp: incoming.Timestamp,
 		UpdatedAt:        time.Now().UTC(),
 	})
+	return nil
+}
+
+func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, destination transport.EndpointID, forwardedText string, replyTo *transport.MessageRef, mediaBytes []byte) error {
+	now := time.Now().UTC()
+	operation := store.DeliveryOperation{
+		CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "create", OperationRevision: 1,
+		State: store.DeliveryQueued, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := r.store.UpsertDeliveryOperation(ctx, operation); err != nil {
+		return fmt.Errorf("queue delivery operation: %w", err)
+	}
+	job := func(jobCtx context.Context) {
+		fail := func(err error) {
+			failure := transport.Classify(err)
+			_ = r.store.MarkDeliveryOperationFailed(jobCtx, operation, string(failure.Class), time.Now().UTC())
+		}
+		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
+			if _, err := r.sender.Send(jobCtx, transport.Outgoing{
+				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
+				SourceText: incoming.Text, AttributionOnly: true,
+				ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
+				ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+			}); err != nil {
+				fail(err)
+				return
+			}
+		}
+		ref, err := r.sender.Send(jobCtx, transport.Outgoing{
+			Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
+			SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
+			Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
+			MediaBytes: mediaBytes, ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+			PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
+		})
+		if err != nil {
+			fail(err)
+			return
+		}
+		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
+			fail(errors.New("transport returned invalid destination message reference"))
+			return
+		}
+		if err := r.store.AddMessageCopy(jobCtx, store.MessageCopy{
+			CanonicalID: canonicalID, EndpointID: string(destination), RemoteMessageID: ref.RemoteMessageID,
+			CreatedAt: time.Now().UTC(), FromSelf: true,
+		}); err != nil {
+			fail(err)
+			return
+		}
+		r.mu.Lock()
+		r.knownCopies[copyKey{endpoint: destination, remoteID: ref.RemoteMessageID}] = canonicalID
+		r.mu.Unlock()
+		_ = r.store.DeleteDeliveryOperation(jobCtx, operation)
+		if r.afterPersist != nil {
+			_ = r.afterPersist(destination)
+		}
+	}
+	if err := r.lanes.Enqueue(ctx, destination, job); err != nil {
+		_ = r.store.MarkDeliveryOperationAwaitingReplay(ctx, operation, time.Now().UTC())
+		return fmt.Errorf("enqueue destination delivery: %w", err)
+	}
 	return nil
 }
 
@@ -580,9 +616,12 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 
 func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incoming) (string, bool, error) {
 	key := copyKey{endpoint: incoming.Endpoint, remoteID: incoming.RemoteID}
+	r.mu.RLock()
 	if canonicalID, ok := r.knownCopies[key]; ok {
+		r.mu.RUnlock()
 		return canonicalID, false, nil
 	}
+	r.mu.RUnlock()
 
 	candidate, err := r.newCanonical()
 	if err != nil {
@@ -597,7 +636,9 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 	if err != nil {
 		return "", false, err
 	}
+	r.mu.Lock()
 	r.knownCopies[key] = canonicalID
+	r.mu.Unlock()
 	return canonicalID, created, nil
 }
 

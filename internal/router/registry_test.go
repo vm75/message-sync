@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/store"
@@ -38,6 +39,8 @@ func TestAdapterRegistryMixedTransportFanout(t *testing.T) {
 	if err := r.Handle(ctx, testIncoming("wa1", "wa-source")); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, dc, 1)
+	waitForSent(t, wa, 1)
 	if len(dc.sent) != 1 || dc.sent[0].outgoing.Endpoint != "discord" {
 		t.Fatalf("WA -> Discord sends = %#v, want one Discord destination", dc.sent)
 	}
@@ -96,14 +99,16 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 	}
 
 	incoming := testIncoming("wa1", "restart-source")
-	if err := firstRouter.Handle(ctx, incoming); !errors.Is(err, crash) {
-		t.Fatalf("first Handle error = %v, want simulated crash", err)
+	if err := firstRouter.Handle(ctx, incoming); err != nil {
+		t.Fatalf("first Handle error = %v", err)
 	}
+	waitForSent(t, firstDC, 1)
+	waitForSent(t, firstWA, 1)
 	if len(firstDC.sent) != 1 || firstDC.sent[0].outgoing.Endpoint != "discord" {
 		t.Fatalf("first Discord sends = %#v, want persisted discord copy", firstDC.sent)
 	}
-	if len(firstWA.sent) != 0 {
-		t.Fatalf("first WhatsApp sends = %#v, want crash before wa2", firstWA.sent)
+	if len(firstWA.sent) != 1 {
+		t.Fatalf("first WhatsApp sends = %#v, want independent wa2 delivery", firstWA.sent)
 	}
 
 	secondWA := &fakeSender{}
@@ -122,11 +127,12 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 	if err := restarted.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	// Both destination copies were persisted independently before the restart.
 	if len(secondDC.sent) != 0 {
 		t.Fatalf("restart resent already-persisted Discord copy: %#v", secondDC.sent)
 	}
-	if len(secondWA.sent) != 1 || secondWA.sent[0].outgoing.Endpoint != "wa2" {
-		t.Fatalf("restart WhatsApp sends = %#v, want only missing wa2", secondWA.sent)
+	if len(secondWA.sent) != 0 {
+		t.Fatalf("restart resent already-persisted WhatsApp copy: %#v", secondWA.sent)
 	}
 }
 
@@ -272,9 +278,19 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	}
 
 	incoming := testIncoming("wa", "restart-source")
-	if err := firstRouter.Handle(ctx, incoming); !errors.Is(err, sendFailure) {
+	if err := firstRouter.Handle(ctx, incoming); err != nil {
 		_ = firstStore.Close()
-		t.Fatalf("first Handle error = %v, want Telegram send failure", err)
+		t.Fatalf("first Handle error = %v", err)
+	}
+	waitForSent(t, firstDC, 1)
+	deadline := time.After(time.Second)
+	for len(firstTG.attempts) == 0 {
+		select {
+		case <-deadline:
+			_ = firstStore.Close()
+			t.Fatal("Telegram lane did not execute")
+		case <-time.After(time.Millisecond):
+		}
 	}
 	if len(firstDC.sent) != 1 || firstDC.sent[0].outgoing.Endpoint != "discord" {
 		_ = firstStore.Close()

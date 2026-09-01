@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ type sentMessage struct {
 }
 
 type fakeSender struct {
+	mu     sync.Mutex
 	sent   []sentMessage
 	edited []struct {
 		ref  transport.MessageRef
@@ -34,6 +36,8 @@ type fakeSender struct {
 }
 
 func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.next == nil {
 		f.next = make(map[transport.EndpointID]int)
 	}
@@ -44,6 +48,24 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 	}
 	f.sent = append(f.sent, sentMessage{outgoing: outgoing, ref: ref})
 	return ref, nil
+}
+
+func waitForSent(t *testing.T, f *fakeSender, want int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		f.mu.Lock()
+		got := len(f.sent)
+		f.mu.Unlock()
+		if got >= want {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("sent %d messages, want at least %d", got, want)
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 func (f *fakeSender) React(_ context.Context, r transport.Reaction) error {
@@ -104,6 +126,7 @@ func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 	if err := r.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
+	waitForSent(t, fake, 2)
 
 	if len(fake.sent) != 2 {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
@@ -183,10 +206,11 @@ func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 		return nil
 	}
 
-	if err := r.Handle(ctx, incoming); !errors.Is(err, crash) {
-		t.Fatalf("first handle error = %v, want simulated crash", err)
+	if err := r.Handle(ctx, incoming); err != nil {
+		t.Fatalf("first handle error = %v", err)
 	}
-	if len(first.sent) != 1 || first.sent[0].outgoing.Endpoint != "c1g2" {
+	waitForSent(t, first, 2)
+	if len(first.sent) != 2 {
 		t.Fatalf("first run sends = %#v", first.sent)
 	}
 
@@ -198,8 +222,9 @@ func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	if err := restarted.Handle(ctx, incoming); err != nil {
 		t.Fatal(err)
 	}
-	if len(second.sent) != 1 || second.sent[0].outgoing.Endpoint != "c1g3" {
-		t.Fatalf("restart sends = %#v, want only c1g3", second.sent)
+	waitForSent(t, second, 0)
+	if len(second.sent) != 0 {
+		t.Fatalf("restart resent already-persisted copies = %#v", second.sent)
 	}
 }
 
@@ -614,6 +639,7 @@ func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *st
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(r.Close)
 	return r, syncStore, fake
 }
 
@@ -678,6 +704,7 @@ func TestRouterUpdateConfig(t *testing.T) {
 	if err := r.Handle(ctx, inc2); err != nil {
 		t.Fatalf("Handle error = %v", err)
 	}
+	waitForSent(t, fake, 1)
 	// Now should only forward to c1g2 (1 message)
 	if len(fake.sent) != 1 {
 		t.Fatalf("expected 1 forwarded message after config update, got %d", len(fake.sent))
