@@ -68,8 +68,11 @@ func TestHandleUpdateObservesUnconfiguredGroupBeforeIngressFiltering(t *testing.
 
 	select {
 	case incoming := <-adapter.events:
-		t.Fatalf("unconfigured Telegram chat emitted ingress: %#v", incoming)
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 1 {
+			t.Fatalf("unconfigured Telegram chat checkpoint = %#v", incoming)
+		}
 	default:
+		t.Fatal("unconfigured Telegram chat did not emit an accepted checkpoint")
 	}
 	chats, err := adapter.DiscoverChats(context.Background())
 	if err != nil {

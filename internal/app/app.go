@@ -165,13 +165,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	var tg telegramTransport
 	if len(telegramChatIDs) > 0 || telegram.BotTokenConfigured() {
+		initialUpdateID, err := telegramInitialUpdateID(ctx, syncStore)
+		if err != nil {
+			return fmt.Errorf("load Telegram recovery cursor: %w", err)
+		}
 		tg, err = openTelegram(ctx, telegram.Options{
-			ChatIDs:       telegramChatIDs,
-			Hasher:        hasher,
-			UsernameMode:  cfg.Identity.UsernameMode,
-			Logger:        logger,
-			MediaEnabled:  cfg.Media.Enabled,
-			MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+			ChatIDs:         telegramChatIDs,
+			Hasher:          hasher,
+			UsernameMode:    cfg.Identity.UsernameMode,
+			Logger:          logger,
+			MediaEnabled:    cfg.Media.Enabled,
+			MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+			InitialUpdateID: initialUpdateID,
 			MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 				return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), oldRemoteID, newRemoteID)
 			},
@@ -380,6 +385,20 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			)
 		}
 	}
+}
+
+func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store) (int64, error) {
+	if syncStore == nil {
+		return 0, nil
+	}
+	cursor, err := syncStore.RecoveryCursor(ctx, "telegram")
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return cursor.Position, nil
 }
 
 func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB, wa any) {

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -192,6 +194,14 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 	}
 	select {
 	case incoming := <-adapter.events:
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 11 {
+			t.Fatalf("ignored Telegram update = %#v", incoming)
+		}
+	default:
+		t.Fatal("ignored Telegram update did not emit an accepted checkpoint")
+	}
+	select {
+	case incoming := <-adapter.events:
 		t.Fatalf("duplicate/older Telegram update was emitted: %#v", incoming)
 	default:
 	}
@@ -279,6 +289,35 @@ func TestPinnedBotClientLongPollReconnectUsesBackoff(t *testing.T) {
 	}
 }
 
+func TestNewBotClientStartsAtAcceptedUpdatePlusOne(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var gotOffset string
+	client, err := newBotClient("12345:test-token", func(context.Context, *telegrambot.Bot, *models.Update) {}, func(error) {}, 42, &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(request.URL.Path, "/getMe") {
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":{"id":12345}}`)), Header: make(http.Header)}, nil
+			}
+			if !strings.HasSuffix(request.URL.Path, "/getUpdates") {
+				return nil, fmt.Errorf("unexpected Telegram method %s", request.URL.Path)
+			}
+			if err := request.ParseMultipartForm(1024); err != nil {
+				return nil, err
+			}
+			gotOffset = request.FormValue("offset")
+			cancel()
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"ok":true,"result":[]}`)), Header: make(http.Header)}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.Start(ctx)
+	if gotOffset != "43" {
+		t.Fatalf("first Telegram getUpdates offset = %q, want 43", gotOffset)
+	}
+}
+
 func TestHandleUpdateDropsBridgeBotWithoutLoggingProtocolData(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModePushName)
 	var logBuf bytes.Buffer
@@ -294,9 +333,12 @@ func TestHandleUpdateDropsBridgeBotWithoutLoggingProtocolData(t *testing.T) {
 	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 1, Message: msg})
 
 	select {
-	case <-adapter.events:
-		t.Fatal("bridge bot message re-entered Telegram ingress")
+	case incoming := <-adapter.events:
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 1 {
+			t.Fatalf("bridge bot update checkpoint = %#v", incoming)
+		}
 	default:
+		t.Fatal("bridge bot update did not emit an accepted checkpoint")
 	}
 	if logBuf.Len() != 0 {
 		t.Fatalf("filtered bridge bot update produced a log: %s", logBuf.String())
@@ -353,10 +395,11 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
-		Hasher:        hasher,
-		UsernameMode:  config.UsernameModePushName,
-		Logger:        slog.New(slog.NewJSONHandler(&logBuf, nil)),
-		clientFactory: factory,
+		Hasher:          hasher,
+		UsernameMode:    config.UsernameModePushName,
+		InitialUpdateID: 12,
+		Logger:          slog.New(slog.NewJSONHandler(&logBuf, nil)),
+		clientFactory:   factory,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -502,8 +545,11 @@ func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T
 	}
 	select {
 	case incoming := <-adapter.events:
-		t.Fatalf("migration service message became canonical ingress: %#v", incoming)
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 1 {
+			t.Fatalf("migration checkpoint = %#v", incoming)
+		}
 	default:
+		t.Fatal("migration update did not emit an accepted checkpoint")
 	}
 
 	// Telegram may also emit migrate_from_chat_id in the new supergroup.
@@ -514,6 +560,14 @@ func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T
 	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 2, Message: replay})
 	if migrationCalls != 1 {
 		t.Fatalf("migration replay caused duplicate persistence update: %d", migrationCalls)
+	}
+	select {
+	case incoming := <-adapter.events:
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 2 {
+			t.Fatalf("migration replay checkpoint = %#v", incoming)
+		}
+	default:
+		t.Fatal("migration replay did not emit an accepted checkpoint")
 	}
 
 	message := testMessage(newChatID, models.ChatTypeSupergroup)
@@ -569,8 +623,11 @@ func TestHandleUpdateLogsOnlySafeUnsupportedEventClass(t *testing.T) {
 
 	select {
 	case incoming := <-adapter.events:
-		t.Fatalf("unsupported service message became ingress: %#v", incoming)
+		if incoming.Kind != "other" || incoming.Checkpoint.Position != 1 {
+			t.Fatalf("unsupported service checkpoint = %#v", incoming)
+		}
 	default:
+		t.Fatal("unsupported service update did not emit an accepted checkpoint")
 	}
 	logged := logBuf.String()
 	for _, required := range []string{"telegram_message_ignored", "team-telegram", "chat_metadata"} {

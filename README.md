@@ -64,7 +64,7 @@ The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISC
 
 If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
 
-The Telegram Bot API adapter uses **long polling** and reads its credential only from one deployment source:
+The Telegram Bot API adapter uses **long polling** and resumes its single global Bot API update stream from the last contiguously accepted update after restart. Replayed updates use the normal canonical routing and idempotency path. Telegram only retains updates for a limited provider window, so updates older than that window cannot be recovered. The adapter reads its credential only from one deployment source:
 
 ```sh
 # Environment source

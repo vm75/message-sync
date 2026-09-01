@@ -35,6 +35,7 @@ type Options struct {
 	Logger          *slog.Logger
 	MediaEnabled    bool
 	MediaMaxBytes   uint64
+	InitialUpdateID int64
 	clientFactory   botClientFactory
 	httpClient      *http.Client
 	retryWait       func(context.Context, time.Duration) error
@@ -118,10 +119,12 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 
 	factory := opts.clientFactory
+	var client botClient
 	if factory == nil {
-		factory = newBotClient
+		client, err = newBotClient(token, adapter.handleUpdate, safeTelegramErrorsHandler(opts.Logger), opts.InitialUpdateID, httpClient)
+	} else {
+		client, err = factory(token, adapter.handleUpdate, safeTelegramErrorsHandler(opts.Logger))
 	}
-	client, err := factory(token, adapter.handleUpdate, safeTelegramErrorsHandler(opts.Logger))
 	if err != nil {
 		pollCancel()
 		safelog.Error(opts.Logger, "Telegram Bot API initialization failed", "telegram_init", err)
@@ -148,8 +151,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	return adapter, nil
 }
 
-func newBotClient(token string, handler telegrambot.HandlerFunc, errorsHandler telegrambot.ErrorsHandler) (botClient, error) {
-	return telegrambot.New(token,
+func newBotClient(token string, handler telegrambot.HandlerFunc, errorsHandler telegrambot.ErrorsHandler, initialUpdateID int64, httpClient *http.Client) (botClient, error) {
+	options := []telegrambot.Option{
 		telegrambot.WithDefaultHandler(handler),
 		telegrambot.WithErrorsHandler(errorsHandler),
 		telegrambot.WithAllowedUpdates(telegrambot.AllowedUpdates{
@@ -158,7 +161,14 @@ func newBotClient(token string, handler telegrambot.HandlerFunc, errorsHandler t
 			models.AllowedUpdateMessageReaction,
 		}),
 		telegrambot.WithNotAsyncHandlers(),
-	)
+	}
+	if initialUpdateID > 0 {
+		options = append(options, telegrambot.WithInitialOffset(initialUpdateID))
+	}
+	if httpClient != nil {
+		options = append(options, telegrambot.WithHTTPClient(time.Minute, httpClient))
+	}
+	return telegrambot.New(token, options...)
 }
 
 func safeTelegramErrorsHandler(logger *slog.Logger) telegrambot.ErrorsHandler {
@@ -226,12 +236,14 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		return
 	}
 	a.observeUpdate(update)
+	checkpoint := transport.Checkpoint{StreamKey: "telegram", Position: update.ID, EventTimestamp: telegramUpdateTimestamp(update), Valid: update.ID > 0}
 
 	a.mu.RLock()
 	normalizer := a.normalizer
 	botUserID := a.botUserID
 	a.mu.RUnlock()
 	if normalizer == nil {
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 		return
 	}
 
@@ -242,6 +254,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	switch {
 	case update.Message != nil:
 		if a.handleTelegramMigration(ctx, normalizer, update.Message) {
+			a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 			return
 		}
 		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
@@ -255,15 +268,35 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	case update.MessageReaction != nil:
 		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
 	default:
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 		return
 	}
 	if !ok {
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 		return
 	}
-	incoming.Checkpoint = transport.Checkpoint{
-		StreamKey: "telegram", Position: update.ID, EventTimestamp: incoming.Timestamp, Valid: update.ID > 0,
+	incoming.Checkpoint = checkpoint
+	if !incoming.Timestamp.IsZero() {
+		incoming.Checkpoint.EventTimestamp = incoming.Timestamp
 	}
 	a.emit(incoming)
+}
+
+func telegramUpdateTimestamp(update *models.Update) time.Time {
+	if update == nil {
+		return time.Time{}
+	}
+	var date int
+	switch {
+	case update.Message != nil:
+		date = update.Message.Date
+	case update.EditedMessage != nil:
+		date = update.EditedMessage.Date
+	}
+	if date == 0 {
+		return time.Time{}
+	}
+	return time.Unix(int64(date), 0).UTC()
 }
 
 func (a *Adapter) acceptUpdateID(updateID int64) bool {
