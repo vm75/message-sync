@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 Program status: **Complete**  
 Branch: `agent/sync-reliability`  
 Plan: [MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md](MUST_HAVE_SYNC_RELIABILITY_IMPLEMENTATION_PLAN.md)  
-Branch head at final gate: `8ccbd23b6fd5d085ab13dbe0f9e4bf224c57e7de`
+Branch head at final gate: `e8dc49f6a2fbef2e4a9ad91b5cbd249f480e57a3`
 
 ## Next action
 
@@ -41,16 +41,16 @@ Only one issue should be `In progress` on the shared branch unless the work is d
 
 These checks apply to every row, not only the final gate:
 
-- [ ] Work is committed only to `agent/sync-reliability`.
-- [ ] `VERSION` is unchanged.
-- [ ] No SQLite schema version, historical `ALTER TABLE`, upgrade dispatcher, data conversion, or backward-compatibility branch is added.
-- [ ] Generic `/api/groups` and the old sync-set `groups` payload do not return after #33.
-- [ ] `sync.db` contains no message content, media, quoted text, poll text/options, display names, phone numbers, raw provider errors, or credentials.
-- [ ] Logs/API contain safe operation labels and failure classes only.
-- [ ] Recovered events use the same canonical router and delivery path as live events.
-- [ ] Sync sets remain simple all-to-all endpoint sets.
-- [ ] No broker, microservice, distributed lease, durable payload queue, generic rules engine, or unused configuration surface is introduced.
-- [ ] Issue-specific tests plus `make fmt`, `make test`, and `make vet` pass.
+- [x] Work is committed only to `agent/sync-reliability`.
+- [x] `VERSION` is unchanged.
+- [x] No SQLite schema version, historical `ALTER TABLE`, upgrade dispatcher, data conversion, or backward-compatibility branch is added.
+- [x] Generic `/api/groups` and the old sync-set `groups` payload do not return after #33.
+- [x] `sync.db` contains no message content, media, quoted text, poll text/options, display names, phone numbers, raw provider errors, or credentials.
+- [x] Logs/API contain safe operation labels and failure classes only.
+- [x] Recovered events use the same canonical router and delivery path as live events.
+- [x] Sync sets remain simple all-to-all endpoint sets.
+- [x] No broker, microservice, distributed lease, durable payload queue, generic rules engine, or unused configuration surface is introduced.
+- [x] Issue-specific tests plus `make fmt`, `make test`, and `make vet` pass.
 
 ## Per-issue start procedure
 
