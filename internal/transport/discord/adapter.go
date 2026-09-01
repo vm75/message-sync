@@ -303,6 +303,7 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	if !ok {
 		return
 	}
+	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 

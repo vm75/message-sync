@@ -260,6 +260,9 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	if !ok {
 		return
 	}
+	incoming.Checkpoint = transport.Checkpoint{
+		StreamKey: "telegram", Position: update.ID, EventTimestamp: incoming.Timestamp, Valid: update.ID > 0,
+	}
 	a.emit(incoming)
 }
 

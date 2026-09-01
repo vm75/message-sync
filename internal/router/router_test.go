@@ -332,7 +332,7 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 
 func TestEditPropagationToDestinationCopies(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Send original text message
 	orig := testIncoming("c1g1", "orig-msg-1")
@@ -380,14 +380,6 @@ func TestEditPropagationToDestinationCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 4. Verify recovery cursor updated
-	cursor, err := syncStore.RecoveryCursor(ctx, "c1g1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cursor.RemoteMessageID != "edit-event-id" {
-		t.Fatalf("recovery cursor remoteID = %q, want edit-event-id", cursor.RemoteMessageID)
-	}
 }
 
 func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
@@ -474,7 +466,7 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 
 func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t, config.UsernameModePushName)
 
 	// 1. Ingest original message in c1g1
 	orig := testIncoming("c1g1", "orig-msg-reaction")
@@ -568,14 +560,6 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 		t.Fatalf("reaction echo was not suppressed, produced %d reactions", len(fake.reacted))
 	}
 
-	// 5. Verify recovery cursor is maintained
-	cursor, err := syncStore.RecoveryCursor(ctx, "c1g1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cursor.RemoteMessageID != "reaction-event-self" {
-		t.Fatalf("recovery cursor remoteID = %q, want reaction-event-self", cursor.RemoteMessageID)
-	}
 }
 
 func TestNativeReplyDestinationTargetResolution(t *testing.T) {

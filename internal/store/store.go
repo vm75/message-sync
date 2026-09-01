@@ -51,10 +51,10 @@ type Reaction struct {
 }
 
 type RecoveryCursor struct {
-	EndpointID       string
-	RemoteMessageID  string
-	MessageTimestamp time.Time
-	UpdatedAt        time.Time
+	StreamKey      string
+	Position       int64
+	EventTimestamp time.Time
+	UpdatedAt      time.Time
 }
 
 const (
@@ -440,45 +440,39 @@ func (s *Store) DeleteReaction(ctx context.Context, canonicalID, sourceEndpointI
 }
 
 func (s *Store) PutRecoveryCursor(ctx context.Context, cursor RecoveryCursor) error {
-	if err := validateEndpoint(cursor.EndpointID); err != nil {
-		return err
+	if !endpointPattern.MatchString(cursor.StreamKey) {
+		return errors.New("recovery stream key is required")
 	}
-	if cursor.RemoteMessageID != "" {
-		if err := requireOpaque("remote message id", cursor.RemoteMessageID); err != nil {
-			return err
-		}
+	if cursor.Position < 0 {
+		return errors.New("recovery cursor position must not be negative")
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO recovery_cursors(endpoint_id, remote_message_id, message_timestamp, updated_at)
+		INSERT INTO recovery_cursors(stream_key, position, event_timestamp, updated_at)
 		VALUES (?, ?, ?, ?)
-		ON CONFLICT(endpoint_id) DO UPDATE SET
-			remote_message_id = excluded.remote_message_id,
-			message_timestamp = excluded.message_timestamp,
-			updated_at = excluded.updated_at`,
-		cursor.EndpointID, nullableString(cursor.RemoteMessageID), nullableMillis(cursor.MessageTimestamp), unixMillis(cursor.UpdatedAt),
-	)
+		ON CONFLICT(stream_key) DO UPDATE SET
+			position = excluded.position,
+			event_timestamp = excluded.event_timestamp,
+			updated_at = excluded.updated_at
+		WHERE excluded.position > recovery_cursors.position
+	`, cursor.StreamKey, cursor.Position, nullableMillis(cursor.EventTimestamp), unixMillis(cursor.UpdatedAt))
 	return wrapDB("put recovery cursor", err)
 }
 
-func (s *Store) RecoveryCursor(ctx context.Context, endpointID string) (RecoveryCursor, error) {
-	if err := validateEndpoint(endpointID); err != nil {
-		return RecoveryCursor{}, err
+func (s *Store) RecoveryCursor(ctx context.Context, streamKey string) (RecoveryCursor, error) {
+	if !endpointPattern.MatchString(streamKey) {
+		return RecoveryCursor{}, errors.New("recovery stream key is required")
 	}
 	var cursor RecoveryCursor
-	var remote sql.NullString
-	var messageTS sql.NullInt64
+	var eventTimestamp sql.NullInt64
 	var updated int64
 	err := s.db.QueryRowContext(ctx,
-		`SELECT endpoint_id, remote_message_id, message_timestamp, updated_at FROM recovery_cursors WHERE endpoint_id = ?`, endpointID,
-	).Scan(&cursor.EndpointID, &remote, &messageTS, &updated)
+		`SELECT stream_key, position, event_timestamp, updated_at FROM recovery_cursors WHERE stream_key = ?`, streamKey,
+	).Scan(&cursor.StreamKey, &cursor.Position, &eventTimestamp, &updated)
 	if err != nil {
 		return RecoveryCursor{}, wrapDB("get recovery cursor", err)
 	}
-	if remote.Valid {
-		cursor.RemoteMessageID = remote.String
-	}
-	if messageTS.Valid {
-		cursor.MessageTimestamp = fromUnixMillis(messageTS.Int64)
+	if eventTimestamp.Valid {
+		cursor.EventTimestamp = fromUnixMillis(eventTimestamp.Int64)
 	}
 	cursor.UpdatedAt = fromUnixMillis(updated)
 	return cursor, nil

@@ -7,6 +7,30 @@ import (
 
 type EndpointID string
 
+// Checkpoint identifies an ordered provider stream without carrying provider
+// payloads or identities. Position is meaningful only within StreamKey.
+type Checkpoint struct {
+	StreamKey      string
+	Position       int64
+	EventTimestamp time.Time
+	Valid          bool
+}
+
+// RecoveryRequest contains fixed, coordinator-owned recovery bounds.
+type RecoveryRequest struct {
+	Cursor    Checkpoint
+	MaxEvents int
+	MaxAge    time.Duration
+}
+
+// RecoverySource is an optional adapter capability. Adapters normalize
+// recovered provider items before emitting them through the supplied callback.
+type RecoverySource interface {
+	RecoveryStreams() []string
+	Recover(context.Context, RecoveryRequest, func(context.Context, Incoming) error) error
+	RecoverySignals() <-chan struct{}
+}
+
 type MessageRef struct {
 	Endpoint        EndpointID
 	RemoteMessageID string
@@ -26,6 +50,7 @@ type Mention struct {
 
 type Incoming struct {
 	Endpoint            EndpointID
+	Checkpoint          Checkpoint
 	RemoteID            string
 	Sender              Sender
 	FromSelf            bool

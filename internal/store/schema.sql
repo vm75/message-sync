@@ -27,9 +27,9 @@ CREATE TABLE IF NOT EXISTS reactions (
 );
 
 CREATE TABLE IF NOT EXISTS recovery_cursors (
-    endpoint_id TEXT PRIMARY KEY,
-    remote_message_id TEXT,
-    message_timestamp INTEGER,
+    stream_key TEXT PRIMARY KEY,
+    position INTEGER NOT NULL,
+    event_timestamp INTEGER,
     updated_at INTEGER NOT NULL
 );
 

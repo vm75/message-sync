@@ -198,6 +198,8 @@ sequenceDiagram
 
 The coordinator starts bounded recovery after adapters, configuration, and lanes are ready. Adapter reconnect can request the same single-flight operation. There is no periodic recovery poller.
 
+The shared Go contract is `transport.RecoverySource`: it supplies safe stream keys, receives a bounded `RecoveryRequest`, emits already-normalized `transport.Incoming` values through a callback, and exposes a reconnect signal. `transport.Incoming.Checkpoint` carries the stream key, ordered numeric position, event timestamp, and validity bit. `internal/recovery.Coordinator` owns per-stream serialization, in-memory acknowledgements for positions after a failed event, durable cursor updates, startup/reconnect single-flight, and the fixed defaults of 200 events and 24 hours. Adapter history implementations are intentionally left to #40-#42.
+
 ### 6.3 Provider implementations and honest limitations
 
 | Transport | Recovery source | Cursor scope | Must handle | Known limitation |

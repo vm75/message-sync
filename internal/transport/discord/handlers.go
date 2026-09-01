@@ -2,9 +2,11 @@ package discord
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/vm75/message-sync/internal/transport"
 )
 
 func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discordgo.MessageUpdate) {
@@ -50,6 +52,7 @@ func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discord
 	if !ok {
 		return
 	}
+	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 
@@ -76,6 +79,7 @@ func (a *Adapter) handleMessageDelete(session *discordgo.Session, event *discord
 	if !ok {
 		return
 	}
+	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 
@@ -99,6 +103,7 @@ func (a *Adapter) handleMessageReactionAdd(session *discordgo.Session, event *di
 	if !ok {
 		return
 	}
+	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 
@@ -122,7 +127,22 @@ func (a *Adapter) handleMessageReactionRemove(session *discordgo.Session, event 
 	if !ok {
 		return
 	}
+	addCheckpoint(&incoming)
 	a.emit(incoming)
+}
+
+func addCheckpoint(incoming *transport.Incoming) {
+	if incoming == nil {
+		return
+	}
+	position, err := strconv.ParseInt(incoming.RemoteID, 10, 64)
+	if err != nil || position <= 0 {
+		return
+	}
+	incoming.Checkpoint = transport.Checkpoint{
+		StreamKey: string(incoming.Endpoint), Position: position,
+		EventTimestamp: incoming.Timestamp, Valid: true,
+	}
 }
 
 func discordBotUserID(session *discordgo.Session) string {

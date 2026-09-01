@@ -70,6 +70,11 @@ type Router struct {
 	mu               sync.RWMutex
 }
 
+type Outcome struct {
+	Accepted bool
+	NoOp     bool
+}
+
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
@@ -158,6 +163,16 @@ func (r *Router) Close() {
 	r.lanes.Close()
 }
 
+// HandleEvent processes live and recovered normalized events through the same
+// canonical path and reports whether the accepted boundary was reached.
+func (r *Router) HandleEvent(ctx context.Context, incoming transport.Incoming) (Outcome, error) {
+	err := r.Handle(ctx, incoming)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Accepted: true, NoOp: incoming.Kind == "other"}, nil
+}
+
 func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error {
 	if incoming.Kind == "other" {
 		return nil
@@ -196,12 +211,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return fmt.Errorf("record poll vote: %w", err)
 		}
 
-		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-			EndpointID:       string(incoming.Endpoint),
-			RemoteMessageID:  incoming.RemoteID,
-			MessageTimestamp: incoming.Timestamp,
-			UpdatedAt:        time.Now().UTC(),
-		})
 		return nil
 	}
 
@@ -255,12 +264,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				return fmt.Errorf("send destination delete: %w", err)
 			}
 		}
-		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-			EndpointID:       string(incoming.Endpoint),
-			RemoteMessageID:  incoming.RemoteID,
-			MessageTimestamp: incoming.Timestamp,
-			UpdatedAt:        time.Now().UTC(),
-		})
 		return nil
 	}
 
@@ -320,12 +323,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				return fmt.Errorf("send destination edit: %w", err)
 			}
 		}
-		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-			EndpointID:       string(incoming.Endpoint),
-			RemoteMessageID:  incoming.RemoteID,
-			MessageTimestamp: incoming.Timestamp,
-			UpdatedAt:        time.Now().UTC(),
-		})
 		return nil
 	}
 
@@ -434,12 +431,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				return fmt.Errorf("send reaction copy: %w", err)
 			}
 		}
-		_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-			EndpointID:       string(incoming.Endpoint),
-			RemoteMessageID:  incoming.RemoteID,
-			MessageTimestamp: incoming.Timestamp,
-			UpdatedAt:        time.Now().UTC(),
-		})
 		return nil
 	}
 
@@ -530,12 +521,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return err
 		}
 	}
-	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-		EndpointID:       string(incoming.Endpoint),
-		RemoteMessageID:  incoming.RemoteID,
-		MessageTimestamp: incoming.Timestamp,
-		UpdatedAt:        time.Now().UTC(),
-	})
 	return nil
 }
 
@@ -802,12 +787,6 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 		}
 	}
 
-	_ = r.store.PutRecoveryCursor(ctx, store.RecoveryCursor{
-		EndpointID:       string(incoming.Endpoint),
-		RemoteMessageID:  incoming.RemoteID,
-		MessageTimestamp: incoming.Timestamp,
-		UpdatedAt:        time.Now().UTC(),
-	})
 	return nil
 }
 

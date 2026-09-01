@@ -65,7 +65,7 @@ Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in 
 
 The application initializes this schema only for a fresh database. The product is pre-release, so the store has no schema-version table, historical migrations, upgrade dispatcher, or legacy-database compatibility path; incompatible development changes use a fresh `sync.db`.
 
-It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and recovery cursors. It must not store message content, poll question/option labels, or raw participant identity.
+It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and generic recovery cursors. A cursor contains only a safe stream key, ordered numeric position, event timestamp, and update timestamp. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
 
@@ -273,6 +273,8 @@ source A
 On replay after restart, the router sees that c1g2 already has a copy and sends only c1g3. The in-memory sent-ID cache is only an optimization; SQLite mapping is authoritative across restarts.
 
 The content-free `delivery_operations` table tracks current payload-dependent work by canonical ID, destination alias, operation kind, and revision. It stores only state, retry timing/counts, safe failure classes, and timestamps; the payload remains in memory. Queued and retrying rows become `awaiting_replay` during startup because their payloads cannot survive a process restart. Successful work is represented by `message_copies` or the resulting mutation and its ledger row is deleted, so the table is not an audit history. Per-endpoint summaries expose only state counts and the oldest active age.
+
+The recovery coordinator is the single accepted-event checkpoint boundary. A normalized incoming event may carry only a stream key, ordered position, and timestamp. The coordinator serializes each stream, invokes the ordinary router handler, and advances the durable cursor only after canonical/delivery intent is durable or the router returns a deliberate no-op. Failed positions block later acknowledgements until replayed; duplicate positions at or below the cursor are accepted no-ops. Optional adapter recovery sources receive fixed in-code count/age bounds and emit normalized events back through this same callback. Startup and reconnect recovery are single-flight and do not create a second delivery path or a periodic poller.
 
 Normal create fan-out uses one bounded in-memory FIFO lane per configured endpoint. The router performs canonicalization, loop prevention, reply resolution, and outgoing construction before enqueueing independent destination jobs; the lane only invokes the transport boundary and records the resulting copy. A slow lane therefore cannot hold up a healthy destination, while each destination remains ordered. Lane membership follows configuration reloads, and a full lane leaves its content-free operation row awaiting replay rather than dropping the event.
 

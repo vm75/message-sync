@@ -352,12 +352,12 @@ func TestReactionAndRecoveryRepositories(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cursor := RecoveryCursor{EndpointID: "c1g1", RemoteMessageID: "ABC", MessageTimestamp: now, UpdatedAt: now.Add(time.Minute)}
+	cursor := RecoveryCursor{StreamKey: "telegram", Position: 42, EventTimestamp: now, UpdatedAt: now.Add(time.Minute)}
 	if err := store.PutRecoveryCursor(ctx, cursor); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.RecoveryCursor(ctx, "c1g1")
-	if err != nil || got.RemoteMessageID != cursor.RemoteMessageID || !got.MessageTimestamp.Equal(now) {
+	got, err := store.RecoveryCursor(ctx, "telegram")
+	if err != nil || got.Position != cursor.Position || !got.EventTimestamp.Equal(now) {
 		t.Fatalf("RecoveryCursor() = %+v, %v", got, err)
 	}
 }

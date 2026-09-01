@@ -42,6 +42,18 @@ func waitForWebhookSends(t *testing.T, api *e2eDiscordAPI, want int) {
 	}
 }
 
+func waitForWebhookCount(t *testing.T, count func() int, want int, label string) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for count() < want {
+		select {
+		case <-deadline:
+			t.Fatalf("Discord %s=%d, want %d", label, count(), want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func (f *e2eDiscordAPI) ChannelWebhooks(channelID string, _ ...discordgo.RequestOption) ([]*discordgo.Webhook, error) {
 	return f.channels[channelID], nil
 }
@@ -279,6 +291,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, reply); err != nil {
 		t.Fatal(err)
 	}
+	waitForWebhookSends(t, discordAPI, 4)
 	if len(discordAPI.replyTargets) != 1 || discordAPI.replyTargets[0] != "discord-copy-1" {
 		t.Fatalf("Discord reply target=%#v, want webhook-created canonical copy", discordAPI.replyTargets)
 	}
@@ -296,6 +309,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, edit); err != nil {
 		t.Fatal(err)
 	}
+	waitForWebhookCount(t, func() int { return len(discordAPI.edits) }, 1, "edits")
 	if len(discordAPI.edits) != 1 || !strings.HasPrefix(discordAPI.edits[0], "discord-copy-1|") {
 		t.Fatalf("Discord edit did not target webhook-created canonical copy: %#v", discordAPI.edits)
 	}
@@ -309,6 +323,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, reaction); err != nil {
 		t.Fatal(err)
 	}
+	waitForWebhookCount(t, func() int { return len(discordAPI.reactions) }, 1, "reactions")
 	if len(discordAPI.reactions) != 1 || discordAPI.reactions[0] != "discord-copy-1|👍" {
 		t.Fatalf("Discord reaction did not target webhook-created canonical copy: %#v", discordAPI.reactions)
 	}
@@ -321,6 +336,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if err := mesh.Handle(ctx, deleteEvent); err != nil {
 		t.Fatal(err)
 	}
+	waitForWebhookCount(t, func() int { return len(discordAPI.deletes) }, 1, "deletes")
 	if len(discordAPI.deletes) != 1 || discordAPI.deletes[0] != "discord-copy-1" {
 		t.Fatalf("Discord delete did not target webhook-created canonical copy: %#v", discordAPI.deletes)
 	}

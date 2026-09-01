@@ -14,6 +14,7 @@ import (
 	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/store"
@@ -205,6 +206,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("create canonical router: %w", err)
 	}
 	defer mesh.Close()
+	recoveryCoordinator, err := recovery.NewCoordinator(syncStore, mesh)
+	if err != nil {
+		return fmt.Errorf("create recovery coordinator: %w", err)
+	}
+	var recoverySources []transport.RecoverySource
+	for _, adapter := range []any{wa, dc, tg} {
+		if source, ok := adapter.(transport.RecoverySource); ok {
+			recoverySources = append(recoverySources, source)
+		}
+	}
 
 	onConfigChange := func(updateCtx context.Context) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
@@ -263,6 +274,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)
 	}
+	recoveryCoordinator.Start(ctx, recoverySources)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -331,7 +343,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if !ok {
 				return errors.New("WhatsApp event stream closed")
 			}
-			if err := mesh.Handle(ctx, incoming); err != nil {
+			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)
 				continue
 			}
@@ -344,7 +356,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if !ok {
 				return errors.New("Discord event stream closed")
 			}
-			if err := mesh.Handle(ctx, incoming); err != nil {
+			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)
 				continue
 			}
@@ -357,7 +369,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if !ok {
 				return errors.New("Telegram event stream closed")
 			}
-			if err := mesh.Handle(ctx, incoming); err != nil {
+			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)
 				continue
 			}
