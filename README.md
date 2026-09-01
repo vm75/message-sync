@@ -20,6 +20,7 @@
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
+- **Reliable Delivery**: Each destination has an independent ordered queue with bounded retries, restart-safe pending work, and lifecycle ordering, so a slow or unavailable provider does not block healthy destinations.
 - **Bounded Recovery**: WhatsApp HistorySync snapshots are replayed oldest-first through the same checkpointed routing path as live messages; recovery is bounded and does not promise offline delete/reaction reconstruction.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
 - **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord/Telegram status, discover Discord channels and transiently observed Telegram groups, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
@@ -156,6 +157,7 @@ IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-s
 ## Documentation & Architecture
 
 - `ARCHITECTURE.md` — In-depth overview of the architecture, data boundaries, event flows, and restart semantics.
+- `TESTING.md` — Automated reliability checks and fresh-volume runtime/container smoke tests.
 - `docs/TESTING_GUIDE.md` — Complete step-by-step testing guide for WhatsApp, Discord, and Telegram.
 - `DOCKERHUB.md` — Information related to the published container images.
 - `docs/ASPIRATIONAL_FEATURES.md` — Deferred extensions and future capabilities beyond the implemented Discord and Telegram transports.

@@ -19,7 +19,7 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ### B. Richer WhatsApp Message Formats
 - **Description**: Support for specialized message types.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Contacts / vCards.
   - Location and live location coordinates.
   - WhatsApp Events.
@@ -28,7 +28,7 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ### C. Multi-User Administration & RBAC
 - **Description**: Multi-admin access control for the web console.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Separate administrator and operator accounts.
   - Role-based permissions (view-only vs configuration editing).
   - Invite codes and credential resets.
@@ -37,14 +37,14 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ### D. Multiple WhatsApp Sessions / Accounts
 - **Description**: Running multiple WhatsApp numbers/sessions within a single daemon instance.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Multi-session lifecycle manager for `whatsmeow` clients.
   - Per-account QR code pairing and health status.
   - Binding specific groups or sync sets to designated bridge numbers.
 
 ### E. Historical Chat Importer & Backfill
 - **Description**: Tooling to import historical chat archives into a newly configured sync set.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - WhatsApp exported `.zip` chat history parser.
   - Streaming historical replay with rate-limiting and progress tracking.
   - Media backfill tooling.
@@ -52,26 +52,26 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ### F. Dedicated Number & eSIM Provisioning
 - **Description**: Automated provisioning of cellular numbers for bridge accounts.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Simbase (or alternative carrier) eSIM/number pool API integration.
   - Automated SIM activation and session assignment.
 
 ### G. External Email & SMS Notifications
 - **Description**: Alerts and notifications sent outside WhatsApp.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - System status and disconnect alerts via SMTP or SMS gateway (Twilio, AWS SNS, etc.).
   - Verification codes for administrative tasks.
 
 ### H. Membership Management & Verification Workflows
 - **Description**: Automated onboarding, identity verification, and participant management.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Approval queues for group join requests.
   - External verification (e.g., OTP or email verification).
   - Automated participant add/remove/promote/demote rules.
 
 ### I. Identity Enrichment & Verification
 - **Description**: Optional enrichment and authenticity verification of group participants.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - LinkedIn profile or domain verification.
   - Document and identity proof verification.
   - Optional AI-assisted authenticity analysis.
@@ -79,19 +79,19 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ### J. Human-Friendly Deterministic Pseudonyms
 - **Description**: Generating user-friendly, memorable pseudonyms from HMAC IDs without storing real names.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Wordlist-based encoding (e.g., PGP word lists or adjective-noun pairs derived from the HMAC hash) to replace `u_xxxxxxxxxx` with names like `SwiftOtter` or `BlueFalcon`.
 
 ### K. Arbitrary Routing Topologies
 - **Description**: Expanding beyond disjoint all-to-all sync sets.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Directional routing (e.g., Group A &rarr; Group B only).
   - Topic/content filtering rules.
   - Overlapping group sets.
 
 ### L. Optional Cloud Storage Backend
 - **Description**: Alternative storage drivers for multi-instance or cloud-native deployments.
-- **Tracked Capabilities**:
+- **Deferred Capabilities**:
   - Cloud database adapter (e.g., Firestore / PostgreSQL).
   - External blob storage for transient media caching (e.g., GCS / S3) if media size exceeds memory limits.
 
@@ -110,7 +110,7 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 
 ## Guiding Principles for Adoption
 
-The must-have sync reliability program (#32–#44) is implemented on `agent/sync-reliability`. Its bounded lanes, content-free delivery ledger, accepted checkpoints, provider recovery bounds, managed-webhook repair, and privacy-safe operator health view are current MVP behavior rather than aspirational work. The capabilities below remain explicitly deferred and must not be added as part of routine reliability maintenance.
+This backlog contains deferred capabilities only. The current MVP behavior and its reliability guarantees are documented in `README.md` and `ARCHITECTURE.md`; these items must not be added as part of routine reliability maintenance.
 
 Before pulling any item from this backlog into implementation:
 
