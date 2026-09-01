@@ -218,6 +218,9 @@ func (m *Manager) EnqueueRetry(ctx context.Context, endpoint transport.EndpointI
 				delay = policy.MaxDelay
 			}
 			if err := policy.Wait(jobCtx, delay); err != nil {
+				// Give the job one final canceled attempt so it can persist its
+				// content-free awaiting-replay state before the lane exits.
+				_ = job(jobCtx, attempt+1)
 				policy.OnExhausted(jobCtx, err)
 				return
 			}

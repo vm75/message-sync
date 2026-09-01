@@ -125,9 +125,10 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
 	gotEndpoints := []transport.EndpointID{fake.sent[0].outgoing.Endpoint, fake.sent[1].outgoing.Endpoint}
-	wantEndpoints := []transport.EndpointID{"c1g1", "c1g3"}
-	if !reflect.DeepEqual(gotEndpoints, wantEndpoints) {
-		t.Fatalf("destinations = %v, want %v", gotEndpoints, wantEndpoints)
+	wantEndpoints := map[transport.EndpointID]bool{"c1g1": true, "c1g3": true}
+	gotSet := map[transport.EndpointID]bool{gotEndpoints[0]: true, gotEndpoints[1]: true}
+	if !reflect.DeepEqual(gotSet, wantEndpoints) {
+		t.Fatalf("destinations = %v, want set %v", gotEndpoints, wantEndpoints)
 	}
 	for _, sent := range fake.sent {
 		if sent.outgoing.Text != "*_c1g2/15551234567 (Alice Example)_*: hello" {
@@ -987,6 +988,8 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	if err := r1.Handle(ctx, pollInc); err != nil {
 		t.Fatalf("Handle poll creation error: %v", err)
 	}
+	// Delivery is lane-owned; finish the first router before simulating a restart.
+	r1.Close()
 
 	hAlpha := hex.EncodeToString(cryptoSHA256("Option Alpha"))
 

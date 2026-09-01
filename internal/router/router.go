@@ -557,7 +557,11 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			_ = r.store.DeleteDeliveryOperation(jobCtx, operation)
 			return nil
 		}
-		if err := r.store.BeginDeliveryAttempt(jobCtx, operation, time.Now().UTC()); err != nil {
+		stateCtx := jobCtx
+		if stateCtx.Err() != nil {
+			stateCtx = context.Background()
+		}
+		if err := r.store.BeginDeliveryAttempt(stateCtx, operation, time.Now().UTC()); err != nil {
 			return err
 		}
 		finishFailure := func(err error) error {
