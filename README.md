@@ -11,7 +11,6 @@
 
 `message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one transport-neutral canonical router. The authenticated Web UI provides Discord channel discovery plus transient Telegram observed-chat discovery without persisting human-readable remote names.
 
-*Note: This project is inspired by earlier explorations and prototypes in multi-platform message synchronization and bridging.*
 
 ## Features
 
@@ -165,7 +164,7 @@ IDENTITY_SECRET="$(openssl rand -hex 32)" DATA_DIR=./data go run ./cmd/message-s
 - `TESTING.md` — Automated reliability checks and fresh-volume runtime/container smoke tests.
 - `docs/TESTING_GUIDE.md` — Complete step-by-step testing guide for WhatsApp, Discord, and Telegram.
 - `DOCKERHUB.md` — Information related to the published container images.
-- `docs/ASPIRATIONAL_FEATURES.md` — Deferred extensions and future capabilities beyond the implemented Discord and Telegram transports.
+- `docs/FEATURE_COMPARISON.md` — Detailed feature comparison and architectural trade-offs.
 - `AGENTS.md` — Instructions for AI agents and code contributors.
 
 ## Disclaimers
