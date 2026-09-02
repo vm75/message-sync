@@ -50,6 +50,14 @@ func TestDisablePlaintextPersistence(t *testing.T) {
 	}
 }
 
+func TestFormatWhatsAppTextUsesBoldItalicSyntaxForLiveResults(t *testing.T) {
+	input := "***Aggregated anonymised live results***\nQuestion\nOption — 1"
+	want := "*_Aggregated anonymised live results_*\nQuestion\nOption — 1"
+	if got := formatWhatsAppText(input); got != want {
+		t.Fatalf("formatted text = %q, want %q", got, want)
+	}
+}
+
 func TestRevokeSenderUsesCachedParticipantForOtherMessages(t *testing.T) {
 	cache := newParticipantCache(4)
 	cache.Add("message-id", "15551234567@s.whatsapp.net")
