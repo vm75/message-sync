@@ -13,9 +13,9 @@ Keep context lean. Read only what the current task requires:
 1. `README.md` for product scope and commands.
 2. `ARCHITECTURE.md` for invariants and data flow.
 3. The package(s) being changed and their tests.
-4. `docs/ASPIRATIONAL_FEATURES.md` only for aspirational/deferred functionality.
+4. `docs/FEATURE_COMPARISON.md` only when comparing implemented capabilities or architectural trade-offs.
 
-The previous implementation or prototypes may be consulted as a behavioral reference for a specific feature. Do not copy legacy architecture wholesale.
+External implementations may be consulted for a specific protocol behavior. Do not copy foreign architecture wholesale.
 
 ## Non-negotiable privacy invariants
 
@@ -56,7 +56,7 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 
 - The canonical router owns cross-endpoint synchronization semantics.
 - Transport adapters own platform protocol details.
-- WhatsApp, Discord, and Telegram use the same canonical router for end-to-end text/media, native representable polls, aggregate-only live-result companions, and reply/reaction/edit/delete lifecycle routing. Telegram Bot API ingress/outbound is registered through the same transport adapter registry and single canonical router loop; Telegram chat discovery is a bounded in-memory observation cache exposed only through authenticated administration, and only selected opaque chat IDs may become endpoint configuration. Provider-specific poll mapping remains at transport boundaries, and no poll text or raw voter identity may be persisted. Discord discovery/UI, parent-flattened thread/forum ingress, native polls/vote events, mention fallbacks, textual poll fallback rendering, and unsupported-format handling are implemented. Dynamic thread endpoints, automatic outbound forum-post creation, directional routing, MTProto, provider-native counter injection, and exact poll-close parity remain deferred.
+- WhatsApp, Discord, and Telegram use the same canonical router for end-to-end text/media, native representable polls, aggregate-only live-result companions, and reply/reaction/edit/delete lifecycle routing. Telegram Bot API ingress/outbound is registered through the same transport adapter registry and single canonical router loop; Telegram chat discovery is a bounded in-memory observation cache exposed only through authenticated administration, and only selected opaque chat IDs may become endpoint configuration. Provider-specific poll mapping remains at transport boundaries, and no poll text or raw voter identity may be persisted. Discord discovery/UI, parent-flattened thread/forum ingress, native polls/vote events, mention fallbacks, textual poll fallback rendering, and unsupported-format handling are implemented. Provider-specific unsupported behavior must stay at transport boundaries rather than leak into canonical routing.
 - Never use a Discord, Telegram, or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Outbound create retries must distinguish definite pre-acceptance failure from ambiguous provider outcomes; never blindly retry an ambiguous create.
@@ -149,13 +149,13 @@ Do not add image-publishing triggers for ordinary pushes, pull requests, tags, s
 
 ## Scope discipline
 
-MVP scope is defined in `README.md`. Aspirational and deferred features are tracked in `docs/ASPIRATIONAL_FEATURES.md`.
+`README.md` defines current product scope. Keep scope changes aligned with KISS/YAGNI and the privacy invariants above.
 
-For a future feature:
+For a scope change:
 
 1. state whether it changes the privacy model;
 2. keep optional integrations behind narrow interfaces;
-3. avoid adding cloud/web dependencies merely because the previous implementation used them;
+3. avoid adding cloud/web dependencies unless the current use case requires them;
 4. extend the canonical transport model instead of special-casing a platform.
 
 ## Documentation maintenance
@@ -166,6 +166,6 @@ At the end of every feature add/delete/modify:
 - update `DOCKERHUB.md` when deployment examples, container features, or configuration options change;
 - update `ARCHITECTURE.md` for data flow/schema/privacy/component changes;
 - update `AGENTS.md` when contributor guidance or invariants change;
-- update `docs/ASPIRATIONAL_FEATURES.md` when scope changes.
+- update `docs/FEATURE_COMPARISON.md` when an implemented capability materially changes the comparison or architectural trade-off.
 
 Keep context and docs lean; avoid duplicating large authoritative sections.
