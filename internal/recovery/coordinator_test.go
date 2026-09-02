@@ -76,6 +76,40 @@ func TestCoordinatorAdvancesAcceptedCheckpointAndDeduplicatesReplay(t *testing.T
 	}
 }
 
+func TestCoordinatorDoesNotAdvanceCheckpointForIgnoredEvent(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	canonicalRouter, err := router.New(recoveryConfig(), syncStore, &recoverySender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canonicalRouter.Close()
+	coordinator, err := NewCoordinator(syncStore, canonicalRouter)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ignored := recoveryEvent(7, "ignored")
+	ignored.Kind = "other"
+	if _, err := coordinator.Handle(ctx, ignored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Handle(ctx, recoveryEvent(7, "real-message")); err != nil {
+		t.Fatal(err)
+	}
+	metrics, err := syncStore.Metrics(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if metrics.CanonicalMessages != 1 || metrics.MessageCopies != 1 {
+		t.Fatalf("ignored event blocked real message: %+v", metrics)
+	}
+}
+
 func TestCoordinatorGapStaysBlockedUntilFailedPositionIsAccepted(t *testing.T) {
 	ctx := context.Background()
 	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")

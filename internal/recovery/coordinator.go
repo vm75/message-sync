@@ -82,6 +82,9 @@ func (c *Coordinator) Handle(ctx context.Context, incoming transport.Incoming) (
 		state.failed[cp.Position] = struct{}{}
 		return outcome, err
 	}
+	if outcome.NoOp {
+		return outcome, nil
+	}
 	state.acked[cp.Position] = cp.EventTimestamp
 	delete(state.failed, cp.Position)
 	if err := c.advance(ctx, state, cp.StreamKey); err != nil {
