@@ -177,7 +177,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 		return fake, nil
 	}
 
-	var out bytes.Buffer
+	var out safeBuffer
 	logger := slog.New(slog.NewJSONHandler(&out, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -303,7 +303,7 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 		return fake, nil
 	}
 
-	var out bytes.Buffer
+	var out safeBuffer
 	logger := slog.New(slog.NewJSONHandler(&out, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -386,7 +386,7 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 		return fake, nil
 	}
 
-	var out bytes.Buffer
+	var out safeBuffer
 	logger := slog.New(slog.NewJSONHandler(&out, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -461,7 +461,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		return fake, nil
 	}
 
-	var out bytes.Buffer
+	var out safeBuffer
 	logger := slog.New(slog.NewJSONHandler(&out, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
