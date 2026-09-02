@@ -1033,6 +1033,32 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	}
 }
 
+func TestRouterTelegramPollSnapshotUsesCanonicalAggregate(t *testing.T) {
+	r, syncStore, fake := newTestRouter(t, config.UsernameModeHash)
+	ctx := context.Background()
+	if err := r.Handle(ctx, transport.Incoming{Endpoint: "c1g1", RemoteID: "poll-snapshot-source", Sender: transport.Sender{OpaqueID: "u_abcdefghij"}, Kind: "poll", Text: "Question", PollOptions: []string{"A", "B"}, PollSelectableCount: 1, Timestamp: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+	canonicalID, err := syncStore.CanonicalForRemote(ctx, "c1g1", "poll-snapshot-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syncStore.SavePollProviderRef(ctx, store.PollProviderRef{CanonicalID: canonicalID, EndpointID: "c1g2", Provider: "telegram", Reference: "opaque-poll"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Handle(ctx, transport.Incoming{Endpoint: "c1g2", RemoteID: "opaque-poll", Kind: "poll_snapshot", PollProvider: "telegram", PollProviderReference: "opaque-poll", PollSnapshot: map[int]int{0: 4, 1: 2}, Timestamp: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := syncStore.GetPollAggregateCounts(ctx, canonicalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[0] != 4 || counts[1] != 2 {
+		t.Fatalf("snapshot counts = %#v", counts)
+	}
+}
+
 func cryptoSHA256(s string) []byte {
 	h := sha256.Sum256([]byte(s))
 	return h[:]

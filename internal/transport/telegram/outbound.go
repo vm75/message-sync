@@ -40,6 +40,7 @@ type telegramAPI interface {
 	EditMessageCaption(context.Context, *telegrambot.EditMessageCaptionParams) (*models.Message, error)
 	DeleteMessage(context.Context, *telegrambot.DeleteMessageParams) (bool, error)
 	GetFile(context.Context, *telegrambot.GetFileParams) (*models.File, error)
+	SendPoll(context.Context, *telegrambot.SendPollParams) (*models.Message, error)
 }
 
 type messageKindKey struct {
@@ -74,10 +75,27 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	kind := strings.TrimSpace(outgoing.Kind)
+	var message *models.Message
 	if kind == "" {
 		kind = "text"
 	}
 	if kind == "poll" {
+		if params, ok := telegramNativePoll(chatID, outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
+			err = a.callWithRetry(ctx, func() error {
+				var callErr error
+				message, callErr = api.SendPoll(ctx, params)
+				return callErr
+			})
+			if err != nil {
+				return transport.MessageRef{}, errors.New("send Telegram poll")
+			}
+			if message == nil || message.ID <= 0 || message.Poll == nil || strings.TrimSpace(message.Poll.ID) == "" {
+				return transport.MessageRef{}, errors.New("Telegram poll response was incomplete")
+			}
+			remoteID := strconv.Itoa(message.ID)
+			a.rememberMessageKind(outgoing.Endpoint, remoteID, "poll")
+			return transport.MessageRef{Endpoint: outgoing.Endpoint, RemoteMessageID: remoteID, IsTargetFromMe: true, Provider: "telegram", ProviderReference: message.Poll.ID}, nil
+		}
 		pollText, pollErr := telegramPollText(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount)
 		if pollErr != nil {
 			return transport.MessageRef{}, pollErr
@@ -91,7 +109,6 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		content = telegramReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
 
-	var message *models.Message
 	switch kind {
 	case "text":
 		content = truncateTelegramText(content, telegramTextLimit)
@@ -140,6 +157,31 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		IsTargetFromMe:  true,
 	}, nil
 }
+
+func telegramNativePoll(chatID int64, question string, options []string, selectableCount, durationHours int, reply *models.ReplyParameters) (*telegrambot.SendPollParams, bool) {
+	question = strings.TrimSpace(question)
+	if utf8.RuneCountInString(question) < 1 || utf8.RuneCountInString(question) > 300 || len(options) < 2 || len(options) > 10 || (selectableCount != 1 && selectableCount != len(options)) || durationHours < 0 {
+		return nil, false
+	}
+	if durationHours > 0 && (durationHours*3600 < 5 || durationHours*3600 > 600) {
+		return nil, false
+	}
+	input := make([]models.InputPollOption, 0, len(options))
+	for _, option := range options {
+		option = strings.TrimSpace(option)
+		if utf8.RuneCountInString(option) < 1 || utf8.RuneCountInString(option) > 100 {
+			return nil, false
+		}
+		input = append(input, models.InputPollOption{Text: option})
+	}
+	params := &telegrambot.SendPollParams{ChatID: chatID, Question: question, Options: input, IsAnonymous: boolPtr(true), AllowsMultipleAnswers: selectableCount > 1, ReplyParameters: reply}
+	if durationHours > 0 {
+		params.OpenPeriod = durationHours * 3600
+	}
+	return params, true
+}
+
+func boolPtr(value bool) *bool { return &value }
 
 func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID int64, kind string, data []byte, caption string, reply *models.ReplyParameters) (*models.Message, error) {
 	var (

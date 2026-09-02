@@ -180,6 +180,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 				return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), oldRemoteID, newRemoteID)
 			},
+			ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
+				endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
+				if resolveErr != nil {
+					return "", false
+				}
+				return transport.EndpointID(endpoint), true
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("start Telegram transport: %w", err)

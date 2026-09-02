@@ -225,6 +225,26 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	if strings.TrimSpace(incoming.RemoteID) == "" {
 		return errors.New("incoming remote message id is required")
 	}
+	if incoming.Kind == "poll_snapshot" {
+		canonicalID, err := r.store.PollCanonicalForProviderRef(ctx, string(incoming.Endpoint), incoming.PollProvider, incoming.PollProviderReference)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return fmt.Errorf("resolve poll snapshot target: %w", err)
+		}
+		tombstoned, err := r.store.IsTombstoned(ctx, canonicalID)
+		if err != nil {
+			return fmt.Errorf("check poll snapshot tombstone: %w", err)
+		}
+		if tombstoned {
+			return nil
+		}
+		if err := r.store.ReplacePollEndpointSnapshot(ctx, canonicalID, string(incoming.Endpoint), incoming.PollSnapshot, incoming.Timestamp); err != nil {
+			return fmt.Errorf("record poll snapshot: %w", err)
+		}
+		return nil
+	}
 
 	if incoming.Kind == "poll_vote" {
 		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
@@ -504,6 +524,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if err := r.store.SavePollOptions(ctx, canonicalID, optionHashes); err != nil {
 				return fmt.Errorf("save poll options: %w", err)
 			}
+			if incoming.PollProvider != "" && incoming.PollProviderReference != "" {
+				if err := r.store.SavePollProviderRef(ctx, store.PollProviderRef{CanonicalID: canonicalID, EndpointID: string(incoming.Endpoint), Provider: incoming.PollProvider, Reference: incoming.PollProviderReference}); err != nil {
+					return fmt.Errorf("save source poll provider reference: %w", err)
+				}
+			}
 		}
 		r.mu.Lock()
 		r.pollCache[canonicalID] = pollMeta{
@@ -648,6 +673,11 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			CreatedAt: time.Now().UTC(), FromSelf: true,
 		}); err != nil {
 			return finishFailure(err)
+		}
+		if incoming.Kind == "poll" && ref.Provider != "" && ref.ProviderReference != "" {
+			if err := r.store.SavePollProviderRef(jobCtx, store.PollProviderRef{CanonicalID: canonicalID, EndpointID: string(destination), Provider: ref.Provider, Reference: ref.ProviderReference}); err != nil {
+				return finishFailure(err)
+			}
 		}
 		r.mu.Lock()
 		r.knownCopies[copyKey{endpoint: destination, remoteID: ref.RemoteMessageID}] = canonicalID

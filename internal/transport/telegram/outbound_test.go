@@ -23,6 +23,7 @@ type fakeTelegramAPI struct {
 
 	methods        []string
 	texts          []string
+	polls          []*telegrambot.SendPollParams
 	caption        string
 	filename       string
 	media          []byte
@@ -75,6 +76,14 @@ func (f *fakeTelegramAPI) SendMessage(_ context.Context, params *telegrambot.Sen
 		return nil, err
 	}
 	return f.nextMessage(), nil
+}
+
+func (f *fakeTelegramAPI) SendPoll(_ context.Context, params *telegrambot.SendPollParams) (*models.Message, error) {
+	f.methods = append(f.methods, "poll")
+	f.polls = append(f.polls, params)
+	message := f.nextMessage()
+	message.Poll = &models.Poll{ID: "opaque-telegram-poll", Options: []models.PollOption{{Text: "one"}, {Text: "two"}}}
+	return message, nil
 }
 
 func captureUpload(file models.InputFile) (string, []byte) {
@@ -468,17 +477,32 @@ func TestSendPollUsesDeterministicTextFallback(t *testing.T) {
 		Sender:              transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
 		SourceText:          "Lunch?",
 		Kind:                "poll",
-		PollOptions:         []string{"Idli", "Dosa"},
+		PollOptions:         []string{"Idli", "Dosa", "Rice", "Roti", "Tea", "Coffee", "Soup", "Fruit", "Cake", "Bread", "Water"},
 		PollSelectableCount: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Alice: Poll: Lunch?\n1. Idli\n2. Dosa\nChoose up to 2 options."
+	want := "Alice: Poll: Lunch?\n1. Idli\n2. Dosa\n3. Rice\n4. Roti\n5. Tea\n6. Coffee\n7. Soup\n8. Fruit\n9. Cake\n10. Bread\n11. Water\nChoose up to 2 options."
 	if len(api.methods) != 1 || api.methods[0] != "message" {
 		t.Fatalf("Telegram poll fallback methods = %v", api.methods)
 	}
 	if len(api.texts) != 1 || api.texts[0] != want {
 		t.Fatalf("Telegram poll fallback text = %q, want %q", api.texts, want)
+	}
+}
+
+func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.polls) != 1 || ref.Provider != "telegram" || ref.ProviderReference != "opaque-telegram-poll" {
+		t.Fatalf("native Telegram poll = ref %#v polls=%d", ref, len(api.polls))
+	}
+	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || !*api.polls[0].IsAnonymous {
+		t.Fatalf("unexpected Telegram poll semantics: %#v", api.polls[0])
 	}
 }

@@ -32,9 +32,11 @@ type RecoverySource interface {
 }
 
 type MessageRef struct {
-	Endpoint        EndpointID
-	RemoteMessageID string
-	IsTargetFromMe  bool
+	Endpoint          EndpointID
+	RemoteMessageID   string
+	IsTargetFromMe    bool
+	Provider          string
+	ProviderReference string
 }
 
 type Sender struct {
@@ -49,23 +51,26 @@ type Mention struct {
 }
 
 type Incoming struct {
-	Endpoint            EndpointID
-	Checkpoint          Checkpoint
-	RemoteID            string
-	Sender              Sender
-	FromSelf            bool
-	Kind                string
-	Text                string // transient only; never persist
-	Mentions            []Mention
-	ReplyTo             *MessageRef
-	QuotedText          string
-	Timestamp           time.Time
-	MediaLoader         func(context.Context) ([]byte, error)
-	PollOptions         []string // transient only; never persist
-	PollSelectableCount int
-	PollDurationHours   int
-	PollOptionHashes    []string // SHA-256 hex hashes of selected options for poll_vote
-	PollOptionIndexes   []int    // canonical zero-based selected option indexes for poll_vote
+	Endpoint              EndpointID
+	Checkpoint            Checkpoint
+	RemoteID              string
+	Sender                Sender
+	FromSelf              bool
+	Kind                  string
+	Text                  string // transient only; never persist
+	Mentions              []Mention
+	ReplyTo               *MessageRef
+	QuotedText            string
+	Timestamp             time.Time
+	MediaLoader           func(context.Context) ([]byte, error)
+	PollOptions           []string // transient only; never persist
+	PollSelectableCount   int
+	PollDurationHours     int
+	PollOptionHashes      []string // SHA-256 hex hashes of selected options for poll_vote
+	PollOptionIndexes     []int    // canonical zero-based selected option indexes for poll_vote
+	PollSnapshot          map[int]int
+	PollProvider          string
+	PollProviderReference string
 }
 
 type Outgoing struct {

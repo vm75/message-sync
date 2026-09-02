@@ -43,7 +43,7 @@ Agents should work in the order below. Before starting a ticket:
 |---|---|---|---|---|
 | 1 | [#45](https://github.com/vm75/message-sync/issues/45) | Provider-neutral canonical poll state | None | Complete |
 | 2 | [#46](https://github.com/vm75/message-sync/issues/46) | Native Discord polls + vote ingestion | #45 | Complete |
-| 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Pending |
+| 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Complete |
 | 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Pending |
 | 5 | [#49](https://github.com/vm75/message-sync/issues/49) | Simplify poll router flow; retain `aggregate-response` | #48 | Pending |
 | 6 | [#50](https://github.com/vm75/message-sync/issues/50) | Restart/concurrency/fallback/no-regression hardening | #45-#49 | Pending |
@@ -239,9 +239,9 @@ Agents should append short durable implementation notes here while the tracker e
 - Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
 
 ### #47
-- Status: Pending
-- Implementation notes:
-- Tests:
+- Status: Complete
+- Implementation notes: Telegram representable polls now use Bot API `SendPoll`; ingress carries canonical option order and opaque `poll_id` metadata, while unsupported quiz/media/limits retain deterministic text fallback. Bot-created `poll` updates resolve persisted poll references and atomically replace endpoint snapshots without Telegram voter state. Human-created source polls retain the Bot API degraded-observability limitation; MTProto is not used.
+- Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
 
 ### #47
 - Status: Pending

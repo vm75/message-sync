@@ -1015,6 +1015,21 @@ func (s *Store) PollCanonicalForProviderRef(ctx context.Context, endpointID, pro
 	return canonicalID, nil
 }
 
+func (s *Store) PollEndpointForProviderRef(ctx context.Context, provider, reference string) (string, error) {
+	if strings.TrimSpace(provider) == "" {
+		return "", errors.New("poll provider is required")
+	}
+	if err := requireOpaque("poll provider reference", reference); err != nil {
+		return "", err
+	}
+	var endpointID string
+	err := s.db.QueryRowContext(ctx, `SELECT endpoint_id FROM poll_provider_refs WHERE provider_kind = ? AND provider_ref = ?`, provider, reference).Scan(&endpointID)
+	if err != nil {
+		return "", wrapDB("resolve poll provider endpoint", err)
+	}
+	return endpointID, nil
+}
+
 func validateCopy(copy MessageCopy) error {
 	if err := requireOpaque("canonical id", copy.CanonicalID); err != nil {
 		return err

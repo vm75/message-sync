@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/go-telegram/bot/models"
 	"github.com/vm75/message-sync/internal/config"
@@ -128,11 +129,30 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 	}
 
 	text, entities := telegramTextPayload(msg)
+	kind := "text"
+	var pollOptions []string
+	selectableCount := 0
+	providerReference := ""
 	if msg.Poll != nil {
-		var ok bool
-		text, ok = telegramPollMessageText(msg.Poll, n.hasher, n.usernameMode)
-		if !ok {
-			return transport.Incoming{}, false
+		if telegramPollRepresentable(msg.Poll) {
+			kind = "poll"
+			text = msg.Poll.Question
+			text, _ = normalizeTelegramMentions(text, msg.Poll.QuestionEntities, n.hasher, n.usernameMode)
+			for _, option := range msg.Poll.Options {
+				pollOptions = append(pollOptions, option.Text)
+			}
+			if msg.Poll.AllowsMultipleAnswers {
+				selectableCount = len(pollOptions)
+			} else {
+				selectableCount = 1
+			}
+			providerReference = msg.Poll.ID
+		} else {
+			var ok bool
+			text, ok = telegramPollMessageText(msg.Poll, n.hasher, n.usernameMode)
+			if !ok {
+				return transport.Incoming{}, false
+			}
 		}
 		entities = nil
 	}
@@ -176,14 +196,34 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			DisplayName: displayName,
 			OpaqueID:    telegramActorID(n.hasher, msg.From.ID),
 		},
-		FromSelf:   false,
-		Kind:       "text",
-		Text:       text,
-		Mentions:   mentions,
-		ReplyTo:    replyTo,
-		QuotedText: quotedText,
-		Timestamp:  timestamp,
+		FromSelf:    false,
+		Kind:        kind,
+		Text:        text,
+		PollOptions: pollOptions, PollSelectableCount: selectableCount,
+		PollProvider: func() string {
+			if providerReference != "" {
+				return "telegram"
+			}
+			return ""
+		}(),
+		PollProviderReference: providerReference,
+		Mentions:              mentions,
+		ReplyTo:               replyTo,
+		QuotedText:            quotedText,
+		Timestamp:             timestamp,
 	}, true
+}
+
+func telegramPollRepresentable(poll *models.Poll) bool {
+	if poll == nil || poll.Type == "quiz" || utf8.RuneCountInString(strings.TrimSpace(poll.Question)) < 1 || utf8.RuneCountInString(poll.Question) > 300 || len(poll.Options) < 2 || len(poll.Options) > 10 {
+		return false
+	}
+	for _, option := range poll.Options {
+		if utf8.RuneCountInString(option.Text) < 1 || utf8.RuneCountInString(option.Text) > 100 {
+			return false
+		}
+	}
+	return true
 }
 
 func (n *Normalizer) NormalizeEditedMessage(msg *models.Message, botUserID int64) (transport.Incoming, bool) {

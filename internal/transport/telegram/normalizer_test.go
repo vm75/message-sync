@@ -273,7 +273,7 @@ func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
 	}
 }
 
-func TestNormalizeTelegramPollUsesDeterministicTextFallback(t *testing.T) {
+func TestNormalizeTelegramPollUsesNativeCanonicalModel(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
 	msg.Text = ""
@@ -288,11 +288,10 @@ func TestNormalizeTelegramPollUsesDeterministicTextFallback(t *testing.T) {
 	if !ok {
 		t.Fatal("Telegram poll was ignored")
 	}
-	want := "Poll: Lunch?\n1. Idli\n2. Dosa\nChoose up to 2 options."
-	if incoming.Kind != "text" || incoming.Text != want {
-		t.Fatalf("Telegram poll fallback = kind %q text %q", incoming.Kind, incoming.Text)
+	if incoming.Kind != "poll" || len(incoming.PollOptions) != 2 || incoming.PollOptions[0] != "Idli" || incoming.PollSelectableCount != 2 {
+		t.Fatalf("Telegram native poll = %#v", incoming)
 	}
-	if len(incoming.PollOptions) != 0 || strings.Contains(incoming.Text, msg.Poll.ID) {
+	if incoming.PollProvider != "telegram" || incoming.PollProviderReference != msg.Poll.ID || strings.Contains(incoming.Text, msg.Poll.ID) {
 		t.Fatalf("Telegram poll created native/shared poll state: %#v", incoming)
 	}
 }

@@ -15,7 +15,7 @@
 ## Features
 
 - **Mixed-Transport Synchronization**: Connect WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups in the same alias-based sync sets.
-- **Telegram Bot API Transport**: Long-poll ingress, transient observed-chat discovery, text/transient media, replies/reactions/edits/deletes, safe sender attribution, forum-topic flattening, deterministic poll/format fallbacks, and group-to-supergroup migration all use the shared canonical/message-copy model.
+- **Telegram Bot API Transport**: Long-poll ingress, transient observed-chat discovery, text/transient media, replies/reactions/edits/deletes, safe sender attribution, forum-topic flattening, native representable polls with opaque result correlation, deterministic unsupported-poll/format fallbacks, and group-to-supergroup migration all use the shared canonical/message-copy model.
 - **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
 - **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.

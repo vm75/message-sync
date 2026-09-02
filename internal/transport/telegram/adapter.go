@@ -29,17 +29,18 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
-	ChatIDs         map[string]string
-	Hasher          *identity.Hasher
-	UsernameMode    config.UsernameMode
-	Logger          *slog.Logger
-	MediaEnabled    bool
-	MediaMaxBytes   uint64
-	InitialUpdateID int64
-	clientFactory   botClientFactory
-	httpClient      *http.Client
-	retryWait       func(context.Context, time.Duration) error
-	MigrateEndpoint func(context.Context, transport.EndpointID, string, string) error
+	ChatIDs             map[string]string
+	Hasher              *identity.Hasher
+	UsernameMode        config.UsernameMode
+	Logger              *slog.Logger
+	MediaEnabled        bool
+	MediaMaxBytes       uint64
+	InitialUpdateID     int64
+	clientFactory       botClientFactory
+	httpClient          *http.Client
+	retryWait           func(context.Context, time.Duration) error
+	MigrateEndpoint     func(context.Context, transport.EndpointID, string, string) error
+	ResolvePollEndpoint func(context.Context, string) (transport.EndpointID, bool)
 }
 
 type Adapter struct {
@@ -52,11 +53,12 @@ type Adapter struct {
 	token      string
 	httpClient *http.Client
 
-	mediaEnabled    bool
-	mediaMaxBytes   uint64
-	retryWait       func(context.Context, time.Duration) error
-	migrateEndpoint func(context.Context, transport.EndpointID, string, string) error
-	messageKinds    map[messageKindKey]string
+	mediaEnabled        bool
+	mediaMaxBytes       uint64
+	retryWait           func(context.Context, time.Duration) error
+	migrateEndpoint     func(context.Context, transport.EndpointID, string, string) error
+	resolvePollEndpoint func(context.Context, string) (transport.EndpointID, bool)
+	messageKinds        map[messageKindKey]string
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
@@ -102,20 +104,21 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
-		normalizer:      normalizer,
-		hasher:          opts.Hasher,
-		events:          make(chan transport.Incoming, eventBufferSize),
-		logger:          opts.Logger,
-		token:           token,
-		httpClient:      httpClient,
-		mediaEnabled:    opts.MediaEnabled,
-		mediaMaxBytes:   opts.MediaMaxBytes,
-		retryWait:       opts.retryWait,
-		migrateEndpoint: opts.MigrateEndpoint,
-		messageKinds:    make(map[messageKindKey]string),
-		observed:        make(map[int64]observedChatEntry),
-		polling:         true,
-		pollCancel:      pollCancel,
+		normalizer:          normalizer,
+		hasher:              opts.Hasher,
+		events:              make(chan transport.Incoming, eventBufferSize),
+		logger:              opts.Logger,
+		token:               token,
+		httpClient:          httpClient,
+		mediaEnabled:        opts.MediaEnabled,
+		mediaMaxBytes:       opts.MediaMaxBytes,
+		retryWait:           opts.retryWait,
+		migrateEndpoint:     opts.MigrateEndpoint,
+		resolvePollEndpoint: opts.ResolvePollEndpoint,
+		messageKinds:        make(map[messageKindKey]string),
+		observed:            make(map[int64]observedChatEntry),
+		polling:             true,
+		pollCancel:          pollCancel,
 	}
 
 	factory := opts.clientFactory
@@ -159,6 +162,7 @@ func newBotClient(token string, handler telegrambot.HandlerFunc, errorsHandler t
 			models.AllowedUpdateMessage,
 			models.AllowedUpdateEditedMessage,
 			models.AllowedUpdateMessageReaction,
+			models.AllowedUpdatePoll,
 		}),
 		telegrambot.WithNotAsyncHandlers(),
 	}
@@ -267,6 +271,20 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)
 	case update.MessageReaction != nil:
 		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
+	case update.Poll != nil:
+		if a.resolvePollEndpoint == nil {
+			return
+		}
+		endpoint, resolved := a.resolvePollEndpoint(context.Background(), update.Poll.ID)
+		if !resolved {
+			return
+		}
+		counts := make(map[int]int, len(update.Poll.Options))
+		for index, option := range update.Poll.Options {
+			counts[index] = option.VoterCount
+		}
+		incoming = transport.Incoming{Endpoint: endpoint, RemoteID: update.Poll.ID, Kind: "poll_snapshot", PollSnapshot: counts, PollProvider: "telegram", PollProviderReference: update.Poll.ID, Timestamp: time.Now().UTC()}
+		ok = true
 	default:
 		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 		return
