@@ -27,11 +27,12 @@ type Coordinator struct {
 }
 
 type streamState struct {
-	mu     sync.Mutex
-	loaded bool
-	cursor int64
-	acked  map[int64]time.Time
-	failed map[int64]struct{}
+	mu      sync.Mutex
+	loaded  bool
+	cursor  int64
+	acked   map[int64]time.Time
+	failed  map[int64]struct{}
+	pending map[int64]time.Time
 }
 
 func NewCoordinator(syncStore *store.Store, canonicalRouter *router.Router) (*Coordinator, error) {
@@ -46,7 +47,7 @@ func (c *Coordinator) stream(key string) *streamState {
 	defer c.mu.Unlock()
 	state := c.streams[key]
 	if state == nil {
-		state = &streamState{acked: make(map[int64]time.Time), failed: make(map[int64]struct{})}
+		state = &streamState{acked: make(map[int64]time.Time), failed: make(map[int64]struct{}), pending: make(map[int64]time.Time)}
 		c.streams[key] = state
 	}
 	return state
@@ -82,11 +83,15 @@ func (c *Coordinator) Handle(ctx context.Context, incoming transport.Incoming) (
 		state.failed[cp.Position] = struct{}{}
 		return outcome, err
 	}
-	if outcome.NoOp {
+	if outcome.NoOp || !outcome.SafeToAdvance {
+		if !outcome.SafeToAdvance {
+			state.pending[cp.Position] = cp.EventTimestamp
+		}
 		return outcome, nil
 	}
 	state.acked[cp.Position] = cp.EventTimestamp
 	delete(state.failed, cp.Position)
+	delete(state.pending, cp.Position)
 	if err := c.advance(ctx, state, cp.StreamKey); err != nil {
 		return router.Outcome{}, err
 	}
@@ -102,6 +107,11 @@ func (c *Coordinator) advance(ctx context.Context, state *streamState, key strin
 	}
 	sort.Slice(positions, func(i, j int) bool { return positions[i] < positions[j] })
 	for _, position := range positions {
+		for pending := range state.pending {
+			if pending <= position {
+				return nil
+			}
+		}
 		for failed := range state.failed {
 			if failed <= position {
 				return nil

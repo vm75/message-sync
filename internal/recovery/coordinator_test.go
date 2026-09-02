@@ -3,6 +3,7 @@ package recovery
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -24,13 +25,80 @@ func recoveryConfig() *config.Config {
 	}
 }
 
-type recoverySender struct{ fail bool }
+type recoverySender struct {
+	mu      sync.Mutex
+	fail    bool
+	next    int
+	block   <-chan struct{}
+	started chan struct{}
+}
 
 func (s *recoverySender) Send(context.Context, transport.Outgoing) (transport.MessageRef, error) {
+	if s.block != nil {
+		if s.started != nil {
+			select {
+			case s.started <- struct{}{}:
+			default:
+			}
+		}
+		<-s.block
+	}
 	if s.fail {
 		return transport.MessageRef{}, errors.New("send failed")
 	}
-	return transport.MessageRef{Endpoint: "two", RemoteMessageID: "remote"}, nil
+	s.mu.Lock()
+	s.next++
+	n := s.next
+	s.mu.Unlock()
+	return transport.MessageRef{Endpoint: "two", RemoteMessageID: fmt.Sprintf("remote-%d", n)}, nil
+}
+
+func TestCoordinatorKeepsCursorReplayableWhilePayloadDeliveryIsPending(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	block := make(chan struct{})
+	sender := &recoverySender{block: block, started: make(chan struct{}, 1)}
+	canonicalRouter, err := router.New(recoveryConfig(), syncStore, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canonicalRouter.Close()
+	coordinator, err := NewCoordinator(syncStore, canonicalRouter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := recoveryEvent(1, "blocked")
+	outcome, err := coordinator.Handle(ctx, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.SafeToAdvance {
+		t.Fatal("queued payload delivery was marked safe")
+	}
+	if _, err := syncStore.RecoveryCursor(ctx, "one"); err == nil {
+		t.Fatal("cursor advanced past pending payload")
+	}
+	<-sender.started
+	close(block)
+	time.Sleep(50 * time.Millisecond)
+	if _, err := coordinator.Handle(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := syncStore.RecoveryCursor(ctx, "one")
+	if err != nil || cursor.Position != 1 {
+		t.Fatalf("replayed cursor = %+v, err=%v", cursor, err)
+	}
+	var copies int
+	if err := syncStore.DB().QueryRow(`SELECT COUNT(*) FROM message_copies`).Scan(&copies); err != nil {
+		t.Fatal(err)
+	}
+	if copies != 2 {
+		t.Fatalf("copies = %d, want source plus one destination", copies)
+	}
 }
 func (*recoverySender) React(context.Context, transport.Reaction) error          { return nil }
 func (*recoverySender) Edit(context.Context, transport.MessageRef, string) error { return nil }
@@ -63,12 +131,15 @@ func TestCoordinatorAdvancesAcceptedCheckpointAndDeduplicatesReplay(t *testing.T
 	if _, err := coordinator.Handle(ctx, recoveryEvent(1, "first")); err != nil {
 		t.Fatal(err)
 	}
+	// Delivery is asynchronous. If the first call observed queued work, the
+	// source event remains replayable until the copy has completed.
+	time.Sleep(50 * time.Millisecond)
+	if _, err := coordinator.Handle(ctx, recoveryEvent(1, "first")); err != nil {
+		t.Fatal(err)
+	}
 	cursor, err := syncStore.RecoveryCursor(ctx, "one")
 	if err != nil || cursor.Position != 1 {
 		t.Fatalf("cursor = %+v, err = %v", cursor, err)
-	}
-	if _, err := coordinator.Handle(ctx, recoveryEvent(1, "first")); err != nil {
-		t.Fatal(err)
 	}
 	cursor, err = syncStore.RecoveryCursor(ctx, "one")
 	if err != nil || cursor.Position != 1 {
@@ -133,10 +204,21 @@ func TestCoordinatorGapStaysBlockedUntilFailedPositionIsAccepted(t *testing.T) {
 	if _, err := coordinator.Handle(ctx, recoveryEvent(2, "second")); err != nil {
 		t.Fatal(err)
 	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := coordinator.Handle(ctx, recoveryEvent(2, "second")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := syncStore.RecoveryCursor(ctx, "one"); err == nil {
 		t.Fatal("cursor advanced across failed position")
 	}
 	if _, err := coordinator.Handle(ctx, recoveryEvent(1, "first")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := coordinator.Handle(ctx, recoveryEvent(1, "first")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Handle(ctx, recoveryEvent(2, "second")); err != nil {
 		t.Fatal(err)
 	}
 	cursor, err := syncStore.RecoveryCursor(ctx, "one")

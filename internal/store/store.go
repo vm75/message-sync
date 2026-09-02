@@ -550,6 +550,24 @@ func (s *Store) UpsertDeliveryOperation(ctx context.Context, operation DeliveryO
 	return wrapDB("upsert delivery operation", err)
 }
 
+func (s *Store) DeliveryOperation(ctx context.Context, operation DeliveryOperation) (DeliveryOperation, error) {
+	var result DeliveryOperation
+	var next sql.NullInt64
+	var failureClass sql.NullString
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT canonical_id, endpoint_id, operation_kind, operation_revision, state, attempt_count, next_attempt_at, failure_class, created_at, updated_at FROM delivery_operations WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?`, operation.CanonicalID, operation.EndpointID, operation.OperationKind, operation.OperationRevision).Scan(&result.CanonicalID, &result.EndpointID, &result.OperationKind, &result.OperationRevision, &result.State, &result.AttemptCount, &next, &failureClass, &created, &updated)
+	if err != nil {
+		return DeliveryOperation{}, wrapDB("get delivery operation", err)
+	}
+	if next.Valid {
+		result.NextAttemptAt = fromUnixMillis(next.Int64)
+	}
+	result.FailureClass = failureClass.String
+	result.CreatedAt = fromUnixMillis(created)
+	result.UpdatedAt = fromUnixMillis(updated)
+	return result, nil
+}
+
 // ClaimDeliveryOperation advances a queued operation to retrying and increments
 // its attempt count atomically. It returns false when another worker claimed it.
 func (s *Store) ClaimDeliveryOperation(ctx context.Context, operation DeliveryOperation, now time.Time) (bool, error) {
@@ -650,6 +668,15 @@ func (s *Store) CreateStep(ctx context.Context, canonicalID, endpointID string, 
 	step.CreatedAt = fromUnixMillis(created)
 	step.UpdatedAt = fromUnixMillis(updated)
 	return step, nil
+}
+
+// PendingDeliveryForRemote reports whether a source event still has
+// payload-dependent work. The ledger is deliberately content-free; the
+// remote ID is used only to locate its canonical message.
+func (s *Store) PendingDeliveryForRemote(ctx context.Context, endpointID, remoteID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM delivery_operations d JOIN message_copies c ON c.canonical_id = d.canonical_id WHERE c.endpoint_id = ? AND c.remote_message_id = ? AND d.state IN (?, ?, ?)`, endpointID, remoteID, DeliveryQueued, DeliveryRetrying, DeliveryAwaitingReplay).Scan(&count)
+	return count > 0, wrapDB("check pending delivery", err)
 }
 
 func (s *Store) CompleteCreateStep(ctx context.Context, step CreateStep, remoteID string, ambiguous bool, updatedAt time.Time) error {

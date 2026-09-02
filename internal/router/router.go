@@ -79,8 +79,11 @@ type Router struct {
 }
 
 type Outcome struct {
-	Accepted bool
-	NoOp     bool
+	Accepted      bool
+	NoOp          bool
+	SafeToAdvance bool
+	Pending       bool
+	Ambiguous     bool
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
@@ -217,7 +220,14 @@ func (r *Router) HandleEvent(ctx context.Context, incoming transport.Incoming) (
 	if err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Accepted: true, NoOp: incoming.Kind == "other"}, nil
+	if incoming.Kind == "other" {
+		return Outcome{Accepted: true, NoOp: true, SafeToAdvance: true}, nil
+	}
+	pending, err := r.store.PendingDeliveryForRemote(ctx, string(incoming.Endpoint), incoming.RemoteID)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Accepted: true, SafeToAdvance: !pending, Pending: pending}, nil
 }
 
 func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error {
@@ -639,6 +649,11 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 	operation := store.DeliveryOperation{
 		CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "create", OperationRevision: 1,
 		State: store.DeliveryQueued, CreatedAt: now, UpdatedAt: now,
+	}
+	if existing, err := r.store.DeliveryOperation(ctx, operation); err == nil && (existing.State == store.DeliveryQueued || existing.State == store.DeliveryRetrying) {
+		return nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("look up delivery operation: %w", err)
 	}
 	if err := r.store.UpsertDeliveryOperation(ctx, operation); err != nil {
 		return fmt.Errorf("queue delivery operation: %w", err)
