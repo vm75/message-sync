@@ -52,6 +52,25 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if !ok {
 		return transport.MessageRef{}, errors.New("unknown Discord endpoint")
 	}
+	if outgoing.Kind == "poll" {
+		if poll, ok := discordNativePoll(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
+			message := &discordgo.MessageSend{Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+			if outgoing.ReplyTo != nil {
+				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: channelID}
+			}
+			created, err := a.api.ChannelMessageSendComplex(channelID, message, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+			if err != nil {
+				return transport.MessageRef{}, err
+			}
+			if created == nil || strings.TrimSpace(created.ID) == "" {
+				return transport.MessageRef{}, errors.New("Discord poll returned an empty message id")
+			}
+			// DiscordGo cannot include Poll in webhook parameters, so native polls
+			// use the existing session REST client; all other messages remain on
+			// the managed webhook path below.
+			return transport.MessageRef{Endpoint: outgoing.Endpoint, RemoteMessageID: strings.TrimSpace(created.ID), IsTargetFromMe: true}, nil
+		}
+	}
 	if webhook == nil {
 		return transport.MessageRef{}, errors.New("managed Discord webhook is unavailable")
 	}
@@ -438,4 +457,33 @@ func discordPollText(question string, options []string, selectableCount int) (st
 		builder.WriteString("\nChoose one option.")
 	}
 	return builder.String(), nil
+}
+
+func discordNativePoll(question string, options []string, selectableCount, durationHours int) (*discordgo.Poll, bool) {
+	question = strings.TrimSpace(question)
+	if question == "" || utf8.RuneCountInString(question) > 300 || len(options) == 0 || len(options) > 10 {
+		return nil, false
+	}
+	if selectableCount != 1 && selectableCount != len(options) {
+		return nil, false
+	}
+	if durationHours == 0 {
+		durationHours = 24
+	}
+	if durationHours < 1 || durationHours > 168 {
+		return nil, false
+	}
+	answers := make([]discordgo.PollAnswer, 0, len(options))
+	for _, option := range options {
+		option = strings.TrimSpace(option)
+		if option == "" || utf8.RuneCountInString(option) > 55 {
+			return nil, false
+		}
+		answers = append(answers, discordgo.PollAnswer{Media: &discordgo.PollMedia{Text: option}})
+	}
+	return &discordgo.Poll{
+		Question: discordgo.PollMedia{Text: question}, Answers: answers,
+		AllowMultiselect: selectableCount > 1, LayoutType: discordgo.PollLayoutTypeDefault,
+		Duration: durationHours,
+	}, true
 }

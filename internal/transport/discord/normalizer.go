@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/config"
@@ -31,6 +32,27 @@ type Normalizer struct {
 	endpoints    map[string]transport.EndpointID
 	hasher       *identity.Hasher
 	usernameMode config.UsernameMode
+}
+
+func (n *Normalizer) endpointFor(channelID string) (transport.EndpointID, bool) {
+	if n == nil {
+		return "", false
+	}
+	endpoint, ok := n.endpoints[strings.TrimSpace(channelID)]
+	return endpoint, ok
+}
+
+func (n *Normalizer) NormalizePollVote(channelID, messageID, userID string, indexes []int, hasher *identity.Hasher) (transport.Incoming, bool) {
+	endpoint, ok := n.endpointFor(channelID)
+	if !ok || strings.TrimSpace(messageID) == "" || strings.TrimSpace(userID) == "" || hasher == nil {
+		return transport.Incoming{}, false
+	}
+	return transport.Incoming{
+		Endpoint: endpoint, RemoteID: strings.TrimSpace(messageID),
+		Sender: transport.Sender{OpaqueID: hasher.UserID("discord:" + strings.TrimSpace(userID))},
+		Kind:   "poll_vote", ReplyTo: &transport.MessageRef{Endpoint: endpoint, RemoteMessageID: strings.TrimSpace(messageID)},
+		PollOptionIndexes: indexes, Timestamp: time.Now().UTC(),
+	}, true
 }
 
 func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
@@ -112,6 +134,26 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 	}
 
 	text := sanitizeDiscordMentions(msg.Content, msg.Mentions, n.hasher)
+	kind := "text"
+	var pollOptions []string
+	selectableCount := 0
+	durationHours := 0
+	if msg.Poll != nil {
+		kind = "poll"
+		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher)
+		for _, answer := range msg.Poll.Answers {
+			if answer.Media == nil || strings.TrimSpace(answer.Media.Text) == "" {
+				return transport.Incoming{}, false
+			}
+			pollOptions = append(pollOptions, answer.Media.Text)
+		}
+		if msg.Poll.AllowMultiselect {
+			selectableCount = len(pollOptions)
+		} else {
+			selectableCount = 1
+		}
+		durationHours = msg.Poll.Duration
+	}
 
 	return transport.Incoming{
 		Endpoint: endpoint,
@@ -120,11 +162,14 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 			DisplayName: displayName,
 			OpaqueID:    n.hasher.UserID("discord:" + authorID),
 		},
-		Kind:       "text",
-		Text:       text,
-		ReplyTo:    replyTo,
-		QuotedText: quotedText,
-		Timestamp:  msg.Timestamp,
+		Kind:                kind,
+		Text:                text,
+		PollOptions:         pollOptions,
+		PollSelectableCount: selectableCount,
+		PollDurationHours:   durationHours,
+		ReplyTo:             replyTo,
+		QuotedText:          quotedText,
+		Timestamp:           msg.Timestamp,
 	}, true
 }
 
@@ -151,8 +196,11 @@ func transientUserDisplayName(user *discordgo.User) string {
 }
 
 func discordMessageSupported(msg *discordgo.Message) bool {
-	if msg == nil || msg.Poll != nil {
+	if msg == nil {
 		return false
+	}
+	if msg.Poll != nil {
+		return strings.TrimSpace(msg.Poll.Question.Text) != "" && len(msg.Poll.Answers) > 0
 	}
 	switch msg.Type {
 	case discordgo.MessageTypeDefault, discordgo.MessageTypeReply, discordgo.MessageTypeThreadStarterMessage:

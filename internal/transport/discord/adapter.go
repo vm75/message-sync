@@ -43,6 +43,7 @@ type Adapter struct {
 	mediaMaxBytes     uint64
 	reactionState     map[reactionKey]string
 	suppressedDeletes map[string]struct{}
+	pollSelections    map[pollActorKey]map[int]struct{}
 
 	mu              sync.RWMutex
 	connected       bool
@@ -111,6 +112,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		mediaMaxBytes:     opts.MediaMaxBytes,
 		reactionState:     make(map[reactionKey]string),
 		suppressedDeletes: make(map[string]struct{}),
+		pollSelections:    make(map[pollActorKey]map[int]struct{}),
 		recoverySignals:   make(chan struct{}, 1),
 		historyStatus:     make(map[string]HistoryStatus),
 	}
@@ -123,6 +125,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	session.AddHandler(adapter.handleMessageDeleteBulk)
 	session.AddHandler(adapter.handleMessageReactionAdd)
 	session.AddHandler(adapter.handleMessageReactionRemove)
+	session.AddHandler(adapter.handlePollVoteAdd)
+	session.AddHandler(adapter.handlePollVoteRemove)
 
 	if err := session.Open(); err != nil {
 		safelog.Error(opts.Logger, "Discord gateway connection failed", "discord_connect", err)
@@ -152,7 +156,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 }
 
 func discordGatewayIntents() discordgo.Intent {
-	return discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent
+	return discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent | discordgo.IntentGuildMessagePolls
 }
 
 func installSafeDiscordLogger(logger *slog.Logger) {

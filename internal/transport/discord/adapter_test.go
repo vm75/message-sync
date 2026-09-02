@@ -28,6 +28,12 @@ func TestDiscordGatewayIntentsIncludeMessageReactions(t *testing.T) {
 	if intents&discordgo.IntentsMessageContent == 0 {
 		t.Fatal("message content intent is missing")
 	}
+	if intents&discordgo.IntentGuildMessagePolls == 0 {
+		t.Fatal("guild poll intent is missing")
+	}
+	if intents&discordgo.IntentDirectMessagePolls != 0 {
+		t.Fatal("DM poll intent must remain disabled")
+	}
 }
 
 func TestLoadBotTokenFromEnvironment(t *testing.T) {

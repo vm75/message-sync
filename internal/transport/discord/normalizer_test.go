@@ -99,6 +99,21 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeDiscordPollVoteKeepsCanonicalIndexesAndHMACsActor(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming, ok := normalizer.NormalizePollVote(testChannelID, "poll-message", testAuthorID, []int{2, 0}, hasher)
+	if !ok || incoming.Kind != "poll_vote" || len(incoming.PollOptionIndexes) != 2 || incoming.PollOptionIndexes[0] != 2 {
+		t.Fatalf("normalized vote = %#v, accepted=%v", incoming, ok)
+	}
+	if incoming.Sender.OpaqueID == "" || strings.Contains(incoming.Sender.OpaqueID, testAuthorID) {
+		t.Fatalf("raw Discord actor crossed boundary: %q", incoming.Sender.OpaqueID)
+	}
+}
+
 func TestNormalizeHashModeDropsDiscordDisplayName(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	incoming, ok := normalizer.NormalizeMessage(testMessage(), "", nil)
@@ -257,9 +272,10 @@ func TestNormalizeUnsupportedDiscordFormatsAreIgnored(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 
 	poll := testMessage()
-	poll.Poll = &discordgo.Poll{Question: discordgo.PollMedia{Text: "private poll"}}
-	if _, ok := normalizer.NormalizeMessage(poll, "", nil); ok {
-		t.Fatal("native Discord poll should use deterministic unsupported-format handling")
+	poll.Poll = &discordgo.Poll{Question: discordgo.PollMedia{Text: "private poll"}, Answers: []discordgo.PollAnswer{{AnswerID: 42, Media: &discordgo.PollMedia{Text: "one"}}}}
+	incoming, ok := normalizer.NormalizeMessage(poll, "", nil)
+	if !ok || incoming.Kind != "poll" || incoming.PollOptions[0] != "one" {
+		t.Fatalf("native Discord poll was not normalized: %#v, accepted=%v", incoming, ok)
 	}
 
 	system := testMessage()

@@ -41,6 +41,7 @@ func (f *fakeChannelWebhook) Delete(_ context.Context, channelID, messageID stri
 
 type fakeDiscordAPI struct {
 	replySends []*discordgo.MessageSend
+	pollSends  []*discordgo.MessageSend
 	adds       []string
 	removes    []string
 	message    *discordgo.Message
@@ -61,6 +62,9 @@ func (f *fakeDiscordAPI) Channel(_ string, _ ...discordgo.RequestOption) (*disco
 
 func (f *fakeDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
 	f.replySends = append(f.replySends, data)
+	if data.Poll != nil {
+		f.pollSends = append(f.pollSends, data)
+	}
 	return &discordgo.Message{ID: "reply-marker"}, nil
 }
 
@@ -351,19 +355,38 @@ func TestDiscordPollUsesDeterministicTextRepresentation(t *testing.T) {
 		Sender:              transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
 		SourceText:          "Lunch?",
 		Kind:                "poll",
-		PollOptions:         []string{"Pizza", "Salad"},
+		PollOptions:         []string{"Pizza", "Salad", "Tacos", "Soup", "Rice", "Bread", "Fruit", "Cake", "Tea", "Coffee", "Water"},
 		PollSelectableCount: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := webhook.executed[len(webhook.executed)-1]
-	want := "Poll: Lunch?\n1. Pizza\n2. Salad\nChoose one option."
+	want := "Poll: Lunch?\n1. Pizza\n2. Salad\n3. Tacos\n4. Soup\n5. Rice\n6. Bread\n7. Fruit\n8. Cake\n9. Tea\n10. Coffee\n11. Water\nChoose one option."
 	if got.Content != want {
 		t.Fatalf("poll fallback = %q, want %q", got.Content, want)
 	}
 	if got.Username != "Alice" {
 		t.Fatalf("poll sender username = %q", got.Username)
+	}
+}
+
+func TestDiscordRepresentablePollUsesNativeMessage(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	api := &fakeDiscordAPI{}
+	adapter := newOutboundTestAdapter(webhook, api)
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord", Sender: transport.Sender{OpaqueID: "u_hash"}, SourceText: "Lunch?", Kind: "poll",
+		PollOptions: []string{"Pizza", "Salad"}, PollSelectableCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.RemoteMessageID != "reply-marker" || len(api.pollSends) != 1 || len(webhook.executed) != 0 {
+		t.Fatalf("native poll send = ref %#v, polls %d, webhook messages %d", ref, len(api.pollSends), len(webhook.executed))
+	}
+	if api.pollSends[0].Poll.Answers[0].Media.Text != "Pizza" || api.pollSends[0].Poll.AllowMultiselect {
+		t.Fatalf("unexpected native poll payload: %#v", api.pollSends[0].Poll)
 	}
 }
 

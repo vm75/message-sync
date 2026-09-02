@@ -13,7 +13,6 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
 - **Deferred Capabilities**:
   - Dynamic thread-specific endpoint creation.
   - Automatic outbound Discord forum-post creation.
-  - Native Discord poll/vote-state bridging.
   - Directional/one-way bridge modes.
 - **Architectural Requirement**: Any extension must keep Discord as a `transport.Adapter` at the canonical router boundary. Configured endpoint aliases remain routing identity; Discord message IDs remain remote-copy IDs only.
 

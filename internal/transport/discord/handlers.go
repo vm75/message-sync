@@ -3,11 +3,76 @@ package discord
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/transport"
 )
+
+type pollActorKey struct{ channel, message, actor string }
+
+func (a *Adapter) handlePollVoteAdd(session *discordgo.Session, event *discordgo.MessagePollVoteAdd) {
+	a.handlePollVote(session, event.ChannelID, event.MessageID, event.UserID, event.AnswerID, true)
+}
+
+func (a *Adapter) handlePollVoteRemove(session *discordgo.Session, event *discordgo.MessagePollVoteRemove) {
+	a.handlePollVote(session, event.ChannelID, event.MessageID, event.UserID, event.AnswerID, false)
+}
+
+func (a *Adapter) handlePollVote(session *discordgo.Session, channelID, messageID, userID string, answerID int, added bool) {
+	if a == nil || session == nil || strings.TrimSpace(channelID) == "" || strings.TrimSpace(messageID) == "" || strings.TrimSpace(userID) == "" || strings.TrimSpace(userID) == discordBotUserID(session) {
+		return
+	}
+	a.mu.RLock()
+	normalizer, api, hasher := a.normalizer, a.api, a.hasher
+	a.mu.RUnlock()
+	_, ok := normalizer.endpointFor(channelID)
+	if !ok || hasher == nil || api == nil {
+		return
+	}
+	poll, err := api.ChannelMessage(channelID, messageID, discordgo.WithRetryOnRatelimit(true))
+	if err != nil || poll == nil || poll.Poll == nil {
+		return
+	}
+	optionIndex, ok := discordPollAnswerIndex(poll.Poll, answerID)
+	if !ok {
+		return
+	}
+	key := pollActorKey{channel: channelID, message: messageID, actor: userID}
+	a.mu.Lock()
+	selected := a.pollSelections[key]
+	if selected == nil {
+		selected = make(map[int]struct{})
+		a.pollSelections[key] = selected
+	}
+	if !added {
+		delete(selected, optionIndex)
+	} else {
+		selected[optionIndex] = struct{}{}
+	}
+	indexes := make([]int, 0, len(selected))
+	for index := range selected {
+		indexes = append(indexes, index)
+	}
+	a.mu.Unlock()
+	incoming, ok := normalizer.NormalizePollVote(channelID, messageID, userID, indexes, hasher)
+	if ok {
+		a.emit(incoming)
+	}
+}
+
+func discordPollAnswerIndex(poll *discordgo.Poll, answerID int) (int, bool) {
+	if poll == nil {
+		return 0, false
+	}
+	for index, answer := range poll.Answers {
+		if answer.AnswerID == answerID {
+			return index, true
+		}
+	}
+	return 0, false
+}
 
 func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discordgo.MessageUpdate) {
 	if a == nil || event == nil || event.Message == nil {

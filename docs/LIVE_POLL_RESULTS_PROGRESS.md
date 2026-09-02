@@ -42,7 +42,7 @@ Agents should work in the order below. Before starting a ticket:
 | Order | Issue | Purpose | Dependencies | Status |
 |---|---|---|---|---|
 | 1 | [#45](https://github.com/vm75/message-sync/issues/45) | Provider-neutral canonical poll state | None | Complete |
-| 2 | [#46](https://github.com/vm75/message-sync/issues/46) | Native Discord polls + vote ingestion | #45 | Pending |
+| 2 | [#46](https://github.com/vm75/message-sync/issues/46) | Native Discord polls + vote ingestion | #45 | Complete |
 | 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Pending |
 | 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Pending |
 | 5 | [#49](https://github.com/vm75/message-sync/issues/49) | Simplify poll router flow; retain `aggregate-response` | #48 | Pending |
@@ -234,6 +234,11 @@ Agents should append short durable implementation notes here while the tracker e
 - Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
 
 ### #46
+- Status: Complete
+- Implementation notes: Discord guild poll intent and vote add/remove handlers are enabled. Native polls are normalized and representable outbound polls use the session REST client because DiscordGo webhook parameters lack poll support; ordinary text/media remains managed-webhook based. Answer IDs are mapped by fetched poll answer order, selections use HMAC actors plus canonical indexes, and unsupported limits fall back deterministically.
+- Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
+
+### #47
 - Status: Pending
 - Implementation notes:
 - Tests:

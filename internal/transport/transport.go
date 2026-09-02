@@ -63,6 +63,7 @@ type Incoming struct {
 	MediaLoader         func(context.Context) ([]byte, error)
 	PollOptions         []string // transient only; never persist
 	PollSelectableCount int
+	PollDurationHours   int
 	PollOptionHashes    []string // SHA-256 hex hashes of selected options for poll_vote
 	PollOptionIndexes   []int    // canonical zero-based selected option indexes for poll_vote
 }
@@ -82,6 +83,7 @@ type Outgoing struct {
 	Kind                string
 	PollOptions         []string
 	PollSelectableCount int
+	PollDurationHours   int
 }
 
 type Reaction struct {

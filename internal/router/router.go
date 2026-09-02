@@ -626,6 +626,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
 			MediaBytes: mediaBytes, ReplyTo: replyTo, QuotedText: incoming.QuotedText,
 			PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
+			PollDurationHours: incoming.PollDurationHours,
 		})
 		if err != nil {
 			return finishFailure(err)
