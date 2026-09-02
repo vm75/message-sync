@@ -101,7 +101,8 @@ These items are **aspirational tracking items**, not firm commitments. Any propo
   - Webhook ingestion as an alternative deployment mode to long polling.
   - Optional Local Bot API server deployment for larger platform file limits.
   - Dynamically configured forum-topic endpoints or automatic outbound topic creation.
-  - Native cross-platform Telegram poll/vote-state bridging rather than deterministic text fallback.
+  - Injecting unified bridge aggregate counts into Telegram's provider-native local poll counters.
+  - Exact provider-native poll-close parity and other unsupported provider-specific poll semantics.
   - Telegram user-account/MTProto session support.
 - **Architectural Requirement**: Any extension must preserve endpoint aliases as routing identity, keep Telegram platform IDs out of canonical identity, and retain the zero-PII/PHI persistence/logging boundary.
 

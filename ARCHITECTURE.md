@@ -297,7 +297,7 @@ Supported MVP message classes:
 - documents;
 - audio/voice notes;
 - stickers;
-- native WhatsApp polls.
+- native WhatsApp, Discord, and Telegram polls where representable.
 
 Media flow:
 
@@ -332,14 +332,19 @@ This permits add/change/remove semantics without raw identity. A native reaction
 
 ## 11. Polls and vote aggregation
 
-Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord and Telegram destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities, translated from option SHA-256 hashes to canonical zero-based option indexes at the boundary, and recorded per HMAC actor in `sync.db`; Discord and Telegram textual copies do not introduce a second vote-state model. The store supports actor-backed endpoint selections and absolute endpoint snapshots, with an explicit endpoint source ensuring one authoritative contribution path and preventing double counting. Opaque provider poll references are stored only when needed for restart correlation. Incoming Telegram polls are likewise normalized to deterministic text before entering the canonical router.
+Polls cross the canonical router using zero-based provider-neutral option indexes. Question and option text is retained only transiently at the transport/router boundary for native sends, deterministic fallbacks, and summaries; it is never persisted in `sync.db` or application logs. Provider mappings stay in adapters: WhatsApp option hashes, Discord answer IDs, and Telegram option order resolve to canonical indexes before state reaches the store.
 
-Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
-- the router intercepts the trigger (it is not fanned out);
-- sums the votes for each option across all groups;
-- formats and sends an aggregated text summary to all groups in the sync set, quoting each group's local copy of the poll.
+Each poll endpoint has exactly one authoritative contribution model. WhatsApp and Discord delta events use HMAC-derived actor selections (add/change/remove), while Telegram bot-created poll updates use absolute option-count snapshots. Opaque provider references such as Telegram `poll_id` are persisted only when needed to correlate later lifecycle updates. Raw voter identity, provider update objects, and poll content do not cross into durable application state.
 
-Option text is retained transiently in memory for formatted summaries during the session and falls back cleanly to generic option indices (`Option 1`, `Option 2`) upon server restart.
+For every supported poll, the router creates at most one bridge-owned editable live-result companion per poll endpoint, including the source endpoint. Companions show aggregate option counts only; they never show voter names, HMAC IDs, per-voter choices, or imply that multi-select counts equal unique voters. The companion rows contain only lifecycle metadata, and edits use the existing per-endpoint delivery lanes, idempotency ledger, and mutation revisions. If a source contribution cannot be observed, the companion marks it partial/unavailable and excludes it from totals rather than fabricating zero.
+
+Replying `aggregate-response` to any poll copy remains an exact reply-trigger feature:
+- `poll_aggregation_trigger` configures the trigger (default `aggregate-response`);
+- the router suppresses the trigger message instead of fanning it out;
+- the router uses the same authoritative canonical aggregate counts as live results;
+- a manual aggregate summary is sent to the sync set and quotes each local poll copy when available, falling back to `Option N` labels after restart.
+
+The fresh-development schema is changed directly for this design. No production migration framework, compatibility path, or backfill is introduced.
 
 ## 12. Edits and deletes
 
@@ -427,7 +432,7 @@ The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or 
 
 ## 19. Deliberate MVP exclusions
 
-Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, native cross-platform Telegram poll/vote bridging, and MTProto user-account sessions also remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, injecting unified aggregate counts into provider-native local poll counters, exact poll-close parity, unsupported provider-specific poll semantics, and MTProto user-account sessions remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
 
 ## 20. Reliability verification
 
