@@ -31,10 +31,12 @@
     groups: document.getElementById('view-groups'),
     'sync-sets': document.getElementById('view-sync-sets'),
     settings: document.getElementById('view-settings')
+    ,users: document.getElementById('view-users'), invite: document.getElementById('view-invite'), reset: document.getElementById('view-reset')
   };
 
   // Auth Form Elements
   const formSetup = document.getElementById('form-setup');
+  const setupUsernameInput = document.getElementById('setup-username');
   const setupPasswordInput = document.getElementById('setup-password');
   const setupConfirmPasswordInput = document.getElementById('setup-confirm-password');
   const setupStrengthFill = document.getElementById('setup-strength-fill');
@@ -44,9 +46,13 @@
   const btnSubmitSetup = document.getElementById('btn-submit-setup');
 
   const formLogin = document.getElementById('form-login');
+  const loginUsernameInput = document.getElementById('login-username');
   const loginPasswordInput = document.getElementById('login-password');
   const loginAlert = document.getElementById('login-alert');
   const btnSubmitLogin = document.getElementById('btn-submit-login');
+  const navUsers = document.getElementById('nav-users');
+  const formInvite = document.getElementById('form-invite');
+  const formReset = document.getElementById('form-reset');
 
   // Dashboard Stats Elements
   const dashWaStatus = document.getElementById('dash-wa-status');
@@ -168,6 +174,7 @@
   // Application State
   let isSetup = null;
   let isAuthenticated = false;
+  let currentUser = null;
   let cachedEndpoints = [];
   let cachedSyncSets = [];
   let cachedConfig = null;
@@ -521,8 +528,15 @@
     setupAlert.classList.add('hidden');
 
     const password = setupPasswordInput.value;
+    const username = setupUsernameInput ? setupUsernameInput.value.trim() : '';
     const confirmPassword = setupConfirmPasswordInput.value;
 
+    if (!username) {
+      setupAlert.textContent = 'Username is required.';
+      setupAlert.classList.remove('hidden');
+      setupUsernameInput.focus();
+      return;
+    }
     if (password.length < 8 || password.length > 72) {
       setupAlert.textContent = 'Password must be between 8 and 72 characters.';
       setupAlert.classList.remove('hidden');
@@ -539,10 +553,10 @@
 
     setButtonLoading(btnSubmitSetup, true);
     try {
-      await window.API.setupPassword(password);
+      await window.API.setupPassword(username, password);
       isSetup = true;
       isAuthenticated = true;
-      showToast('Admin password initialized successfully! Welcome to Message Sync.', 'success');
+      showToast('Administrator account created. Welcome to Message Sync.', 'success');
       window.Router.navigate('dashboard');
     } catch (err) {
       setupAlert.textContent = err.message || 'Failed to initialize password.';
@@ -557,8 +571,9 @@
     loginAlert.classList.add('hidden');
 
     const password = loginPasswordInput.value;
-    if (!password) {
-      loginAlert.textContent = 'Please enter your administrator password.';
+    const username = loginUsernameInput ? loginUsernameInput.value.trim() : '';
+    if (!username || !password) {
+      loginAlert.textContent = 'Please enter your username and password.';
       loginAlert.classList.remove('hidden');
       loginPasswordInput.focus();
       return;
@@ -566,8 +581,14 @@
 
     setButtonLoading(btnSubmitLogin, true);
     try {
-      await window.API.login(password);
+      const result = await window.API.login(username, password);
       isAuthenticated = true;
+      currentUser = result && result.user ? result.user : null;
+      const userEl = document.getElementById('session-username');
+      const roleEl = document.getElementById('session-role');
+      if (userEl && currentUser) userEl.textContent = currentUser.username;
+      if (roleEl && currentUser) roleEl.textContent = currentUser.role;
+      if (navUsers) navUsers.classList.toggle('hidden', !currentUser || currentUser.role !== 'admin');
       showToast('Signed in successfully.', 'success');
       loginPasswordInput.value = '';
       window.Router.navigate('dashboard');
@@ -2121,6 +2142,12 @@
     if (formSetup) formSetup.addEventListener('submit', handleSetupSubmit);
     if (formLogin) formLogin.addEventListener('submit', handleLoginSubmit);
     if (btnLogout) btnLogout.addEventListener('click', handleLogout);
+    if (formInvite) formInvite.addEventListener('submit', async (e) => { e.preventDefault(); try { const r=await window.API.redeemInvite(document.getElementById('invite-token').value,document.getElementById('invite-username').value,document.getElementById('invite-password').value); currentUser=r.user; isAuthenticated=true; window.Router.navigate('dashboard'); } catch(err) { document.getElementById('invite-alert').textContent=err.message; document.getElementById('invite-alert').classList.remove('hidden'); } });
+    if (formReset) formReset.addEventListener('submit', async (e) => { e.preventDefault(); try { await window.API.resetPassword(document.getElementById('reset-token').value,document.getElementById('reset-password').value); window.Router.navigate('login'); } catch(err) { document.getElementById('reset-alert').textContent=err.message; document.getElementById('reset-alert').classList.remove('hidden'); } });
+    const inviteButton = document.getElementById('btn-create-invite');
+    if (inviteButton) inviteButton.addEventListener('click', async () => {
+      try { const result = await window.API.createInvite(document.getElementById('invite-role').value, 24); document.getElementById('invite-result').textContent = `Copy this one-time token now: ${result.token}`; } catch (err) { showToast(err.message, 'danger'); }
+    });
 
     // Nav tabs
     document.querySelectorAll('.nav-tab').forEach((tab) => {
@@ -2213,6 +2240,12 @@
       if (!isAuthenticated) {
         try {
           await window.API.getConfig();
+          currentUser = await window.API.getCurrentUser();
+          const userEl = document.getElementById('session-username');
+          const roleEl = document.getElementById('session-role');
+          if (userEl && currentUser) userEl.textContent = currentUser.username;
+          if (roleEl && currentUser) roleEl.textContent = currentUser.role;
+          if (navUsers) navUsers.classList.toggle('hidden', !currentUser || currentUser.role !== 'admin');
           isAuthenticated = true;
         } catch (err) {
           isAuthenticated = false;
@@ -2237,6 +2270,8 @@
       switchView('login');
       if (loginPasswordInput) loginPasswordInput.focus();
     });
+    window.Router.addRoute('invite', () => switchView('invite'));
+    window.Router.addRoute('reset', () => switchView('reset'));
 
     window.Router.addRoute('dashboard', () => {
       switchView('dashboard');
@@ -2272,6 +2307,11 @@
     window.Router.addRoute('settings', () => {
       switchView('settings');
       loadSettings();
+    });
+    window.Router.addRoute('users', () => {
+      if (!currentUser || currentUser.role !== 'admin') { window.Router.navigate('dashboard'); return; }
+      switchView('users');
+      window.API.getUsers().then(users => { const body=document.getElementById('users-table-body'); if (body) body.innerHTML=users.map(u=>`<tr><td>${escapeHtml(u.username)}</td><td>${escapeHtml(u.role)}</td><td>${u.active?'active':'inactive'}</td><td><button class="btn btn-sm btn-ghost" data-user-id="${escapeHtml(u.id)}" data-user-active="${u.active?'false':'true'}">${u.active?'Deactivate':'Reactivate'}</button> <button class="btn btn-sm btn-ghost" data-reset-id="${escapeHtml(u.id)}">Reset token</button></td></tr>`).join(''); body.querySelectorAll('[data-user-id]').forEach(b=>b.addEventListener('click',async()=>{try { await window.API.setUserActive(b.dataset.userId,b.dataset.userActive==='true'); window.Router.handleRouteChange(); } catch(err) { showToast(err.message,'danger'); }})); body.querySelectorAll('[data-reset-id]').forEach(b=>b.addEventListener('click',async()=>{try { const result=await window.API.createResetToken(b.dataset.resetId); showToast(`Copy this one-time reset token now: ${result.token}`,'success',10000); } catch(err) { showToast(err.message,'danger'); }})); }).catch(err=>showToast(err.message,'danger'));
     });
 
     // Initialize router

@@ -6,33 +6,15 @@
 (function () {
   'use strict';
 
-  const TOKEN_STORAGE_KEY = 'msg_sync_token';
-
   const API = {
-    /**
-     * Get the stored session token from sessionStorage.
-     */
+    /** Authentication is provided by the HttpOnly cookie. */
     getToken() {
-      try {
-        return sessionStorage.getItem(TOKEN_STORAGE_KEY) || '';
-      } catch (e) {
-        return '';
-      }
+      return '';
     },
 
-    /**
-     * Store the session token in sessionStorage.
-     */
+    /** Kept as a no-op so API responses remain compatible with callers. */
     setToken(token) {
-      try {
-        if (token) {
-          sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
-        } else {
-          sessionStorage.removeItem(TOKEN_STORAGE_KEY);
-        }
-      } catch (e) {
-        console.warn('Unable to access sessionStorage', e);
-      }
+      // Authentication is carried by the HttpOnly session cookie.
     },
 
     /**
@@ -97,11 +79,12 @@
     async getAuthStatus() {
       return this.request('/api/auth/status');
     },
+    async getCurrentUser() { return this.request('/api/auth/me'); },
 
-    async setupPassword(password) {
+    async setupPassword(username, password) {
       const res = await this.request('/api/auth/setup', {
         method: 'POST',
-        body: { password }
+        body: { username, password }
       });
       if (res && res.token) {
         this.setToken(res.token);
@@ -109,10 +92,10 @@
       return res;
     },
 
-    async login(password) {
+    async login(username, password) {
       const res = await this.request('/api/auth/login', {
         method: 'POST',
-        body: { password }
+        body: { username, password }
       });
       if (res && res.token) {
         this.setToken(res.token);
@@ -134,6 +117,13 @@
         body: { currentPassword, newPassword }
       });
     },
+    async redeemInvite(token, username, password) { const res = await this.request('/api/auth/invite/redeem', { method: 'POST', body: { token, username, password } }); if (res && res.token) this.setToken(res.token); return res; },
+    async resetPassword(token, password) { return this.request('/api/auth/reset-password', { method: 'POST', body: { token, password } }); },
+
+    async getUsers() { return this.request('/api/users'); },
+    async createInvite(role, ttlHours) { return this.request('/api/users/invites', { method: 'POST', body: { role, ttlHours } }); },
+    async setUserActive(id, active) { return this.request(`/api/users/${encodeURIComponent(id)}/active`, { method: 'POST', body: { active } }); },
+    async createResetToken(id) { return this.request(`/api/users/${encodeURIComponent(id)}/reset-token`, { method: 'POST' }); },
 
     /**
      * Configuration & Status Endpoints

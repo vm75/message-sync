@@ -92,12 +92,13 @@
             </svg>
             Settings
           </button>
+          <button class="nav-tab" data-tab="users" id="nav-users">Users</button>
         </nav>
 
         <div class="header-actions">
           <div class="session-badge" title="Authenticated as Administrator">
             <span class="status-dot"></span>
-            <span>admin</span>
+            <span id="session-username">signed in</span><span id="session-role" class="brand-badge">user</span>
           </div>
           <button id="btn-logout" class="btn btn-ghost btn-icon-only" title="Sign out">
             <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -120,6 +121,9 @@
         </div>
       </section>
 
+      <section id="view-invite" class="view view-center hidden"><div class="auth-card"><div class="card-header"><h1 class="card-title">Redeem Invite</h1><p class="card-subtitle">Create your account using the one-time invite token.</p></div><form id="form-invite" class="auth-form"><div id="invite-alert" class="alert alert-danger hidden"></div><input id="invite-token" class="form-input" placeholder="Invite token" required><input id="invite-username" class="form-input" placeholder="Username" autocomplete="username" required><input id="invite-password" type="password" class="form-input" placeholder="Password" autocomplete="new-password" required><button class="btn btn-primary btn-block">Create account</button></form></div></section>
+      <section id="view-reset" class="view view-center hidden"><div class="auth-card"><div class="card-header"><h1 class="card-title">Reset Password</h1></div><form id="form-reset" class="auth-form"><div id="reset-alert" class="alert alert-danger hidden"></div><input id="reset-token" class="form-input" placeholder="Reset token" required><input id="reset-password" type="password" class="form-input" placeholder="New password" autocomplete="new-password" required><button class="btn btn-primary btn-block">Reset password</button></form></div></section>
+
       <!-- First-Use Setup View -->
       <section id="view-setup" class="view view-center hidden">
         <div class="auth-card">
@@ -132,11 +136,13 @@
               </svg>
             </div>
             <h1 class="card-title">Secure Your Console</h1>
-            <p class="card-subtitle">Create a master administrator password to protect your message routing and group configurations.</p>
+            <p class="card-subtitle">Create the first administrator account to protect your message routing and group configurations.</p>
           </div>
 
           <form id="form-setup" class="auth-form" novalidate>
             <div id="setup-alert" class="alert alert-danger hidden" role="alert"></div>
+
+            <div class="form-group"><label for="setup-username" class="form-label">Username</label><input id="setup-username" class="form-input" autocomplete="username" required></div>
 
             <div class="form-group">
               <label for="setup-password" class="form-label">Admin Password</label>
@@ -216,6 +222,8 @@
 
           <form id="form-login" class="auth-form" novalidate>
             <div id="login-alert" class="alert alert-danger hidden" role="alert"></div>
+
+            <div class="form-group"><label for="login-username" class="form-label">Username</label><input id="login-username" class="form-input" autocomplete="username" required></div>
 
             <div class="form-group">
               <label for="login-password" class="form-label">Password</label>
@@ -816,6 +824,14 @@
               Create First Sync Set
             </button>
           </div>
+        </div>
+      </section>
+
+      <!-- Settings View -->
+      <section id="view-users" class="view hidden">
+        <div class="page-shell"><div class="page-header"><div><h1 class="page-title">Users</h1><p class="page-subtitle">Manage accounts and create one-time access tokens.</p></div></div>
+          <div class="card settings-card"><div class="form-group"><label class="form-label" for="invite-role">Invite role</label><select id="invite-role" class="form-input"><option value="operator">Operator</option><option value="admin">Administrator</option></select></div><button id="btn-create-invite" class="btn btn-primary">Create invite</button><p id="invite-result" class="form-hint"></p></div>
+          <div class="card settings-card"><table class="data-table"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody id="users-table-body"></tbody></table></div>
         </div>
       </section>
 

@@ -169,6 +169,12 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, http.StatusOK, AuthStatusResponse{IsSetup: count > 0})
 }
 
+func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
+	p, ok := principalFromContext(r.Context())
+	if !ok { WriteError(w, http.StatusUnauthorized, "unauthorized"); return }
+	_ = WriteJSON(w, http.StatusOK, p)
+}
+
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
 	if !s.controlAvailable(w) {
 		return
