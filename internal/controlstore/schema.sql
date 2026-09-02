@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS membership_requests (
     evidence_reference TEXT,
     evidence_metadata TEXT,
     verification_state TEXT NOT NULL CHECK (verification_state IN ('pending', 'in_progress', 'verified', 'failed', 'unavailable')),
+    fulfillment_state TEXT NOT NULL DEFAULT 'not_started' CHECK (fulfillment_state IN ('not_started', 'succeeded', 'action_pending', 'failed')),
+    fulfillment_failure_class TEXT,
     decided_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     decision_reason TEXT,
     decided_at INTEGER,

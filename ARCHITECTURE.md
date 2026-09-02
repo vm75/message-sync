@@ -102,6 +102,12 @@ bounded asynchronous job. Only structured bounded results are stored in
 `control.db`; raw prompts/responses are discarded. PDFs remain human-review
 material, provider failures are unavailable/failed states, and no AI result
 can advance or decide membership.
+Approved membership fulfillment is implemented outside canonical routing. It
+resolves endpoint aliases at action time, checks WhatsApp membership before
+adding a participant, assigns Discord roles through the existing bot session,
+and records only safe fulfillment state/classes in `control.db`. WhatsApp
+invite fallback is emailed only through the optional mailer and remains
+`action_pending` until membership and invite rotation are confirmed.
 
 ### SQLite Configuration Tables
 

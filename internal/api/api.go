@@ -167,6 +167,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/verification/{token}", s.handlePublicPipeline)
 	s.mux.HandleFunc("POST /api/verification/{token}", s.handlePublicIntake)
 	s.mux.HandleFunc("DELETE /api/verification/requests/{id}", s.handleDeleteMembershipRequest)
+	s.mux.HandleFunc("POST /api/verification/requests/{id}/fulfill", s.handleFulfillMembershipRequest)
+	s.mux.HandleFunc("POST /api/verification/requests/{id}/confirm-fallback", s.handleConfirmFallback)
 	s.mux.HandleFunc("POST /api/verification/email/verify", s.handleVerifyEmail)
 	s.mux.HandleFunc("POST /api/verification/email/resend", s.handleResendEmail)
 

@@ -271,6 +271,73 @@ func (s *Server) handleDeleteMembershipRequest(w http.ResponseWriter, r *http.Re
 	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
 }
 
+func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req verification.FulfillmentRequest
+	var email, label, status, fulfillmentState string
+	err := s.controlDB.QueryRowContext(r.Context(), `SELECT p.target_transport,p.endpoint_alias,COALESCE(p.discord_role_id,''),COALESCE(m.applicant_whatsapp_phone,''),COALESCE(m.applicant_discord_user_id,''),m.status,m.fulfillment_state,m.applicant_work_email,p.label FROM membership_requests m JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE m.id=?`, id).Scan(&req.Transport, &req.EndpointAlias, &req.RoleID, &req.Phone, &req.DiscordUserID, &status, &fulfillmentState, &email, &label)
+	if err != nil {
+		WriteError(w, 404, "request not found")
+		return
+	}
+	if status != "approved" {
+		WriteError(w, 409, "request is not approved")
+		return
+	}
+	if fulfillmentState == "succeeded" {
+		_ = WriteJSON(w, 200, map[string]string{"status": "succeeded"})
+		return
+	}
+	var wa verification.WhatsAppAdmin
+	if candidate, ok := s.whatsapp.(verification.WhatsAppAdmin); ok {
+		wa = candidate
+	}
+	var dc verification.DiscordAdmin
+	if candidate, ok := s.discord.(verification.DiscordAdmin); ok {
+		dc = candidate
+	}
+	result, fulfillErr := verification.Fulfill(r.Context(), req, wa, dc)
+	if result.State == "action_pending" && s.mailer != nil {
+		if link, linkErr := wa.InviteLink(r.Context(), req.EndpointAlias); linkErr == nil {
+			_ = s.mailer.Send(r.Context(), email, label, link)
+		}
+	}
+	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state=?,fulfillment_failure_class=?,updated_at=? WHERE id=?`, result.State, result.FailureClass, time.Now().UnixMilli(), id)
+	if fulfillErr != nil && result.State == "failed" {
+		_ = WriteJSON(w, 502, map[string]string{"status": result.State, "failureClass": result.FailureClass})
+		return
+	}
+	_ = WriteJSON(w, 200, map[string]string{"status": result.State, "failureClass": result.FailureClass})
+}
+
+func (s *Server) handleConfirmFallback(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var alias, phone, state string
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT p.endpoint_alias,COALESCE(m.applicant_whatsapp_phone,''),m.fulfillment_state FROM membership_requests m JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE m.id=? AND p.target_transport='whatsapp'`, id).Scan(&alias, &phone, &state); err != nil {
+		WriteError(w, 404, "request not found")
+		return
+	}
+	wa, ok := s.whatsapp.(verification.WhatsAppAdmin)
+	if !ok {
+		WriteError(w, 503, "WhatsApp membership administration unavailable")
+		return
+	}
+	member, err := wa.IsMember(r.Context(), alias, phone)
+	if err != nil || !member {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state='action_pending',fulfillment_failure_class='membership_unconfirmed',updated_at=? WHERE id=?`, time.Now().UnixMilli(), id)
+		WriteError(w, 409, "membership could not be confirmed")
+		return
+	}
+	if err := wa.RotateInviteLink(r.Context(), alias); err != nil {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state='action_pending',fulfillment_failure_class='invite_rotation_unconfirmed',updated_at=? WHERE id=?`, time.Now().UnixMilli(), id)
+		WriteError(w, 409, "invite rotation could not be confirmed")
+		return
+	}
+	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state='succeeded',fulfillment_failure_class=NULL,updated_at=? WHERE id=?`, time.Now().UnixMilli(), id)
+	_ = state
+	_ = WriteJSON(w, 200, map[string]string{"status": "succeeded"})
+}
+
 func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequestID string `json:"requestId"`
