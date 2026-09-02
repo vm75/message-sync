@@ -27,15 +27,6 @@ Provider-exactly-once remote creation remains a provider capability limitation, 
   - Broad `@all` / `@everyone` participant mentions.
 - **Privacy Considerations**: Contacts and locations carry PII. If implemented, they must follow strict sanitization or explicit opt-in handling.
 
-### C. Multi-User Administration & RBAC
-- **Description**: Multi-admin access control for the web console.
-- **Deferred Capabilities**:
-  - Separate administrator and operator accounts.
-  - Role-based permissions (view-only vs configuration editing).
-  - Invite codes and credential resets.
-  - Administrative audit log.
-- **Privacy Considerations**: Multi-user accounts and audit logs must reside in a separate subsystem to keep `sync.db` PII-free.
-
 ### D. Multiple WhatsApp Sessions / Accounts
 - **Description**: Running multiple WhatsApp numbers/sessions within a single daemon instance.
 - **Deferred Capabilities**:
@@ -64,18 +55,19 @@ Provider-exactly-once remote creation remains a provider capability limitation, 
   - Verification codes for administrative tasks.
 
 ### H. Membership Management & Verification Workflows
-- **Description**: Automated onboarding, identity verification, and participant management.
+The core verification pipeline, email challenge, review queue, and narrow
+WhatsApp/Discord fulfillment workflow are implemented in the control plane.
+The following remain deferred:
 - **Deferred Capabilities**:
-  - Approval queues for group join requests.
-  - External verification (e.g., OTP or email verification).
   - Automated participant add/remove/promote/demote rules.
 
 ### I. Identity Enrichment & Verification
-- **Description**: Optional enrichment and authenticity verification of group participants.
+Work-email domain, LinkedIn-host, bounded evidence, and optional advisory AI
+checks exist only for the explicit membership control-plane workflow. Broader
+identity enrichment remains deferred:
 - **Deferred Capabilities**:
-  - LinkedIn profile or domain verification.
-  - Document and identity proof verification.
-  - Optional AI-assisted authenticity analysis.
+  - General-purpose LinkedIn profile verification.
+  - Automated document or identity-proof verification.
 - **Privacy Boundary**: Must remain completely isolated as an optional, external, consent-based subsystem.
 
 ### J. Human-Friendly Deterministic Pseudonyms

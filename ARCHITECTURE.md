@@ -116,6 +116,12 @@ and records only safe fulfillment state/classes in `control.db`. WhatsApp
 invite fallback is emailed only through the optional mailer and remains
 `action_pending` until membership and invite rotation are confirmed.
 
+The verification state machine is `pending_email` → `pending_admin` after a
+valid work-email challenge, then `approved`, `rejected`, or `pending_admin`
+(`needs_review`). Approved requests separately track fulfillment as
+`not_started`, `succeeded`, `action_pending`, or `failed`; this control-plane
+state never enters canonical routing.
+
 ### SQLite Configuration Tables
 
 - `global_config`: Single-row table (`id = 1`) storing global behavior settings:
@@ -484,7 +490,7 @@ The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or 
 
 ## 19. Deliberate MVP exclusions
 
-Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, injecting unified aggregate counts into provider-native local poll counters, exact poll-close parity, unsupported provider-specific poll semantics, and MTProto user-account sessions remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, email/SMS, LinkedIn/enrichment, AI document analysis and historical ZIP bootstrap remain deferred. See `docs/ASPIRATIONAL_FEATURES.md`.
+Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, injecting unified aggregate counts into provider-native local poll counters, exact poll-close parity, unsupported provider-specific poll semantics, and MTProto user-account sessions remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, general-purpose email/SMS notifications, broad LinkedIn/enrichment, automated identity-proof verification, and historical ZIP bootstrap remain deferred. Membership-specific email challenges and advisory evidence analysis are implemented only within the isolated control plane. See `docs/ASPIRATIONAL_FEATURES.md`.
 
 ## 20. Reliability verification
 

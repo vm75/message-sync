@@ -136,6 +136,14 @@ Mount a persistent volume to `/data`:
 
 - `/data/whatsapp.db`: Sensitive protocol session store managed by `whatsmeow` (reconnects without re-pairing).
 - `/data/sync.db`: Application routing state.
+- `/data/control.db`: Mode-0600 sensitive account, session, audit, and membership-verification state.
+- `/data/membership-evidence/`: Mode-0700 directory for short-lived mode-0600 PDF/image evidence; terminal requests are pruned after 30 days.
+
+Optional membership integrations use deployment-only environment variables
+`VERIFICATION_MAIL_API_KEY` and `VERIFICATION_MAIL_FROM` for Resend-compatible
+email delivery, and `OPENROUTER_API_KEY` with
+`OPENROUTER_ALLOW_TRAINING=false` for advisory image analysis. The daemon and
+core routing work when these variables are absent; no paid service is required.
 
 ---
 
