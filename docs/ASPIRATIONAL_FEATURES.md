@@ -4,6 +4,8 @@ This document tracks aspirational features and capabilities from inspiration dis
 
 These items are **aspirational tracking items**, not firm commitments. Any proposed implementation must be evaluated against the project's **KISS/YAGNI** principles and **strict zero-PII/PHI privacy model**.
 
+Provider-exactly-once remote creation remains a provider capability limitation, not a promise of this service. A future provider-specific idempotency capability may be considered only when it keeps opaque operation references content-free and preserves the canonical/message-copy boundary.
+
 ---
 
 ## Aspirational Features Backlog

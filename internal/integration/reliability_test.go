@@ -184,6 +184,59 @@ func TestThreeTransportHarnessIsolatesDeliveryAndPreservesLifecycleOrder(t *test
 	}
 }
 
+func TestThreeTransportHarnessDoesNotBlindlyRetryAmbiguousCreate(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	wa := &fakeAdapter{name: "wa"}
+	dc := &fakeAdapter{name: "dc", failures: 1, failure: transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("ambiguous provider result"))}
+	tg := &fakeAdapter{name: "tg"}
+	registry, err := router.NewAdapterRegistry(reliabilityConfig(), map[config.Transport]router.OutboundAdapter{
+		config.TransportWhatsApp: wa, config.TransportDiscord: dc, config.TransportTelegram: tg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mesh, err := router.New(reliabilityConfig(), syncStore, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mesh.Close()
+	event := transport.Incoming{Endpoint: "wa", RemoteID: "ambiguous-message", Kind: "text", Text: "ambiguous canary", Sender: transport.Sender{OpaqueID: "u_abcdefghij"}, Timestamp: time.Now().UTC()}
+	if err := mesh.Handle(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	tg.waitFor(t, 1)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		attempts, _, _ := dc.snapshot()
+		if attempts == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if attempts, _, _ := dc.snapshot(); attempts != 1 {
+		t.Fatalf("ambiguous attempts=%d, want one", attempts)
+	}
+	if err := mesh.Handle(ctx, event); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if attempts, _, _ := dc.snapshot(); attempts != 1 {
+		t.Fatalf("duplicate ambiguous retry attempts=%d, want one", attempts)
+	}
+	var canaries int
+	if err := syncStore.DB().QueryRow(`SELECT COUNT(*) FROM canonical_messages`).Scan(&canaries); err != nil {
+		t.Fatal(err)
+	}
+	if canaries != 1 {
+		t.Fatalf("canonical messages=%d, want one", canaries)
+	}
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

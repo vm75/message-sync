@@ -11,7 +11,7 @@ GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./intern
 git diff --exit-code VERSION
 ```
 
-`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify cross-transport fan-out, destination isolation, retry, and lifecycle ordering. The focused package tests cover bounded queues, restart/replay state, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, and privacy-safe API/logging.
+`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify cross-transport fan-out, destination isolation, ambiguity-safe retry, restart/replay state, and lifecycle ordering. The focused package tests cover bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, WhatsApp lifecycle markers, and privacy-safe API/logging.
 
 For a runtime/container smoke test, use a fresh data directory and no provider credentials:
 
@@ -34,3 +34,5 @@ Create delivery tests also cover explicit pre-acceptance retries, ambiguous no-b
 Recovery tests assert that queued, retrying, and awaiting-replay delivery keeps the source checkpoint replayable, that pending positions block later positions, and that replay reuses the existing canonical/message-copy mapping.
 
 WhatsApp transport tests cover one-shot lifecycle-marker consumption, stale-marker expiry, and the bounded in-memory marker set. Matching bridge echoes are suppressed while unmatched linked-device `FromSelf` mutations continue through normal routing.
+
+The integration gate combines the three transports with deterministic fake outcomes for all-to-all duplicate handling, ambiguous create, retry/replay, partial fan-out, and lifecycle ordering. Provider-specific exact-once creation remains deliberately unasserted where the provider cannot supply it.

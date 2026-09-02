@@ -20,13 +20,15 @@
 - **Native Polls & Live Results**: Uses native WhatsApp, Discord, and Telegram polls where representable; every poll endpoint gets one bridge-owned editable companion with aggregate option counts only. Unsupported representations use deterministic text fallback.
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
-- **Reliable Delivery**: Each destination has an independent ordered queue with bounded retries, restart-safe pending work, and lifecycle ordering, so a slow or unavailable provider does not block healthy destinations.
+- **Reliable Delivery**: Each destination has an independent ordered queue with bounded retries, restart-safe pending work, and lifecycle ordering, so a slow or unavailable provider does not block healthy destinations. Ambiguous provider creates are never blindly retried; source recovery remains replayable until payload-dependent work is safe to forget.
 - **Bounded Recovery**: WhatsApp HistorySync snapshots are replayed oldest-first through the same checkpointed routing path as live messages; recovery is bounded and does not promise offline delete/reaction reconstruction.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
 - **Embedded Web UI**: Simple, zero-dependency management console to inspect WhatsApp/Discord/Telegram status, discover Discord channels and transiently observed Telegram groups, configure transport-neutral endpoint aliases, and manage mixed sync sets directly from your browser.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
 Polls retain their native UI on destinations that support the source semantics. A destination that cannot represent the question, options, answer mode, duration, or media combination receives deterministic text instead of silently losing poll semantics. The bridge-owned live-result companion is aggregate-only: it shows option counts, never voter names or per-voter choices, and is updated through the normal delivery lanes. Its heading is bold-italic with transport-native markup, followed by the question and options. Deleting a poll also deletes its live-result companion on every endpoint. `aggregate-response` remains supported as an exact reply to a poll copy; the trigger message is suppressed and the reply produces a manual aggregate summary using the same canonical counts. Bot-created Telegram polls provide absolute result snapshots. Human-created Telegram source polls can be mirrored but have a partial/unavailable live source contribution because the Bot API does not expose the required ongoing voter/result lifecycle; MTProto is intentionally not used.
+
+Remote providers do not all offer deterministic client-assigned create IDs. When a provider response is ambiguous, the bridge preserves content-free retry state and requires provider recovery or operator reconciliation rather than claiming exactly-once remote creation. WhatsApp bridge-generated lifecycle echoes use bounded in-memory suppression markers; genuine unmatched linked-device `FromSelf` mutations remain routable.
 
 ## Privacy Model
 
