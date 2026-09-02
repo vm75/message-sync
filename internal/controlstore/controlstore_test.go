@@ -1,0 +1,67 @@
+package controlstore
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestOpenCreatesSensitiveSchemaAndRestrictsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.db")
+	s, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var foreignKeys int
+	if err := s.db.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+		t.Fatal(err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
+	}
+	for _, table := range []string{"users", "sessions", "user_invites", "audit_events", "verification_pipelines", "membership_requests", "email_challenges", "verification_assessments"} {
+		var count int
+		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("missing table %q", table)
+		}
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("control.db permissions = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestControlSchemaConstraintsAndNoRoutingSchemaMix(t *testing.T) {
+	s, err := Open(context.Background(), filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.db.Exec(`INSERT INTO users(id, username, password_hash, role, created_at, updated_at) VALUES ('u1', 'Admin', 'hash', 'admin', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO users(id, username, password_hash, role, created_at, updated_at) VALUES ('u2', 'admin', 'hash', 'operator', 1, 1)`); err == nil {
+		t.Fatal("case-insensitive username uniqueness was not enforced")
+	}
+	if _, err := s.db.Exec(`INSERT INTO sessions(token_hash, user_id, expires_at, created_at, last_seen_at) VALUES ('token-hash', 'u1', 2, 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO sessions(token_hash, user_id, expires_at, created_at, last_seen_at) VALUES ('token-hash', 'u1', 2, 1, 1)`); err == nil {
+		t.Fatal("session token hash uniqueness was not enforced")
+	}
+	var routingTables int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('canonical_messages', 'message_copies', 'endpoints')").Scan(&routingTables); err != nil {
+		t.Fatal(err)
+	}
+	if routingTables != 0 {
+		t.Fatal("control database contains routing tables")
+	}
+}

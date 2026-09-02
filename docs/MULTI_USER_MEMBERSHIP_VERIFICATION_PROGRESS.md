@@ -23,7 +23,7 @@ This file exists only while issues #52-#62 are being implemented. **Delete this 
 
 | Order | Issue | Status | Depends on | Purpose |
 |---:|---|---|---|---|
-| 1 | [#52 Control plane: add isolated PII-sensitive control.db](https://github.com/vm75/message-sync/issues/52) | Pending | — | Establish the separate sensitive persistence boundary used by accounts and verification. |
+| 1 | [#52 Control plane: add isolated PII-sensitive control.db](https://github.com/vm75/message-sync/issues/52) | Complete | — | Establish the separate sensitive persistence boundary used by accounts and verification. |
 | 2 | [#53 Auth: replace shared admin password with multi-user accounts and server-side sessions](https://github.com/vm75/message-sync/issues/53) | Pending | #52 | Replace the single shared password with per-user authentication and revocable sessions. |
 | 3 | [#54 RBAC: add admin/operator lifecycle, invites, deactivation, and control-plane audit](https://github.com/vm75/message-sync/issues/54) | Pending | #53 | Add the minimal two-role authorization model, user lifecycle, and structured audit events. |
 | 4 | [#55 Web UI: add multi-user login, account management, and role-aware navigation](https://github.com/vm75/message-sync/issues/55) | Pending | #53, #54 | Make the embedded Web UI usable with multi-user auth and RBAC. |

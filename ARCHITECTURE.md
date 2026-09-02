@@ -71,6 +71,19 @@ It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC 
 
 Configuration is stored in SQLite (`sync.db`) and managed programmatically via Go packages and the REST API.
 
+### `control.db`
+
+The application-owned control plane opens `/data/control.db` independently of
+the routing store. Its fresh schema contains the account/session/invite/audit
+foundation and the planned verification pipeline/request, email challenge,
+and assessment records. This is the only application database permitted to
+hold the minimum PII needed for multi-user administration and membership
+verification. It uses foreign keys, explicit role/status checks, opaque IDs,
+hashed bearer tokens, parameterized access APIs, and mode `0600` where the
+platform permits. It has no routing tables and is never queried by the
+canonical message router. The daemon closes it independently during shutdown;
+the existing `sync.db` and `whatsapp.db` boundaries remain unchanged.
+
 ### SQLite Configuration Tables
 
 - `global_config`: Single-row table (`id = 1`) storing global behavior settings:

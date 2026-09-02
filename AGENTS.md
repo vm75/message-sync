@@ -21,6 +21,12 @@ The previous implementation or prototypes may be consulted as a behavioral refer
 
 Application persistence (`sync.db`) and application logs must contain **no PII/PHI**.
 
+The explicit control-plane database (`control.db`) is a separate sensitive
+boundary for multi-user accounts and membership verification. It may contain
+the minimum PII required by those features; keep it out of `sync.db`, logs,
+router state, and transport protocol stores. Restrict its file permissions to
+0600 where supported.
+
 Never persist or log:
 
 - participant phone numbers;
@@ -64,10 +70,11 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 
 ## SQLite rules
 
-Use two databases:
+Use three databases:
 
 - `/data/whatsapp.db`: whatsmeow protocol/session store.
 - `/data/sync.db`: application routing state.
+- `/data/control.db`: sensitive control-plane accounts and membership state.
 
 For `sync.db`:
 

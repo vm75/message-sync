@@ -13,6 +13,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
@@ -28,6 +29,7 @@ import (
 const (
 	WhatsAppDBName = "whatsapp.db"
 	SyncDBName     = "sync.db"
+	ControlDBName  = "control.db"
 )
 
 type whatsappTransport interface {
@@ -100,6 +102,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return err
 	}
 	defer syncStore.Close()
+	controlStore, err := controlstore.Open(ctx, filepath.Join(dataDir, ControlDBName))
+	if err != nil {
+		return fmt.Errorf("open control store: %w", err)
+	}
+	defer controlStore.Close()
 
 	if cfg == nil {
 		loadedCfg, err := config.LoadRaw(ctx, syncStore.DB())

@@ -38,6 +38,7 @@ Remote providers do not all offer deterministic client-assigned create IDs. When
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
+- **Control-plane separation**: Multi-user account and membership-verification data is kept in the separate sensitive `/data/control.db`; it is not copied into the PII-free routing database (`sync.db`) or application logs.
 
 ## Quick Start
 
