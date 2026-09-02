@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS poll_provider_refs (
     UNIQUE (endpoint_id, provider_kind, provider_ref)
 );
 
+CREATE TABLE IF NOT EXISTS poll_result_companions (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    remote_message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id),
+    UNIQUE (endpoint_id, remote_message_id)
+);
+
 CREATE TABLE IF NOT EXISTS suppressed_reactions (
     endpoint_id TEXT NOT NULL,
     remote_message_id TEXT NOT NULL,

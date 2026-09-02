@@ -109,6 +109,14 @@ type PollProviderRef struct {
 	Reference   string
 }
 
+type PollResultCompanion struct {
+	CanonicalID     string
+	EndpointID      string
+	RemoteMessageID string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -1028,6 +1036,44 @@ func (s *Store) PollEndpointForProviderRef(ctx context.Context, provider, refere
 		return "", wrapDB("resolve poll provider endpoint", err)
 	}
 	return endpointID, nil
+}
+
+func (s *Store) PollResultCompanion(ctx context.Context, canonicalID, endpointID string) (PollResultCompanion, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return PollResultCompanion{}, err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return PollResultCompanion{}, err
+	}
+	var result PollResultCompanion
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT canonical_id, endpoint_id, remote_message_id, created_at, updated_at FROM poll_result_companions WHERE canonical_id = ? AND endpoint_id = ?`, canonicalID, endpointID).Scan(&result.CanonicalID, &result.EndpointID, &result.RemoteMessageID, &createdAt, &updatedAt)
+	if err != nil {
+		return PollResultCompanion{}, wrapDB("find poll result companion", err)
+	}
+	result.CreatedAt, result.UpdatedAt = fromUnixMillis(createdAt), fromUnixMillis(updatedAt)
+	return result, nil
+}
+
+func (s *Store) SavePollResultCompanion(ctx context.Context, companion PollResultCompanion) error {
+	if err := requireOpaque("canonical id", companion.CanonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(companion.EndpointID); err != nil {
+		return err
+	}
+	if err := requireOpaque("remote message id", companion.RemoteMessageID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if companion.CreatedAt.IsZero() {
+		companion.CreatedAt = now
+	}
+	if companion.UpdatedAt.IsZero() {
+		companion.UpdatedAt = now
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO poll_result_companions(canonical_id, endpoint_id, remote_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(canonical_id, endpoint_id) DO UPDATE SET updated_at = excluded.updated_at`, companion.CanonicalID, companion.EndpointID, companion.RemoteMessageID, unixMillis(companion.CreatedAt), unixMillis(companion.UpdatedAt))
+	return wrapDB("save poll result companion", err)
 }
 
 func validateCopy(copy MessageCopy) error {

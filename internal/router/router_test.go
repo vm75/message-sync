@@ -62,6 +62,11 @@ func waitForSent(t *testing.T, f *fakeSender, want int) {
 		}
 		select {
 		case <-deadline:
+			f.mu.Lock()
+			for _, sent := range f.sent {
+				t.Logf("timeout sent endpoint=%s kind=%s", sent.outgoing.Endpoint, sent.outgoing.Kind)
+			}
+			f.mu.Unlock()
 			t.Fatalf("sent %d messages, want at least %d", got, want)
 		case <-time.After(time.Millisecond):
 		}
@@ -765,13 +770,21 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 	if err := r.Handle(ctx, inc); err != nil {
 		t.Fatalf("Handle poll error: %v", err)
 	}
-	waitForSent(t, fake, 2)
+	waitForSent(t, fake, 5)
 
-	if len(fake.sent) != 2 {
-		t.Fatalf("expected 2 fan-out copies, got %d", len(fake.sent))
+	if len(fake.sent) != 5 {
+		for _, sent := range fake.sent {
+			t.Logf("sent endpoint=%s kind=%s text=%q", sent.outgoing.Endpoint, sent.outgoing.Kind, sent.outgoing.Text)
+		}
+		t.Fatalf("expected 2 poll copies and 3 result companions, got %d", len(fake.sent))
 	}
 
+	pollCopies := 0
 	for _, s := range fake.sent {
+		if s.outgoing.Kind == "text" {
+			continue
+		}
+		pollCopies++
 		if s.outgoing.Kind != "poll" {
 			t.Fatalf("expected Kind 'poll', got %q", s.outgoing.Kind)
 		}
@@ -782,6 +795,9 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 			t.Fatalf("expected PollSelectableCount 1, got %d", s.outgoing.PollSelectableCount)
 		}
 	}
+	if pollCopies != 2 {
+		t.Fatalf("poll copies = %d, want 2", pollCopies)
+	}
 
 	canonicalID, err := store.CanonicalForRemote(ctx, "c1g1", "poll-orig-1")
 	if err != nil {
@@ -790,6 +806,13 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 	isPoll, err := store.IsPoll(ctx, canonicalID)
 	if err != nil || !isPoll {
 		t.Fatalf("expected isPoll=true, got %v (err: %v)", isPoll, err)
+	}
+	var companions int
+	if err := store.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM poll_result_companions WHERE canonical_id = ?`, canonicalID).Scan(&companions); err != nil {
+		t.Fatal(err)
+	}
+	if companions != 3 {
+		t.Fatalf("result companions = %d, want one per endpoint", companions)
 	}
 }
 

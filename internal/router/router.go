@@ -55,20 +55,22 @@ type pendingReaction struct {
 }
 
 type Router struct {
-	store            *store.Store
-	sender           sender
-	lanes            *delivery.Manager
-	routes           map[transport.EndpointID][]transport.EndpointID
-	usernameMode     config.UsernameMode
-	aggTrigger       string
-	knownCopies      map[copyKey]string
-	pollCache        map[string]pollMeta
-	pendingEdits     map[mutationKey]pendingEdit
-	pendingReactions map[mutationKey]map[string]pendingReaction
-	nextRevision     int64
-	newCanonical     func() (string, error)
-	afterPersist     func(transport.EndpointID) error
-	mu               sync.RWMutex
+	store              *store.Store
+	sender             sender
+	lanes              *delivery.Manager
+	routes             map[transport.EndpointID][]transport.EndpointID
+	usernameMode       config.UsernameMode
+	aggTrigger         string
+	knownCopies        map[copyKey]string
+	pollCache          map[string]pollMeta
+	pendingEdits       map[mutationKey]pendingEdit
+	pendingResultEdits map[mutationKey]pendingEdit
+	pendingReactions   map[mutationKey]map[string]pendingReaction
+	nextRevision       int64
+	newCanonical       func() (string, error)
+	afterPersist       func(transport.EndpointID) error
+	mu                 sync.RWMutex
+	pollResultMu       sync.Mutex
 }
 
 type Outcome struct {
@@ -110,17 +112,18 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		return nil, fmt.Errorf("create delivery lanes: %w", err)
 	}
 	return &Router{
-		store:            syncStore,
-		sender:           transportSender,
-		lanes:            lanes,
-		routes:           routes,
-		usernameMode:     cfg.Identity.UsernameMode,
-		aggTrigger:       cfg.Polls.AggregationTrigger,
-		knownCopies:      make(map[copyKey]string),
-		pollCache:        make(map[string]pollMeta),
-		pendingEdits:     make(map[mutationKey]pendingEdit),
-		pendingReactions: make(map[mutationKey]map[string]pendingReaction),
-		newCanonical:     newCanonicalID,
+		store:              syncStore,
+		sender:             transportSender,
+		lanes:              lanes,
+		routes:             routes,
+		usernameMode:       cfg.Identity.UsernameMode,
+		aggTrigger:         cfg.Polls.AggregationTrigger,
+		knownCopies:        make(map[copyKey]string),
+		pollCache:          make(map[string]pollMeta),
+		pendingEdits:       make(map[mutationKey]pendingEdit),
+		pendingResultEdits: make(map[mutationKey]pendingEdit),
+		pendingReactions:   make(map[mutationKey]map[string]pendingReaction),
+		newCanonical:       newCanonicalID,
 	}, nil
 }
 
@@ -243,6 +246,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		if err := r.store.ReplacePollEndpointSnapshot(ctx, canonicalID, string(incoming.Endpoint), incoming.PollSnapshot, incoming.Timestamp); err != nil {
 			return fmt.Errorf("record poll snapshot: %w", err)
 		}
+		r.updatePollResults(ctx, canonicalID, members)
 		return nil
 	}
 
@@ -275,7 +279,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		if recordErr != nil {
 			return fmt.Errorf("record poll vote: %w", recordErr)
 		}
-
+		r.updatePollResults(ctx, targetCanonical, members)
 		return nil
 	}
 
@@ -591,6 +595,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return err
 		}
 	}
+	if incoming.Kind == "poll" {
+		r.updatePollResults(ctx, canonicalID, members)
+	}
 	return nil
 }
 
@@ -682,6 +689,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		r.mu.Lock()
 		r.knownCopies[copyKey{endpoint: destination, remoteID: ref.RemoteMessageID}] = canonicalID
 		r.mu.Unlock()
+		if incoming.Kind == "poll" {
+			_ = r.ensurePollResultCompanion(jobCtx, canonicalID, destination)
+		}
 		_ = r.store.DeleteDeliveryOperation(jobCtx, operation)
 		if r.afterPersist != nil {
 			_ = r.afterPersist(destination)
@@ -694,6 +704,92 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		return fmt.Errorf("enqueue destination delivery: %w", err)
 	}
 	return nil
+}
+
+func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (string, error) {
+	options, err := r.store.GetPollOptionMetadata(ctx, canonicalID)
+	if err != nil {
+		return "", err
+	}
+	counts, err := r.store.GetPollAggregateCounts(ctx, canonicalID)
+	if err != nil {
+		return "", err
+	}
+	var builder strings.Builder
+	builder.WriteString("📊 Live results across synced groups\n")
+	for _, option := range options {
+		fmt.Fprintf(&builder, "Option %d — %d\n", option.Index+1, counts[option.Index])
+	}
+	return strings.TrimSuffix(builder.String(), "\n"), nil
+}
+
+func (r *Router) ensurePollResultCompanion(ctx context.Context, canonicalID string, endpoint transport.EndpointID) error {
+	r.pollResultMu.Lock()
+	defer r.pollResultMu.Unlock()
+	if _, err := r.store.PollResultCompanion(ctx, canonicalID, string(endpoint)); err == nil {
+		return nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	text, err := r.renderPollResults(ctx, canonicalID)
+	if err != nil {
+		return err
+	}
+	ref, err := r.sender.Send(ctx, transport.Outgoing{Endpoint: endpoint, Kind: "text", Text: text})
+	if err != nil {
+		return err
+	}
+	if ref.Endpoint != endpoint || strings.TrimSpace(ref.RemoteMessageID) == "" {
+		return errors.New("poll result transport returned invalid message reference")
+	}
+	return r.store.SavePollResultCompanion(ctx, store.PollResultCompanion{CanonicalID: canonicalID, EndpointID: string(endpoint), RemoteMessageID: ref.RemoteMessageID})
+}
+
+func (r *Router) updatePollResults(ctx context.Context, canonicalID string, members []transport.EndpointID) {
+	if tombstoned, err := r.store.IsTombstoned(ctx, canonicalID); err != nil || tombstoned {
+		return
+	}
+	text, err := r.renderPollResults(ctx, canonicalID)
+	if err != nil {
+		return
+	}
+	for _, endpoint := range members {
+		companion, err := r.store.PollResultCompanion(ctx, canonicalID, string(endpoint))
+		if errors.Is(err, sql.ErrNoRows) {
+			if _, copyErr := r.store.MessageCopyForEndpoint(ctx, canonicalID, string(endpoint)); copyErr != nil {
+				continue
+			}
+			if createErr := r.ensurePollResultCompanion(ctx, canonicalID, endpoint); createErr != nil {
+				continue
+			}
+			companion, err = r.store.PollResultCompanion(ctx, canonicalID, string(endpoint))
+		}
+		if err != nil {
+			continue
+		}
+		key := mutationKey{canonical: canonicalID, endpoint: endpoint}
+		revision := r.nextMutationRevision()
+		r.mu.Lock()
+		r.pendingResultEdits[key] = pendingEdit{revision: revision, text: text}
+		r.mu.Unlock()
+		op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(endpoint), OperationKind: "poll_result_edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingResultEditCurrent(key, revision) }, func(jobCtx context.Context) error {
+			return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: endpoint, RemoteMessageID: companion.RemoteMessageID, IsTargetFromMe: true}, text)
+		}, func() {
+			r.mu.Lock()
+			if current, ok := r.pendingResultEdits[key]; ok && current.revision == revision {
+				delete(r.pendingResultEdits, key)
+			}
+			r.mu.Unlock()
+		})
+	}
+}
+
+func (r *Router) pendingResultEditCurrent(key mutationKey, revision int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	edit, ok := r.pendingResultEdits[key]
+	return ok && edit.revision == revision
 }
 
 func (r *Router) enqueueMutation(ctx context.Context, operation store.DeliveryOperation, current func() bool, execute func(context.Context) error, succeeded func()) error {

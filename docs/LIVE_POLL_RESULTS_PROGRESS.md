@@ -44,7 +44,7 @@ Agents should work in the order below. Before starting a ticket:
 | 1 | [#45](https://github.com/vm75/message-sync/issues/45) | Provider-neutral canonical poll state | None | Complete |
 | 2 | [#46](https://github.com/vm75/message-sync/issues/46) | Native Discord polls + vote ingestion | #45 | Complete |
 | 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Complete |
-| 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Pending |
+| 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Complete |
 | 5 | [#49](https://github.com/vm75/message-sync/issues/49) | Simplify poll router flow; retain `aggregate-response` | #48 | Pending |
 | 6 | [#50](https://github.com/vm75/message-sync/issues/50) | Restart/concurrency/fallback/no-regression hardening | #45-#49 | Pending |
 | 7 | [#51](https://github.com/vm75/message-sync/issues/51) | Final docs, regression/privacy/version audit, tracker removal | #45-#50 | Pending |
@@ -249,6 +249,11 @@ Agents should append short durable implementation notes here while the tracker e
 - Tests:
 
 ### #48
+- Status: Complete
+- Implementation notes: Added one unique bridge-owned result companion per canonical poll/endpoint, including the source endpoint. Companion creation occurs after a durable poll copy and is idempotent; aggregate-only edits use existing endpoint lanes, delivery ledger, revision coalescing, and retry paths. Result text uses only `Option N` plus counts and is never stored; tombstoned polls are ignored and endpoint failures remain isolated.
+- Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
+
+### #49
 - Status: Pending
 - Implementation notes:
 - Tests:
