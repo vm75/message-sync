@@ -43,6 +43,7 @@ Remote providers do not all offer deterministic client-assigned create IDs. When
 - **Optional email verification**: `VERIFICATION_MAIL_API_KEY` and `VERIFICATION_MAIL_FROM` enable Resend-compatible challenge delivery. Missing mail configuration is non-fatal; deterministic checks remain advisory.
 - **Optional AI review**: `OPENROUTER_API_KEY` plus `OPENROUTER_ALLOW_TRAINING=false` enables bounded asynchronous image assessment (default model `openrouter/free`). Results are advisory only; malformed, unavailable, or privacy-ineligible analysis falls back to human review.
 - **Membership fulfillment**: Approved requests use narrow WhatsApp/Discord administration boundaries for direct addition or role assignment. WhatsApp invite fallback remains pending until membership is confirmed and the old invite is rotated; provider failures expose only safe status classes.
+- **Membership review**: Authenticated admins and operators can filter and review requests, inspect protected evidence, and make audited approve/reject/needs-review decisions. Concurrent stale decisions return a conflict; AI remains advisory.
 
 ## Quick Start
 

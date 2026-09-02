@@ -124,6 +124,13 @@
     async createInvite(role, ttlHours) { return this.request('/api/users/invites', { method: 'POST', body: { role, ttlHours } }); },
     async setUserActive(id, active) { return this.request(`/api/users/${encodeURIComponent(id)}/active`, { method: 'POST', body: { active } }); },
     async createResetToken(id) { return this.request(`/api/users/${encodeURIComponent(id)}/reset-token`, { method: 'POST' }); },
+    async getMembershipRequests(filters = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value)); return this.request('/api/verification/requests' + (query.toString() ? `?${query}` : '')); },
+    async getMembershipRequest(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}`); },
+    async decideMembership(id, action) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: { action } }); },
+    async getVerificationPipelines() { return this.request('/api/verification/pipelines'); },
+    async createVerificationPipeline(body) { return this.request('/api/verification/pipelines', { method: 'POST', body }); },
+    async updateVerificationPipeline(id, body) { return this.request(`/api/verification/pipelines/${encodeURIComponent(id)}`, { method: 'PUT', body }); },
+    async deleteVerificationPipeline(id) { return this.request(`/api/verification/pipelines/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
 
     /**
      * Configuration & Status Endpoints

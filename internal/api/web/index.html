@@ -92,6 +92,7 @@
             </svg>
             Settings
           </button>
+          <button class="nav-tab" data-tab="membership">Membership</button>
           <button class="nav-tab" data-tab="users" id="nav-users">Users</button>
         </nav>
 
@@ -834,6 +835,8 @@
           <div class="card settings-card"><table class="data-table"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody id="users-table-body"></tbody></table></div>
         </div>
       </section>
+
+      <section id="view-membership" class="view hidden"><div class="page-shell"><div class="page-header"><div><h1 class="page-title">Membership Review</h1><p class="page-subtitle">Review email-verified applications and advisory signals. Decisions are authoritative.</p></div></div><div class="card settings-card"><div class="form-row"><select id="membership-status-filter" class="form-input"><option value="">All statuses</option><option value="pending_admin">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><input id="membership-age-filter" class="form-input" type="number" min="0" placeholder="Age (hours)"><button id="membership-refresh" class="btn btn-secondary">Refresh</button></div><table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Verification</th><th>Signals</th><th>Action</th></tr></thead><tbody id="membership-table-body"></tbody></table><div id="membership-detail" class="form-hint"></div></div><div id="membership-pipelines" class="card settings-card hidden"><h2>Verification pipelines</h2><div class="form-row"><input id="pipeline-label" class="form-input" placeholder="Label"><select id="pipeline-transport" class="form-input"><option value="whatsapp">WhatsApp</option><option value="discord">Discord</option></select><input id="pipeline-endpoint" class="form-input" placeholder="Endpoint alias"><input id="pipeline-role" class="form-input" placeholder="Discord role ID (optional)"><button id="pipeline-create" class="btn btn-primary">Create</button></div><div id="pipeline-list"></div></div></div></section>
 
       <!-- Settings View -->
       <section id="view-settings" class="view hidden">

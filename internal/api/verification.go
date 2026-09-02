@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -288,6 +289,7 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 		_ = WriteJSON(w, 200, map[string]string{"status": "succeeded"})
 		return
 	}
+	s.audit(r, "membership_fulfillment_retry", id)
 	var wa verification.WhatsAppAdmin
 	if candidate, ok := s.whatsapp.(verification.WhatsAppAdmin); ok {
 		wa = candidate
@@ -338,6 +340,118 @@ func (s *Server) handleConfirmFallback(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, 200, map[string]string{"status": "succeeded"})
 }
 
+type MembershipRequestView struct {
+	ID                  string `json:"id"`
+	PipelineID          string `json:"pipelineId"`
+	Status              string `json:"status"`
+	WorkEmail           string `json:"workEmail"`
+	WhatsAppPhone       string `json:"whatsappPhone,omitempty"`
+	DiscordUserID       string `json:"discordUserId,omitempty"`
+	LinkedInURL         string `json:"linkedinUrl,omitempty"`
+	EvidenceReference   string `json:"evidenceReference,omitempty"`
+	VerificationState   string `json:"verificationState"`
+	FulfillmentState    string `json:"fulfillmentState"`
+	FailureClass        string `json:"failureClass,omitempty"`
+	DeterministicResult string `json:"deterministicResult,omitempty"`
+	AIState             string `json:"aiState,omitempty"`
+	AIConfidence        string `json:"aiConfidence,omitempty"`
+	AIAssessment        string `json:"aiAssessment,omitempty"`
+	CreatedAt           int64  `json:"createdAt"`
+}
+
+func (s *Server) handleListMembershipRequests(w http.ResponseWriter, r *http.Request) {
+	query := `SELECT id,pipeline_id,status,applicant_work_email,COALESCE(applicant_whatsapp_phone,''),COALESCE(applicant_discord_user_id,''),COALESCE(linkedin_url,''),COALESCE(evidence_reference,''),verification_state,fulfillment_state,COALESCE(fulfillment_failure_class,''),created_at FROM membership_requests WHERE 1=1`
+	args := []any{}
+	if pipeline := r.URL.Query().Get("pipeline"); pipeline != "" {
+		query += " AND pipeline_id=?"
+		args = append(args, pipeline)
+	}
+	if status := r.URL.Query().Get("status"); status != "" {
+		query += " AND status=?"
+		args = append(args, status)
+	}
+	if ageHours := r.URL.Query().Get("ageHours"); ageHours != "" {
+		hours, err := strconv.Atoi(ageHours)
+		if err != nil || hours < 0 || hours > 24*365 {
+			WriteError(w, 400, "invalid age filter")
+			return
+		}
+		query += " AND created_at>=?"
+		args = append(args, time.Now().Add(-time.Duration(hours)*time.Hour).UnixMilli())
+	}
+	query += " ORDER BY created_at DESC LIMIT 500"
+	rows, err := s.controlDB.QueryContext(r.Context(), query, args...)
+	if err != nil {
+		WriteError(w, 500, "failed to list requests")
+		return
+	}
+	defer rows.Close()
+	out := []MembershipRequestView{}
+	for rows.Next() {
+		var v MembershipRequestView
+		if err := rows.Scan(&v.ID, &v.PipelineID, &v.Status, &v.WorkEmail, &v.WhatsAppPhone, &v.DiscordUserID, &v.LinkedInURL, &v.EvidenceReference, &v.VerificationState, &v.FulfillmentState, &v.FailureClass, &v.CreatedAt); err != nil {
+			WriteError(w, 500, "failed to list requests")
+			return
+		}
+		out = append(out, v)
+	}
+	_ = WriteJSON(w, 200, out)
+}
+
+func (s *Server) handleGetMembershipRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var v MembershipRequestView
+	err := s.controlDB.QueryRowContext(r.Context(), `SELECT m.id,m.pipeline_id,m.status,m.applicant_work_email,COALESCE(m.applicant_whatsapp_phone,''),COALESCE(m.applicant_discord_user_id,''),COALESCE(m.linkedin_url,''),COALESCE(m.evidence_reference,''),m.verification_state,m.fulfillment_state,COALESCE(m.fulfillment_failure_class,''),COALESCE((SELECT result_code FROM verification_assessments WHERE membership_request_id=m.id AND assessment_kind='deterministic' ORDER BY created_at DESC LIMIT 1),''),COALESCE((SELECT state FROM verification_assessments WHERE membership_request_id=m.id AND assessment_kind='openrouter' ORDER BY created_at DESC LIMIT 1),''),COALESCE((SELECT confidence FROM verification_assessments WHERE membership_request_id=m.id AND assessment_kind='openrouter' ORDER BY created_at DESC LIMIT 1),''),COALESCE((SELECT detail FROM verification_assessments WHERE membership_request_id=m.id AND assessment_kind='openrouter' ORDER BY created_at DESC LIMIT 1),''),m.created_at FROM membership_requests m WHERE m.id=?`, id).Scan(&v.ID, &v.PipelineID, &v.Status, &v.WorkEmail, &v.WhatsAppPhone, &v.DiscordUserID, &v.LinkedInURL, &v.EvidenceReference, &v.VerificationState, &v.FulfillmentState, &v.FailureClass, &v.DeterministicResult, &v.AIState, &v.AIConfidence, &v.AIAssessment, &v.CreatedAt)
+	if err != nil {
+		WriteError(w, 404, "request not found")
+		return
+	}
+	_ = WriteJSON(w, 200, v)
+}
+
+func (s *Server) handleMembershipDecision(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var req struct {
+		Action string `json:"action"`
+	}
+	if ReadJSON(r, &req) != nil || (req.Action != "approve" && req.Action != "reject" && req.Action != "needs_review") {
+		WriteError(w, 400, "invalid decision")
+		return
+	}
+	next := map[string]string{"approve": "approved", "reject": "rejected", "needs_review": "pending_admin"}[req.Action]
+	p, _ := principalFromContext(r.Context())
+	res, err := s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET status=?,decided_by_user_id=?,decided_at=?,updated_at=? WHERE id=? AND status='pending_admin'`, next, p.ID, time.Now().UnixMilli(), time.Now().UnixMilli(), id)
+	if err != nil {
+		WriteError(w, 500, "decision unavailable")
+		return
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		WriteError(w, 409, "request state changed")
+		return
+	}
+	s.audit(r, "membership_"+req.Action, id)
+	_ = WriteJSON(w, 200, map[string]string{"status": next})
+}
+
+func (s *Server) handleMembershipEvidence(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var ref string
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT evidence_reference FROM membership_requests WHERE id=?`, id).Scan(&ref); err != nil || ref == "" {
+		WriteError(w, 404, "evidence not found")
+		return
+	}
+	path := filepath.Join(s.evidenceDir, ref)
+	if filepath.Base(path) != ref {
+		WriteError(w, 404, "evidence not found")
+		return
+	}
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", "attachment")
+	http.ServeFile(w, r, path)
+}
+
 func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequestID string `json:"requestId"`
@@ -368,7 +482,7 @@ func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, 500, "verification unavailable")
 		return
 	}
-	if _, err = tx.ExecContext(r.Context(), `UPDATE membership_requests SET status='pending',verification_state='verified',updated_at=? WHERE id=? AND status='pending_email'`, time.Now().UnixMilli(), req.RequestID); err != nil {
+	if _, err = tx.ExecContext(r.Context(), `UPDATE membership_requests SET status='pending_admin',verification_state='verified',updated_at=? WHERE id=? AND status='pending_email'`, time.Now().UnixMilli(), req.RequestID); err != nil {
 		WriteError(w, 500, "verification unavailable")
 		return
 	}
