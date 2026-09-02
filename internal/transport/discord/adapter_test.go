@@ -14,6 +14,22 @@ import (
 	"github.com/vm75/message-sync/internal/transport"
 )
 
+func TestDiscordGatewayIntentsIncludeMessageReactions(t *testing.T) {
+	intents := discordGatewayIntents()
+	if intents&discordgo.IntentsGuildMessages == 0 {
+		t.Fatal("guild message intent is missing")
+	}
+	if intents&discordgo.IntentsGuildMessageReactions == 0 {
+		t.Fatal("guild message reactions intent is missing")
+	}
+	if intents&discordgo.IntentsGuilds == 0 {
+		t.Fatal("guilds intent is missing")
+	}
+	if intents&discordgo.IntentsMessageContent == 0 {
+		t.Fatal("message content intent is missing")
+	}
+}
+
 func TestLoadBotTokenFromEnvironment(t *testing.T) {
 	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
 	t.Setenv("DISCORD_BOT_TOKEN", "  environment-token  ")

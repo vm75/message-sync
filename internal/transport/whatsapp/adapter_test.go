@@ -50,6 +50,27 @@ func TestDisablePlaintextPersistence(t *testing.T) {
 	}
 }
 
+func TestRevokeSenderUsesCachedParticipantForOtherMessages(t *testing.T) {
+	cache := newParticipantCache(4)
+	cache.Add("message-id", "15551234567@s.whatsapp.net")
+
+	sender, err := revokeSender(transport.MessageRef{RemoteMessageID: "message-id"}, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := sender.String(); got != "15551234567@s.whatsapp.net" {
+		t.Fatalf("revoke sender = %q", got)
+	}
+
+	self, err := revokeSender(transport.MessageRef{IsTargetFromMe: true}, cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !self.IsEmpty() {
+		t.Fatalf("self revoke sender = %q, want empty", self.String())
+	}
+}
+
 func TestWhatsAppCheckpointUsesEndpointAndMessageTimestamp(t *testing.T) {
 	timestamp := time.Unix(1_700_000_123, 456).UTC()
 	cp := whatsappCheckpoint("wa-team", timestamp)

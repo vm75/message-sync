@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
@@ -24,6 +25,13 @@ type discordAPI interface {
 	MessageReactionRemove(channelID, messageID, emojiID, userID string, options ...discordgo.RequestOption) error
 }
 
+// discordChannelAPI is implemented by discordgo.Session. It is kept
+// separate from discordAPI so small outbound test doubles do not need to
+// implement the channel lookup used only for reply links.
+type discordChannelAPI interface {
+	Channel(channelID string, options ...discordgo.RequestOption) (*discordgo.Channel, error)
+}
+
 type reactionKey struct {
 	endpoint transport.EndpointID
 	message  string
@@ -40,7 +48,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		return transport.MessageRef{Endpoint: outgoing.Endpoint}, nil
 	}
 
-	channelID, webhook, mediaEnabled, mediaMaxBytes, api, ok := a.outboundState(outgoing.Endpoint)
+	channelID, webhook, mediaEnabled, mediaMaxBytes, _, ok := a.outboundState(outgoing.Endpoint)
 	if !ok {
 		return transport.MessageRef{}, errors.New("unknown Discord endpoint")
 	}
@@ -90,11 +98,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	if outgoing.ReplyTo != nil {
-		if api == nil {
-			return transport.MessageRef{}, errors.New("Discord reply API is unavailable")
-		}
-		if err := sendNativeReplyMarker(ctx, api, channelID, outgoing.ReplyTo.RemoteMessageID); err != nil {
-			return transport.MessageRef{}, err
+		if link := a.replyLink(channelID, outgoing.ReplyTo.RemoteMessageID); link != "" {
+			content = fmt.Sprintf("[%s](%s)\n\n%s", discordReplyLinkLabel(outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
+		} else {
+			content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 		}
 	}
 
@@ -114,6 +121,65 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		RemoteMessageID: strings.TrimSpace(remoteID),
 		IsTargetFromMe:  true,
 	}, nil
+}
+
+func (a *Adapter) replyLink(channelID, messageID string) string {
+	if a == nil {
+		return ""
+	}
+	a.mu.RLock()
+	session := a.session
+	api := a.api
+	a.mu.RUnlock()
+	if session != nil && session.State != nil {
+		if channel, err := session.State.Channel(strings.TrimSpace(channelID)); err == nil && channel != nil {
+			if link := discordMessageLink(channel.GuildID, channel.ID, messageID); link != "" {
+				return link
+			}
+		}
+	}
+
+	lookup, ok := api.(discordChannelAPI)
+	if !ok {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	channel, err := lookup.Channel(strings.TrimSpace(channelID), discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+	if err != nil || channel == nil {
+		return ""
+	}
+	return discordMessageLink(channel.GuildID, channel.ID, messageID)
+}
+
+func discordMessageLink(guildID, channelID, messageID string) string {
+	guildID = strings.TrimSpace(guildID)
+	channelID = strings.TrimSpace(channelID)
+	messageID = strings.TrimSpace(messageID)
+	if guildID == "" || channelID == "" || messageID == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://discord.com/channels/%s/%s/%s", guildID, channelID, messageID)
+}
+
+func discordReplyLinkLabel(origin transport.EndpointID, quotedText string) string {
+	label := "message"
+	if line := strings.TrimSpace(strings.SplitN(strings.ReplaceAll(quotedText, "\r", ""), "\n", 2)[0]); line != "" {
+		label = line
+		if strings.HasPrefix(label, "*_") {
+			label = strings.TrimPrefix(label, "*_")
+			label = strings.Replace(label, "_*: ", ": ", 1)
+		}
+	}
+	label = strings.Join(strings.Fields(label), " ")
+	label = strings.NewReplacer("[", "(", "]", ")").Replace(label)
+	if len([]rune(label)) > 400 {
+		label = string([]rune(label)[:400]) + "…"
+	}
+	if origin == "" {
+		origin = "source"
+	}
+	return fmt.Sprintf("↪ reply to %s: %s", origin, label)
 }
 
 func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error {

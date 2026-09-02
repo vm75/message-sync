@@ -55,7 +55,7 @@ To bridge Discord channels, you will create a Discord server, register a Discord
 
 ### Step 2.3: Enable Privileged Gateway Intents
 On the same **Bot** page, scroll down to the **Privileged Gateway Intents** section:
-1. Toggle **Guild Messages** to ON.
+1. The bridge requests **Guild Messages** and **Guild Message Reactions** at gateway startup; no separate portal toggle is required for those gateway intents.
 2. Toggle **Message Content Intent** to ON.
    > [!IMPORTANT]
    > **Message Content Intent** is mandatory. If this intent is disabled, Discord will hide all message text and attachments from the bridge bot, preventing messages from being relayed.
@@ -326,7 +326,7 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 
 ### Scenario 3: Replies (Thread Reference)
 - [ ] **Reply on WhatsApp**: Right-click/swipe a bridged message in WhatsApp and reply `Replying to this`.
-  - **Verify Discord**: Emits a native reply marker pointing to the parent message, accompanied by the webhook content.
+  - **Verify Discord**: Emits one webhook message under the sender's name with a clickable link labelled with the source endpoint and first line of the quoted message, followed by the reply content.
   - **Verify Telegram**: Delivered as a native Telegram quote/reply to the corresponding message.
 - [ ] **Reply on Telegram**: Reply to a bridged message in Telegram.
   - **Verify WhatsApp & Discord**: Mapped reply accurately references the original canonical message.

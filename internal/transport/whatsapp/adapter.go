@@ -413,12 +413,34 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 		defer cancel()
 	}
 
-	revokeMsg := a.client.BuildRevoke(target, types.EmptyJID, types.MessageID(ref.RemoteMessageID))
-	_, err := a.client.SendMessage(ctx, target, revokeMsg)
+	sender, err := revokeSender(ref, a.pcache)
+	if err != nil {
+		return err
+	}
+	revokeMsg := a.client.BuildRevoke(target, sender, types.MessageID(ref.RemoteMessageID))
+	_, err = a.client.SendMessage(ctx, target, revokeMsg)
 	if err != nil {
 		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp delete: %w", err))
 	}
 	return nil
+}
+
+func revokeSender(ref transport.MessageRef, cache *participantCache) (types.JID, error) {
+	if ref.IsTargetFromMe {
+		return types.EmptyJID, nil
+	}
+	if cache == nil {
+		return types.EmptyJID, transport.NewFailure(transport.FailureUnsupported, 0, errors.New("WhatsApp delete participant is unavailable"))
+	}
+	rawJID, ok := cache.Get(ref.RemoteMessageID)
+	if !ok {
+		return types.EmptyJID, transport.NewFailure(transport.FailureUnsupported, 0, errors.New("WhatsApp delete participant is unavailable"))
+	}
+	sender, err := types.ParseJID(strings.TrimSpace(rawJID))
+	if err != nil || sender.IsEmpty() {
+		return types.EmptyJID, transport.NewFailure(transport.FailureUnsupported, 0, errors.New("WhatsApp delete participant is invalid"))
+	}
+	return sender, nil
 }
 
 // BuildClearChatPatch creates an AppState PatchInfo for clearing messages in a chat up to the given cutoff.

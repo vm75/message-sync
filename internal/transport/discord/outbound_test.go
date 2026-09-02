@@ -44,6 +44,7 @@ type fakeDiscordAPI struct {
 	adds       []string
 	removes    []string
 	message    *discordgo.Message
+	channel    *discordgo.Channel
 }
 
 func (f *fakeDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...discordgo.RequestOption) ([]*discordgo.Message, error) {
@@ -52,6 +53,10 @@ func (f *fakeDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...d
 
 func (f *fakeDiscordAPI) ChannelMessage(_ string, _ string, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
 	return f.message, nil
+}
+
+func (f *fakeDiscordAPI) Channel(_ string, _ ...discordgo.RequestOption) (*discordgo.Channel, error) {
+	return f.channel, nil
 }
 
 func (f *fakeDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
@@ -183,7 +188,7 @@ func TestDiscordMediaUsesTransientBytesAndSafeGeneratedFilename(t *testing.T) {
 	}
 }
 
-func TestDiscordReplyUsesNativeMarkerAndWebhookSender(t *testing.T) {
+func TestDiscordReplyUsesSingleWebhookMessageWhenLinkUnavailable(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	api := &fakeDiscordAPI{}
 	adapter := newOutboundTestAdapter(webhook, api)
@@ -202,18 +207,61 @@ func TestDiscordReplyUsesNativeMarkerAndWebhookSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.replySends) != 1 || api.replySends[0].Reference == nil {
-		t.Fatal("native Discord reply marker was not sent")
-	}
-	if api.replySends[0].Reference.MessageID != "known-discord-copy" {
-		t.Fatalf("reply target = %q", api.replySends[0].Reference.MessageID)
-	}
-	if api.replySends[0].Content != replyMarkerText {
-		t.Fatalf("reply marker content = %q", api.replySends[0].Content)
+	if len(api.replySends) != 0 {
+		t.Fatal("single-message reply unexpectedly sent a separate native marker")
 	}
 	got := webhook.executed[len(webhook.executed)-1]
-	if got.Username != "Alice" || got.Content != "reply body" {
+	if got.Username != "Alice" || !strings.Contains(got.Content, "reply to source") || !strings.Contains(got.Content, "reply body") {
 		t.Fatalf("reply content lost webhook APP rendering: %#v", got)
+	}
+}
+
+func TestDiscordReplyUsesTransientChannelLookupForClickableLink(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	api := &fakeDiscordAPI{channel: &discordgo.Channel{ID: testChannelID, GuildID: "guild"}}
+	adapter := newOutboundTestAdapter(webhook, api)
+
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint:       "discord",
+		OriginEndpoint: "g1",
+		SourceText:     "reply body",
+		Text:           "reply body",
+		QuotedText:     "*_d1/vm_*: original message\nsecond line",
+		Kind:           "text",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "discord",
+			RemoteMessageID: "known-discord-copy",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(webhook.executed) != 1 {
+		t.Fatalf("webhook messages = %d, want 1", len(webhook.executed))
+	}
+	content := webhook.executed[0].Content
+	if !strings.Contains(content, "[↪ reply to g1: d1/vm: original message](https://discord.com/channels/guild/"+testChannelID+"/known-discord-copy)") {
+		t.Fatalf("clickable reply link missing: %q", content)
+	}
+	if !strings.Contains(content, "reply body") {
+		t.Fatalf("reply body missing: %q", content)
+	}
+}
+
+func TestDiscordReplyLinkLabelUsesFirstQuotedLine(t *testing.T) {
+	got := discordReplyLinkLabel("g1", "*_d1/vm_*: first line\nsecond line")
+	if got != "↪ reply to g1: d1/vm: first line" {
+		t.Fatalf("reply link label = %q", got)
+	}
+}
+
+func TestDiscordMessageLink(t *testing.T) {
+	got := discordMessageLink("guild", "channel", "message")
+	if got != "https://discord.com/channels/guild/channel/message" {
+		t.Fatalf("message link = %q", got)
+	}
+	if discordMessageLink("", "channel", "message") != "" {
+		t.Fatal("incomplete message link was not rejected")
 	}
 }
 

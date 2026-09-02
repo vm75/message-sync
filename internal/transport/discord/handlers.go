@@ -52,7 +52,6 @@ func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discord
 	if !ok {
 		return
 	}
-	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 
@@ -79,8 +78,36 @@ func (a *Adapter) handleMessageDelete(session *discordgo.Session, event *discord
 	if !ok {
 		return
 	}
-	addCheckpoint(&incoming)
 	a.emit(incoming)
+}
+
+func (a *Adapter) handleMessageDeleteBulk(session *discordgo.Session, event *discordgo.MessageDeleteBulk) {
+	if a == nil || event == nil {
+		return
+	}
+	if len(event.Messages) == 0 {
+		return
+	}
+	a.mu.RLock()
+	normalizer := a.normalizer
+	a.mu.RUnlock()
+	if normalizer == nil {
+		return
+	}
+	routeChannelID := configuredIngressChannelID(session, normalizer, event.ChannelID)
+	if routeChannelID == "" {
+		return
+	}
+	for _, messageID := range event.Messages {
+		incoming, ok := normalizer.NormalizeDelete(&discordgo.MessageDelete{Message: &discordgo.Message{
+			ID:        messageID,
+			ChannelID: routeChannelID,
+		}})
+		if !ok {
+			continue
+		}
+		a.emit(incoming)
+	}
 }
 
 func (a *Adapter) handleMessageReactionAdd(session *discordgo.Session, event *discordgo.MessageReactionAdd) {
@@ -103,7 +130,6 @@ func (a *Adapter) handleMessageReactionAdd(session *discordgo.Session, event *di
 	if !ok {
 		return
 	}
-	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 
@@ -127,7 +153,6 @@ func (a *Adapter) handleMessageReactionRemove(session *discordgo.Session, event 
 	if !ok {
 		return
 	}
-	addCheckpoint(&incoming)
 	a.emit(incoming)
 }
 

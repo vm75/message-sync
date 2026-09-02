@@ -330,11 +330,14 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	}
 	waitForWebhookSends(t, discordAPI, 4)
 	_, _, messagesSnapshot, replyTargets, _, _, _ := discordAPI.snapshot()
-	if len(replyTargets) != 1 || replyTargets[0] != "discord-copy-1" {
-		t.Fatalf("Discord reply target=%#v, want webhook-created canonical copy", replyTargets)
+	if len(replyTargets) != 0 {
+		t.Fatalf("single-message reply emitted a separate marker: %#v", replyTargets)
 	}
 	if got := messagesSnapshot[len(messagesSnapshot)-1].Username; got != "Vidhya Private" {
 		t.Fatalf("reply lost sender-specific APP username: %q", got)
+	}
+	if got := messagesSnapshot[len(messagesSnapshot)-1].Content; !strings.Contains(got, "reply to wa-one") || !strings.Contains(got, "PRIVATE_REPLY_BODY") {
+		t.Fatalf("reply fallback content = %q", got)
 	}
 
 	edit := transport.Incoming{

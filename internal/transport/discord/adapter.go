@@ -81,9 +81,10 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 	session.ShouldRetryOnRateLimit = true
 
-	// Request guild message events only. DMs are intentionally not subscribed,
-	// and the normalizer still rejects any DM event defensively.
-	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsMessageContent
+	// Request only the guild message and reaction events needed by the bridge.
+	// DMs are intentionally not subscribed, and the normalizer still rejects
+	// any DM event defensively.
+	session.Identify.Intents = discordGatewayIntents()
 
 	// DiscordGo's default logger may include protocol identifiers and arbitrary
 	// server error text. Replace it with a fixed-field classifier and keep only
@@ -119,6 +120,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	session.AddHandler(adapter.handleMessageCreate)
 	session.AddHandler(adapter.handleMessageUpdate)
 	session.AddHandler(adapter.handleMessageDelete)
+	session.AddHandler(adapter.handleMessageDeleteBulk)
 	session.AddHandler(adapter.handleMessageReactionAdd)
 	session.AddHandler(adapter.handleMessageReactionRemove)
 
@@ -147,6 +149,10 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+func discordGatewayIntents() discordgo.Intent {
+	return discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent
 }
 
 func installSafeDiscordLogger(logger *slog.Logger) {

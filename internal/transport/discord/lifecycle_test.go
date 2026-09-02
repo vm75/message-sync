@@ -45,6 +45,40 @@ func TestNormalizeDiscordLifecycleEvents(t *testing.T) {
 		}
 	})
 
+	t.Run("delete payload without guild id", func(t *testing.T) {
+		incoming, ok := normalizer.NormalizeDelete(&discordgo.MessageDelete{Message: &discordgo.Message{
+			ID:        "923456789012345673",
+			ChannelID: testChannelID,
+		}})
+		if !ok {
+			t.Fatal("configured-channel delete without guild id was ignored")
+		}
+		if incoming.Kind != "delete" || incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "923456789012345673" {
+			t.Fatalf("unexpected delete normalization: %#v", incoming)
+		}
+	})
+
+	t.Run("bulk delete payload", func(t *testing.T) {
+		adapter := &Adapter{
+			normalizer: normalizer,
+			events:     make(chan transport.Incoming, 2),
+		}
+		adapter.handleMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{
+			ChannelID: testChannelID,
+			Messages:  []string{"923456789012345674", "923456789012345675"},
+		})
+		for _, wantID := range []string{"923456789012345674", "923456789012345675"} {
+			select {
+			case incoming := <-adapter.events:
+				if incoming.Kind != "delete" || incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != wantID {
+					t.Fatalf("unexpected bulk delete normalization: %#v", incoming)
+				}
+			default:
+				t.Fatalf("bulk delete did not emit %s", wantID)
+			}
+		}
+	})
+
 	t.Run("reaction add and remove", func(t *testing.T) {
 		reaction := &discordgo.MessageReaction{
 			UserID:    testAuthorID,
@@ -69,6 +103,10 @@ func TestNormalizeDiscordLifecycleEvents(t *testing.T) {
 		}
 		if _, ok := normalizer.NormalizeReaction(reaction, testAuthorID, false); ok {
 			t.Fatal("bridge bot reaction echo was not filtered")
+		}
+		reaction.GuildID = ""
+		if incoming, ok := normalizer.NormalizeReaction(reaction, "different-bot", false); !ok || incoming.Kind != "reaction" {
+			t.Fatal("configured-channel reaction without guild id was ignored")
 		}
 	})
 }
@@ -98,5 +136,46 @@ func TestBridgeInitiatedDiscordDeleteGatewayEchoIsIgnored(t *testing.T) {
 	case <-adapter.events:
 		t.Fatal("bridge-initiated Discord delete re-entered canonical ingress")
 	default:
+	}
+}
+
+func TestDiscordLiveReactionAndDeleteDoNotReuseTargetAsCheckpoint(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher, config.UsernameModeHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Adapter{
+		normalizer:        normalizer,
+		events:            make(chan transport.Incoming, 3),
+		suppressedDeletes: make(map[string]struct{}),
+	}
+
+	update := testMessage().Message
+	update.Content = "edited body"
+	adapter.handleMessageUpdate(nil, &discordgo.MessageUpdate{Message: update})
+	adapter.handleMessageReactionAdd(nil, &discordgo.MessageReactionAdd{MessageReaction: &discordgo.MessageReaction{
+		UserID: testAuthorID, MessageID: "923456789012345680", ChannelID: testChannelID,
+		Emoji: discordgo.Emoji{Name: "👍"},
+	}})
+	adapter.handleMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{
+		ID: "923456789012345681", ChannelID: testChannelID,
+	}})
+
+	for _, kind := range []string{"edit", "reaction", "delete"} {
+		select {
+		case incoming := <-adapter.events:
+			if incoming.Kind != kind {
+				t.Fatalf("event kind = %q, want %q", incoming.Kind, kind)
+			}
+			if incoming.Checkpoint.Valid {
+				t.Fatalf("%s reused target message snowflake as a recovery checkpoint", kind)
+			}
+		default:
+			t.Fatalf("missing %s event", kind)
+		}
 	}
 }

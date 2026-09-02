@@ -28,9 +28,6 @@ func (n *Normalizer) NormalizeDelete(event *discordgo.MessageDelete) (transport.
 		return transport.Incoming{}, false
 	}
 	message := event.Message
-	if strings.TrimSpace(message.GuildID) == "" {
-		return transport.Incoming{}, false
-	}
 	endpoint, ok := n.endpoints[strings.TrimSpace(message.ChannelID)]
 	if !ok || strings.TrimSpace(message.ID) == "" {
 		return transport.Incoming{}, false
@@ -49,9 +46,6 @@ func (n *Normalizer) NormalizeDelete(event *discordgo.MessageDelete) (transport.
 
 func (n *Normalizer) NormalizeReaction(reaction *discordgo.MessageReaction, botUserID string, removed bool) (transport.Incoming, bool) {
 	if n == nil || reaction == nil {
-		return transport.Incoming{}, false
-	}
-	if strings.TrimSpace(reaction.GuildID) == "" {
 		return transport.Incoming{}, false
 	}
 	endpoint, ok := n.endpoints[strings.TrimSpace(reaction.ChannelID)]
