@@ -798,6 +798,19 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 	if pollCopies != 2 {
 		t.Fatalf("poll copies = %d, want 2", pollCopies)
 	}
+	var resultText string
+	for _, s := range fake.sent {
+		if s.outgoing.Kind == "text" {
+			resultText = s.outgoing.Text
+			break
+		}
+	}
+	if !strings.HasPrefix(resultText, "***Aggregated anonymised live results***\nWhat is your favorite pet?\n") {
+		t.Fatalf("unexpected live result heading/question: %q", resultText)
+	}
+	if !strings.Contains(resultText, "Dog — 0") || !strings.Contains(resultText, "Cat — 0") || !strings.Contains(resultText, "Parrot — 0") {
+		t.Fatalf("expected anonymised option results, got %q", resultText)
+	}
 
 	canonicalID, err := store.CanonicalForRemote(ctx, "c1g1", "poll-orig-1")
 	if err != nil {

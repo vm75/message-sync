@@ -720,13 +720,25 @@ func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (str
 	if err != nil {
 		return "", err
 	}
+	r.mu.RLock()
+	presentation, hasPresentation := r.pollPresentation[canonicalID]
+	r.mu.RUnlock()
+
 	var builder strings.Builder
-	builder.WriteString("📊 Live results across synced groups\n")
+	builder.WriteString("***Aggregated anonymised live results***\n")
+	if hasPresentation && presentation.Question != "" {
+		builder.WriteString(presentation.Question)
+		builder.WriteString("\n")
+	}
 	if aggregate.Partial {
 		builder.WriteString("Partial/unavailable source\n")
 	}
 	for _, option := range aggregate.Options {
-		fmt.Fprintf(&builder, "Option %d — %d\n", option.Index+1, aggregate.Counts[option.Index])
+		label := fmt.Sprintf("Option %d", option.Index+1)
+		if hasPresentation && option.Index < len(presentation.Options) && presentation.Options[option.Index] != "" {
+			label = presentation.Options[option.Index]
+		}
+		fmt.Fprintf(&builder, "%s — %d\n", label, aggregate.Counts[option.Index])
 	}
 	return strings.TrimSuffix(builder.String(), "\n"), nil
 }
