@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -19,6 +20,61 @@ import (
 var schemaSQL string
 
 type Store struct{ db *sql.DB }
+
+// PruneRetention removes only expired/terminal control-plane artifacts in a
+// bounded transaction. It returns evidence references for the caller to unlink
+// from the private evidence directory; routing state is never touched.
+func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Duration, batch int) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("control database is required")
+	}
+	if batch <= 0 {
+		batch = 100
+	}
+	cutoff := now.Add(-age).UnixMilli()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin control retention: %w", err)
+	}
+	defer tx.Rollback()
+	for _, q := range []string{
+		`DELETE FROM email_challenges WHERE rowid IN (SELECT rowid FROM email_challenges WHERE expires_at < ? LIMIT ?)`,
+		`DELETE FROM user_invites WHERE rowid IN (SELECT rowid FROM user_invites WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
+		`DELETE FROM password_reset_tokens WHERE rowid IN (SELECT rowid FROM password_reset_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
+		`DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE expires_at < ? OR revoked_at IS NOT NULL LIMIT ?)`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, now.UnixMilli(), batch); err != nil {
+			return nil, fmt.Errorf("prune control artifacts: %w", err)
+		}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT evidence_reference FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch)
+	if err != nil {
+		return nil, fmt.Errorf("select expired membership evidence: %w", err)
+	}
+	var refs []string
+	for rows.Next() {
+		var ref string
+		if err := rows.Scan(&ref); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("scan expired membership evidence: %w", err)
+		}
+		if ref != "" {
+			refs = append(refs, ref)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, fmt.Errorf("iterate expired membership evidence: %w", err)
+	}
+	rows.Close()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch); err != nil {
+		return nil, fmt.Errorf("prune membership requests: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit control retention: %w", err)
+	}
+	return refs, nil
+}
 
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = strings.TrimSpace(path)

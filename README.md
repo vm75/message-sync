@@ -44,6 +44,7 @@ Remote providers do not all offer deterministic client-assigned create IDs. When
 - **Optional AI review**: `OPENROUTER_API_KEY` plus `OPENROUTER_ALLOW_TRAINING=false` enables bounded asynchronous image assessment (default model `openrouter/free`). Results are advisory only; malformed, unavailable, or privacy-ineligible analysis falls back to human review.
 - **Membership fulfillment**: Approved requests use narrow WhatsApp/Discord administration boundaries for direct addition or role assignment. WhatsApp invite fallback remains pending until membership is confirmed and the old invite is rotated; provider failures expose only safe status classes.
 - **Membership review**: Authenticated admins and operators can filter and review requests, inspect protected evidence, and make audited approve/reject/needs-review decisions. Concurrent stale decisions return a conflict; AI remains advisory.
+- **Control-plane retention**: Expired sessions/challenges/invites and terminal membership requests are pruned in bounded batches; terminal evidence is removed from the private evidence directory after 30 days. Routing state is not affected.
 
 ## Quick Start
 

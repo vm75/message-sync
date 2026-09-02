@@ -29,6 +29,12 @@ timeout 4s podman run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=
 
 The data directory is disposable because the current SQLite schema is a fresh-database schema; no migration or compatibility path is supported before the first release. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
 
+The control-plane retention test verifies bounded deletion of expired auth
+artifacts and terminal membership requests while returning only opaque evidence
+references for private-file cleanup. Container smoke tests use a data volume
+writable by UID 1000 because the image deliberately runs as the non-root
+`message-sync` user.
+
 Create delivery tests also cover explicit pre-acceptance retries, ambiguous no-blind-retry behavior, restart-safe create-step completion, and audio/sticker compatibility companions. These tests intentionally do not claim exactly-once remote creation for providers without deterministic client-assigned operation IDs.
 
 Recovery tests assert that queued, retrying, and awaiting-replay delivery keeps the source checkpoint replayable, that pending positions block later positions, and that replay reuses the existing canonical/message-copy mapping.

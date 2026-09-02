@@ -102,6 +102,13 @@ bounded asynchronous job. Only structured bounded results are stored in
 `control.db`; raw prompts/responses are discarded. PDFs remain human-review
 material, provider failures are unavailable/failed states, and no AI result
 can advance or decide membership.
+Control-plane retention runs at startup and on the daily maintenance tick in
+bounded batches. Expired or revoked sessions, consumed/expired invites and
+reset tokens, expired email challenges, and terminal membership requests older
+than 30 days are removed. Cleanup returns only opaque evidence references so
+the application can unlink corresponding files under the dedicated evidence
+directory; routing state in `sync.db` is never touched.
+
 Approved membership fulfillment is implemented outside canonical routing. It
 resolves endpoint aliases at action time, checks WhatsApp membership before
 adding a participant, assigns Discord roles through the existing bot session,

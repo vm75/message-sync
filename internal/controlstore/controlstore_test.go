@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestOpenCreatesSensitiveSchemaAndRestrictsFile(t *testing.T) {
@@ -63,5 +64,41 @@ func TestControlSchemaConstraintsAndNoRoutingSchemaMix(t *testing.T) {
 	}
 	if routingTables != 0 {
 		t.Fatal("control database contains routing tables")
+	}
+}
+
+func TestPruneRetentionRemovesBoundedTerminalStateAndReturnsEvidence(t *testing.T) {
+	s, err := Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	now := time.Now().UnixMilli()
+	if _, err := s.db.Exec(`INSERT INTO users(id,username,password_hash,role,created_at,updated_at) VALUES('u','operator','hash','operator',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,creator_user_id,created_at,updated_at) VALUES('p','token','test','whatsapp','alias','u',?,?)`, now, now); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-48 * time.Hour).UnixMilli()
+	if _, err := s.db.Exec(`INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,evidence_reference,created_at,updated_at) VALUES('r','p','rejected','private@example.test','failed','opaque-evidence',?,?)`, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO email_challenges(id,membership_request_id,token_hash,expires_at) VALUES('c','r','challenge-hash',?)`, old); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := s.PruneRetention(context.Background(), time.Now(), 24*time.Hour, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0] != "opaque-evidence" {
+		t.Fatalf("evidence refs = %v", refs)
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM membership_requests`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("terminal request count = %d, want 0", count)
 	}
 }

@@ -312,6 +312,19 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	} else if deleted > 0 {
 		logger.Info("retention prune completed", "deleted_messages", deleted)
 	}
+	pruneControl := func() {
+		refs, err := controlStore.PruneRetention(ctx, time.Now().UTC(), 30*24*time.Hour, 100)
+		if err != nil {
+			safelog.Error(logger, "control retention prune failed", "control_retention", err)
+			return
+		}
+		for _, ref := range refs {
+			if filepath.Base(ref) == ref {
+				_ = os.Remove(filepath.Join(dataDir, "membership-evidence", ref))
+			}
+		}
+	}
+	pruneControl()
 
 	runWhatsAppChatCleanup(ctx, logger, syncStore.DB(), wa)
 
@@ -355,6 +368,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			} else if deleted > 0 {
 				logger.Info("retention prune completed", "deleted_messages", deleted)
 			}
+			pruneControl()
 			runWhatsAppChatCleanup(ctx, logger, syncStore.DB(), wa)
 			if metrics, err := syncStore.Metrics(ctx, syncDBPath); err == nil {
 				logger.Info("storage metrics",
