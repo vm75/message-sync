@@ -171,7 +171,10 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 	p, ok := principalFromContext(r.Context())
-	if !ok { WriteError(w, http.StatusUnauthorized, "unauthorized"); return }
+	if !ok {
+		WriteError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	_ = WriteJSON(w, http.StatusOK, p)
 }
 
@@ -346,7 +349,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" {
+		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" || (strings.HasPrefix(r.URL.Path, "/api/verification/") && !strings.HasPrefix(r.URL.Path, "/api/verification/pipelines") && !strings.HasPrefix(r.URL.Path, "/api/verification/requests/")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -368,7 +371,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 }
 
 func requiresAdmin(path string) bool {
-	return path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit"
+	return path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit" || path == "/api/verification/pipelines" || strings.HasPrefix(path, "/api/verification/pipelines/") || strings.HasPrefix(path, "/api/verification/requests/")
 }
 
 func (s *Server) extractToken(r *http.Request) string {

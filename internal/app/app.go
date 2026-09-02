@@ -291,6 +291,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Telegram:       tg,
 		Delivery:       mesh,
 		OnConfigChange: onConfigChange,
+		EvidenceDir:    filepath.Join(dataDir, "membership-evidence"),
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)

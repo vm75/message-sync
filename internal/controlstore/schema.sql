@@ -62,7 +62,7 @@ CREATE TABLE IF NOT EXISTS verification_pipelines (
 CREATE TABLE IF NOT EXISTS membership_requests (
     id TEXT PRIMARY KEY,
     pipeline_id TEXT NOT NULL REFERENCES verification_pipelines(id),
-    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'fulfilled')),
+    status TEXT NOT NULL CHECK (status IN ('pending_email', 'pending', 'approved', 'rejected', 'fulfilled', 'cancelled', 'expired')),
     applicant_work_email TEXT NOT NULL,
     applicant_whatsapp_phone TEXT,
     applicant_discord_user_id TEXT,

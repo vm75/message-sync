@@ -84,6 +84,14 @@ platform permits. It has no routing tables and is never queried by the
 canonical message router. The daemon closes it independently during shutdown;
 the existing `sync.db` and `whatsapp.db` boundaries remain unchanged.
 
+Verification pipelines and membership requests remain in this control-plane
+boundary. Pipeline administration resolves the configured endpoint alias
+against `sync.db` at mutation time but does not copy its remote target into
+`control.db`. Public pipeline responses expose only a label and the fields
+needed to render intake. Evidence is written with a random filename below the
+dedicated private `/data/membership-evidence` path, mode `0600`, after bounded
+MIME/size checks; request deletion removes the file and control record.
+
 ### SQLite Configuration Tables
 
 - `global_config`: Single-row table (`id = 1`) storing global behavior settings:

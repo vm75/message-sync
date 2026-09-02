@@ -60,6 +60,7 @@ type Options struct {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
 	OnConfigChange func(ctx context.Context) error
+	EvidenceDir    string
 }
 
 type Server struct {
@@ -78,6 +79,7 @@ type Server struct {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
 	onConfigChange func(ctx context.Context) error
+	evidenceDir    string
 	listener       net.Listener
 }
 
@@ -118,6 +120,7 @@ func NewServer(opts Options) *Server {
 		telegram:          opts.Telegram,
 		delivery:          opts.Delivery,
 		onConfigChange:    opts.OnConfigChange,
+		evidenceDir:       opts.EvidenceDir,
 	}
 
 	s.registerRoutes()
@@ -150,6 +153,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/users/{id}/active", s.handleSetUserActive)
 	s.mux.HandleFunc("POST /api/users/{id}/reset-token", s.handleCreateResetToken)
 	s.mux.HandleFunc("GET /api/audit", s.handleListAudit)
+	s.mux.HandleFunc("GET /api/verification/pipelines", s.handleListPipelines)
+	s.mux.HandleFunc("POST /api/verification/pipelines", s.handleCreatePipeline)
+	s.mux.HandleFunc("PUT /api/verification/pipelines/{id}", s.handleUpdatePipeline)
+	s.mux.HandleFunc("DELETE /api/verification/pipelines/{id}", s.handleDeletePipeline)
+	s.mux.HandleFunc("GET /api/verification/{token}", s.handlePublicPipeline)
+	s.mux.HandleFunc("POST /api/verification/{token}", s.handlePublicIntake)
+	s.mux.HandleFunc("DELETE /api/verification/requests/{id}", s.handleDeleteMembershipRequest)
 
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
