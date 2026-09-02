@@ -39,6 +39,7 @@ type pollPresentation struct {
 type pollAggregate struct {
 	Options []store.PollOption
 	Counts  map[int]int
+	Partial bool
 }
 
 type mutationKey struct {
@@ -536,6 +537,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				if err := r.store.SavePollProviderRef(ctx, store.PollProviderRef{CanonicalID: canonicalID, EndpointID: string(incoming.Endpoint), Provider: incoming.PollProvider, Reference: incoming.PollProviderReference}); err != nil {
 					return fmt.Errorf("save source poll provider reference: %w", err)
 				}
+				if incoming.PollSourceUnavailable {
+					if err := r.store.MarkPollEndpointUnavailable(ctx, canonicalID, string(incoming.Endpoint)); err != nil {
+						return fmt.Errorf("mark source poll unavailable: %w", err)
+					}
+				}
 			}
 		}
 		r.mu.Lock()
@@ -716,6 +722,9 @@ func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (str
 	}
 	var builder strings.Builder
 	builder.WriteString("📊 Live results across synced groups\n")
+	if aggregate.Partial {
+		builder.WriteString("Partial/unavailable source\n")
+	}
 	for _, option := range aggregate.Options {
 		fmt.Fprintf(&builder, "Option %d — %d\n", option.Index+1, aggregate.Counts[option.Index])
 	}
@@ -731,7 +740,11 @@ func (r *Router) readPollAggregate(ctx context.Context, canonicalID string) (pol
 	if err != nil {
 		return pollAggregate{}, err
 	}
-	return pollAggregate{Options: options, Counts: counts}, nil
+	partial, err := r.store.HasUnavailablePollEndpoint(ctx, canonicalID)
+	if err != nil {
+		return pollAggregate{}, err
+	}
+	return pollAggregate{Options: options, Counts: counts, Partial: partial}, nil
 }
 
 func (r *Router) ensurePollResultCompanion(ctx context.Context, canonicalID string, endpoint transport.EndpointID) error {

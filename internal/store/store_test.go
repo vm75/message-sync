@@ -541,6 +541,13 @@ func TestProviderNeutralPollStateUsesOneEndpointContribution(t *testing.T) {
 	if counts[0] != 1 || counts[1] != 1 || counts[2] != 1 {
 		t.Fatalf("exclusive aggregate counts = %#v, want option 0=1, 1=1, 2=1", counts)
 	}
+	if err := store.MarkPollEndpointUnavailable(ctx, "canon-poll-state", "endpoint3"); err != nil {
+		t.Fatal(err)
+	}
+	partial, err := store.HasUnavailablePollEndpoint(ctx, "canon-poll-state")
+	if err != nil || !partial {
+		t.Fatalf("unavailable endpoint marker = %v, %v", partial, err)
+	}
 }
 
 func TestPollProviderReferenceIsOpaqueAndRestartSafe(t *testing.T) {

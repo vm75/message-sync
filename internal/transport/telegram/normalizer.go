@@ -207,6 +207,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			return ""
 		}(),
 		PollProviderReference: providerReference,
+		PollSourceUnavailable: providerReference != "",
 		Mentions:              mentions,
 		ReplyTo:               replyTo,
 		QuotedText:            quotedText,

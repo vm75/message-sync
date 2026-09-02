@@ -936,6 +936,29 @@ func (s *Store) ReplacePollEndpointSnapshot(ctx context.Context, canonicalID, en
 	return tx.Commit()
 }
 
+func (s *Store) MarkPollEndpointUnavailable(ctx context.Context, canonicalID, endpointID string) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO poll_endpoint_sources(canonical_id, endpoint_id, source_kind) VALUES (?, ?, 'unavailable') ON CONFLICT(canonical_id, endpoint_id) DO UPDATE SET source_kind = 'unavailable'`, canonicalID, endpointID)
+	return wrapDB("mark poll endpoint unavailable", err)
+}
+
+func (s *Store) HasUnavailablePollEndpoint(ctx context.Context, canonicalID string) (bool, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return false, err
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM poll_endpoint_sources WHERE canonical_id = ? AND source_kind = 'unavailable'`, canonicalID).Scan(&count)
+	if err != nil {
+		return false, wrapDB("check unavailable poll endpoint", err)
+	}
+	return count > 0, nil
+}
+
 func (s *Store) GetPollAggregateCounts(ctx context.Context, canonicalID string) (map[int]int, error) {
 	if err := requireOpaque("canonical id", canonicalID); err != nil {
 		return nil, err

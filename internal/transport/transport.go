@@ -71,6 +71,7 @@ type Incoming struct {
 	PollSnapshot          map[int]int
 	PollProvider          string
 	PollProviderReference string
+	PollSourceUnavailable bool
 }
 
 type Outgoing struct {

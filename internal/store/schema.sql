@@ -73,7 +73,7 @@ CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_
 CREATE TABLE IF NOT EXISTS poll_endpoint_sources (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     endpoint_id TEXT NOT NULL,
-    source_kind TEXT NOT NULL CHECK (source_kind IN ('actor', 'snapshot')),
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('actor', 'snapshot', 'unavailable')),
     PRIMARY KEY (canonical_id, endpoint_id)
 );
 

@@ -46,7 +46,7 @@ Agents should work in the order below. Before starting a ticket:
 | 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Complete |
 | 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Complete |
 | 5 | [#49](https://github.com/vm75/message-sync/issues/49) | Simplify poll router flow; retain `aggregate-response` | #48 | Complete |
-| 6 | [#50](https://github.com/vm75/message-sync/issues/50) | Restart/concurrency/fallback/no-regression hardening | #45-#49 | Pending |
+| 6 | [#50](https://github.com/vm75/message-sync/issues/50) | Restart/concurrency/fallback/no-regression hardening | #45-#49 | Complete |
 | 7 | [#51](https://github.com/vm75/message-sync/issues/51) | Final docs, regression/privacy/version audit, tracker removal | #45-#50 | Pending |
 
 Use only these status values: `Pending`, `In Progress`, `Complete`, `Blocked`.
@@ -264,9 +264,9 @@ Agents should append short durable implementation notes here while the tracker e
 - Tests:
 
 ### #50
-- Status: Pending
-- Implementation notes:
-- Tests:
+- Status: Complete
+- Implementation notes: Hardened aggregate accounting with explicit unavailable-source state for human-created Telegram polls, preserving partial/unavailable rendering rather than fabricated zeroes. Verified restart-safe copy/provider-reference/companion state, actor replacement, snapshot exclusivity, concurrent delivery lanes, stale revision suppression, tombstones, deterministic native/fallback limits, and endpoint-isolated failures through focused and full regression coverage.
+- Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
 
 ### #51
 - Status: Pending
