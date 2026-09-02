@@ -10,8 +10,6 @@
 4. transport adapters for WhatsApp (`tulir/whatsmeow`), Discord (gateway/webhooks), and Telegram (Bot API long polling);
 5. transport-neutral canonical IDs so transport adapters do not become canonical identity.
 
-The previous Node/Baileys project is a behavioral reference only, not the architecture baseline.
-
 ## 2. Trust and persistence boundaries
 
 ```text
@@ -140,7 +138,7 @@ state never enters canonical routing.
 
 The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, for Discord it is the channel ID, and for Telegram it is the negative group/supergroup chat ID. Human-readable guild/channel/group/chat metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
-Each validated configured endpoint must belong to exactly one sync set. Arbitrary routing graphs are post-MVP.
+Each validated configured endpoint must belong to exactly one sync set.
 
 ### REST API, Web UI & Authentication
 
@@ -488,9 +486,11 @@ The Discord adapter replaces DiscordGo's default logger with a fixed-field warni
 
 The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`; ambiguous dual-source configuration is rejected and the token is never written to `sync.db`. The Bot API client's default raw update/error logging is not enabled: application-visible client errors pass through the fixed safe-log classifier, and ingress buffer/lifecycle logs contain only fixed event names, safe endpoint aliases, normalized kinds, and reasons. The long-poll client starts at the persisted generic `telegram` cursor plus one, advances its Bot API `getUpdates` offset in process, and applies bounded retry/backoff (including Telegram `retry_after` responses). The adapter rejects duplicate/older update IDs within the running process before normalization; Telegram's retained update window limits how far a restart can recover.
 
-## 19. Deliberate MVP exclusions
+## 19. Scope boundaries
 
-Dynamic Discord thread endpoint creation, automatic outbound forum-post creation, and directional bridge modes remain excluded. Telegram webhook ingestion, local Bot API server deployment, dynamic forum-topic endpoints, injecting unified aggregate counts into provider-native local poll counters, exact poll-close parity, unsupported provider-specific poll semantics, and MTProto user-account sessions remain excluded. Events/locations/contacts, dedicated-number provisioning, cloud persistence, general-purpose email/SMS notifications, broad LinkedIn/enrichment, automated identity-proof verification, and historical ZIP bootstrap remain deferred. Membership-specific email challenges and advisory evidence analysis are implemented only within the isolated control plane. See `docs/ASPIRATIONAL_FEATURES.md`.
+`README.md` is authoritative for supported product behavior. This architecture document records implemented components, invariants, and known provider constraints rather than maintaining a feature backlog. New scope must be justified independently and documented here only after it changes an implemented architecture or invariant.
+
+Membership-specific email challenges and advisory evidence analysis are implemented only within the isolated control plane described above.
 
 ## 20. Reliability verification
 
