@@ -355,7 +355,7 @@ func TestWhatsAppEndpoints_Logout(t *testing.T) {
 	rec = httptest.NewRecorder()
 	srvNoWA.Handler().ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for a token unknown to this server, got %d", rec.Code)
 	}
 }

@@ -25,8 +25,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("control database path is required")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("create control database directory: %w", err)
+	if path != ":memory:" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, fmt.Errorf("create control database directory: %w", err)
+		}
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -64,9 +66,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("commit control schema initialization: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("secure control database permissions: %w", err)
+	if path != ":memory:" {
+		if err := os.Chmod(path, 0o600); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("secure control database permissions: %w", err)
+		}
 	}
 	return &Store{db: db}, nil
 }

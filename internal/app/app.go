@@ -284,6 +284,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Addr:           apiAddr,
 		Logger:         logger,
 		DB:             syncStore.DB(),
+		ControlDB:      controlStore.DB(),
 		Secret:         []byte(secret),
 		WhatsApp:       waService,
 		Discord:        dc,

@@ -1,17 +1,18 @@
 package api
 
 import (
-	"crypto/hmac"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vm75/message-sync/internal/safelog"
@@ -24,250 +25,261 @@ const (
 	maxPasswordLength = 72
 )
 
-type sessionClaims struct {
-	Subject   string `json:"sub"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
-	Nonce     string `json:"nonce"`
+var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,63}$`)
+
+type Principal struct{ ID, Role, Username string }
+type principalContextKey struct{}
+
+func principalFromContext(ctx context.Context) (Principal, bool) {
+	p, ok := ctx.Value(principalContextKey{}).(Principal)
+	return p, ok
 }
 
+type loginFailure struct {
+	count int
+	until time.Time
+}
 type SessionManager struct {
-	secret   []byte
+	db       *sql.DB
 	tokenTTL time.Duration
+	mu       sync.Mutex
+	failed   map[string]loginFailure
 }
 
-func NewSessionManager(secret []byte, ttl time.Duration) (*SessionManager, error) {
-	if len(secret) == 0 {
-		secret = make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			return nil, fmt.Errorf("generate random session secret: %w", err)
-		}
-	} else if len(secret) < 32 {
-		return nil, errors.New("session secret must be at least 32 bytes")
+func NewSessionManager(db *sql.DB, ttl time.Duration) (*SessionManager, error) {
+	if db == nil {
+		return nil, errors.New("control database is required")
 	}
-
 	if ttl == 0 {
 		ttl = defaultSessionTTL
 	}
-
-	secretCopy := append([]byte(nil), secret...)
-	return &SessionManager{
-		secret:   secretCopy,
-		tokenTTL: ttl,
-	}, nil
+	if ttl < time.Second {
+		return nil, errors.New("session TTL must be at least one second")
+	}
+	return &SessionManager{db: db, tokenTTL: ttl, failed: make(map[string]loginFailure)}, nil
 }
 
-func (sm *SessionManager) CreateToken() (string, error) {
-	nonceBytes := make([]byte, 16)
-	if _, err := rand.Read(nonceBytes); err != nil {
-		return "", fmt.Errorf("generate session nonce: %w", err)
+func randomOpaqueID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate opaque ID: %w", err)
 	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
 
-	now := time.Now().UTC()
-	claims := sessionClaims{
-		Subject:   "admin",
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(sm.tokenTTL).Unix(),
-		Nonce:     hex.EncodeToString(nonceBytes),
+func newBearerToken() (string, string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", "", fmt.Errorf("generate session token: %w", err)
 	}
+	token := base64.RawURLEncoding.EncodeToString(b)
+	h := sha256.Sum256([]byte(token))
+	return token, base64.RawURLEncoding.EncodeToString(h[:]), nil
+}
 
-	payloadBytes, err := json.Marshal(claims)
+func normalizeUsername(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+func validUsername(s string) bool       { return usernamePattern.MatchString(s) }
+
+func (sm *SessionManager) createSession(ctx context.Context, userID string) (string, error) {
+	token, hash, err := newBearerToken()
 	if err != nil {
-		return "", fmt.Errorf("marshal session claims: %w", err)
+		return "", err
 	}
-
-	sig := sm.sign(payloadBytes)
-	token := base64.RawURLEncoding.EncodeToString(payloadBytes) + "." + base64.RawURLEncoding.EncodeToString(sig)
+	now := time.Now().UTC()
+	_, err = sm.db.ExecContext(ctx, `INSERT INTO sessions(token_hash,user_id,expires_at,created_at,last_seen_at) VALUES(?,?,?,?,?)`, hash, userID, now.Add(sm.tokenTTL).UnixMilli(), now.UnixMilli(), now.UnixMilli())
+	if err != nil {
+		return "", fmt.Errorf("save session: %w", err)
+	}
 	return token, nil
 }
 
-func (sm *SessionManager) ValidateToken(tokenStr string) bool {
-	parts := strings.Split(tokenStr, ".")
-	if len(parts) != 2 {
-		return false
+// CreateToken is retained for internal package tests and small API fixtures.
+// It still creates a hashed, database-backed session; it is not an alternate
+// token format or authentication path.
+func (sm *SessionManager) CreateToken() (string, error) {
+	var userID string
+	if err := sm.db.QueryRow(`SELECT id FROM users WHERE active = 1 ORDER BY created_at LIMIT 1`).Scan(&userID); err != nil {
+		return "", err
 	}
-
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return false
-	}
-
-	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return false
-	}
-
-	expectedSig := sm.sign(payloadBytes)
-	if !hmac.Equal(sigBytes, expectedSig) {
-		return false
-	}
-
-	var claims sessionClaims
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
-		return false
-	}
-
-	now := time.Now().UTC().Unix()
-	if claims.Subject != "admin" {
-		return false
-	}
-	if claims.ExpiresAt < now {
-		return false
-	}
-	// Allow 60 seconds clock skew in the future for IssuedAt
-	if claims.IssuedAt > now+60 {
-		return false
-	}
-
-	return true
+	return sm.createSession(context.Background(), userID)
 }
 
-func (sm *SessionManager) sign(data []byte) []byte {
-	mac := hmac.New(sha256.New, sm.secret)
-	mac.Write(data)
-	return mac.Sum(nil)
+func tokenHash(token string) string {
+	h := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+func (sm *SessionManager) principal(ctx context.Context, token string) (Principal, error) {
+	if token == "" {
+		return Principal{}, sql.ErrNoRows
+	}
+	var p Principal
+	var expires int64
+	err := sm.db.QueryRowContext(ctx, `SELECT u.id,u.role,u.username,s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.revoked_at IS NULL AND u.active=1`, tokenHash(token)).Scan(&p.ID, &p.Role, &p.Username, &expires)
+	if err != nil || expires <= time.Now().UTC().UnixMilli() {
+		return Principal{}, sql.ErrNoRows
+	}
+	_, _ = sm.db.ExecContext(ctx, `UPDATE sessions SET last_seen_at=? WHERE token_hash=?`, time.Now().UTC().UnixMilli(), tokenHash(token))
+	return p, nil
+}
+
+func (sm *SessionManager) revoke(ctx context.Context, token string) error {
+	if token == "" {
+		return nil
+	}
+	_, err := sm.db.ExecContext(ctx, `UPDATE sessions SET revoked_at=? WHERE token_hash=?`, time.Now().UTC().UnixMilli(), tokenHash(token))
+	return err
+}
+
+func (sm *SessionManager) revokeOtherSessions(ctx context.Context, userID, currentToken string) error {
+	_, err := sm.db.ExecContext(ctx, `UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL AND token_hash<>?`, time.Now().UTC().UnixMilli(), userID, tokenHash(currentToken))
+	return err
 }
 
 type AuthStatusResponse struct {
 	IsSetup bool `json:"isSetup"`
 }
-
-type AuthPasswordRequest struct {
+type AuthCredentialsRequest struct {
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
-
 type AuthTokenResponse struct {
-	Token string `json:"token"`
+	Token string    `json:"token"`
+	User  Principal `json:"user"`
+}
+
+func (s *Server) controlAvailable(w http.ResponseWriter) bool {
+	if s.controlDB == nil || s.sessions == nil {
+		WriteError(w, http.StatusServiceUnavailable, "authentication unavailable")
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+	if !s.controlAvailable(w) {
 		return
 	}
-
-	var hash string
-	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&hash)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	var count int
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
 		safelog.Error(s.logger, "query auth status failed", "auth_status", err)
 		WriteError(w, http.StatusInternalServerError, "failed to check auth status")
 		return
 	}
-
-	isSetup := hash != ""
-	_ = WriteJSON(w, http.StatusOK, AuthStatusResponse{IsSetup: isSetup})
+	_ = WriteJSON(w, http.StatusOK, AuthStatusResponse{IsSetup: count > 0})
 }
 
 func (s *Server) handleAuthSetup(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+	if !s.controlAvailable(w) {
 		return
 	}
-
-	var req AuthPasswordRequest
+	var req AuthCredentialsRequest
 	if err := ReadJSON(r, &req); err != nil {
 		WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
+	username := normalizeUsername(req.Username)
+	if !validUsername(username) {
+		WriteError(w, http.StatusBadRequest, "invalid username")
+		return
+	}
 	if len(req.Password) < minPasswordLength || len(req.Password) > maxPasswordLength {
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("password must be between %d and %d characters", minPasswordLength, maxPasswordLength))
+		WriteError(w, http.StatusBadRequest, "invalid password")
 		return
 	}
-
-	var existingHash string
-	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&existingHash)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		safelog.Error(s.logger, "check existing password failed", "auth_setup_check", err)
-		WriteError(w, http.StatusInternalServerError, "failed to check existing auth setup")
+	var count int
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		safelog.Error(s.logger, "check auth setup failed", "auth_setup_check", err)
+		WriteError(w, http.StatusInternalServerError, "failed to check auth setup")
 		return
 	}
-	if existingHash != "" {
-		WriteError(w, http.StatusBadRequest, "admin password already configured")
+	if count != 0 {
+		WriteError(w, http.StatusBadRequest, "account setup is already complete")
 		return
 	}
-
-	hashBytes, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		safelog.Error(s.logger, "password hash failed", "auth_password_hash", err)
-		WriteError(w, http.StatusInternalServerError, "failed to process password")
+		WriteError(w, 500, "failed to process password")
 		return
 	}
-
-	_, err = s.db.ExecContext(r.Context(), `
-		INSERT INTO global_config (id, admin_password_hash) VALUES (1, ?)
-		ON CONFLICT(id) DO UPDATE SET admin_password_hash = excluded.admin_password_hash
-	`, string(hashBytes))
+	id, err := randomOpaqueID()
 	if err != nil {
-		safelog.Error(s.logger, "save password hash failed", "auth_password_save", err)
-		WriteError(w, http.StatusInternalServerError, "failed to save password")
+		safelog.Error(s.logger, "user ID generation failed", "auth_user_id", err)
+		WriteError(w, 500, "failed to create account")
 		return
 	}
-
-	s.logger.Info("admin password configured successfully")
-
-	token, err := s.sessions.CreateToken()
+	now := time.Now().UTC().UnixMilli()
+	tx, err := s.controlDB.BeginTx(r.Context(), nil)
+	if err == nil {
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES(?,?,?,'admin',1,?,?)`, id, username, string(hash), now, now)
+	}
 	if err != nil {
-		safelog.Error(s.logger, "generate session token failed", "auth_session", err)
-		WriteError(w, http.StatusInternalServerError, "failed to create session")
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+		safelog.Error(s.logger, "save initial account failed", "auth_setup_save", err)
+		WriteError(w, 500, "failed to create account")
 		return
 	}
-
-	s.setSessionCookie(w, token, int(s.sessions.tokenTTL.Seconds()))
-	_ = WriteJSON(w, http.StatusOK, AuthTokenResponse{Token: token})
+	if err = tx.Commit(); err != nil {
+		safelog.Error(s.logger, "commit initial account failed", "auth_setup_commit", err)
+		WriteError(w, 500, "failed to create account")
+		return
+	}
+	s.issueSession(w, r, id, username, "admin")
 }
 
 func (s *Server) handleAuthLogin(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+	if !s.controlAvailable(w) {
 		return
 	}
-
-	var req AuthPasswordRequest
+	var req AuthCredentialsRequest
 	if err := ReadJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, 400, "invalid request body")
 		return
 	}
-
-	if req.Password == "" {
-		WriteError(w, http.StatusBadRequest, "password is required")
+	key := clientKey(r)
+	if !s.allowLogin(key) {
+		WriteError(w, 429, "try again later")
 		return
 	}
-
-	var storedHash string
-	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&storedHash)
-	if errors.Is(err, sql.ErrNoRows) || storedHash == "" {
-		WriteError(w, http.StatusBadRequest, "admin password not configured")
-		return
-	}
+	username := normalizeUsername(req.Username)
+	var p Principal
+	var hash string
+	err := s.controlDB.QueryRowContext(r.Context(), `SELECT id,username,role,password_hash FROM users WHERE username=? AND active=1`, username).Scan(&p.ID, &p.Username, &p.Role, &hash)
 	if err != nil {
-		safelog.Error(s.logger, "fetch password hash failed", "auth_login_lookup", err)
-		WriteError(w, http.StatusInternalServerError, "authentication failed")
+		hash = "$2a$10$7EqJtq98hPqEX7fNZaFWoOe0VdZK0VdJf7hQJmJj1L2R7F1T9D3mK"
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil || err != nil {
+		s.recordLoginFailure(key)
+		WriteError(w, 401, "invalid credentials")
 		return
 	}
+	s.clearLoginFailure(key)
+	s.issueSession(w, r, p.ID, p.Username, p.Role)
+}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(req.Password)); err != nil {
-		s.logger.Warn("admin login attempt rejected")
-		WriteError(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-
-	s.logger.Info("admin login successful")
-
-	token, err := s.sessions.CreateToken()
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, id, username, role string) {
+	token, err := s.sessions.createSession(r.Context(), id)
 	if err != nil {
-		safelog.Error(s.logger, "generate session token failed", "auth_session", err)
-		WriteError(w, http.StatusInternalServerError, "failed to create session")
+		safelog.Error(s.logger, "create session failed", "auth_session", err)
+		WriteError(w, 500, "failed to create session")
 		return
 	}
-
-	s.setSessionCookie(w, token, int(s.sessions.tokenTTL.Seconds()))
-	_ = WriteJSON(w, http.StatusOK, AuthTokenResponse{Token: token})
+	s.setSessionCookie(w, token, int(s.sessions.tokenTTL.Seconds()), r)
+	_ = WriteJSON(w, 200, AuthTokenResponse{Token: token, User: Principal{ID: id, Username: username, Role: role}})
 }
 
 func (s *Server) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
-	s.setSessionCookie(w, "", -1)
-	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	if !s.controlAvailable(w) {
+		return
+	}
+	if err := s.sessions.revoke(r.Context(), s.extractToken(r)); err != nil {
+		safelog.Error(s.logger, "revoke session failed", "auth_logout", err)
+	}
+	s.setSessionCookie(w, "", -1, r)
+	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
 }
 
 type AuthChangePasswordRequest struct {
@@ -276,119 +288,112 @@ type AuthChangePasswordRequest struct {
 }
 
 func (s *Server) handleAuthChangePassword(w http.ResponseWriter, r *http.Request) {
-	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+	if !s.controlAvailable(w) {
 		return
 	}
-
+	p, ok := principalFromContext(r.Context())
+	if !ok {
+		WriteError(w, 401, "unauthorized")
+		return
+	}
 	var req AuthChangePasswordRequest
 	if err := ReadJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, 400, "invalid request body")
 		return
 	}
-
-	if req.CurrentPassword == "" {
-		WriteError(w, http.StatusBadRequest, "current password is required")
+	if req.CurrentPassword == "" || len(req.NewPassword) < minPasswordLength || len(req.NewPassword) > maxPasswordLength {
+		WriteError(w, 400, "invalid password")
 		return
 	}
-
-	if len(req.NewPassword) < minPasswordLength || len(req.NewPassword) > maxPasswordLength {
-		WriteError(w, http.StatusBadRequest, fmt.Sprintf("new password must be between %d and %d characters", minPasswordLength, maxPasswordLength))
+	var oldHash string
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id=? AND active=1`, p.ID).Scan(&oldHash); err != nil || bcrypt.CompareHashAndPassword([]byte(oldHash), []byte(req.CurrentPassword)) != nil {
+		WriteError(w, 401, "invalid current password")
 		return
 	}
-
-	var storedHash string
-	err := s.db.QueryRowContext(r.Context(), `SELECT admin_password_hash FROM global_config WHERE id = 1`).Scan(&storedHash)
-	if errors.Is(err, sql.ErrNoRows) || storedHash == "" {
-		WriteError(w, http.StatusBadRequest, "admin password not configured")
-		return
-	}
-	if err != nil {
-		safelog.Error(s.logger, "fetch password hash failed", "auth_password_lookup", err)
-		WriteError(w, http.StatusInternalServerError, "failed to verify password")
-		return
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(req.CurrentPassword)); err != nil {
-		s.logger.Warn("change password rejected: invalid current password")
-		WriteError(w, http.StatusUnauthorized, "invalid current password")
-		return
-	}
-
-	newHashBytes, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
 		safelog.Error(s.logger, "password hash failed", "auth_password_hash", err)
-		WriteError(w, http.StatusInternalServerError, "failed to process new password")
+		WriteError(w, 500, "failed to process new password")
 		return
 	}
-
-	_, err = s.db.ExecContext(r.Context(), `UPDATE global_config SET admin_password_hash = ? WHERE id = 1`, string(newHashBytes))
-	if err != nil {
-		safelog.Error(s.logger, "update password hash failed", "auth_password_update", err)
-		WriteError(w, http.StatusInternalServerError, "failed to update password")
+	if _, err = s.controlDB.ExecContext(r.Context(), `UPDATE users SET password_hash=?,updated_at=? WHERE id=?`, string(newHash), time.Now().UTC().UnixMilli(), p.ID); err != nil {
+		safelog.Error(s.logger, "update password failed", "auth_password_update", err)
+		WriteError(w, 500, "failed to update password")
 		return
 	}
-
-	s.logger.Info("admin password updated successfully")
-	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	if err = s.sessions.revokeOtherSessions(r.Context(), p.ID, s.extractToken(r)); err != nil {
+		safelog.Error(s.logger, "revoke other sessions failed", "auth_password_revoke", err)
+		WriteError(w, 500, "failed to update password")
+		return
+	}
+	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
 }
 
-func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge int) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session",
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   maxAge,
-	})
+func (s *Server) setSessionCookie(w http.ResponseWriter, token string, maxAge int, r *http.Request) {
+	secure := r != nil && (r.TLS != nil || strings.EqualFold(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]), "https"))
+	http.SetCookie(w, &http.Cookie{Name: "session", Value: token, Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: maxAge})
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-
-		// Only intercept /api/* routes
-		if !strings.HasPrefix(path, "/api/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/") {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		// Public authentication routes
-		if path == "/api/auth/status" || path == "/api/auth/setup" || path == "/api/auth/login" || path == "/api/auth/logout" {
+		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" {
 			next.ServeHTTP(w, r)
 			return
 		}
-
-		// Check session authentication
-		token := s.extractToken(r)
-		if token == "" || s.sessions == nil || !s.sessions.ValidateToken(token) {
-			WriteError(w, http.StatusUnauthorized, "unauthorized")
+		if s.sessions == nil {
+			WriteError(w, 401, "unauthorized")
 			return
 		}
-
-		next.ServeHTTP(w, r)
+		p, err := s.sessions.principal(r.Context(), s.extractToken(r))
+		if err != nil {
+			WriteError(w, 401, "unauthorized")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, p)))
 	})
 }
 
 func (s *Server) extractToken(r *http.Request) string {
-	authHeader := r.Header.Get("Authorization")
-	if authHeader != "" {
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
-			token := strings.TrimSpace(parts[1])
-			if token != "" {
-				return token
-			}
+	if parts := strings.SplitN(r.Header.Get("Authorization"), " ", 2); len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+		if token := strings.TrimSpace(parts[1]); token != "" {
+			return token
 		}
 	}
-
-	if cookie, err := r.Cookie("session"); err == nil && cookie.Value != "" {
-		return cookie.Value
+	if c, err := r.Cookie("session"); err == nil {
+		return c.Value
 	}
-	if cookie, err := r.Cookie("token"); err == nil && cookie.Value != "" {
-		return cookie.Value
-	}
-
 	return ""
+}
+func clientKey(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+func (s *Server) allowLogin(key string) bool {
+	s.sessions.mu.Lock()
+	defer s.sessions.mu.Unlock()
+	f := s.sessions.failed[key]
+	return f.until.IsZero() || time.Now().After(f.until)
+}
+func (s *Server) recordLoginFailure(key string) {
+	s.sessions.mu.Lock()
+	defer s.sessions.mu.Unlock()
+	f := s.sessions.failed[key]
+	f.count++
+	if f.count >= 5 {
+		f.until = time.Now().Add(time.Minute)
+		f.count = 0
+	}
+	s.sessions.failed[key] = f
+}
+func (s *Server) clearLoginFailure(key string) {
+	s.sessions.mu.Lock()
+	defer s.sessions.mu.Unlock()
+	delete(s.sessions.failed, key)
 }

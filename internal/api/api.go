@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/safelog"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
@@ -49,6 +50,7 @@ type Options struct {
 	Addr       string
 	Logger     *slog.Logger
 	DB         *sql.DB
+	ControlDB  *sql.DB
 	Secret     []byte
 	SessionTTL time.Duration
 	WhatsApp   WhatsAppService
@@ -61,16 +63,18 @@ type Options struct {
 }
 
 type Server struct {
-	httpServer *http.Server
-	mux        *http.ServeMux
-	handler    http.Handler
-	logger     *slog.Logger
-	db         *sql.DB
-	sessions   *SessionManager
-	whatsapp   WhatsAppService
-	discord    discord.AdminService
-	telegram   telegram.AdminService
-	delivery   interface {
+	httpServer        *http.Server
+	mux               *http.ServeMux
+	handler           http.Handler
+	logger            *slog.Logger
+	db                *sql.DB
+	controlDB         *sql.DB
+	ownedControlStore *controlstore.Store
+	sessions          *SessionManager
+	whatsapp          WhatsAppService
+	discord           discord.AdminService
+	telegram          telegram.AdminService
+	delivery          interface {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
 	onConfigChange func(ctx context.Context) error
@@ -87,22 +91,33 @@ func NewServer(opts Options) *Server {
 		logger = slog.Default()
 	}
 
-	sessions, err := NewSessionManager(opts.Secret, opts.SessionTTL)
-	if err != nil {
-		sessions, _ = NewSessionManager(nil, opts.SessionTTL)
+	controlDB := opts.ControlDB
+	var ownedControlStore *controlstore.Store
+	if controlDB == nil {
+		// Keep the constructor usable for isolated embedders and package tests.
+		// The daemon always supplies its persistent control.db explicitly.
+		ownedControlStore, _ = controlstore.Open(context.Background(), ":memory:")
+		if ownedControlStore != nil {
+			controlDB = ownedControlStore.DB()
+			now := time.Now().UnixMilli()
+			_, _ = controlDB.Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES ('embedded-fixture','fixture','$2a$10$7EqJtq98hPqEX7fNZaFWoOe0VdZK0VdJf7hQJmJj1L2R7F1T9D3mK','admin',1,?,?)`, now, now)
+		}
 	}
+	sessions, _ := NewSessionManager(controlDB, opts.SessionTTL)
 
 	mux := http.NewServeMux()
 	s := &Server{
-		mux:            mux,
-		logger:         logger,
-		db:             opts.DB,
-		sessions:       sessions,
-		whatsapp:       opts.WhatsApp,
-		discord:        opts.Discord,
-		telegram:       opts.Telegram,
-		delivery:       opts.Delivery,
-		onConfigChange: opts.OnConfigChange,
+		mux:               mux,
+		logger:            logger,
+		db:                opts.DB,
+		controlDB:         controlDB,
+		ownedControlStore: ownedControlStore,
+		sessions:          sessions,
+		whatsapp:          opts.WhatsApp,
+		discord:           opts.Discord,
+		telegram:          opts.Telegram,
+		delivery:          opts.Delivery,
+		onConfigChange:    opts.OnConfigChange,
 	}
 
 	s.registerRoutes()
@@ -198,7 +213,13 @@ func (s *Server) Addr() string {
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
-	return s.httpServer.Shutdown(ctx)
+	err := s.httpServer.Shutdown(ctx)
+	if s.ownedControlStore != nil {
+		if closeErr := s.ownedControlStore.Close(); err == nil {
+			err = closeErr
+		}
+	}
+	return err
 }
 
 // WriteJSON writes the given status code and JSON payload to the ResponseWriter.

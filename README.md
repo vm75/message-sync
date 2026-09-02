@@ -97,21 +97,13 @@ docker compose up -d
 ### 3. Setup and Pairing
 
 1. Open `http://localhost:8080` in your web browser.
-2. Complete the initial admin password setup.
+2. Complete the first-run setup with an account username and password; this creates the first active administrator.
 3. Go to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp on your phone (**Linked Devices** → **Link a Device**).
 4. Configure WhatsApp, Discord, and Telegram endpoints and sync sets in the web console. For Telegram, send a group message first so the Bot API observation cache can discover the chat.
 
-## Resetting Admin Password
-
-If you forget the admin password, you can clear it to set up a new one on your next visit:
-
-```sh
-docker exec -it message-sync sqlite3 /data/sync.db "UPDATE global_config SET admin_password_hash = '' WHERE id = 1;"
-```
-
 ## Management API & Administration
 
-The authenticated management API provides transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. Runtime configuration reload updates routing targets across all active transports without restart.
+The authenticated management API uses per-user accounts and server-side sessions stored in the sensitive `control.db`. First-run `POST /api/auth/setup` accepts `username` and `password` and creates the first admin; `POST /api/auth/login` accepts the same fields. Sessions are revocable and deactivation-aware. Password changes revoke the user's other sessions. The API also provides transport-neutral endpoint CRUD at `/api/endpoints`. Endpoint records contain only `alias`, `transport`, `remoteId`, and optional `syncSetId`; transport credentials are configured separately and are never accepted by endpoint CRUD. The configuration model accepts `whatsapp`, `discord`, and `telegram`; Telegram endpoint `remoteId` values are negative Bot API group/supergroup chat IDs. Runtime configuration reload updates routing targets across all active transports without restart.
 
 - **Endpoint Management**: `GET`, `POST`, `PUT`, `DELETE` at `/api/endpoints`.
 - **Discord Administration**: `GET /api/discord/status` reports safe connection/webhook-readiness state; `GET /api/discord/channels` provides on-demand live discovery of guild text/announcement channels.

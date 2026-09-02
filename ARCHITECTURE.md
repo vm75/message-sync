@@ -111,7 +111,9 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 - `GET /`: Serves the Single Page Application (SPA) administration console built with vanilla HTML/CSS/JS (embedded directly into the binary via `go:embed` without CDN or runtime filesystem dependencies).
 - `GET /health`: Returns `{"status":"ok"}` with `200 OK` (public).
 - `GET /api/auth/status`: Returns `{"isSetup": bool}` indicating whether the admin password has been initialized.
-- `POST /api/auth/setup`: Accepts `{"password": "..."}` to configure the admin password on first run, saves the bcrypt hash into `sync.db` (`global_config.admin_password_hash`), issues an HMAC-signed session token, and sets an `HttpOnly` session cookie. Fails if already configured.
+- `POST /api/auth/setup`: Accepts `{"username": "...", "password": "..."}` on first run, creates the first active `admin` in `control.db`, stores only its bcrypt hash, and issues a random server-side session token in an `HttpOnly` cookie. Fails if an account already exists.
+- `POST /api/auth/login`: Verifies a username and password against an active `control.db` account and creates an independent hashed-token session. Authenticated requests resolve an opaque user ID, role, and safe username from the live session record; logout revokes only that session, and password changes revoke the user's other sessions.
+- `POST /api/auth/logout` and `POST /api/auth/change-password`: Revoke the current session or change the authenticated user's password. Expired, revoked, unknown, or deactivated sessions receive `401` without waiting for token expiry.
 - `POST /api/auth/login`: Accepts `{"password": "..."}`, verifies against stored bcrypt hash, and returns a session token / sets an `HttpOnly` session cookie.
 - `POST /api/auth/logout`: Clears the session cookie.
 - `POST /api/auth/change-password`: Accepts `{"currentPassword": "...", "newPassword": "..."}`, verifies existing password hash, and updates stored bcrypt hash.
