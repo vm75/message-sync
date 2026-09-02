@@ -14,16 +14,16 @@ func classifyTelegramFailure(err error) error {
 	}
 	var rateLimit *telegrambot.TooManyRequestsError
 	if errors.As(err, &rateLimit) {
-		return transport.NewFailure(transport.FailureRateLimited, time.Duration(rateLimit.RetryAfter)*time.Second, err)
+		return transport.NewFailureWithCertainty(transport.FailureRateLimited, time.Duration(rateLimit.RetryAfter)*time.Second, transport.SendUnknown, err)
 	}
 	switch {
 	case errors.Is(err, telegrambot.ErrorForbidden), errors.Is(err, telegrambot.ErrorUnauthorized):
-		return transport.NewFailure(transport.FailurePermissionDenied, 0, err)
+		return transport.NewFailureWithCertainty(transport.FailurePermissionDenied, 0, transport.SendUnknown, err)
 	case errors.Is(err, telegrambot.ErrorNotFound):
-		return transport.NewFailure(transport.FailureDestinationMissing, 0, err)
+		return transport.NewFailureWithCertainty(transport.FailureDestinationMissing, 0, transport.SendUnknown, err)
 	case errors.Is(err, telegrambot.ErrorBadRequest):
-		return transport.NewFailure(transport.FailurePayloadRejected, 0, err)
+		return transport.NewFailureWithCertainty(transport.FailurePayloadRejected, 0, transport.SendUnknown, err)
 	default:
-		return transport.NewFailure(transport.FailureTransient, 0, err)
+		return transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, err)
 	}
 }

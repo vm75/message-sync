@@ -139,3 +139,18 @@ CREATE TABLE IF NOT EXISTS delivery_operations (
 );
 CREATE INDEX IF NOT EXISTS idx_delivery_operations_endpoint_state ON delivery_operations(endpoint_id, state);
 CREATE INDEX IF NOT EXISTS idx_delivery_operations_active_age ON delivery_operations(state, updated_at);
+
+-- Create sub-steps contain no payload. They prevent a successful compatibility
+-- companion or provider create from being repeated while its copy is persisted.
+CREATE TABLE IF NOT EXISTS delivery_create_steps (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    operation_revision INTEGER NOT NULL CHECK (operation_revision >= 0),
+    step_kind TEXT NOT NULL CHECK (step_kind IN ('companion', 'primary')),
+    state TEXT NOT NULL CHECK (state IN ('pending', 'complete', 'ambiguous')),
+    remote_message_id TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, operation_revision, step_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_create_steps_state ON delivery_create_steps(state, updated_at);

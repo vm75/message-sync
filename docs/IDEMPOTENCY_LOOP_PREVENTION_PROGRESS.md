@@ -41,7 +41,7 @@ The implementation must re-read current code before changing it and must adapt t
 
 | Order | Issue | Status | Depends on | Purpose |
 |---:|---|---|---|---|
-| 1 | [#63 Idempotency: make outbound create retries ambiguity-safe and companion sends single-shot](https://github.com/vm75/message-sync/issues/63) | Pending | — | Prevent blind duplicate creates after ambiguous sends and prevent duplicate multi-send companions. |
+| 1 | [#63 Idempotency: make outbound create retries ambiguity-safe and companion sends single-shot](https://github.com/vm75/message-sync/issues/63) | Complete | — | Prevent blind duplicate creates after ambiguous sends and prevent duplicate multi-send companions. |
 | 2 | [#64 Recovery: do not advance checkpoints past payload-dependent pending delivery](https://github.com/vm75/message-sync/issues/64) | Pending | #63 | Align source checkpoint advancement with the point where transient payload is genuinely safe to forget. |
 | 3 | [#65 Loop prevention: suppress WhatsApp bridge-generated edit/delete lifecycle echoes](https://github.com/vm75/message-sync/issues/65) | Pending | #64 | Terminate bridge-generated WhatsApp lifecycle echoes without suppressing genuine linked-device actions. |
 | 4 | [#66 Integration: verify idempotency/recovery hardening and remove temporary tracker](https://github.com/vm75/message-sync/issues/66) | Pending | #63-#65 all Complete | Verify the fixes together, update permanent docs, and delete this tracker. |

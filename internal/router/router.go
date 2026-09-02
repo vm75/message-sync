@@ -643,6 +643,14 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 	if err := r.store.UpsertDeliveryOperation(ctx, operation); err != nil {
 		return fmt.Errorf("queue delivery operation: %w", err)
 	}
+	for _, kind := range []string{"primary", "companion"} {
+		if kind == "companion" && !(len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker")) {
+			continue
+		}
+		if err := r.store.UpsertCreateStep(ctx, store.CreateStep{CanonicalID: canonicalID, EndpointID: string(destination), OperationRevision: 1, StepKind: kind, State: "pending", CreatedAt: now, UpdatedAt: now}); err != nil {
+			return fmt.Errorf("queue create step: %w", err)
+		}
+	}
 	job := func(jobCtx context.Context, attempt int) error {
 		tombstoned, err := r.store.IsTombstoned(jobCtx, canonicalID)
 		if err != nil {
@@ -661,6 +669,12 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		}
 		finishFailure := func(err error) error {
 			failure := transport.Classify(err)
+			// A provider request may have been accepted even when it returned an
+			// error. The persisted step is the durable no-blind-retry boundary.
+			if failure.Certainty == transport.SendUnknown {
+				_ = r.store.MarkDeliveryOperationAwaitingReplay(context.Background(), operation, time.Now().UTC())
+				return nil
+			}
 			if !failure.Retryable || attempt >= delivery.DefaultRetryPolicy().MaxAttempts || jobCtx.Err() != nil {
 				stateErr := error(nil)
 				if failure.Retryable && jobCtx.Err() != nil || failure.Retryable && attempt >= delivery.DefaultRetryPolicy().MaxAttempts {
@@ -676,28 +690,63 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			return err
 		}
 		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
-			if _, err := r.sender.Send(jobCtx, transport.Outgoing{
-				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
-				SourceText: incoming.Text, AttributionOnly: true,
-				ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
-				ReplyTo: replyTo, QuotedText: incoming.QuotedText,
-			}); err != nil {
-				return finishFailure(err)
+			step, stepErr := r.store.CreateStep(jobCtx, canonicalID, string(destination), 1, "companion")
+			if stepErr != nil {
+				return finishFailure(stepErr)
+			}
+			if step.State == "ambiguous" {
+				return nil
+			}
+			if step.State != "complete" {
+				if _, err := r.sender.Send(jobCtx, transport.Outgoing{
+					Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
+					SourceText: incoming.Text, AttributionOnly: true,
+					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
+					ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+				}); err != nil {
+					if transport.Classify(err).Certainty == transport.SendUnknown {
+						_ = r.store.CompleteCreateStep(context.Background(), step, "", true, time.Now().UTC())
+					}
+					return finishFailure(err)
+				}
+				if err := r.store.CompleteCreateStep(jobCtx, step, "", false, time.Now().UTC()); err != nil {
+					return finishFailure(err)
+				}
 			}
 		}
-		ref, err := r.sender.Send(jobCtx, transport.Outgoing{
-			Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
-			SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
-			Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
-			MediaBytes: mediaBytes, ReplyTo: replyTo, QuotedText: incoming.QuotedText,
-			PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
-			PollDurationHours: incoming.PollDurationHours,
-		})
-		if err != nil {
-			return finishFailure(err)
+		primary, stepErr := r.store.CreateStep(jobCtx, canonicalID, string(destination), 1, "primary")
+		if stepErr != nil {
+			return finishFailure(stepErr)
 		}
-		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
-			return finishFailure(errors.New("transport returned invalid destination message reference"))
+		var ref transport.MessageRef
+		if primary.State == "ambiguous" {
+			return nil
+		}
+		if primary.State == "complete" {
+			ref = transport.MessageRef{Endpoint: destination, RemoteMessageID: primary.RemoteMessageID, IsTargetFromMe: true}
+		} else {
+			ref, err = r.sender.Send(jobCtx, transport.Outgoing{
+				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
+				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
+				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
+				MediaBytes: mediaBytes, ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
+				PollDurationHours: incoming.PollDurationHours,
+			})
+			if err != nil {
+				if transport.Classify(err).Certainty == transport.SendUnknown {
+					_ = r.store.CompleteCreateStep(context.Background(), primary, "", true, time.Now().UTC())
+				}
+				return finishFailure(err)
+			}
+			if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
+				return finishFailure(errors.New("transport returned invalid destination message reference"))
+			}
+			if primary.State != "complete" {
+				if err := r.store.CompleteCreateStep(jobCtx, primary, ref.RemoteMessageID, false, time.Now().UTC()); err != nil {
+					return finishFailure(err)
+				}
+			}
 		}
 		tombstoned, err = r.store.IsTombstoned(jobCtx, canonicalID)
 		if err != nil {

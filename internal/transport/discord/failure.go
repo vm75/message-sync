@@ -29,7 +29,7 @@ func classifyDiscordFailure(err error) error {
 		case http.StatusTooManyRequests:
 			class = transport.FailureRateLimited
 		}
-		return transport.NewFailure(class, 0, err)
+		return transport.NewFailureWithCertainty(class, 0, transport.SendUnknown, err)
 	}
-	return transport.NewFailure(transport.FailureTransient, 0, err)
+	return transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, err)
 }

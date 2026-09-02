@@ -9,6 +9,16 @@ import (
 // boundary into routing, persistence, logs, or APIs.
 type FailureClass string
 
+// SendCertainty describes what is known about a provider create attempt.
+// DefinitelyNotSent is safe to retry; Unknown is never blindly retried.
+type SendCertainty uint8
+
+const (
+	SendDefinitelyNotSent SendCertainty = iota
+	SendAccepted
+	SendUnknown
+)
+
 const (
 	FailureTransient          FailureClass = "transient"
 	FailureRateLimited        FailureClass = "rate_limited"
@@ -24,6 +34,7 @@ type Failure struct {
 	Class      FailureClass
 	Retryable  bool
 	RetryAfter time.Duration
+	Certainty  SendCertainty
 	cause      error
 }
 
@@ -58,6 +69,12 @@ func classRetryable(class FailureClass) bool {
 // NewFailure classifies an error without exposing its provider-specific text.
 // A nil cause returns nil so it can be used directly around provider calls.
 func NewFailure(class FailureClass, retryAfter time.Duration, cause error) error {
+	return NewFailureWithCertainty(class, retryAfter, SendDefinitelyNotSent, cause)
+}
+
+// NewFailureWithCertainty preserves the existing safe failure class while
+// allowing create callers to avoid a blind retry after an ambiguous request.
+func NewFailureWithCertainty(class FailureClass, retryAfter time.Duration, certainty SendCertainty, cause error) error {
 	if cause == nil {
 		return nil
 	}
@@ -67,7 +84,10 @@ func NewFailure(class FailureClass, retryAfter time.Duration, cause error) error
 	if retryAfter < 0 {
 		retryAfter = 0
 	}
-	return &Failure{Class: class, Retryable: classRetryable(class), RetryAfter: retryAfter, cause: cause}
+	if certainty > SendUnknown {
+		certainty = SendUnknown
+	}
+	return &Failure{Class: class, Retryable: classRetryable(class), RetryAfter: retryAfter, Certainty: certainty, cause: cause}
 }
 
 // Classify returns a safe view of any error. Unknown errors conservatively
@@ -80,5 +100,8 @@ func Classify(err error) Failure {
 	if errors.As(err, &failure) && failure != nil {
 		return *failure
 	}
-	return Failure{Class: FailureTransient, Retryable: true, cause: err}
+	// Unclassified errors are retained as the legacy pre-acceptance contract.
+	// Provider adapters must use NewFailureWithCertainty for API outcomes whose
+	// acceptance cannot be known.
+	return Failure{Class: FailureTransient, Retryable: true, Certainty: SendDefinitelyNotSent, cause: err}
 }

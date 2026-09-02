@@ -18,5 +18,5 @@ func classifyWhatsAppFailure(err error) error {
 	case errors.Is(err, whatsmeow.ErrNotInGroup), errors.Is(err, whatsmeow.ErrNotLoggedIn):
 		class = transport.FailurePermissionDenied
 	}
-	return transport.NewFailure(class, 0, err)
+	return transport.NewFailureWithCertainty(class, 0, transport.SendUnknown, err)
 }

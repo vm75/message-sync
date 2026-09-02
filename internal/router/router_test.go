@@ -30,9 +30,12 @@ type fakeSender struct {
 		ref  transport.MessageRef
 		text string
 	}
-	deleted []transport.MessageRef
-	reacted []transport.Reaction
-	next    map[transport.EndpointID]int
+	deleted    []transport.MessageRef
+	reacted    []transport.Reaction
+	next       map[transport.EndpointID]int
+	sendErrors map[transport.EndpointID][]error
+	sendError  func(transport.Outgoing) error
+	attempts   int
 }
 
 func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
@@ -42,12 +45,83 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 		f.next = make(map[transport.EndpointID]int)
 	}
 	f.next[outgoing.Endpoint]++
+	f.attempts++
+	if f.sendError != nil {
+		if err := f.sendError(outgoing); err != nil {
+			return transport.MessageRef{}, err
+		}
+	}
+	if queued := f.sendErrors[outgoing.Endpoint]; len(queued) > 0 {
+		err := queued[0]
+		f.sendErrors[outgoing.Endpoint] = queued[1:]
+		return transport.MessageRef{}, err
+	}
 	ref := transport.MessageRef{
 		Endpoint:        outgoing.Endpoint,
 		RemoteMessageID: string(outgoing.Endpoint) + "-sent-" + string(rune('0'+f.next[outgoing.Endpoint])),
 	}
 	f.sent = append(f.sent, sentMessage{outgoing: outgoing, ref: ref})
 	return ref, nil
+}
+
+func TestAmbiguousCreateIsNotBlindlyRetried(t *testing.T) {
+	r, syncStore, fake := newTestRouter(t, config.UsernameModeHash)
+	fake.sendErrors = map[transport.EndpointID][]error{
+		"c1g2": {transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("provider accepted but response was lost"))},
+	}
+	if err := r.Handle(context.Background(), testIncoming("c1g1", "ambiguous-source")); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	fake.mu.Lock()
+	attempts := fake.attempts
+	fake.mu.Unlock()
+	if attempts != 2 {
+		t.Fatalf("attempts = %d, want source fan-out attempts only", attempts)
+	}
+	canonical, err := syncStore.CanonicalForRemote(context.Background(), "c1g1", "ambiguous-source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	step, err := syncStore.CreateStep(context.Background(), canonical, "c1g2", 1, "primary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if step.State != "ambiguous" {
+		t.Fatalf("primary step state = %q, want ambiguous", step.State)
+	}
+}
+
+func TestMediaCompanionIsNotRepeatedWhenPrimaryRetries(t *testing.T) {
+	r, _, fake := newTestRouter(t, config.UsernameModeHash)
+	failed := false
+	fake.sendError = func(outgoing transport.Outgoing) error {
+		if outgoing.Endpoint == "c1g2" && !outgoing.AttributionOnly && !failed {
+			failed = true
+			return transport.NewFailure(transport.FailureTransient, 0, errors.New("primary not accepted"))
+		}
+		return nil
+	}
+	incoming := testIncoming("c1g1", "media-source")
+	incoming.Kind = "sticker"
+	incoming.MediaLoader = func(context.Context) ([]byte, error) { return []byte("media"), nil }
+	if err := r.Handle(context.Background(), incoming); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 4)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var companions, primary int
+	for _, sent := range fake.sent {
+		if sent.outgoing.AttributionOnly {
+			companions++
+		} else if sent.outgoing.Kind == "sticker" {
+			primary++
+		}
+	}
+	if companions != 2 || primary != 2 {
+		t.Fatalf("companion=%d primary=%d, want one each destination", companions, primary)
+	}
 }
 
 func waitForSent(t *testing.T, f *fakeSender, want int) {

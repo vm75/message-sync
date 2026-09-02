@@ -87,6 +87,17 @@ type DeliverySummary struct {
 	FailureClass    string
 }
 
+type CreateStep struct {
+	CanonicalID       string
+	EndpointID        string
+	OperationRevision int64
+	StepKind          string
+	State             string
+	RemoteMessageID   string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
 type StorageMetrics struct {
 	CanonicalMessages int64
 	MessageCopies     int64
@@ -611,6 +622,43 @@ func (s *Store) DeleteDeliveryOperation(ctx context.Context, operation DeliveryO
 		WHERE canonical_id = ? AND endpoint_id = ? AND operation_kind = ? AND operation_revision = ?`,
 		operation.CanonicalID, operation.EndpointID, operation.OperationKind, operation.OperationRevision)
 	return wrapDB("delete delivery operation", err)
+}
+
+func (s *Store) UpsertCreateStep(ctx context.Context, step CreateStep) error {
+	if err := validateDeliveryIdentity(DeliveryOperation{CanonicalID: step.CanonicalID, EndpointID: step.EndpointID, OperationKind: "create", OperationRevision: step.OperationRevision}); err != nil {
+		return err
+	}
+	if step.StepKind != "primary" && step.StepKind != "companion" {
+		return errors.New("invalid create step")
+	}
+	if step.State != "pending" && step.State != "complete" && step.State != "ambiguous" {
+		return errors.New("invalid create step state")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO delivery_create_steps(canonical_id, endpoint_id, operation_revision, step_kind, state, remote_message_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(canonical_id, endpoint_id, operation_revision, step_kind) DO NOTHING`, step.CanonicalID, step.EndpointID, step.OperationRevision, step.StepKind, step.State, nullableString(step.RemoteMessageID), unixMillis(step.CreatedAt), unixMillis(step.UpdatedAt))
+	return wrapDB("upsert create step", err)
+}
+
+func (s *Store) CreateStep(ctx context.Context, canonicalID, endpointID string, revision int64, kind string) (CreateStep, error) {
+	var step CreateStep
+	var remote sql.NullString
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT canonical_id, endpoint_id, operation_revision, step_kind, state, remote_message_id, created_at, updated_at FROM delivery_create_steps WHERE canonical_id = ? AND endpoint_id = ? AND operation_revision = ? AND step_kind = ?`, canonicalID, endpointID, revision, kind).Scan(&step.CanonicalID, &step.EndpointID, &step.OperationRevision, &step.StepKind, &step.State, &remote, &created, &updated)
+	if err != nil {
+		return CreateStep{}, wrapDB("get create step", err)
+	}
+	step.RemoteMessageID = remote.String
+	step.CreatedAt = fromUnixMillis(created)
+	step.UpdatedAt = fromUnixMillis(updated)
+	return step, nil
+}
+
+func (s *Store) CompleteCreateStep(ctx context.Context, step CreateStep, remoteID string, ambiguous bool, updatedAt time.Time) error {
+	state := "complete"
+	if ambiguous {
+		state = "ambiguous"
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE delivery_create_steps SET state = ?, remote_message_id = ?, updated_at = ? WHERE canonical_id = ? AND endpoint_id = ? AND operation_revision = ? AND step_kind = ?`, state, nullableString(remoteID), unixMillis(updatedAt), step.CanonicalID, step.EndpointID, step.OperationRevision, step.StepKind)
+	return wrapDB("complete create step", err)
 }
 
 func (s *Store) DeliverySummaries(ctx context.Context, now time.Time) (map[string]DeliverySummary, error) {
