@@ -33,7 +33,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const eventBufferSize = 128
+const (
+	eventBufferSize              = 128
+	anonymisedLiveResultsHeading = "Aggregated anonymised live results"
+)
+
+func formatWhatsAppText(text string) string {
+	return strings.ReplaceAll(text, "***"+anonymisedLiveResultsHeading+"***", "*_"+anonymisedLiveResultsHeading+"_*")
+}
 
 type Options struct {
 	DatabasePath     string
@@ -278,7 +285,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		if outgoing.Text == "" {
 			return transport.MessageRef{}, errors.New("outgoing text is required")
 		}
-		text := outgoing.Text
+		text := formatWhatsAppText(outgoing.Text)
 		if contextInfo != nil {
 			msg = &waE2E.Message{
 				ExtendedTextMessage: &waE2E.ExtendedTextMessage{
@@ -387,7 +394,7 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	}
 
 	editContent := &waE2E.Message{
-		Conversation: proto.String(text),
+		Conversation: proto.String(formatWhatsAppText(text)),
 	}
 	editMsg := a.client.BuildEdit(target, types.MessageID(ref.RemoteMessageID), editContent)
 	_, err := a.client.SendMessage(ctx, target, editMsg)
