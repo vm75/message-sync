@@ -17,6 +17,7 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
 	telegram "github.com/vm75/message-sync/internal/transport/telegram"
+	"github.com/vm75/message-sync/internal/verification"
 )
 
 type WhatsAppStatus struct {
@@ -61,6 +62,7 @@ type Options struct {
 	}
 	OnConfigChange func(ctx context.Context) error
 	EvidenceDir    string
+	Mailer         verification.Mailer
 }
 
 type Server struct {
@@ -80,6 +82,7 @@ type Server struct {
 	}
 	onConfigChange func(ctx context.Context) error
 	evidenceDir    string
+	mailer         verification.Mailer
 	listener       net.Listener
 }
 
@@ -121,6 +124,7 @@ func NewServer(opts Options) *Server {
 		delivery:          opts.Delivery,
 		onConfigChange:    opts.OnConfigChange,
 		evidenceDir:       opts.EvidenceDir,
+		mailer:            opts.Mailer,
 	}
 
 	s.registerRoutes()
@@ -160,6 +164,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/verification/{token}", s.handlePublicPipeline)
 	s.mux.HandleFunc("POST /api/verification/{token}", s.handlePublicIntake)
 	s.mux.HandleFunc("DELETE /api/verification/requests/{id}", s.handleDeleteMembershipRequest)
+	s.mux.HandleFunc("POST /api/verification/email/verify", s.handleVerifyEmail)
+	s.mux.HandleFunc("POST /api/verification/email/resend", s.handleResendEmail)
 
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)

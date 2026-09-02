@@ -349,7 +349,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" || (strings.HasPrefix(r.URL.Path, "/api/verification/") && !strings.HasPrefix(r.URL.Path, "/api/verification/pipelines") && !strings.HasPrefix(r.URL.Path, "/api/verification/requests/")) {
+		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" || r.URL.Path == "/api/verification/email/verify" || r.URL.Path == "/api/verification/email/resend" || (strings.HasPrefix(r.URL.Path, "/api/verification/") && !strings.HasPrefix(r.URL.Path, "/api/verification/pipelines") && !strings.HasPrefix(r.URL.Path, "/api/verification/requests/")) {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -23,6 +23,7 @@ import (
 	discord "github.com/vm75/message-sync/internal/transport/discord"
 	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
+	"github.com/vm75/message-sync/internal/verification"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -292,6 +293,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Delivery:       mesh,
 		OnConfigChange: onConfigChange,
 		EvidenceDir:    filepath.Join(dataDir, "membership-evidence"),
+		Mailer:         verification.NewResendMailerFromEnv(),
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)

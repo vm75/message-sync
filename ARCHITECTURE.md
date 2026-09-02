@@ -91,6 +91,11 @@ against `sync.db` at mutation time but does not copy its remote target into
 needed to render intake. Evidence is written with a random filename below the
 dedicated private `/data/membership-evidence` path, mode `0600`, after bounded
 MIME/size checks; request deletion removes the file and control record.
+Work-email challenges are stored only as hashes with expiry and bounded
+attempts. Optional Resend-compatible delivery reads deployment-only mail
+credentials; a valid challenge advances `pending_email` to `pending`. Local
+free-domain, LinkedIn-host, and evidence checks are advisory and never imply
+employment or automatically approve a request.
 
 ### SQLite Configuration Tables
 

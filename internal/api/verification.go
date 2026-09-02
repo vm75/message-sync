@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"github.com/vm75/message-sync/internal/verification"
 	"io"
 	"net/http"
 	"os"
@@ -218,7 +219,7 @@ func (s *Server) handlePublicIntake(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, 400, "application could not be accepted")
 		return
 	}
-	_, challengeHash, challengeErr := newBearerToken()
+	challenge, challengeHash, challengeErr := newBearerToken()
 	if challengeErr != nil {
 		_, _ = s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_requests WHERE id = ?`, id)
 		if ref != "" {
@@ -235,6 +236,11 @@ func (s *Server) handlePublicIntake(w http.ResponseWriter, r *http.Request) {
 		}
 		WriteError(w, 500, "application could not be accepted")
 		return
+	}
+	assessment := verification.Assess(email, r.FormValue("linkedinURL"), ref != "")
+	_, _ = s.controlDB.ExecContext(r.Context(), `INSERT INTO verification_assessments(id,membership_request_id,assessment_kind,state,result_code,confidence,detail,created_at,updated_at) VALUES(?,?,?,'complete',?,?,?, ?,?)`, id+"-deterministic", id, "deterministic", assessment.Result, nil, assessment.DomainClass, now, now)
+	if s.mailer != nil {
+		_ = s.mailer.Send(r.Context(), email, p.Label, challenge)
 	}
 	_ = WriteJSON(w, 202, map[string]string{"status": "received"})
 }
@@ -254,4 +260,72 @@ func (s *Server) handleDeleteMembershipRequest(w http.ResponseWriter, r *http.Re
 		return
 	}
 	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleVerifyEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID string `json:"requestId"`
+		Challenge string `json:"challenge"`
+	}
+	if ReadJSON(r, &req) != nil || req.RequestID == "" || req.Challenge == "" {
+		WriteError(w, 400, "invalid verification")
+		return
+	}
+	var hash string
+	var expires int64
+	var attempts int
+	err := s.controlDB.QueryRowContext(r.Context(), `SELECT token_hash,expires_at,attempt_count FROM email_challenges WHERE membership_request_id=? AND verified_at IS NULL`, req.RequestID).Scan(&hash, &expires, &attempts)
+	if err != nil || expires <= time.Now().UnixMilli() || attempts >= 5 || tokenHash(req.Challenge) != hash {
+		if err == nil {
+			_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE email_challenges SET attempt_count=attempt_count+1 WHERE membership_request_id=?`, req.RequestID)
+		}
+		WriteError(w, 401, "invalid verification")
+		return
+	}
+	tx, err := s.controlDB.BeginTx(r.Context(), nil)
+	if err != nil {
+		WriteError(w, 500, "verification unavailable")
+		return
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(r.Context(), `UPDATE email_challenges SET verified_at=? WHERE membership_request_id=? AND verified_at IS NULL`, time.Now().UnixMilli(), req.RequestID); err != nil {
+		WriteError(w, 500, "verification unavailable")
+		return
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE membership_requests SET status='pending',verification_state='verified',updated_at=? WHERE id=? AND status='pending_email'`, time.Now().UnixMilli(), req.RequestID); err != nil {
+		WriteError(w, 500, "verification unavailable")
+		return
+	}
+	if err = tx.Commit(); err != nil {
+		WriteError(w, 500, "verification unavailable")
+		return
+	}
+	_ = WriteJSON(w, 200, map[string]string{"status": "verified"})
+}
+
+func (s *Server) handleResendEmail(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RequestID string `json:"requestId"`
+	}
+	if ReadJSON(r, &req) != nil || req.RequestID == "" {
+		WriteError(w, 400, "invalid request")
+		return
+	}
+	var email, label string
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT r.applicant_work_email,p.label FROM membership_requests r JOIN verification_pipelines p ON p.id=r.pipeline_id WHERE r.id=? AND r.status='pending_email'`, req.RequestID).Scan(&email, &label); err != nil {
+		WriteError(w, 202, "if eligible, a new challenge will be sent")
+		return
+	}
+	challenge, hash, err := newBearerToken()
+	if err != nil {
+		WriteError(w, 202, "if eligible, a new challenge will be sent")
+		return
+	}
+	now := time.Now().UnixMilli()
+	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE email_challenges SET token_hash=?,expires_at=?,attempt_count=0,verified_at=NULL WHERE membership_request_id=?`, hash, time.Now().Add(24*time.Hour).UnixMilli(), req.RequestID)
+	if s.mailer != nil {
+		_ = s.mailer.Send(r.Context(), email, label, challenge)
+	}
+	_ = now
+	_ = WriteJSON(w, 202, map[string]string{"status": "accepted"})
 }
