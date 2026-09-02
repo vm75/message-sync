@@ -32,7 +32,7 @@ This file exists only while issues #52-#62 are being implemented. **Delete this 
 | 7 | [#58 Membership: add optional OpenRouter free-model advisory analysis](https://github.com/vm75/message-sync/issues/58) | Pending | #56, #57 | Add slow/optional free-model analysis without making AI a gate. |
 | 8 | [#59 Membership: add WhatsApp/Discord approval fulfillment and secure invite fallback](https://github.com/vm75/message-sync/issues/59) | Pending | #57 | Perform approved membership actions through narrow transport-admin interfaces. |
 | 9 | [#60 Membership UI: add verification queue, evidence review, and decision workflow](https://github.com/vm75/message-sync/issues/60) | Pending | #54, #56, #57, #58, #59 | Add role-authorized review, approval/rejection, evidence access, and fulfillment retry UI/API. |
-| 10 | [#61 Integration: harden privacy, retention, container behavior, and end-to-end RBAC/verification](https://github.com/vm75/message-sync/issues/61) | Pending | #52-#60 | Validate the complete workflow, privacy canaries, failure isolation, retention, and rootless container behavior. |
+| 10 | [#61 Integration: harden privacy, retention, container behavior, and end-to-end RBAC/verification](https://github.com/vm75/message-sync/issues/61) | Pending | #52-#60, #66 | Validate the complete workflow against the corrected idempotency/recovery baseline, privacy canaries, failure isolation, retention, and rootless container behavior. |
 | 11 | [#62 Docs: finalize multi-user/membership verification and remove temporary progress tracker](https://github.com/vm75/message-sync/issues/62) | Pending | #52-#61 all Complete | Update permanent docs/aspirational backlog and delete this tracker. |
 
 ## Dependency notes
@@ -44,8 +44,9 @@ This file exists only while issues #52-#62 are being implemented. **Delete this 
 - #57 is the minimum verification gate. AI in #58 is optional and must not be required for #59 or manual review.
 - #59 must extend narrow WhatsApp/Discord administration capabilities rather than the canonical message transport interface.
 - #60 composes the already-built backend capabilities; avoid reimplementing business logic in browser JavaScript.
-- #61 is the release-readiness/hardening gate for this feature set.
-- #62 is documentation-only/final cleanup. It must verify all prior rows are Complete before deleting this file.
+- #52-#60 may proceed in parallel with the separate idempotency/loop-prevention workstream (#63-#66); membership control-plane implementation must not be coupled to router internals.
+- #61 is the release-readiness/hardening gate for this feature set and must use a baseline where #66 is Complete, so its routing-independence checks cover the corrected create/recovery/WhatsApp lifecycle semantics.
+- #62 is documentation-only/final cleanup and remains transitively dependent on #66 through #61. It does not own or delete the idempotency tracker. It must verify all prior rows are Complete before deleting this file.
 
 ## Per-issue completion checklist
 
