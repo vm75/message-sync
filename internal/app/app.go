@@ -294,6 +294,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		OnConfigChange: onConfigChange,
 		EvidenceDir:    filepath.Join(dataDir, "membership-evidence"),
 		Mailer:         verification.NewResendMailerFromEnv(),
+		Analyzer:       verification.NewOpenRouterFromEnv(),
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)

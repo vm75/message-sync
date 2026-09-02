@@ -96,6 +96,12 @@ attempts. Optional Resend-compatible delivery reads deployment-only mail
 credentials; a valid challenge advances `pending_email` to `pending`. Local
 free-domain, LinkedIn-host, and evidence checks are advisory and never imply
 employment or automatically approve a request.
+When `OPENROUTER_API_KEY` is configured with the explicit
+`OPENROUTER_ALLOW_TRAINING=false` privacy setting, evidence analysis runs in a
+bounded asynchronous job. Only structured bounded results are stored in
+`control.db`; raw prompts/responses are discarded. PDFs remain human-review
+material, provider failures are unavailable/failed states, and no AI result
+can advance or decide membership.
 
 ### SQLite Configuration Tables
 

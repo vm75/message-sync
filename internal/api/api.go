@@ -63,6 +63,7 @@ type Options struct {
 	OnConfigChange func(ctx context.Context) error
 	EvidenceDir    string
 	Mailer         verification.Mailer
+	Analyzer       verification.Analyzer
 }
 
 type Server struct {
@@ -83,6 +84,7 @@ type Server struct {
 	onConfigChange func(ctx context.Context) error
 	evidenceDir    string
 	mailer         verification.Mailer
+	analyzer       verification.Analyzer
 	listener       net.Listener
 }
 
@@ -125,6 +127,7 @@ func NewServer(opts Options) *Server {
 		onConfigChange:    opts.OnConfigChange,
 		evidenceDir:       opts.EvidenceDir,
 		mailer:            opts.Mailer,
+		analyzer:          opts.Analyzer,
 	}
 
 	s.registerRoutes()

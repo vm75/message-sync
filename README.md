@@ -41,6 +41,7 @@ Remote providers do not all offer deterministic client-assigned create IDs. When
 - **Control-plane separation**: Multi-user account and membership-verification data is kept in the separate sensitive `/data/control.db`; it is not copied into the PII-free routing database (`sync.db`) or application logs.
 - **Membership intake**: Administrators can bind a public, high-entropy verification pipeline to a configured WhatsApp or Discord endpoint. Public applications validate transport identity and work email, optionally accept bounded PDF/image evidence under `/data`, and create pending email-verification requests without exposing endpoint addressing or applicant records.
 - **Optional email verification**: `VERIFICATION_MAIL_API_KEY` and `VERIFICATION_MAIL_FROM` enable Resend-compatible challenge delivery. Missing mail configuration is non-fatal; deterministic checks remain advisory.
+- **Optional AI review**: `OPENROUTER_API_KEY` plus `OPENROUTER_ALLOW_TRAINING=false` enables bounded asynchronous image assessment (default model `openrouter/free`). Results are advisory only; malformed, unavailable, or privacy-ineligible analysis falls back to human review.
 
 ## Quick Start
 

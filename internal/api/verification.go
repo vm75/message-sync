@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
@@ -241,6 +242,14 @@ func (s *Server) handlePublicIntake(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.controlDB.ExecContext(r.Context(), `INSERT INTO verification_assessments(id,membership_request_id,assessment_kind,state,result_code,confidence,detail,created_at,updated_at) VALUES(?,?,?,'complete',?,?,?, ?,?)`, id+"-deterministic", id, "deterministic", assessment.Result, nil, assessment.DomainClass, now, now)
 	if s.mailer != nil {
 		_ = s.mailer.Send(r.Context(), email, p.Label, challenge)
+	}
+	if s.analyzer != nil && ref != "" {
+		if evidence, readErr := os.ReadFile(filepath.Join(s.evidenceDir, ref)); readErr == nil {
+			_, _ = s.controlDB.ExecContext(r.Context(), `INSERT INTO verification_assessments(id,membership_request_id,assessment_kind,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?) ON CONFLICT(membership_request_id,assessment_kind) DO NOTHING`, id+"-openrouter", id, "openrouter", now, now)
+			verification.AnalyzeAsync(context.Background(), s.analyzer, verification.AnalysisInput{EvidenceType: "application/octet-stream", Evidence: evidence}, func(result verification.AnalysisResult) {
+				_, _ = s.controlDB.ExecContext(context.Background(), `UPDATE verification_assessments SET state=?,result_code=?,detail=?,updated_at=? WHERE membership_request_id=? AND assessment_kind='openrouter'`, result.Status, result.Confidence, result.Assessment, time.Now().UnixMilli(), id)
+			})
+		}
 	}
 	_ = WriteJSON(w, 202, map[string]string{"status": "received"})
 }
