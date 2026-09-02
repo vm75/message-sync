@@ -400,3 +400,85 @@ func TestAdapterClearChatUnauthenticated(t *testing.T) {
 		t.Fatal("expected IsLoggedIn to return false")
 	}
 }
+
+func TestFilterAndFormatJoinedGroups_ExcludesCommunitiesAndAnnouncements(t *testing.T) {
+	c1JID := types.NewJID("100", "g.us")
+	c2JID := types.NewJID("200", "g.us")
+
+	groups := []*types.GroupInfo{
+		// Community 1 parent
+		{
+			JID:         c1JID,
+			GroupName:   types.GroupName{Name: "ms-test1"},
+			GroupParent: types.GroupParent{IsParent: true},
+		},
+		// Community 1 Announcement (default sub group, shares community name)
+		{
+			JID:               types.NewJID("101", "g.us"),
+			GroupName:         types.GroupName{Name: "ms-test1"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c1JID},
+			GroupIsDefaultSub: types.GroupIsDefaultSub{IsDefaultSubGroup: true},
+			GroupAnnounce:     types.GroupAnnounce{IsAnnounce: true},
+		},
+		// Community 1 General
+		{
+			JID:               types.NewJID("102", "g.us"),
+			GroupName:         types.GroupName{Name: "General"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c1JID},
+		},
+		// Community 1 g1
+		{
+			JID:               types.NewJID("103", "g.us"),
+			GroupName:         types.GroupName{Name: "g1"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c1JID},
+		},
+		// Community 2 parent
+		{
+			JID:         c2JID,
+			GroupName:   types.GroupName{Name: "ms-test2"},
+			GroupParent: types.GroupParent{IsParent: true},
+		},
+		// Community 2 Announcement (named Announcements)
+		{
+			JID:               types.NewJID("201", "g.us"),
+			GroupName:         types.GroupName{Name: "Announcements"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c2JID},
+			GroupAnnounce:     types.GroupAnnounce{IsAnnounce: true},
+		},
+		// Community 2 General
+		{
+			JID:               types.NewJID("202", "g.us"),
+			GroupName:         types.GroupName{Name: "General"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c2JID},
+		},
+		// Community 2 g2
+		{
+			JID:               types.NewJID("203", "g.us"),
+			GroupName:         types.GroupName{Name: "g2"},
+			GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: c2JID},
+		},
+	}
+
+	result := filterAndFormatJoinedGroups(groups, nil)
+
+	if len(result) != 4 {
+		t.Fatalf("expected 4 groups, got %d: %+v", len(result), result)
+	}
+
+	expected := []struct {
+		jid  string
+		name string
+	}{
+		{jid: "102@g.us", name: "ms-test1:General"},
+		{jid: "103@g.us", name: "ms-test1:g1"},
+		{jid: "202@g.us", name: "ms-test2:General"},
+		{jid: "203@g.us", name: "ms-test2:g2"},
+	}
+
+	for i, exp := range expected {
+		if result[i].JID != exp.jid || result[i].Name != exp.name {
+			t.Errorf("result[%d] = {JID: %s, Name: %s}, want {JID: %s, Name: %s}",
+				i, result[i].JID, result[i].Name, exp.jid, exp.name)
+		}
+	}
+}

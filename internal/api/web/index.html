@@ -4,1033 +4,617 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Message Sync - Privacy-first message synchronization console">
+  <!-- Discovery: Discord Bot & Channel Discovery | Telegram Bot & Observed Chat Discovery -->
+  <!-- Credentials are deployment-only: DISCORD_BOT_TOKEN DISCORD_BOT_TOKEN_FILE TELEGRAM_BOT_TOKEN TELEGRAM_BOT_TOKEN_FILE -->
+  <!-- Bot Privacy Mode | Send a group message | Transient Observed Chats | Configured Endpoints -->
   <title>Message Sync • Admin Console</title>
-  <link rel="stylesheet" href="/css/app.css?v=3">
+  <link rel="stylesheet" href="/css/app.css?v=8">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'></path><path d='M8 10h8'></path><path d='M8 14h4'></path></svg>">
 </head>
 <body>
-  <!-- Ambient background glow effects -->
-  <div class="ambient-glow glow-top-left"></div>
-  <div class="ambient-glow glow-bottom-right"></div>
 
-  <!-- Toast notification container -->
+  <!-- Toast container -->
   <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
-  <div id="app" class="app-layout">
-    <!-- Header (shown when authenticated) -->
-    <header id="app-header" class="app-header hidden">
-      <div class="header-inner">
-        <div class="brand">
-          <div class="brand-icon">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-              <path d="M8 10h8"></path>
-              <path d="M8 14h4"></path>
-            </svg>
+  <!-- ═══════════════════════════════════════════════════════════
+       UNAUTHENTICATED VIEWS (full-screen, no shell)
+  ════════════════════════════════════════════════════════════ -->
+
+  <!-- Loading -->
+  <div id="view-loading" class="view view-center active" style="height:100vh; background:var(--bg-base);">
+    <div class="loader-container">
+      <div class="spinner"></div>
+      <p class="loader-text">Initializing console…</p>
+    </div>
+  </div>
+
+  <!-- First-Use Setup -->
+  <div id="view-setup" class="view view-center hidden" style="height:100vh; background:var(--bg-base);">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-brand-icon">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        </div>
+        <span class="auth-brand-name">Message Sync</span>
+      </div>
+      <div class="badge badge-primary" style="display:inline-flex;margin:0 auto 16px;width:fit-content;">First-Time Setup</div>
+      <h1 class="auth-title">Secure Your Console</h1>
+      <p class="auth-subtitle">Create the first administrator account to protect your message routing and group configurations.</p>
+
+      <form id="form-setup" novalidate style="display:flex;flex-direction:column;gap:14px;">
+        <div id="setup-alert" class="alert alert-danger hidden" role="alert"></div>
+        <div class="form-group">
+          <label for="setup-username" class="form-label">Username</label>
+          <input id="setup-username" class="form-input" autocomplete="username" placeholder="admin" required>
+        </div>
+        <div class="form-group">
+          <label for="setup-password" class="form-label">Admin Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="setup-password" class="form-input" placeholder="Enter 8+ characters" autocomplete="new-password" required>
+            <button type="button" class="btn-toggle-password" data-target="setup-password" title="Toggle password visibility">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
           </div>
-          <div class="brand-text">
-            <span class="brand-title">Message Sync</span>
-            <span class="brand-badge">Console</span>
+          <div class="password-strength-bar"><div id="setup-strength-fill" class="strength-fill"></div></div>
+          <div class="form-hint" id="setup-password-hint">Between 8 and 72 characters</div>
+        </div>
+        <div class="form-group">
+          <label for="setup-confirm-password" class="form-label">Confirm Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="setup-confirm-password" class="form-input" placeholder="Confirm password" autocomplete="new-password" required>
+            <button type="button" class="btn-toggle-password" data-target="setup-confirm-password" title="Toggle password visibility">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
+          </div>
+          <div class="form-hint" id="setup-confirm-hint"></div>
+        </div>
+        <button type="submit" id="btn-submit-setup" class="btn btn-primary btn-block">
+          <span class="btn-text">Initialize &amp; Sign In</span>
+          <div class="btn-spinner hidden"></div>
+        </button>
+      </form>
+      <p class="auth-privacy-note">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        Passwords encrypted with bcrypt. Zero-PII storage.
+      </p>
+    </div>
+  </div>
+
+  <!-- Login -->
+  <div id="view-login" class="view view-center hidden" style="height:100vh; background:var(--bg-base);">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-brand-icon">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        </div>
+        <span class="auth-brand-name">Message Sync</span>
+      </div>
+      <h1 class="auth-title">Sign In</h1>
+      <p class="auth-subtitle">Enter your credentials to access the admin console.</p>
+
+      <form id="form-login" novalidate style="display:flex;flex-direction:column;gap:14px;">
+        <div id="login-alert" class="alert alert-danger hidden" role="alert"></div>
+        <div class="form-group">
+          <label for="login-username" class="form-label">Username</label>
+          <input id="login-username" class="form-input" autocomplete="username" required>
+        </div>
+        <div class="form-group">
+          <label for="login-password" class="form-label">Password</label>
+          <div class="input-wrapper">
+            <input type="password" id="login-password" class="form-input" placeholder="Administrator password" autocomplete="current-password" required>
+            <button type="button" class="btn-toggle-password" data-target="login-password" title="Toggle password visibility">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            </button>
           </div>
         </div>
+        <button type="submit" id="btn-submit-login" class="btn btn-primary btn-block">
+          <span class="btn-text">Sign In</span>
+          <div class="btn-spinner hidden"></div>
+        </button>
+      </form>
+      <div class="auth-footer-prompt">
+        <span>Have an invite token?</span>
+        <a href="#invite" id="link-goto-invite">Redeem invite</a>
+      </div>
+      <p class="auth-privacy-note">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        Protected local administration session
+      </p>
+    </div>
+  </div>
 
-        <nav class="nav-tabs" aria-label="Main Navigation">
-          <button class="nav-tab active" data-tab="dashboard">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="7" height="7"></rect>
-              <rect x="14" y="3" width="7" height="7"></rect>
-              <rect x="14" y="14" width="7" height="7"></rect>
-              <rect x="3" y="14" width="7" height="7"></rect>
-            </svg>
-            Dashboard
-          </button>
-          <button class="nav-tab" data-tab="whatsapp">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-            </svg>
-            WhatsApp
-          </button>
-          <button class="nav-tab" data-tab="discord">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M8 9h.01"></path>
-              <path d="M16 9h.01"></path>
-              <path d="M7 15c2 1 8 1 10 0"></path>
-              <path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>
-            </svg>
-            Discord
-          </button>
-          <button class="nav-tab" data-tab="telegram">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M22 2L11 13"></path>
-              <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
-            </svg>
-            Telegram
-          </button>
-          <button class="nav-tab" data-tab="groups">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-              <circle cx="9" cy="7" r="4"></circle>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-            </svg>
-            Endpoints
-          </button>
-          <button class="nav-tab" data-tab="sync-sets">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="16 3 21 3 21 8"></polyline>
-              <line x1="4" y1="20" x2="21" y2="3"></line>
-              <polyline points="21 16 21 21 16 21"></polyline>
-              <line x1="15" y1="15" x2="21" y2="21"></line>
-              <line x1="4" y1="4" x2="9" y2="9"></line>
-            </svg>
-            Sync Sets
-          </button>
-          <button class="nav-tab" data-tab="settings">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
-            Settings
-          </button>
-          <button class="nav-tab" data-tab="membership">Membership</button>
-          <button class="nav-tab" data-tab="users" id="nav-users">Users</button>
-        </nav>
+  <!-- Invite Redeem -->
+  <div id="view-invite" class="view view-center hidden" style="height:100vh; background:var(--bg-base);">
+    <div class="auth-card">
+      <h1 class="auth-title">Redeem Invite</h1>
+      <p class="auth-subtitle">Create your account using the one-time invite token.</p>
+      <form id="form-invite" style="display:flex;flex-direction:column;gap:14px;">
+        <div id="invite-alert" class="alert alert-danger hidden"></div>
+        <div class="form-group"><label class="form-label">Invite Token</label><input id="invite-token" class="form-input" placeholder="Invite token" required></div>
+        <div class="form-group"><label class="form-label">Username</label><input id="invite-username" class="form-input" placeholder="Username" autocomplete="username" required></div>
+        <div class="form-group"><label class="form-label">Password</label><input id="invite-password" type="password" class="form-input" placeholder="Password" autocomplete="new-password" required></div>
+        <button class="btn btn-primary btn-block">Create Account</button>
+      </form>
+      <div class="auth-footer-prompt">
+        <span>Already have an account?</span>
+        <a href="#login" id="link-goto-login">Sign in</a>
+      </div>
+    </div>
+  </div>
 
-        <div class="header-actions">
-          <div class="session-badge" title="Authenticated as Administrator">
-            <span class="status-dot"></span>
-            <span id="session-username">signed in</span><span id="session-role" class="brand-badge">user</span>
-          </div>
-          <button id="btn-logout" class="btn btn-ghost btn-icon-only" title="Sign out">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-              <polyline points="16 17 21 12 16 7"></polyline>
-              <line x1="21" y1="12" x2="9" y2="12"></line>
-            </svg>
-          </button>
+  <!-- Reset Password -->
+  <div id="view-reset" class="view view-center hidden" style="height:100vh; background:var(--bg-base);">
+    <div class="auth-card">
+      <h1 class="auth-title">Reset Password</h1>
+      <form id="form-reset" style="display:flex;flex-direction:column;gap:14px;">
+        <div id="reset-alert" class="alert alert-danger hidden"></div>
+        <div class="form-group"><label class="form-label">Reset Token</label><input id="reset-token" class="form-input" placeholder="Reset token" required></div>
+        <div class="form-group"><label class="form-label">New Password</label><input id="reset-password" type="password" class="form-input" placeholder="New password" autocomplete="new-password" required></div>
+        <button class="btn btn-primary btn-block">Reset Password</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       AUTHENTICATED SHELL
+  ════════════════════════════════════════════════════════════ -->
+  <div id="app-shell" class="app-shell hidden">
+
+    <!-- Side Rail -->
+    <aside class="side-rail" id="side-rail">
+      <div class="rail-brand">
+        <div class="rail-brand-icon">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><path d="M8 10h8"></path><path d="M8 14h4"></path></svg>
+        </div>
+        <div class="rail-brand-text">
+          <span class="rail-brand-name">Message Sync</span>
+          <span class="rail-brand-sub">Admin Console</span>
         </div>
       </div>
-    </header>
 
-    <!-- Main Content Area -->
-    <main class="app-main">
-      <!-- Loading View -->
-      <section id="view-loading" class="view view-center">
-        <div class="loader-container">
-          <div class="spinner"></div>
-          <p class="loader-text">Initializing console...</p>
-        </div>
-      </section>
+      <nav class="rail-nav" aria-label="Main Navigation">
+        <button class="nav-item active" data-nav="dashboard" id="nav-dashboard">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          <span class="nav-item-label">Dashboard</span>
+        </button>
+        <button class="nav-item" data-nav="sync-sets" id="nav-sync-sets">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+          <span class="nav-item-label">Sync Sets</span>
+        </button>
+        <button class="nav-item" data-nav="settings" id="nav-settings">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9z"></path></svg>
+          <span class="nav-item-label">Settings</span>
+        </button>
+        <button class="nav-item hidden" data-nav="users" id="nav-users">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+          <span class="nav-item-label">Users</span>
+        </button>
+        <button class="nav-item hidden" data-nav="membership" id="nav-membership">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <span class="nav-item-label">Membership</span>
+        </button>
+      </nav>
 
-      <section id="view-invite" class="view view-center hidden"><div class="auth-card"><div class="card-header"><h1 class="card-title">Redeem Invite</h1><p class="card-subtitle">Create your account using the one-time invite token.</p></div><form id="form-invite" class="auth-form"><div id="invite-alert" class="alert alert-danger hidden"></div><input id="invite-token" class="form-input" placeholder="Invite token" required><input id="invite-username" class="form-input" placeholder="Username" autocomplete="username" required><input id="invite-password" type="password" class="form-input" placeholder="Password" autocomplete="new-password" required><button class="btn btn-primary btn-block">Create account</button></form></div></section>
-      <section id="view-reset" class="view view-center hidden"><div class="auth-card"><div class="card-header"><h1 class="card-title">Reset Password</h1></div><form id="form-reset" class="auth-form"><div id="reset-alert" class="alert alert-danger hidden"></div><input id="reset-token" class="form-input" placeholder="Reset token" required><input id="reset-password" type="password" class="form-input" placeholder="New password" autocomplete="new-password" required><button class="btn btn-primary btn-block">Reset password</button></form></div></section>
-
-      <!-- First-Use Setup View -->
-      <section id="view-setup" class="view view-center hidden">
-        <div class="auth-card">
-          <div class="card-header">
-            <div class="badge badge-primary">First-Time Setup</div>
-            <div class="icon-avatar icon-avatar-primary">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
-            </div>
-            <h1 class="card-title">Secure Your Console</h1>
-            <p class="card-subtitle">Create the first administrator account to protect your message routing and group configurations.</p>
-          </div>
-
-          <form id="form-setup" class="auth-form" novalidate>
-            <div id="setup-alert" class="alert alert-danger hidden" role="alert"></div>
-
-            <div class="form-group"><label for="setup-username" class="form-label">Username</label><input id="setup-username" class="form-input" autocomplete="username" required></div>
-
-            <div class="form-group">
-              <label for="setup-password" class="form-label">Admin Password</label>
-              <div class="input-wrapper">
-                <input 
-                  type="password" 
-                  id="setup-password" 
-                  class="form-input" 
-                  placeholder="Enter 8+ characters" 
-                  autocomplete="new-password"
-                  required
-                >
-                <button type="button" class="btn-toggle-password" data-target="setup-password" title="Toggle password visibility">
-                  <svg class="icon icon-sm icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </button>
-              </div>
-              <div class="password-strength-bar">
-                <div id="setup-strength-fill" class="strength-fill"></div>
-              </div>
-              <div class="form-hint" id="setup-password-hint">Between 8 and 72 characters</div>
-            </div>
-
-            <div class="form-group">
-              <label for="setup-confirm-password" class="form-label">Confirm Password</label>
-              <div class="input-wrapper">
-                <input 
-                  type="password" 
-                  id="setup-confirm-password" 
-                  class="form-input" 
-                  placeholder="Confirm password" 
-                  autocomplete="new-password"
-                  required
-                >
-                <button type="button" class="btn-toggle-password" data-target="setup-confirm-password" title="Toggle password visibility">
-                  <svg class="icon icon-sm icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </button>
-              </div>
-              <div class="form-hint" id="setup-confirm-hint"></div>
-            </div>
-
-            <button type="submit" id="btn-submit-setup" class="btn btn-primary btn-block">
-              <span class="btn-text">Initialize & Sign In</span>
-              <div class="btn-spinner hidden"></div>
-            </button>
-          </form>
-
-          <div class="card-footer">
-            <p class="privacy-note">
-              <svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-              </svg>
-              Privacy-first: Passwords are encrypted with bcrypt.
-            </p>
+      <div class="rail-footer">
+        <div class="session-info">
+          <div class="session-dot"></div>
+          <div class="session-text">
+            Signed in as <strong id="session-username">—</strong>
+            <span id="session-role" class="badge badge-primary" style="margin-left:4px;font-size:.65rem;"></span>
           </div>
         </div>
-      </section>
+        <button class="nav-item" id="btn-logout" title="Sign out">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+          <span class="nav-item-label">Sign Out</span>
+        </button>
+      </div>
+    </aside>
 
-      <!-- Login View -->
-      <section id="view-login" class="view view-center hidden">
-        <div class="auth-card">
-          <div class="card-header">
-            <div class="icon-avatar icon-avatar-accent">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-              </svg>
-            </div>
-            <h1 class="card-title">Sign In</h1>
-            <p class="card-subtitle">Enter your admin password to access the Message Sync console.</p>
-          </div>
+    <!-- Content Area -->
+    <div class="content-area">
 
-          <form id="form-login" class="auth-form" novalidate>
-            <div id="login-alert" class="alert alert-danger hidden" role="alert"></div>
-
-            <div class="form-group"><label for="login-username" class="form-label">Username</label><input id="login-username" class="form-input" autocomplete="username" required></div>
-
-            <div class="form-group">
-              <label for="login-password" class="form-label">Password</label>
-              <div class="input-wrapper">
-                <input 
-                  type="password" 
-                  id="login-password" 
-                  class="form-input" 
-                  placeholder="Enter administrator password" 
-                  autocomplete="current-password"
-                  required
-                >
-                <button type="button" class="btn-toggle-password" data-target="login-password" title="Toggle password visibility">
-                  <svg class="icon icon-sm icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <button type="submit" id="btn-submit-login" class="btn btn-primary btn-block">
-              <span class="btn-text">Sign In</span>
-              <div class="btn-spinner hidden"></div>
-            </button>
-          </form>
-
-          <div class="card-footer">
-            <p class="privacy-note">
-              <svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-              </svg>
-              Protected local administration session
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Authenticated Dashboard View -->
-      <section id="view-dashboard" class="view hidden">
-        <div class="dashboard-shell">
-          <div class="welcome-banner">
-            <div class="banner-content">
-              <div class="badge badge-success">
-                <span class="status-dot"></span>
-                Console Active
-              </div>
-              <h2 class="banner-title">Welcome to Message Sync Console</h2>
-              <p class="banner-subtitle">Your privacy-first message synchronization service is running securely.</p>
-            </div>
-            <div class="banner-meta">
-              <div class="meta-item">
-                <span class="meta-label">Session Status</span>
-                <span class="meta-value text-success">Authenticated</span>
-              </div>
-              <div class="meta-item">
-                <span class="meta-label">Storage Engine</span>
-                <span class="meta-value">SQLite (Zero PII)</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Feature Cards Grid -->
-          <div class="dashboard-grid">
-            <div class="card stat-card" data-action="whatsapp">
-              <div class="stat-icon-wrapper icon-whatsapp">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">WhatsApp Client</h3>
-                <p id="dash-wa-status" class="stat-value">Checking...</p>
-                <p class="stat-desc">Pair phone and inspect connection state.</p>
-              </div>
-            </div>
-
-            <div class="card stat-card" data-action="discord">
-              <div class="stat-icon-wrapper icon-groups">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path>
-                  <path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">Discord Bot</h3>
-                <p id="dash-discord-status" class="stat-value">Checking...</p>
-                <p class="stat-desc">Inspect bot status and discover channels.</p>
-              </div>
-            </div>
-
-            <div class="card stat-card" data-action="telegram">
-              <div class="stat-icon-wrapper icon-groups">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M22 2L11 13"></path>
-                  <path d="M22 2L15 22l-4-9-9-4 20-7z"></path>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">Telegram Bot</h3>
-                <p id="dash-telegram-status" class="stat-value">Checking...</p>
-                <p class="stat-desc">Inspect long polling and observed groups.</p>
-              </div>
-            </div>
-
-            <div class="card stat-card" data-action="groups">
-              <div class="stat-icon-wrapper icon-groups">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="9" cy="7" r="4"></circle>
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">Configured Endpoints</h3>
-                <p id="dash-groups-count" class="stat-value">0 Endpoints</p>
-                <p class="stat-desc">Manage WhatsApp, Discord, and Telegram routing aliases.</p>
-              </div>
-            </div>
-
-            <div class="card stat-card" data-action="sync-sets">
-              <div class="stat-icon-wrapper icon-sync">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <polyline points="16 3 21 3 21 8"></polyline>
-                  <line x1="4" y1="20" x2="21" y2="3"></line>
-                  <polyline points="21 16 21 21 16 21"></polyline>
-                  <line x1="15" y1="15" x2="21" y2="21"></line>
-                  <line x1="4" y1="4" x2="9" y2="9"></line>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">Sync Sets</h3>
-                <p id="dash-sync-sets-count" class="stat-value">0 Sets</p>
-                <p class="stat-desc">Configure all-to-all synchronization sets.</p>
-              </div>
-            </div>
-
-            <div class="card stat-card" data-action="settings">
-              <div class="stat-icon-wrapper icon-settings">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <circle cx="12" cy="12" r="3"></circle>
-                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                </svg>
-              </div>
-              <div class="stat-content">
-                <h3 class="stat-title">Configuration</h3>
-                <p id="dash-config-mode" class="stat-value">Settings</p>
-                <p class="stat-desc">Adjust privacy, media, and retention limits.</p>
-              </div>
-            </div>
-
-            <div class="card table-card delivery-health-card">
-              <div class="page-header">
-                <div>
-                  <h2 class="page-title" style="font-size:1.15rem;">Delivery Health</h2>
-                  <p class="page-subtitle">Live queue and retry state. Endpoint aliases are the only identifiers shown.</p>
-                </div>
-              </div>
-              <div class="table-responsive">
-                <table class="data-table">
-                  <thead><tr><th>Endpoint</th><th>Transport</th><th>State</th><th>Queue</th><th>Ledger</th><th>Oldest active</th><th>Transport</th></tr></thead>
-                  <tbody id="delivery-health-body"></tbody>
-                </table>
-              </div>
-              <div id="delivery-health-empty" class="empty-state hidden">
-                <h3 class="empty-title">No Endpoints Configured</h3>
-                <p class="empty-desc">Delivery health appears here after an endpoint is configured.</p>
-              </div>
-              <div id="delivery-health-error" class="alert alert-danger hidden" role="alert"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- WhatsApp Registration & Lifecycle View -->
-      <section id="view-whatsapp" class="view hidden">
-        <div class="page-shell">
+      <!-- ═══ DASHBOARD ══════════════════════════════════════ -->
+      <div id="view-dashboard" class="view active" style="overflow-y:auto;">
+        <div class="view-body">
           <div class="page-header">
             <div>
-              <h1 class="page-title">WhatsApp Registration & Status</h1>
-              <p class="page-subtitle">Manage device pairing, inspect WhatsApp protocol connection, and view QR codes.</p>
+              <h1 class="page-title">Dashboard</h1>
             </div>
-            <div class="page-actions">
-              <button id="btn-wa-refresh" class="btn btn-ghost" title="Refresh status">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
-                </svg>
-                <span>Refresh</span>
-              </button>
-            </div>
+            <button id="btn-dash-refresh" class="btn btn-ghost btn-sm">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+              Refresh
+            </button>
           </div>
 
-          <!-- Connection Status Card -->
-          <div class="card status-banner-card">
-            <div class="status-banner-main">
-              <div id="wa-status-indicator" class="status-indicator indicator-neutral">
-                <span class="status-pulse"></span>
-              </div>
-              <div class="status-banner-text">
-                <div class="status-banner-header">
-                  <span class="status-label">Current State:</span>
-                  <span id="wa-status-text" class="status-badge badge-neutral">Checking Status...</span>
+          <!-- Platform status cards -->
+          <div class="dash-platform-grid">
+
+            <!-- WhatsApp -->
+            <div class="platform-card">
+              <div class="platform-card-top">
+                <div class="platform-card-icon wa">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
                 </div>
-                <p id="wa-status-desc" class="status-detail">Checking WhatsApp transport session...</p>
-              </div>
-            </div>
-            <div class="status-banner-actions">
-              <button id="btn-wa-pair" class="btn btn-primary">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="3" width="7" height="7"></rect>
-                  <rect x="14" y="14" width="7" height="7"></rect>
-                  <rect x="3" y="14" width="7" height="7"></rect>
-                </svg>
-                <span class="btn-text">Pair WhatsApp Device</span>
-                <div class="btn-spinner hidden"></div>
-              </button>
-              <button id="btn-wa-cancel" class="btn btn-danger hidden">
-                <span class="btn-text">Cancel Pairing</span>
-                <div class="btn-spinner hidden"></div>
-              </button>
-              <button id="btn-wa-logout" class="btn btn-danger hidden">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
-                  <polyline points="16 17 21 12 16 7"></polyline>
-                  <line x1="21" y1="12" x2="9" y2="12"></line>
-                </svg>
-                <span class="btn-text">Log Out WhatsApp</span>
-                <div class="btn-spinner hidden"></div>
-              </button>
-            </div>
-          </div>
-
-          <!-- Pairing / QR Section (shown when pairing active) -->
-          <div id="wa-qr-section" class="qr-pairing-grid hidden">
-            <div class="card qr-card">
-              <div class="qr-card-header">
-                <span class="badge badge-primary">Scan with WhatsApp</span>
-                <div id="wa-countdown-badge" class="countdown-badge">
-                  <svg class="icon icon-xs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <polyline points="12 6 12 12 16 14"></polyline>
-                  </svg>
-                  <span id="wa-countdown-text">Expires in --s</span>
+                <div class="platform-card-menu">
+                  <button class="platform-card-menu-btn" id="wa-menu-btn" title="WhatsApp actions" aria-haspopup="true" aria-expanded="false">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                  </button>
+                  <div class="platform-card-dropdown" id="wa-menu">
+                    <button class="dropdown-item" id="btn-wa-pair">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                      Pair Device
+                    </button>
+                    <button class="dropdown-item danger" id="btn-wa-logout">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                      Log Out
+                    </button>
+                  </div>
                 </div>
-              </div>
-
-              <div class="qr-canvas-wrapper">
-                <canvas id="wa-qr-canvas" class="qr-canvas"></canvas>
-                <div id="wa-qr-loader" class="qr-loader-overlay hidden">
-                  <div class="spinner"></div>
-                  <span>Generating QR Code...</span>
-                </div>
-              </div>
-
-              <p class="qr-help-text">QR code refreshes automatically when expired.</p>
-            </div>
-
-            <div class="card instructions-card">
-              <h3 class="instructions-title">Pairing Instructions</h3>
-              <ol class="instructions-list">
-                <li>
-                  <span class="step-num">1</span>
-                  <div class="step-content">
-                    <strong>Open WhatsApp</strong> on your phone.
-                  </div>
-                </li>
-                <li>
-                  <span class="step-num">2</span>
-                  <div class="step-content">
-                    Tap <strong>Menu (⋮)</strong> on Android or <strong>Settings</strong> on iPhone.
-                  </div>
-                </li>
-                <li>
-                  <span class="step-num">3</span>
-                  <div class="step-content">
-                    Select <strong>Linked Devices</strong> and tap <strong>Link a Device</strong>.
-                  </div>
-                </li>
-                <li>
-                  <span class="step-num">4</span>
-                  <div class="step-content">
-                    Point your camera at the QR code displayed on the left.
-                  </div>
-                </li>
-              </ol>
-
-              <div class="privacy-callout">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                </svg>
-                <span>Zero-PII guarantee: Session keys are kept in local sqlite protocol store and never transmitted.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Discord Administration & Discovery View -->
-      <section id="view-discord" class="view hidden">
-        <div class="page-shell">
-          <div class="page-header">
-            <div>
-              <h1 class="page-title">Discord Bot & Channel Discovery</h1>
-              <p class="page-subtitle">Inspect the live bot connection, verify managed-webhook readiness, and configure Discord channels by safe alias.</p>
-            </div>
-            <div class="page-actions">
-              <button id="btn-discord-refresh" class="btn btn-ghost" title="Refresh Discord status">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                <span>Refresh</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="card status-banner-card">
-            <div class="status-banner-main">
-              <div id="discord-status-indicator" class="status-indicator indicator-neutral"><span class="status-pulse"></span></div>
-              <div class="status-banner-text">
-                <div class="status-banner-header">
-                  <span class="status-label">Current State:</span>
-                  <span id="discord-status-text" class="status-badge badge-neutral">Checking Status...</span>
-                </div>
-                <p id="discord-status-desc" class="status-detail">Checking Discord bot connection...</p>
-              </div>
-            </div>
-            <div class="status-banner-actions">
-              <button id="btn-discord-discover" class="btn btn-primary">
-                <span class="btn-text">Discover Channels</span>
-                <div class="btn-spinner hidden"></div>
-              </button>
-            </div>
-          </div>
-
-          <div class="card settings-card">
-            <div class="settings-card-header">
-              <div class="icon-avatar icon-avatar-primary">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
               </div>
               <div>
-                <h3 class="settings-card-title">Deployment-only credentials</h3>
-                <p class="settings-card-subtitle">Set <code>DISCORD_BOT_TOKEN</code> or <code>DISCORD_BOT_TOKEN_FILE</code> on the server and restart message-sync. This console never accepts or stores a Discord bot token.</p>
-              </div>
-            </div>
-            <p class="form-hint">Required gateway intents: Guild Messages and Message Content. Configure View Channel, Read Message History, Send Messages, Add Reactions, and Manage Webhooks permissions for channels you bridge.</p>
-          </div>
-
-          <div class="page-header" style="margin-top:1.5rem;">
-            <div>
-              <h2 class="page-title" style="font-size:1.15rem;">Configured Discord Endpoints</h2>
-              <p class="page-subtitle">Webhook readiness is exposed only as safe state; webhook IDs, URLs, and tokens are never returned.</p>
-            </div>
-          </div>
-          <div class="card table-card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead><tr><th>Alias</th><th>Channel ID</th><th>Sync Set</th><th>Managed Webhook</th></tr></thead>
-                <tbody id="discord-configured-body"></tbody>
-              </table>
-            </div>
-            <div id="discord-configured-empty" class="empty-state hidden">
-              <h3 class="empty-title">No Discord Endpoints Configured</h3>
-              <p class="empty-desc">Use live discovery below to choose a channel and assign a safe alias.</p>
-            </div>
-          </div>
-
-          <div class="page-header" style="margin-top:1.5rem;">
-            <div>
-              <h2 class="page-title" style="font-size:1.15rem;">Live Channel Discovery</h2>
-              <p class="page-subtitle">Guild and channel names below are fetched on demand and remain transient browser/runtime data; they are not written to sync.db.</p>
-            </div>
-          </div>
-          <div id="discord-discovery-alert" class="alert alert-danger hidden" role="alert"></div>
-          <div class="card table-card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead><tr><th>Guild</th><th>Channel</th><th>Channel ID</th><th>Configuration</th></tr></thead>
-                <tbody id="discord-discovery-body"></tbody>
-              </table>
-            </div>
-            <div id="discord-discovery-empty" class="empty-state">
-              <h3 class="empty-title">Run Channel Discovery</h3>
-              <p class="empty-desc">Channel display names are shown only after an authenticated on-demand discovery request.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Telegram Administration & Observed Chat Discovery View -->
-      <section id="view-telegram" class="view hidden">
-        <div class="page-shell">
-          <div class="page-header">
-            <div>
-              <h1 class="page-title">Telegram Bot & Observed Chat Discovery</h1>
-              <p class="page-subtitle">Inspect long-poll status and configure groups/supergroups observed from live Bot API updates.</p>
-            </div>
-            <div class="page-actions">
-              <button id="btn-telegram-refresh" class="btn btn-ghost" title="Refresh Telegram status">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                <span>Refresh</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="card status-banner-card">
-            <div class="status-banner-main">
-              <div id="telegram-status-indicator" class="status-indicator indicator-neutral"><span class="status-pulse"></span></div>
-              <div class="status-banner-text">
-                <div class="status-banner-header">
-                  <span class="status-label">Current State:</span>
-                  <span id="telegram-status-text" class="status-badge badge-neutral">Checking Status...</span>
+                <div class="platform-card-label">WhatsApp Bridge</div>
+                <div class="platform-card-status">
+                  <span class="status-dot neutral" id="wa-status-dot"></span>
+                  <span class="platform-card-status-text" id="wa-status-text">Unlinked</span>
                 </div>
-                <p id="telegram-status-desc" class="status-detail">Checking Telegram long polling...</p>
+                <p class="platform-card-desc" id="wa-status-desc"></p>
               </div>
             </div>
-            <div class="status-banner-actions">
-              <button id="btn-telegram-discover" class="btn btn-primary">
-                <span class="btn-text">Refresh Observed Chats</span>
-                <div class="btn-spinner hidden"></div>
-              </button>
-            </div>
-          </div>
 
-          <div class="card settings-card">
-            <div class="settings-card-header">
-              <div class="icon-avatar icon-avatar-primary">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <!-- Discord -->
+            <div class="platform-card">
+              <div class="platform-card-top">
+                <div class="platform-card-icon discord">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><path d="M7.5 7.5c3.5-1 5.5-1 9 0 1 2.5 1.5 6 1 8.5-2 1.5-4 1.5-5.5 1.5l-.5-.5c1-.5 1.5-1 1.5-1-1.5.5-3 .5-4.5 0 0 0 .5.5 1.5 1l-.5.5C8.5 17.5 6.5 17.5 4.5 16c-.5-2.5 0-6 1-8.5z"></path></svg>
+                </div>
+                <div class="platform-card-menu">
+                  <button class="platform-card-menu-btn" id="discord-menu-btn" title="Discord actions" aria-haspopup="true" aria-expanded="false">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                  </button>
+                  <div class="platform-card-dropdown" id="discord-menu">
+                    <button class="dropdown-item" id="btn-discord-refresh-status">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                      Refresh Status
+                    </button>
+                  </div>
+                </div>
               </div>
               <div>
-                <h3 class="settings-card-title">Deployment-only credentials & visibility</h3>
-                <p class="settings-card-subtitle">Set <code>TELEGRAM_BOT_TOKEN</code> or <code>TELEGRAM_BOT_TOKEN_FILE</code> on the server and restart message-sync. This console never accepts or stores a Telegram bot token.</p>
+                <div class="platform-card-label">Discord Bot</div>
+                <div class="platform-card-status">
+                  <span class="status-dot neutral" id="discord-status-dot"></span>
+                  <span class="platform-card-status-text" id="discord-status-text">Not Configured</span>
+                </div>
+                <p class="platform-card-desc" id="discord-status-desc"></p>
               </div>
             </div>
-            <p class="form-hint">Create the bot with BotFather, add it to the target group/supergroup, and ensure it can receive messages intended for synchronization. The console reports Bot Privacy Mode readiness when Telegram's safe capability probe succeeds. Disable Bot Privacy Mode or grant appropriate administrator visibility when ordinary group messages are not visible. Send a group message before refreshing discovery.</p>
-          </div>
 
-          <div class="page-header" style="margin-top:1.5rem;">
-            <div>
-              <h2 class="page-title" style="font-size:1.15rem;">Configured Telegram Endpoints</h2>
-              <p class="page-subtitle">Only the identity-free endpoint alias and opaque chat ID are persisted. Choose aliases that do not encode chat titles/usernames; human-readable Telegram metadata stays transient.</p>
-            </div>
-          </div>
-          <div class="card table-card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead><tr><th>Alias</th><th>Chat ID</th><th>Sync Set</th><th>Runtime</th></tr></thead>
-                <tbody id="telegram-configured-body"></tbody>
-              </table>
-            </div>
-            <div id="telegram-configured-empty" class="empty-state hidden">
-              <h3 class="empty-title">No Telegram Endpoints Configured</h3>
-              <p class="empty-desc">Use observed-chat discovery below to choose a group and assign a safe alias.</p>
-            </div>
-          </div>
-
-          <div class="page-header" style="margin-top:1.5rem;">
-            <div>
-              <h2 class="page-title" style="font-size:1.15rem;">Transient Observed Chats</h2>
-              <p class="page-subtitle">The Bot API cannot enumerate all groups. This bounded process-memory list contains only group/supergroup chats seen in live updates; titles and usernames are never written to sync.db.</p>
-            </div>
-          </div>
-          <div id="telegram-discovery-alert" class="alert alert-danger hidden" role="alert"></div>
-          <div class="card table-card">
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead><tr><th>Chat</th><th>Username</th><th>Type</th><th>Chat ID</th><th>Configuration</th></tr></thead>
-                <tbody id="telegram-discovery-body"></tbody>
-              </table>
-            </div>
-            <div id="telegram-discovery-empty" class="empty-state">
-              <h3 class="empty-title">Refresh Observed Chats</h3>
-              <p class="empty-desc">Add the bot to a group/supergroup, ensure message visibility, send a group message, then refresh.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- Endpoint Management View -->
-      <section id="view-groups" class="view hidden">
-        <div class="page-shell">
-          <div class="page-header">
-            <div>
-              <h1 class="page-title">Configured Endpoints</h1>
-              <p class="page-subtitle">Manage transport-neutral aliases for WhatsApp groups, Discord channels, and Telegram groups/supergroups.</p>
-            </div>
-            <div class="page-actions">
-              <button id="btn-open-add-group" class="btn btn-primary">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>Add WhatsApp Endpoint</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Toolbar -->
-          <div class="table-toolbar">
-            <div class="search-box">
-              <svg class="icon icon-sm search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              <input type="text" id="search-groups" class="form-input search-input" placeholder="Search by alias, transport, or remote ID...">
-            </div>
-            <div id="groups-count-badge" class="badge badge-neutral">0 Endpoints</div>
-          </div>
-
-          <!-- Groups Table Card -->
-          <div class="card table-card">
-            <div class="table-responsive">
-              <table class="data-table" id="table-groups">
-                <thead>
-                  <tr>
-                    <th>Endpoint Alias</th>
-                    <th>Transport</th>
-                    <th>Remote Target ID</th>
-                    <th>Sync Set Membership</th>
-                    <th class="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody id="groups-table-body">
-                  <!-- Rendered dynamically -->
-                </tbody>
-              </table>
-            </div>
-
-            <!-- Empty State -->
-            <div id="groups-empty-state" class="empty-state hidden">
-              <div class="empty-icon-wrapper">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
-                  <circle cx="9" cy="7" r="4"></circle>
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-                </svg>
+            <!-- Telegram -->
+            <div class="platform-card">
+              <div class="platform-card-top">
+                <div class="platform-card-icon telegram">
+                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path></svg>
+                </div>
+                <div class="platform-card-menu">
+                  <button class="platform-card-menu-btn" id="telegram-menu-btn" title="Telegram actions" aria-haspopup="true" aria-expanded="false">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+                  </button>
+                  <div class="platform-card-dropdown" id="telegram-menu">
+                    <button class="dropdown-item" id="btn-telegram-refresh-status">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                      Refresh Status
+                    </button>
+                  </div>
+                </div>
               </div>
-              <h3 class="empty-title">No Endpoints Configured</h3>
-              <p class="empty-desc">Add a WhatsApp endpoint here or configure a Discord endpoint through live discovery.</p>
-              <button class="btn btn-primary btn-sm btn-empty-cta" onclick="document.getElementById('btn-open-add-group').click()">
-                Add First WhatsApp Endpoint
-              </button>
+              <div>
+                <div class="platform-card-label">Telegram Bot</div>
+                <div class="platform-card-status">
+                  <span class="status-dot neutral" id="telegram-status-dot"></span>
+                  <span class="platform-card-status-text" id="telegram-status-text">Not Configured</span>
+                </div>
+                <p class="platform-card-desc" id="telegram-status-desc"></p>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
 
-      <!-- Sync Sets Management View -->
-      <section id="view-sync-sets" class="view hidden">
-        <div class="page-shell">
-          <div class="page-header">
+          <!-- Delivery Health -->
+          <div class="card delivery-card">
+            <div class="settings-card-header" style="padding:14px 16px;">
+              <div>
+                <div class="page-title" style="font-size:.88rem;">Delivery Health</div>
+              </div>
+            </div>
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead><tr><th>Endpoint</th><th>Transport</th><th>State</th><th>Queue</th><th>Ledger</th><th>Oldest active</th><th>Transport</th></tr></thead>
+                <tbody id="delivery-health-body"></tbody>
+              </table>
+            </div>
+            <div id="delivery-health-empty" class="empty-state hidden">
+              <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+              <p class="empty-title">No Endpoints Configured</p>
+              <p class="empty-desc">Delivery health appears here after an endpoint is configured inside a sync set.</p>
+            </div>
+            <div id="delivery-health-error" class="alert alert-danger hidden" style="margin:12px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ SYNC SETS ═══════════════════════════════════════ -->
+      <div id="view-sync-sets" class="view hidden" style="overflow:hidden;">
+        <div style="padding:20px 24px 12px; flex-shrink:0;">
+          <div class="page-header" style="margin-bottom:0;">
             <div>
               <h1 class="page-title">Sync Sets</h1>
-              <p class="page-subtitle">Assemble WhatsApp, Discord, and Telegram endpoints into all-to-all synchronization sets. Each endpoint belongs to at most one sync set.</p>
             </div>
-            <div class="page-actions">
-              <button id="btn-open-add-sync-set" class="btn btn-primary">
-                <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19"></line>
-                  <line x1="5" y1="12" x2="19" y2="12"></line>
-                </svg>
-                <span>Add Sync Set</span>
+          </div>
+        </div>
+        <div class="syncset-layout" style="padding:0 24px 24px; flex:1; min-height:0;">
+
+          <!-- List panel -->
+          <div class="syncset-list-panel">
+            <div class="syncset-list-header">
+              <span class="syncset-list-title">Sets <span id="syncset-count-badge" class="badge badge-neutral" style="margin-left:6px;">0</span></span>
+              <button id="btn-new-sync-set" class="btn btn-primary btn-sm">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                New
               </button>
             </div>
-          </div>
-
-          <!-- Toolbar -->
-          <div class="table-toolbar">
-            <div class="search-box">
-              <svg class="icon icon-sm search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              <input type="text" id="search-sync-sets" class="form-input search-input" placeholder="Search sync sets or member aliases...">
+            <div class="syncset-list-scroll" id="syncset-list">
+              <div class="syncset-empty-list">No sync sets yet. Click <strong>New</strong> to create one.</div>
             </div>
-            <div id="sync-sets-count-badge" class="badge badge-neutral">0 Sets</div>
           </div>
 
-          <!-- Sync Sets List / Grid -->
-          <div id="sync-sets-container" class="sync-sets-grid">
-            <!-- Rendered dynamically -->
-          </div>
-
-          <!-- Empty State -->
-          <div id="sync-sets-empty-state" class="card empty-state hidden">
-            <div class="empty-icon-wrapper">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="16 3 21 3 21 8"></polyline>
-                <line x1="4" y1="20" x2="21" y2="3"></line>
-                <polyline points="21 16 21 21 16 21"></polyline>
-                <line x1="15" y1="15" x2="21" y2="21"></line>
-                <line x1="4" y1="4" x2="9" y2="9"></line>
-              </svg>
+          <!-- Editor panel -->
+          <div class="syncset-editor-panel" id="syncset-editor-panel">
+            <!-- Placeholder shown when nothing selected -->
+            <div id="syncset-editor-placeholder" style="display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:12px;color:var(--text-muted);">
+              <svg style="width:40px;height:40px;color:var(--border-strong);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+              <p style="font-size:.82rem;">Select a sync set to edit or click <strong>New</strong> to create one.</p>
             </div>
-            <h3 class="empty-title">No Sync Sets Configured</h3>
-            <p class="empty-desc">Create a sync set to bridge 2 or more endpoints across supported transports.</p>
-            <button class="btn btn-primary btn-sm btn-empty-cta" onclick="document.getElementById('btn-open-add-sync-set').click()">
-              Create First Sync Set
-            </button>
+
+            <!-- Editor form (hidden until a set is selected/created) -->
+            <div id="syncset-editor-form" class="hidden" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+              <div class="syncset-editor-header">
+                <div>
+                  <div class="syncset-editor-title" id="syncset-editor-title">New Sync Set</div>
+                  <div style="margin-top:4px;">
+                    <span class="form-label" style="display:inline;">ID:&nbsp;</span>
+                    <span id="syncset-editor-id-display" class="alias-badge"></span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                  <button id="btn-delete-sync-set" class="btn btn-danger btn-sm hidden">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              <div class="syncset-editor-body">
+                <!-- Sync set ID (only editable on create) -->
+                <div class="form-group" id="syncset-id-field">
+                  <label for="input-syncset-id" class="form-label">Sync Set ID</label>
+                  <input type="text" id="input-syncset-id" class="form-input font-mono" placeholder="e.g. family-bridge" required>
+                  <p class="form-hint">Alphanumeric, dashes, underscores. 1–64 chars. Cannot be changed after creation.</p>
+                </div>
+
+                <!-- Current endpoints chips -->
+                <div>
+                  <div class="section-label">Endpoints in this Set</div>
+                  <div class="endpoint-chips-area" id="endpoint-chips">
+                    <span class="chips-placeholder">No endpoints yet. Add one below.</span>
+                  </div>
+                </div>
+
+                <!-- Add endpoint form -->
+                <div>
+                  <div class="section-label">Add Endpoint</div>
+                  <div class="add-endpoint-form">
+                    <!-- Transport picker -->
+                    <div>
+                      <div class="section-label" style="margin-bottom:6px;">Transport</div>
+                      <div class="transport-tabs">
+                        <button type="button" class="transport-tab active wa" data-transport="whatsapp" data-tab="whatsapp" id="tab-wa">
+                          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                          WhatsApp
+                        </button>
+                        <button type="button" class="transport-tab discord" data-transport="discord" data-tab="discord" id="tab-discord">
+                          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path></svg>
+                          Discord
+                        </button>
+                        <button type="button" class="transport-tab telegram" data-transport="telegram" data-tab="telegram" id="tab-telegram">
+                          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path></svg>
+                          Telegram
+                        </button>
+                      </div>
+                    </div>
+
+                    <!-- Remote selection + alias -->
+                    <div class="add-endpoint-row">
+                      <div class="form-group">
+                        <label class="form-label" id="add-remote-label">WhatsApp Group</label>
+                        <select id="add-remote-select" class="form-select">
+                          <option value="">— select group —</option>
+                        </select>
+                        <p class="form-hint" id="add-remote-hint"></p>
+                      </div>
+                      <div class="form-group">
+                        <label for="add-alias-input" class="form-label">Alias</label>
+                        <input type="text" id="add-alias-input" class="form-input font-mono" placeholder="e.g. family-wa">
+                      </div>
+                      <div class="form-group" style="align-self:flex-end;">
+                        <button type="button" id="btn-add-endpoint" class="btn btn-primary">
+                          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                          <span class="btn-text">Add</span>
+                          <div class="btn-spinner hidden"></div>
+                        </button>
+                      </div>
+                    </div>
+                    <div id="add-endpoint-alert" class="alert alert-danger hidden"></div>
+
+                    <!-- Collapsible setup note -->
+                    <div id="platform-setup-note" class="info-callout hidden">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                      <span id="platform-setup-note-text"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="syncset-editor-footer">
+                <button id="btn-cancel-editor" class="btn btn-ghost">Cancel</button>
+                <button id="btn-save-sync-set" class="btn btn-primary">
+                  <span class="btn-text">Save Sync Set</span>
+                  <div class="btn-spinner hidden"></div>
+                </button>
+              </div>
+            </div>
           </div>
+
         </div>
-      </section>
+      </div>
 
-      <!-- Settings View -->
-      <section id="view-users" class="view hidden">
-        <div class="page-shell"><div class="page-header"><div><h1 class="page-title">Users</h1><p class="page-subtitle">Manage accounts and create one-time access tokens.</p></div></div>
-          <div class="card settings-card"><div class="form-group"><label class="form-label" for="invite-role">Invite role</label><select id="invite-role" class="form-input"><option value="operator">Operator</option><option value="admin">Administrator</option></select></div><button id="btn-create-invite" class="btn btn-primary">Create invite</button><p id="invite-result" class="form-hint"></p></div>
-          <div class="card settings-card"><table class="data-table"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Action</th></tr></thead><tbody id="users-table-body"></tbody></table></div>
-        </div>
-      </section>
-
-      <section id="view-membership" class="view hidden"><div class="page-shell"><div class="page-header"><div><h1 class="page-title">Membership Review</h1><p class="page-subtitle">Review email-verified applications and advisory signals. Decisions are authoritative.</p></div></div><div class="card settings-card"><div class="form-row"><select id="membership-status-filter" class="form-input"><option value="">All statuses</option><option value="pending_admin">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select><input id="membership-age-filter" class="form-input" type="number" min="0" placeholder="Age (hours)"><button id="membership-refresh" class="btn btn-secondary">Refresh</button></div><table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Verification</th><th>Signals</th><th>Action</th></tr></thead><tbody id="membership-table-body"></tbody></table><div id="membership-detail" class="form-hint"></div></div><div id="membership-pipelines" class="card settings-card hidden"><h2>Verification pipelines</h2><div class="form-row"><input id="pipeline-label" class="form-input" placeholder="Label"><select id="pipeline-transport" class="form-input"><option value="whatsapp">WhatsApp</option><option value="discord">Discord</option></select><input id="pipeline-endpoint" class="form-input" placeholder="Endpoint alias"><input id="pipeline-role" class="form-input" placeholder="Discord role ID (optional)"><button id="pipeline-create" class="btn btn-primary">Create</button></div><div id="pipeline-list"></div></div></div></section>
-
-      <!-- Settings View -->
-      <section id="view-settings" class="view hidden">
-        <div class="page-shell">
+      <!-- ═══ SETTINGS ════════════════════════════════════════ -->
+      <div id="view-settings" class="view hidden" style="overflow-y:auto;">
+        <div class="view-body">
           <div class="page-header">
             <div>
-              <h1 class="page-title">Global Settings</h1>
-              <p class="page-subtitle">Configure privacy modes, media forwarding limits, catch-up recovery, and message retention.</p>
+              <h1 class="page-title">Settings</h1>
             </div>
           </div>
 
-          <form id="form-settings" class="settings-form" novalidate>
+          <form id="form-settings" novalidate class="settings-section">
             <div id="settings-alert" class="alert alert-danger hidden" role="alert"></div>
 
-            <!-- Identity & Privacy Card -->
-            <div class="card settings-card">
+            <!-- Identity & Privacy -->
+            <div class="settings-card">
               <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-primary">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
-                    <circle cx="12" cy="7" r="4"></circle>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">Identity & Privacy</h3>
-                  <p class="settings-card-subtitle">Control how sender usernames are attributed across bridged endpoints.</p>
+                <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Identity &amp; Privacy</div>
                 </div>
               </div>
-
-              <div class="form-group">
-                <label for="settings-username-mode" class="form-label">Username Attribution Mode</label>
-                <select id="settings-username-mode" class="form-select">
-                  <option value="push_name">Push Name (Plain sender display name attribution)</option>
-                  <option value="hash">Hash (Pseudonymous HMAC-derived actor token)</option>
-                </select>
-                <p class="form-hint">Under 'Hash' mode, participant names and numbers are strictly non-disclosed.</p>
-              </div>
-            </div>
-
-            <!-- Media Forwarding Card -->
-            <div class="card settings-card">
-              <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-accent">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">Media Forwarding</h3>
-                  <p class="settings-card-subtitle">Manage attachment relay and ephemeral memory transfer boundaries.</p>
-                </div>
-              </div>
-
-              <div class="form-grid-2">
+              <div class="settings-card-body">
                 <div class="form-group">
-                  <label class="toggle-control">
-                    <input type="checkbox" id="settings-media-enabled" class="toggle-checkbox">
-                    <span class="toggle-slider"></span>
-                    <span class="toggle-label">Enable Media Forwarding</span>
-                  </label>
-                  <p class="form-hint">When enabled, media is relayed in memory and never written to disk.</p>
-                </div>
-
-                <div class="form-group">
-                  <label for="settings-media-max-size" class="form-label">Max Media Size (MB)</label>
-                  <input type="number" id="settings-media-max-size" class="form-input" min="1" max="100" required>
-                  <p class="form-hint">Media larger than this threshold is rejected.</p>
+                  <label for="settings-username-mode" class="form-label">Username Attribution Mode</label>
+                  <select id="settings-username-mode" class="form-select">
+                    <option value="push_name">Push Name (plain display name)</option>
+                    <option value="hash">Hash (pseudonymous HMAC-derived token)</option>
+                  </select>
                 </div>
               </div>
             </div>
 
-            <!-- Catch-up & Recovery Card -->
-            <div class="card settings-card">
+            <!-- Media Forwarding -->
+            <div class="settings-card">
               <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-primary">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="1 4 1 10 7 10"></polyline>
-                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">Offline Catch-Up Recovery</h3>
-                  <p class="settings-card-subtitle">Configure message replay and synchronization catch-up boundaries upon reconnection.</p>
+                <div class="settings-card-icon accent"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Media Forwarding</div>
                 </div>
               </div>
+              <div class="settings-card-body">
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label class="toggle-control">
+                      <input type="checkbox" id="settings-media-enabled" class="toggle-checkbox">
+                      <span class="toggle-slider"></span>
+                      <span class="toggle-label">Enable Media Forwarding</span>
+                    </label>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-media-max-size" class="form-label">Max Media Size (MB)</label>
+                    <input type="number" id="settings-media-max-size" class="form-input" min="1" max="100" required>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-              <div class="form-group">
+            <!-- Recovery -->
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"></polyline><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Offline Catch-Up Recovery</div>
+                </div>
+              </div>
+              <div class="settings-card-body">
                 <label class="toggle-control">
                   <input type="checkbox" id="settings-recovery-enabled" class="toggle-checkbox">
                   <span class="toggle-slider"></span>
                   <span class="toggle-label">Enable Catch-Up Recovery</span>
                 </label>
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label for="settings-recovery-max-age" class="form-label">Max Replay Age (Hours)</label>
+                    <input type="number" id="settings-recovery-max-age" class="form-input" min="1" max="720" required>
+                  </div>
+                  <div class="form-group">
+                    <label for="settings-recovery-max-msgs" class="form-label">Max Messages Per Group</label>
+                    <input type="number" id="settings-recovery-max-msgs" class="form-input" min="1" max="5000" required>
+                  </div>
+                </div>
               </div>
+            </div>
 
-              <div class="form-grid-2">
+            <!-- Retention -->
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <div class="settings-card-icon accent"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Storage &amp; Retention</div>
+                </div>
+              </div>
+              <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-recovery-max-age" class="form-label">Max Replay Age (Hours)</label>
-                  <input type="number" id="settings-recovery-max-age" class="form-input" min="1" max="720" required>
-                  <p class="form-hint">Maximum age of offline messages to backfill.</p>
+                  <label for="settings-retention-days" class="form-label">Message Copy Retention (Days)</label>
+                  <input type="number" id="settings-retention-days" class="form-input" min="1" max="365" required>
                 </div>
+              </div>
+            </div>
 
+            <!-- Polls -->
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"></path><path d="M18 20V4"></path><path d="M6 20v-4"></path></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Polls</div>
+                </div>
+              </div>
+              <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-recovery-max-msgs" class="form-label">Max Messages Per Group</label>
-                  <input type="number" id="settings-recovery-max-msgs" class="form-input" min="1" max="5000" required>
-                  <p class="form-hint">Hard cap on replay volume per synchronization set.</p>
+                  <label for="settings-polls-aggregation-trigger" class="form-label">Aggregation Trigger</label>
+                  <input type="text" id="settings-polls-aggregation-trigger" class="form-input" required>
                 </div>
               </div>
             </div>
 
-            <!-- Database Retention Card -->
-            <div class="card settings-card">
+            <!-- WhatsApp Cleanup -->
+            <div class="settings-card">
               <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-accent">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-                    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
-                    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">Storage & Retention</h3>
-                  <p class="settings-card-subtitle">Set automated pruning windows for routing identifiers in `sync.db`.</p>
+                <div class="settings-card-icon wa"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">WhatsApp Chat Cleanup</div>
                 </div>
               </div>
-
-              <div class="form-group">
-                <label for="settings-retention-days" class="form-label">Message Copy Retention (Days)</label>
-                <input type="number" id="settings-retention-days" class="form-input" min="1" max="365" required>
-                <p class="form-hint">Canonical message mappings older than this are safely pruned.</p>
-              </div>
-            </div>
-
-            <!-- Poll Settings Card -->
-            <div class="card settings-card">
-              <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-primary">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 20V10"></path>
-                    <path d="M18 20V4"></path>
-                    <path d="M6 20v-4"></path>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">Polls</h3>
-                  <p class="settings-card-subtitle">Configure poll aggregation and synchronization behaviors.</p>
-                </div>
-              </div>
-
-              <div class="form-group">
-                <label for="settings-polls-aggregation-trigger" class="form-label">Aggregation Trigger</label>
-                <input type="text" id="settings-polls-aggregation-trigger" class="form-input" required>
-                <p class="form-hint">The textual trigger used to aggregate poll responses.</p>
-              </div>
-            </div>
-
-            <!-- WhatsApp Chat Cleanup Card -->
-            <div class="card settings-card">
-              <div class="settings-card-header">
-                <div class="icon-avatar icon-avatar-whatsapp">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="3 6 5 6 21 6"></polyline>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  </svg>
-                </div>
-                <div>
-                  <h3 class="settings-card-title">WhatsApp Chat Cleanup</h3>
-                  <p class="settings-card-subtitle">Automate daily WhatsApp message clearing on the sync account for groups in sync-sets.</p>
-                </div>
-              </div>
-
-              <div class="form-group">
+              <div class="settings-card-body">
                 <div class="toggle-wrapper">
-                  <input type="checkbox" id="settings-whatsapp-cleanup-enabled" class="toggle-checkbox">
-                  <label for="settings-whatsapp-cleanup-enabled" class="toggle-label">
-                    <span class="toggle-title">Enable Daily WhatsApp Chat Cleanup</span>
-                    <span class="toggle-desc">Automatically clears messages older than the retention period on the sync account. Messages remain untouched for other group participants.</span>
-                  </label>
+                  <input type="checkbox" id="settings-whatsapp-cleanup-enabled" style="width:auto;flex-shrink:0;margin-top:3px;">
+                  <div>
+                    <div class="toggle-title">Enable Daily Chat Cleanup</div>
+                  </div>
                 </div>
-              </div>
-
-              <div class="form-group">
-                <label for="settings-whatsapp-cleanup-retention-days" class="form-label">WhatsApp Chat Retention (Days)</label>
-                <input type="number" id="settings-whatsapp-cleanup-retention-days" class="form-input" min="1" max="365" required>
-                <p class="form-hint">WhatsApp chat history older than this is cleared for sync-set groups during daily maintenance.</p>
+                <div class="form-group">
+                  <label for="settings-whatsapp-cleanup-retention-days" class="form-label">WhatsApp Retention (Days)</label>
+                  <input type="number" id="settings-whatsapp-cleanup-retention-days" class="form-input" min="1" max="365" required>
+                </div>
               </div>
             </div>
 
-            <!-- Form Actions -->
             <div class="settings-form-actions">
-              <button type="button" id="btn-reset-settings" class="btn btn-ghost">
-                Reset Values
-              </button>
+              <button type="button" id="btn-reset-settings" class="btn btn-ghost">Reset</button>
               <button type="submit" id="btn-save-settings" class="btn btn-primary">
                 <span class="btn-text">Save Configuration</span>
                 <div class="btn-spinner hidden"></div>
@@ -1038,247 +622,196 @@
             </div>
           </form>
 
-          <!-- Admin Security / Change Password Card -->
-          <div class="card settings-card" style="margin-top: 1.5rem;">
+          <!-- Change Password -->
+          <div class="settings-card" style="margin-top:20px;">
             <div class="settings-card-header">
-              <div class="icon-avatar icon-avatar-primary">
-                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-                </svg>
-              </div>
-              <div>
-                <h3 class="settings-card-title">Admin Security</h3>
-                <p class="settings-card-subtitle">Change the web dashboard administrative password.</p>
+              <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></div>
+              <div class="settings-card-meta">
+                <div class="settings-card-title">Admin Security</div>
               </div>
             </div>
-
-            <form id="form-change-password" class="auth-form" novalidate style="margin-top: 1rem;">
-              <div id="change-pwd-alert" class="alert alert-danger hidden" role="alert"></div>
-
-              <div class="form-group">
-                <label for="change-pwd-current" class="form-label">Current Password</label>
-                <div class="password-input-wrapper">
-                  <input 
-                    type="password" 
-                    id="change-pwd-current" 
-                    class="form-input" 
-                    placeholder="Enter current admin password" 
-                    autocomplete="current-password"
-                    required
-                  >
-                  <button type="button" class="btn-toggle-password" data-target="change-pwd-current" aria-label="Toggle password visibility">
-                    <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                      <circle cx="12" cy="12" r="3"></circle>
-                    </svg>
+            <div class="settings-card-body">
+              <form id="form-change-password" novalidate style="display:flex;flex-direction:column;gap:14px;">
+                <div id="change-pwd-alert" class="alert alert-danger hidden" role="alert"></div>
+                <div class="form-group">
+                  <label for="change-pwd-current" class="form-label">Current Password</label>
+                  <div class="input-wrapper">
+                    <input type="password" id="change-pwd-current" class="form-input" placeholder="Current password" autocomplete="current-password" required>
+                    <button type="button" class="btn-toggle-password" data-target="change-pwd-current"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                  </div>
+                </div>
+                <div class="form-grid-2">
+                  <div class="form-group">
+                    <label for="change-pwd-new" class="form-label">New Password</label>
+                    <div class="input-wrapper">
+                      <input type="password" id="change-pwd-new" class="form-input" placeholder="New password" autocomplete="new-password" minlength="8" maxlength="72" required>
+                      <button type="button" class="btn-toggle-password" data-target="change-pwd-new"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                    </div>
+                    <div class="password-strength-bar"><div id="change-pwd-strength-fill" class="strength-fill"></div></div>
+                    <div class="form-hint" id="change-pwd-hint">Between 8 and 72 characters</div>
+                  </div>
+                  <div class="form-group">
+                    <label for="change-pwd-confirm" class="form-label">Confirm New Password</label>
+                    <div class="input-wrapper">
+                      <input type="password" id="change-pwd-confirm" class="form-input" placeholder="Confirm password" autocomplete="new-password" minlength="8" maxlength="72" required>
+                      <button type="button" class="btn-toggle-password" data-target="change-pwd-confirm"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                    </div>
+                    <div class="form-hint" id="change-pwd-confirm-hint"></div>
+                  </div>
+                </div>
+                <div class="settings-form-actions">
+                  <button type="submit" id="btn-submit-change-pwd" class="btn btn-primary">
+                    <span class="btn-text">Update Password</span>
+                    <div class="btn-spinner hidden"></div>
                   </button>
                 </div>
-              </div>
-
-              <div class="form-grid-2">
-                <div class="form-group">
-                  <label for="change-pwd-new" class="form-label">New Password</label>
-                  <div class="password-input-wrapper">
-                    <input 
-                      type="password" 
-                      id="change-pwd-new" 
-                      class="form-input" 
-                      placeholder="Enter new password" 
-                      autocomplete="new-password"
-                      minlength="8"
-                      maxlength="72"
-                      required
-                    >
-                    <button type="button" class="btn-toggle-password" data-target="change-pwd-new" aria-label="Toggle password visibility">
-                      <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                        <circle cx="12" cy="12" r="3"></circle>
-                      </svg>
-                    </button>
-                  </div>
-                  <div class="password-strength-bar">
-                    <div id="change-pwd-strength-fill" class="strength-fill"></div>
-                  </div>
-                  <div class="form-hint" id="change-pwd-hint">Between 8 and 72 characters</div>
-                </div>
-
-                <div class="form-group">
-                  <label for="change-pwd-confirm" class="form-label">Confirm New Password</label>
-                  <div class="password-input-wrapper">
-                    <input 
-                      type="password" 
-                      id="change-pwd-confirm" 
-                      class="form-input" 
-                      placeholder="Re-enter new password" 
-                      autocomplete="new-password"
-                      minlength="8"
-                      maxlength="72"
-                      required
-                    >
-                    <button type="button" class="btn-toggle-password" data-target="change-pwd-confirm" aria-label="Toggle password visibility">
-                      <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                        <circle cx="12" cy="12" r="3"></circle>
-                      </svg>
-                    </button>
-                  </div>
-                  <div class="form-hint" id="change-pwd-confirm-hint"></div>
-                </div>
-              </div>
-
-              <div class="settings-form-actions" style="margin-top: 1rem;">
-                <button type="submit" id="btn-submit-change-pwd" class="btn btn-primary">
-                  <span class="btn-text">Update Admin Password</span>
-                  <div class="btn-spinner hidden"></div>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <!-- Group Modal (Add / Edit) -->
-    <div id="modal-group" class="modal-overlay hidden" role="dialog" aria-modal="true">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3 id="modal-group-title" class="modal-title">Add WhatsApp Endpoint</h3>
-          <button type="button" class="btn-modal-close" data-modal="modal-group" aria-label="Close modal">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-
-        <form id="form-group" class="modal-form" novalidate>
-          <div id="modal-group-alert" class="alert alert-danger hidden" role="alert"></div>
-
-          <div class="form-group">
-            <label for="select-group-wa" class="form-label">WhatsApp Group</label>
-            <select id="select-group-wa" class="form-select" required>
-              <option value="">-- Select WhatsApp Group --</option>
-            </select>
-            <input type="hidden" id="input-group-jid">
-            <p class="form-hint" id="select-group-wa-hint">Select from active joined groups on linked WhatsApp.</p>
-          </div>
-
-          <div class="form-group">
-            <label for="input-group-alias" class="form-label">Endpoint Alias</label>
-            <input 
-              type="text" 
-              id="input-group-alias" 
-              class="form-input font-mono" 
-              placeholder="e.g. engineering_team" 
-              required
-            >
-            <p class="form-hint">Unique safe identifier (1-64 alphanumeric, dash, or underscore characters).</p>
-          </div>
-
-          <div class="form-group">
-            <label for="select-group-sync-set" class="form-label">Assign to Sync Set (Optional)</label>
-            <select id="select-group-sync-set" class="form-select">
-              <option value="">-- None (Unassigned) --</option>
-            </select>
-          </div>
-
-          <div class="modal-footer">
-            <button type="button" class="btn btn-ghost" data-modal="modal-group">Cancel</button>
-            <button type="submit" id="btn-submit-group" class="btn btn-primary">
-              <span class="btn-text">Save Endpoint</span>
-              <div class="btn-spinner hidden"></div>
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Sync Set Modal (Add / Edit) -->
-    <div id="modal-sync-set" class="modal-overlay hidden" role="dialog" aria-modal="true">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3 id="modal-sync-set-title" class="modal-title">Add Sync Set</h3>
-          <button type="button" class="btn-modal-close" data-modal="modal-sync-set" aria-label="Close modal">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-
-        <form id="form-sync-set" class="modal-form" novalidate>
-          <div id="modal-sync-set-alert" class="alert alert-danger hidden" role="alert"></div>
-
-          <div class="form-group">
-            <label for="input-sync-set-id" class="form-label">Sync Set ID</label>
-            <input 
-              type="text" 
-              id="input-sync-set-id" 
-              class="form-input font-mono" 
-              placeholder="e.g. main-sync-cluster" 
-              required
-            >
-            <p class="form-hint">Unique identifier (1-64 alphanumeric, dash, or underscore characters).</p>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Select Member Endpoints</label>
-            <p class="form-hint">Select configured WhatsApp, Discord, or Telegram endpoint aliases to synchronize together.</p>
-            <div id="sync-set-groups-checklist" class="groups-checklist">
-              <!-- Rendered dynamically -->
+              </form>
             </div>
           </div>
+        </div>
+      </div>
 
-          <div class="modal-footer">
-            <button type="button" class="btn btn-ghost" data-modal="modal-sync-set">Cancel</button>
-            <button type="submit" id="btn-submit-sync-set" class="btn btn-primary">
-              <span class="btn-text">Save Sync Set</span>
-              <div class="btn-spinner hidden"></div>
-            </button>
+      <!-- ═══ USERS ════════════════════════════════════════════ -->
+      <div id="view-users" class="view hidden" style="overflow-y:auto;">
+        <div class="view-body">
+          <div class="page-header">
+            <div><h1 class="page-title">Users</h1></div>
           </div>
-        </form>
+          <div class="settings-section">
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg></div>
+                <div class="settings-card-meta"><div class="settings-card-title">Create Invite</div></div>
+              </div>
+              <div class="settings-card-body" style="flex-direction:row;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+                <div class="form-group" style="flex:1;min-width:160px;">
+                  <label for="invite-role" class="form-label">Role</label>
+                  <select id="invite-role" class="form-select"><option value="operator">Operator</option><option value="admin">Administrator</option></select>
+                </div>
+                <button id="btn-create-invite" class="btn btn-primary">Create Invite</button>
+              </div>
+              <div id="invite-result" class="invite-result" style="padding:0 20px 14px;"></div>
+            </div>
+            <div class="settings-card">
+              <div class="table-responsive">
+                <table class="data-table"><thead><tr><th>Username</th><th>Role</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody id="users-table-body"></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ MEMBERSHIP ══════════════════════════════════════ -->
+      <div id="view-membership" class="view hidden" style="overflow-y:auto;">
+        <div class="view-body">
+          <div class="page-header">
+            <div><h1 class="page-title">Membership Review</h1></div>
+          </div>
+          <div class="settings-section">
+            <div class="settings-card">
+              <div class="settings-card-body" style="flex-direction:row;gap:10px;flex-wrap:wrap;">
+                <div class="form-group" style="flex:1;min-width:160px;">
+                  <label class="form-label">Status filter</label>
+                  <select id="membership-status-filter" class="form-select"><option value="">All statuses</option><option value="pending_admin">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
+                </div>
+                <div class="form-group" style="flex:1;min-width:120px;">
+                  <label class="form-label">Age (hours)</label>
+                  <input id="membership-age-filter" class="form-input" type="number" min="0" placeholder="Max age">
+                </div>
+                <div style="align-self:flex-end;"><button id="membership-refresh" class="btn btn-ghost">Refresh</button></div>
+              </div>
+              <div class="table-responsive">
+                <table class="data-table"><thead><tr><th>Request</th><th>Status</th><th>Verification</th><th>Signals</th><th class="text-right">Action</th></tr></thead><tbody id="membership-table-body"></tbody></table>
+              </div>
+              <div id="membership-detail" style="padding:12px 16px;font-size:.78rem;color:var(--text-muted);"></div>
+            </div>
+            <div id="membership-pipelines" class="settings-card hidden">
+              <div class="settings-card-header"><div class="settings-card-meta"><div class="settings-card-title">Verification Pipelines</div></div></div>
+              <div class="settings-card-body" style="flex-direction:row;gap:10px;flex-wrap:wrap;">
+                <div class="form-group" style="flex:1;min-width:140px;"><label class="form-label">Label</label><input id="pipeline-label" class="form-input" placeholder="Label"></div>
+                <div class="form-group" style="min-width:140px;"><label class="form-label">Transport</label><select id="pipeline-transport" class="form-select"><option value="whatsapp">WhatsApp</option><option value="discord">Discord</option></select></div>
+                <div class="form-group" style="flex:1;min-width:140px;"><label class="form-label">Endpoint alias</label><input id="pipeline-endpoint" class="form-input" placeholder="Endpoint alias"></div>
+                <div class="form-group" style="flex:1;min-width:140px;"><label class="form-label">Discord role ID</label><input id="pipeline-role" class="form-input" placeholder="Optional"></div>
+                <div style="align-self:flex-end;"><button id="pipeline-create" class="btn btn-primary">Create</button></div>
+              </div>
+              <div id="pipeline-list" style="padding:0 20px 14px;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- end content-area -->
+  </div><!-- end app-shell -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       MODALS
+  ═══════════════════════════════════════════════════════════ -->
+
+  <!-- WA Pair / QR Modal -->
+  <div id="modal-wa-pair" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:680px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Pair WhatsApp Device</h3>
+        <button type="button" class="btn-modal-close" data-modal="modal-wa-pair" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="wa-pair-status" class="alert alert-info" style="margin-bottom:16px;">Requesting QR code…</div>
+        <div id="wa-qr-section" class="qr-pairing-grid hidden">
+          <div>
+            <canvas id="wa-qr-canvas" class="qr-canvas"></canvas>
+            <div class="qr-countdown" id="wa-countdown-badge">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+              <span id="wa-countdown-text">Expires in --s</span>
+            </div>
+          </div>
+          <div class="qr-instructions">
+            <ol>
+              <li class="qr-step"><span class="step-num">1</span><span class="step-text">Open <strong>WhatsApp</strong> on your phone.</span></li>
+              <li class="qr-step"><span class="step-num">2</span><span class="step-text">Tap <strong>Menu (⋮)</strong> on Android or <strong>Settings</strong> on iPhone.</span></li>
+              <li class="qr-step"><span class="step-num">3</span><span class="step-text">Select <strong>Linked Devices</strong> → <strong>Link a Device</strong>.</span></li>
+              <li class="qr-step"><span class="step-num">4</span><span class="step-text">Point your camera at the QR code on the left.</span></li>
+            </ol>
+            <div class="info-callout" style="margin-top:16px;">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+              Zero-PII: session keys remain in the local SQLite protocol store and are never transmitted.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-wa-cancel-pair" class="btn btn-ghost hidden">Cancel Pairing</button>
+        <button type="button" class="btn btn-ghost" data-modal="modal-wa-pair">Close</button>
       </div>
     </div>
-
-    <!-- Universal Confirmation Modal -->
-    <div id="modal-confirm" class="modal-overlay hidden" role="dialog" aria-modal="true">
-      <div class="modal-card modal-card-sm">
-        <div class="modal-header">
-          <h3 id="modal-confirm-title" class="modal-title">Confirm Action</h3>
-          <button type="button" class="btn-modal-close" data-modal="modal-confirm" aria-label="Close modal">
-            <svg class="icon icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-        <div class="modal-body">
-          <p id="modal-confirm-msg" class="confirm-message">Are you sure you want to proceed?</p>
-        </div>
-        <div class="modal-footer">
-          <button type="button" id="btn-confirm-cancel" class="btn btn-ghost" data-modal="modal-confirm">Cancel</button>
-          <button type="button" id="btn-confirm-ok" class="btn btn-danger">
-            <span class="btn-text">Delete</span>
-            <div class="btn-spinner hidden"></div>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Footer -->
-    <footer class="app-footer">
-      <div class="footer-inner">
-        <span>Message Sync</span>
-        <span class="footer-separator">•</span>
-        <span>Zero-PII Architecture</span>
-      </div>
-    </footer>
   </div>
 
-  <script src="/js/qrcode.js?v=3"></script>
-  <script src="/js/api.js?v=3"></script>
-  <script src="/js/router.js?v=3"></script>
-  <script src="/js/app.js?v=3"></script>
+  <!-- Universal Confirmation Modal -->
+  <div id="modal-confirm" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3 id="modal-confirm-title" class="modal-title">Confirm Action</h3>
+        <button type="button" class="btn-modal-close" data-modal="modal-confirm" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="modal-confirm-msg" class="confirm-message">Are you sure you want to proceed?</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-modal="modal-confirm">Cancel</button>
+        <button type="button" id="btn-confirm-ok" class="btn btn-danger">
+          <span class="btn-text">Delete</span>
+          <div class="btn-spinner hidden"></div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/qrcode.js?v=8"></script>
+  <script src="/js/api.js?v=8"></script>
+  <script src="/js/router.js?v=8"></script>
+  <script src="/js/app.js?v=8"></script>
 </body>
 </html>

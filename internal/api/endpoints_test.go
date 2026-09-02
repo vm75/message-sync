@@ -322,3 +322,65 @@ func TestEndpointErrorsDoNotLogRemoteIDs(t *testing.T) {
 		t.Fatalf("logs exposed remote id: %s", logs.String())
 	}
 }
+
+func TestEndpointsRenameAlias(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authHeader := "Bearer " + token
+
+	if _, err := db.Exec(`INSERT INTO sync_sets (id) VALUES ('set1')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create endpoint "old_alias"
+	reqCreate := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
+		`{"alias":"old_alias","transport":"whatsapp","remoteId":"11111@g.us","syncSetId":"set1"}`,
+	))
+	reqCreate.Header.Set("Authorization", authHeader)
+	recCreate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recCreate, reqCreate)
+	if recCreate.Code != http.StatusCreated {
+		t.Fatalf("POST /api/endpoints status = %d, want 201: %s", recCreate.Code, recCreate.Body.String())
+	}
+
+	// Insert message_copies referencing "old_alias"
+	if _, err := db.Exec(`INSERT INTO canonical_messages (canonical_id, created_at) VALUES ('c1', 1000)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO message_copies (canonical_id, endpoint_id, remote_message_id, created_at) VALUES ('c1', 'old_alias', 'rm1', 1000)`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename "old_alias" -> "new_alias"
+	reqUpdate := httptest.NewRequest(http.MethodPut, "/api/endpoints/old_alias", strings.NewReader(
+		`{"alias":"new_alias","transport":"whatsapp","remoteId":"11111@g.us","syncSetId":"set1"}`,
+	))
+	reqUpdate.Header.Set("Authorization", authHeader)
+	recUpdate := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recUpdate, reqUpdate)
+	if recUpdate.Code != http.StatusOK {
+		t.Fatalf("PUT /api/endpoints/old_alias status = %d, want 200: %s", recUpdate.Code, recUpdate.Body.String())
+	}
+
+	// Verify old_alias is gone and new_alias exists
+	var count int
+	_ = db.QueryRow(`SELECT COUNT(*) FROM endpoints WHERE alias = 'old_alias'`).Scan(&count)
+	if count != 0 {
+		t.Fatalf("old_alias still exists")
+	}
+	_ = db.QueryRow(`SELECT COUNT(*) FROM endpoints WHERE alias = 'new_alias'`).Scan(&count)
+	if count != 1 {
+		t.Fatalf("new_alias does not exist")
+	}
+
+	// Verify message_copies was updated to new_alias
+	var copyEndpoint string
+	_ = db.QueryRow(`SELECT endpoint_id FROM message_copies WHERE canonical_id = 'c1'`).Scan(&copyEndpoint)
+	if copyEndpoint != "new_alias" {
+		t.Fatalf("message_copies endpoint_id = %s, want new_alias", copyEndpoint)
+	}
+}

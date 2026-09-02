@@ -201,9 +201,13 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	newAlias := alias
 	if req.Alias != "" && strings.TrimSpace(req.Alias) != alias {
-		WriteError(w, http.StatusBadRequest, "endpoint alias in body does not match path")
-		return
+		newAlias = strings.TrimSpace(req.Alias)
+		if err := config.ValidateAlias(newAlias); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
 	req.Transport = config.Transport(strings.TrimSpace(string(req.Transport)))
@@ -225,6 +229,19 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if newAlias != alias {
+		err = s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ?`, newAlias).Scan(&existing)
+		if err == nil {
+			WriteError(w, http.StatusBadRequest, "endpoint alias already exists")
+			return
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			safelog.Error(s.logger, "check endpoint alias uniqueness failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+	}
+
 	err = s.db.QueryRowContext(r.Context(),
 		`SELECT alias FROM endpoints WHERE transport = ? AND remote_id = ? AND alias != ?`,
 		string(req.Transport), req.RemoteID, alias,
@@ -244,9 +261,17 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = s.db.ExecContext(r.Context(),
-		`UPDATE endpoints SET transport = ?, remote_id = ?, sync_set_id = ? WHERE alias = ?`,
-		string(req.Transport), req.RemoteID, syncSetValue, alias,
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		safelog.Error(s.logger, "begin tx failed", "endpoint_update", err)
+		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(r.Context(),
+		`UPDATE endpoints SET alias = ?, transport = ?, remote_id = ?, sync_set_id = ? WHERE alias = ?`,
+		newAlias, string(req.Transport), req.RemoteID, syncSetValue, alias,
 	)
 	if err != nil {
 		safelog.Error(s.logger, "update endpoint failed", "endpoint_update", err)
@@ -254,9 +279,32 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if newAlias != alias {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE message_copies SET endpoint_id = ? WHERE endpoint_id = ?`, newAlias, alias); err != nil {
+			safelog.Error(s.logger, "update message copies endpoint failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
+			return
+		}
+		if _, err := tx.ExecContext(r.Context(), `UPDATE reactions SET source_endpoint_id = ? WHERE source_endpoint_id = ?`, newAlias, alias); err != nil {
+			safelog.Error(s.logger, "update reactions endpoint failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
+			return
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		safelog.Error(s.logger, "commit tx failed", "endpoint_update", err)
+		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
+	if newAlias != alias && s.controlDB != nil {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE verification_pipelines SET endpoint_alias = ? WHERE endpoint_alias = ?`, newAlias, alias)
+	}
+
 	s.notifyConfigChange(r.Context())
 	_ = WriteJSON(w, http.StatusOK, EndpointDTO{
-		Alias:     alias,
+		Alias:     newAlias,
 		Transport: req.Transport,
 		RemoteID:  req.RemoteID,
 		SyncSetID: responseSyncSet,

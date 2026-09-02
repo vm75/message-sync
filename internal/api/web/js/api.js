@@ -56,7 +56,7 @@
         const data = isJson ? await response.json() : null;
 
         if (!response.ok) {
-          if (response.status === 401 && !url.includes('/api/auth/login')) {
+          if (response.status === 401 && !url.includes('/api/auth/login') && !url.includes('/api/auth/me')) {
             this.clearToken();
             window.dispatchEvent(new CustomEvent('auth:unauthorized'));
           }

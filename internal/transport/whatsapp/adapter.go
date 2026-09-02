@@ -841,6 +841,55 @@ func (a *Adapter) Logout(ctx context.Context) error {
 	return nil
 }
 
+func filterAndFormatJoinedGroups(groups []*types.GroupInfo, resolveParent func(types.JID) string) []api.WhatsAppGroup {
+	parentNames := make(map[types.JID]string)
+	for _, g := range groups {
+		if g != nil && g.IsParent {
+			parentNames[g.JID] = g.Name
+		}
+	}
+
+	result := make([]api.WhatsAppGroup, 0, len(groups))
+	for _, g := range groups {
+		if g == nil || g.IsParent || g.IsDefaultSubGroup {
+			continue
+		}
+
+		var parentName string
+		if !g.LinkedParentJID.IsEmpty() {
+			var ok bool
+			parentName, ok = parentNames[g.LinkedParentJID]
+			if !ok && resolveParent != nil {
+				parentName = resolveParent(g.LinkedParentJID)
+				if parentName != "" {
+					parentNames[g.LinkedParentJID] = parentName
+				}
+			}
+			if strings.EqualFold(g.Name, "Announcements") || strings.EqualFold(g.Name, "Announcement") || (g.IsAnnounce && parentName != "" && g.Name == parentName) {
+				continue
+			}
+		}
+
+		name := g.Name
+		if parentName != "" {
+			name = parentName + ":" + g.Name
+		}
+		if name == "" {
+			name = g.JID.String()
+		}
+
+		result = append(result, api.WhatsAppGroup{
+			JID:  g.JID.String(),
+			Name: name,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
+}
+
 func (a *Adapter) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
 	if a == nil {
 		return nil, errors.New("WhatsApp adapter is not initialized")
@@ -861,16 +910,13 @@ func (a *Adapter) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, err
 		return nil, err
 	}
 
-	result := make([]api.WhatsAppGroup, 0, len(groups))
-	for _, g := range groups {
-		if g == nil {
-			continue
+	result := filterAndFormatJoinedGroups(groups, func(parentJID types.JID) string {
+		info, err := client.GetGroupInfo(ctx, parentJID)
+		if err == nil && info != nil {
+			return info.Name
 		}
-		result = append(result, api.WhatsAppGroup{
-			JID:  g.JID.String(),
-			Name: g.Name,
-		})
-	}
+		return ""
+	})
 	return result, nil
 }
 

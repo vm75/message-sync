@@ -27,7 +27,11 @@ const (
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{1,63}$`)
 
-type Principal struct{ ID, Role, Username string }
+type Principal struct {
+	ID       string `json:"id"`
+	Role     string `json:"role"`
+	Username string `json:"username"`
+}
 type principalContextKey struct{}
 
 func principalFromContext(ctx context.Context) (Principal, bool) {

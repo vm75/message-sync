@@ -48,7 +48,8 @@
      */
     getRoute() {
       const hash = window.location.hash.slice(1).trim();
-      return hash || 'dashboard';
+      const [route] = hash.split('?');
+      return route || 'dashboard';
     }
 
     /**
