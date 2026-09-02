@@ -442,7 +442,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 		resp, requestErr := client.Post(
 			fmt.Sprintf("http://%s/api/auth/setup", apiAddr),
 			"application/json",
-			strings.NewReader(`{"password":"testadminpassword123"}`),
+			strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`),
 		)
 		if requestErr == nil {
 			var tokenResp struct {

@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS user_invites (
     consumed_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    consumed_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     id TEXT PRIMARY KEY,
     actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,

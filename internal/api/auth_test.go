@@ -163,3 +163,41 @@ func TestAuthMalformedExpiredAndSecretFreeLogs(t *testing.T) {
 		t.Fatalf("sensitive login data logged: %s", logs.String())
 	}
 }
+
+func TestRBACInvitesDeactivationAndAudit(t *testing.T) {
+	srv, _, controlDB := setupAuthServer(t, time.Hour)
+	admin := tokenFrom(t, request(t, srv, http.MethodPost, "/api/auth/setup", AuthCredentialsRequest{Username: "admin", Password: "password-one"}, ""))
+	invite := request(t, srv, http.MethodPost, "/api/users/invites", InviteRequest{Role: "operator", TTLHours: 1}, admin)
+	if invite.Code != http.StatusCreated {
+		t.Fatalf("invite=%d", invite.Code)
+	}
+	var inviteResponse SecretTokenResponse
+	_ = json.NewDecoder(invite.Body).Decode(&inviteResponse)
+	operatorResponse := request(t, srv, http.MethodPost, "/api/auth/invite/redeem", RedeemInviteRequest{Token: inviteResponse.Token, Username: "operator", Password: "password-two"}, "")
+	if operatorResponse.Code != http.StatusOK {
+		t.Fatalf("redeem=%d", operatorResponse.Code)
+	}
+	operator := tokenFrom(t, operatorResponse)
+	if rec := request(t, srv, http.MethodGet, "/api/users", nil, operator); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator users=%d", rec.Code)
+	}
+	var operatorID string
+	if err := controlDB.QueryRow("SELECT id FROM users WHERE username='operator'").Scan(&operatorID); err != nil {
+		t.Fatal(err)
+	}
+	if rec := request(t, srv, http.MethodPost, "/api/users/"+operatorID+"/active", SetActiveRequest{Active: false}, admin); rec.Code != http.StatusOK {
+		t.Fatalf("deactivate=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodGet, "/api/config", nil, operator); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deactivated operator=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPost, "/api/users/"+"missing"+"/active", SetActiveRequest{Active: false}, admin); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing user=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPost, "/api/users/"+"x"+"/active", SetActiveRequest{Active: false}, admin); rec.Code != http.StatusNotFound {
+		t.Fatalf("last admin/missing=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodGet, "/api/audit", nil, admin); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "invite_created") {
+		t.Fatalf("audit=%d %s", rec.Code, rec.Body.String())
+	}
+}

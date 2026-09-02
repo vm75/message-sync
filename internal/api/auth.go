@@ -340,7 +340,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" {
+		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -353,8 +353,16 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			WriteError(w, 401, "unauthorized")
 			return
 		}
+		if requiresAdmin(r.URL.Path) && p.Role != "admin" {
+			WriteError(w, http.StatusForbidden, "forbidden")
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, p)))
 	})
+}
+
+func requiresAdmin(path string) bool {
+	return path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit"
 }
 
 func (s *Server) extractToken(r *http.Request) string {

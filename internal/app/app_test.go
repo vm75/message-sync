@@ -475,7 +475,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	var token string
 	for i := 0; i < 50; i++ {
-		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"password":"testadminpassword123"}`))
+		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`))
 		if err == nil {
 			var tokenResp struct {
 				Token string `json:"token"`
@@ -635,7 +635,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	client := &http.Client{Timeout: 2 * time.Second}
 	var token string
 	for i := 0; i < 50; i++ {
-		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"password":"testadminpassword123"}`))
+		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`))
 		if err == nil {
 			var tokenResp struct {
 				Token string `json:"token"`

@@ -142,6 +142,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
 	s.mux.HandleFunc("POST /api/auth/logout", s.handleAuthLogout)
 	s.mux.HandleFunc("POST /api/auth/change-password", s.handleAuthChangePassword)
+	s.mux.HandleFunc("POST /api/auth/invite/redeem", s.handleInviteRedeem)
+	s.mux.HandleFunc("POST /api/auth/reset-password", s.handleResetPassword)
+	s.mux.HandleFunc("GET /api/users", s.handleListUsers)
+	s.mux.HandleFunc("POST /api/users/invites", s.handleCreateInvite)
+	s.mux.HandleFunc("POST /api/users/{id}/active", s.handleSetUserActive)
+	s.mux.HandleFunc("POST /api/users/{id}/reset-token", s.handleCreateResetToken)
+	s.mux.HandleFunc("GET /api/audit", s.handleListAudit)
 
 	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
 	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
