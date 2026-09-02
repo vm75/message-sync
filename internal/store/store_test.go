@@ -500,6 +500,65 @@ func TestPollOptionsAndVotes(t *testing.T) {
 	}
 }
 
+func TestProviderNeutralPollStateUsesOneEndpointContribution(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0)
+	if err := store.CreateCanonical(ctx, "canon-poll-state", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePollOptionMetadata(ctx, "canon-poll-state", []PollOption{
+		{Index: 0, WhatsAppHash: "wa-zero"}, {Index: 1}, {Index: 2, WhatsAppHash: "wa-two"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	index, err := store.PollOptionIndexForWhatsAppHash(ctx, "canon-poll-state", "wa-two")
+	if err != nil || index != 2 {
+		t.Fatalf("WhatsApp hash index = %d, %v; want 2", index, err)
+	}
+	if err := store.ReplacePollActorSelections(ctx, "canon-poll-state", "endpoint1", "u_abcdefghij", []int{0, 2}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplacePollEndpointSnapshot(ctx, "canon-poll-state", "endpoint2", map[int]int{0: 4, 1: 3}, now); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := store.GetPollAggregateCounts(ctx, "canon-poll-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[0] != 5 || counts[1] != 3 || counts[2] != 1 {
+		t.Fatalf("aggregate counts = %#v, want option 0=5, 1=3, 2=1", counts)
+	}
+	// Replacing the endpoint contribution changes its authoritative path and
+	// must not leave the old snapshot contributing as well.
+	if err := store.ReplacePollActorSelections(ctx, "canon-poll-state", "endpoint2", "u_klmnopqrst", []int{1}, now); err != nil {
+		t.Fatal(err)
+	}
+	counts, err = store.GetPollAggregateCounts(ctx, "canon-poll-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[0] != 1 || counts[1] != 1 || counts[2] != 1 {
+		t.Fatalf("exclusive aggregate counts = %#v, want option 0=1, 1=1, 2=1", counts)
+	}
+}
+
+func TestPollProviderReferenceIsOpaqueAndRestartSafe(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateCanonical(ctx, "canon-poll-ref", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	want := PollProviderRef{CanonicalID: "canon-poll-ref", EndpointID: "endpoint1", Provider: "telegram", Reference: "opaque-poll-123"}
+	if err := store.SavePollProviderRef(ctx, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.PollCanonicalForProviderRef(ctx, want.EndpointID, want.Provider, want.Reference)
+	if err != nil || got != want.CanonicalID {
+		t.Fatalf("resolved canonical = %q, %v; want %q", got, err, want.CanonicalID)
+	}
+}
+
 func TestResolveOrCreateCanonicalIsPersistentAndIdempotent(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sync.db")

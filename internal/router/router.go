@@ -246,8 +246,14 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return nil
 		}
 
-		if err := r.store.RecordPollVote(ctx, targetCanonical, string(incoming.Endpoint), incoming.Sender.OpaqueID, incoming.PollOptionHashes, incoming.Timestamp); err != nil {
-			return fmt.Errorf("record poll vote: %w", err)
+		var recordErr error
+		if incoming.PollOptionIndexes != nil {
+			recordErr = r.store.ReplacePollActorSelections(ctx, targetCanonical, string(incoming.Endpoint), incoming.Sender.OpaqueID, incoming.PollOptionIndexes, incoming.Timestamp)
+		} else {
+			recordErr = r.store.RecordPollVote(ctx, targetCanonical, string(incoming.Endpoint), incoming.Sender.OpaqueID, incoming.PollOptionHashes, incoming.Timestamp)
+		}
+		if recordErr != nil {
+			return fmt.Errorf("record poll vote: %w", recordErr)
 		}
 
 		return nil
@@ -766,11 +772,11 @@ func (r *Router) pendingReactionCurrent(key mutationKey, actor string, revision 
 }
 
 func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.Incoming, canonicalID string, members []transport.EndpointID) error {
-	optionHashes, err := r.store.GetPollOptions(ctx, canonicalID)
+	options, err := r.store.GetPollOptionMetadata(ctx, canonicalID)
 	if err != nil {
 		return fmt.Errorf("get poll options: %w", err)
 	}
-	counts, err := r.store.GetPollVoteCounts(ctx, canonicalID)
+	counts, err := r.store.GetPollAggregateCounts(ctx, canonicalID)
 	if err != nil {
 		return fmt.Errorf("get poll vote counts: %w", err)
 	}
@@ -791,12 +797,12 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 		sb.WriteString("📊 Aggregated Poll Results\n\n")
 	}
 
-	for i, optHash := range optionHashes {
+	for i, option := range options {
 		label := fmt.Sprintf("Option %d", i+1)
 		if hasMeta && i < len(meta.Options) {
 			label = meta.Options[i]
 		}
-		cnt := counts[optHash]
+		cnt := counts[option.Index]
 		pct := 0
 		if totalVotes > 0 {
 			pct = (cnt * 100) / totalVotes

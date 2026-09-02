@@ -65,20 +65,46 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, r
 CREATE TABLE IF NOT EXISTS poll_options (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     option_index INTEGER NOT NULL,
-    option_hash TEXT NOT NULL,
+    option_hash TEXT,
     PRIMARY KEY (canonical_id, option_index)
 );
 CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
 
-CREATE TABLE IF NOT EXISTS poll_votes (
+CREATE TABLE IF NOT EXISTS poll_endpoint_sources (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    source_kind TEXT NOT NULL CHECK (source_kind IN ('actor', 'snapshot')),
+    PRIMARY KEY (canonical_id, endpoint_id)
+);
+
+CREATE TABLE IF NOT EXISTS poll_actor_selections (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     endpoint_id TEXT NOT NULL,
     actor_hash TEXT NOT NULL,
-    option_hash TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
-    PRIMARY KEY (canonical_id, endpoint_id, actor_hash, option_hash)
+    PRIMARY KEY (canonical_id, endpoint_id, actor_hash, option_index)
 );
-CREATE INDEX IF NOT EXISTS idx_poll_votes_canonical ON poll_votes(canonical_id);
+CREATE INDEX IF NOT EXISTS idx_poll_actor_selections_canonical ON poll_actor_selections(canonical_id);
+
+CREATE TABLE IF NOT EXISTS poll_endpoint_snapshots (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
+    option_count INTEGER NOT NULL CHECK (option_count >= 0),
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, option_index)
+);
+CREATE INDEX IF NOT EXISTS idx_poll_endpoint_snapshots_canonical ON poll_endpoint_snapshots(canonical_id);
+
+CREATE TABLE IF NOT EXISTS poll_provider_refs (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    provider_kind TEXT NOT NULL,
+    provider_ref TEXT NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, provider_kind),
+    UNIQUE (endpoint_id, provider_kind, provider_ref)
+);
 
 CREATE TABLE IF NOT EXISTS suppressed_reactions (
     endpoint_id TEXT NOT NULL,

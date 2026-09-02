@@ -41,7 +41,7 @@ Agents should work in the order below. Before starting a ticket:
 
 | Order | Issue | Purpose | Dependencies | Status |
 |---|---|---|---|---|
-| 1 | [#45](https://github.com/vm75/message-sync/issues/45) | Provider-neutral canonical poll state | None | Pending |
+| 1 | [#45](https://github.com/vm75/message-sync/issues/45) | Provider-neutral canonical poll state | None | Complete |
 | 2 | [#46](https://github.com/vm75/message-sync/issues/46) | Native Discord polls + vote ingestion | #45 | Pending |
 | 3 | [#47](https://github.com/vm75/message-sync/issues/47) | Native Telegram polls + poll-state ingestion | #45 | Pending |
 | 4 | [#48](https://github.com/vm75/message-sync/issues/48) | Aggregate-only live result companions | #45, #46, #47 | Pending |
@@ -229,9 +229,9 @@ At minimum, the completed series must cover:
 Agents should append short durable implementation notes here while the tracker exists. Keep notes concise; detailed long-term behavior belongs in authoritative docs before #51 completes.
 
 ### #45
-- Status: Pending
-- Implementation notes:
-- Tests:
+- Status: Complete
+- Implementation notes: Canonical poll state now uses zero-based option indexes; WhatsApp hashes resolve only at the store boundary. Actor selections, endpoint snapshots, explicit source-path exclusivity, and opaque provider references are persisted in fresh-schema tables. Router aggregation reads the shared index-based aggregate while retaining `aggregate-response` and transient labels.
+- Tests: `make fmt`; `make test`; `make vet`; `git diff --check`; `git diff --exit-code VERSION`.
 
 ### #46
 - Status: Pending

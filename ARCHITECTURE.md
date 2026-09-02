@@ -65,7 +65,7 @@ Owned by message-sync and designed to remain PII/PHI-free. Initial schema is in 
 
 The application initializes this schema only for a fresh database. The product is pre-release, so the store has no schema-version table, historical migrations, upgrade dispatcher, or legacy-database compatibility path; incompatible development changes use a fresh `sync.db`.
 
-It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, option SHA-256 hashes for polls, timestamps and generic recovery cursors. A cursor contains only a safe stream key, ordered numeric position, event timestamp, and update timestamp. It must not store message content, poll question/option labels, or raw participant identity.
+It may store canonical IDs, configured aliases, opaque remote message IDs, HMAC actor IDs, emoji reaction state, canonical poll option indexes, WhatsApp option hashes used only for boundary resolution, aggregate counts, narrowly required opaque provider poll references, timestamps and generic recovery cursors. A cursor contains only a safe stream key, ordered numeric position, event timestamp, and update timestamp. It must not store message content, poll question/option labels, or raw participant identity.
 
 ## 3. Configuration
 
@@ -332,7 +332,7 @@ This permits add/change/remove semantics without raw identity. A native reaction
 
 ## 11. Polls and vote aggregation
 
-Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord and Telegram destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities and recorded per HMAC actor and option SHA-256 hash in `sync.db`; Discord and Telegram textual copies do not introduce a second vote-state model. Incoming Telegram polls are likewise normalized to deterministic text before entering the canonical router.
+Poll creation preserves native WhatsApp polls on WhatsApp destinations and renders the same transient question/options as deterministic text on Discord and Telegram destinations. Incoming WhatsApp poll updates (`PollUpdateMessage`) are decrypted using whatsmeow's message-secret capabilities, translated from option SHA-256 hashes to canonical zero-based option indexes at the boundary, and recorded per HMAC actor in `sync.db`; Discord and Telegram textual copies do not introduce a second vote-state model. The store supports actor-backed endpoint selections and absolute endpoint snapshots, with an explicit endpoint source ensuring one authoritative contribution path and preventing double counting. Opaque provider poll references are stored only when needed for restart correlation. Incoming Telegram polls are likewise normalized to deterministic text before entering the canonical router.
 
 Replying `aggregate-response` to any poll copy triggers cross-group aggregation:
 - the router intercepts the trigger (it is not fanned out);

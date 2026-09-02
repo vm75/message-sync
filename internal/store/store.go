@@ -94,6 +94,21 @@ type StorageMetrics struct {
 	DatabaseSizeBytes int64
 }
 
+// PollOption is the provider-neutral option metadata for a canonical poll.
+// WhatsAppHash is only a boundary-resolution value and may be empty for other
+// transports.
+type PollOption struct {
+	Index        int
+	WhatsAppHash string
+}
+
+type PollProviderRef struct {
+	CanonicalID string
+	EndpointID  string
+	Provider    string
+	Reference   string
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -672,11 +687,76 @@ func (s *Store) SavePollOptions(ctx context.Context, canonicalID string, optionH
 	return tx.Commit()
 }
 
+// SavePollOptionMetadata stores canonical option order and optional WhatsApp
+// hashes. It is intentionally separate from provider-specific poll models.
+func (s *Store) SavePollOptionMetadata(ctx context.Context, canonicalID string, options []PollOption) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if len(options) == 0 {
+		return errors.New("poll options are required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrapDB("begin save poll option metadata", err)
+	}
+	defer tx.Rollback()
+	stmt, err := tx.PrepareContext(ctx, `INSERT INTO poll_options(canonical_id, option_index, option_hash) VALUES (?, ?, ?)`)
+	if err != nil {
+		return wrapDB("prepare save poll option metadata", err)
+	}
+	defer stmt.Close()
+	for expected, option := range options {
+		if option.Index != expected || option.Index < 0 || strings.ContainsAny(option.WhatsAppHash, "\r\n\x00") {
+			return errors.New("poll option indexes must be contiguous and non-negative")
+		}
+		if _, err := stmt.ExecContext(ctx, canonicalID, option.Index, nullableString(option.WhatsAppHash)); err != nil {
+			return wrapDB("insert poll option metadata", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetPollOptionMetadata(ctx context.Context, canonicalID string) ([]PollOption, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT option_index, COALESCE(option_hash, '') FROM poll_options WHERE canonical_id = ? ORDER BY option_index ASC`, canonicalID)
+	if err != nil {
+		return nil, wrapDB("get poll option metadata", err)
+	}
+	defer rows.Close()
+	var options []PollOption
+	for rows.Next() {
+		var option PollOption
+		if err := rows.Scan(&option.Index, &option.WhatsAppHash); err != nil {
+			return nil, wrapDB("scan poll option metadata", err)
+		}
+		options = append(options, option)
+	}
+	return options, rows.Err()
+}
+
+func (s *Store) PollOptionIndexForWhatsAppHash(ctx context.Context, canonicalID, optionHash string) (int, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return 0, err
+	}
+	if strings.TrimSpace(optionHash) == "" {
+		return 0, errors.New("option hash is required")
+	}
+	var index int
+	err := s.db.QueryRowContext(ctx, `SELECT option_index FROM poll_options WHERE canonical_id = ? AND option_hash = ?`, canonicalID, optionHash).Scan(&index)
+	if err != nil {
+		return 0, wrapDB("resolve WhatsApp poll option", err)
+	}
+	return index, nil
+}
+
 func (s *Store) GetPollOptions(ctx context.Context, canonicalID string) ([]string, error) {
 	if err := requireOpaque("canonical id", canonicalID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT option_hash FROM poll_options WHERE canonical_id = ? ORDER BY option_index ASC`, canonicalID)
+	rows, err := s.db.QueryContext(ctx, `SELECT COALESCE(option_hash, '') FROM poll_options WHERE canonical_id = ? ORDER BY option_index ASC`, canonicalID)
 	if err != nil {
 		return nil, wrapDB("get poll options", err)
 	}
@@ -748,56 +828,191 @@ func (s *Store) RecordPollVote(ctx context.Context, canonicalID, endpointID, act
 		return errors.New("actor hash must be an HMAC-derived user id")
 	}
 
+	indexes := make([]int, 0, len(optionHashes))
+	for _, optionHash := range optionHashes {
+		index, err := s.PollOptionIndexForWhatsAppHash(ctx, canonicalID, optionHash)
+		if err != nil {
+			return err
+		}
+		indexes = append(indexes, index)
+	}
+	return s.ReplacePollActorSelections(ctx, canonicalID, endpointID, actorHash, indexes, updatedAt)
+}
+
+// ReplacePollActorSelections atomically replaces one actor's complete
+// selection set and makes the endpoint's contribution actor-backed.
+func (s *Store) ReplacePollActorSelections(ctx context.Context, canonicalID, endpointID, actorHash string, optionIndexes []int, updatedAt time.Time) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	if !actorPattern.MatchString(actorHash) {
+		return errors.New("actor hash must be an HMAC-derived user id")
+	}
+	if err := validatePollIndexes(optionIndexes); err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return wrapDB("begin record poll vote", err)
+		return wrapDB("begin replace poll actor selections", err)
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(ctx, `DELETE FROM poll_votes WHERE canonical_id = ? AND endpoint_id = ? AND actor_hash = ?`, canonicalID, endpointID, actorHash); err != nil {
-		return wrapDB("delete old poll votes", err)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO poll_endpoint_sources(canonical_id, endpoint_id, source_kind) VALUES (?, ?, 'actor') ON CONFLICT(canonical_id, endpoint_id) DO UPDATE SET source_kind = 'actor'`, canonicalID, endpointID); err != nil {
+		return wrapDB("set actor poll source", err)
 	}
-
-	if len(optionHashes) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `INSERT INTO poll_votes(canonical_id, endpoint_id, actor_hash, option_hash, updated_at) VALUES (?, ?, ?, ?, ?)`)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM poll_actor_selections WHERE canonical_id = ? AND endpoint_id = ? AND actor_hash = ?`, canonicalID, endpointID, actorHash); err != nil {
+		return wrapDB("delete old poll actor selections", err)
+	}
+	if len(optionIndexes) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO poll_actor_selections(canonical_id, endpoint_id, actor_hash, option_index, updated_at) VALUES (?, ?, ?, ?, ?)`)
 		if err != nil {
-			return wrapDB("prepare insert poll vote", err)
+			return wrapDB("prepare insert poll actor selection", err)
 		}
 		defer stmt.Close()
-
-		for _, optHash := range optionHashes {
-			if strings.TrimSpace(optHash) == "" {
-				continue
-			}
-			if _, err := stmt.ExecContext(ctx, canonicalID, endpointID, actorHash, optHash, unixMillis(updatedAt)); err != nil {
-				return wrapDB("insert poll vote", err)
+		for _, optionIndex := range optionIndexes {
+			if _, err := stmt.ExecContext(ctx, canonicalID, endpointID, actorHash, optionIndex, unixMillis(updatedAt)); err != nil {
+				return wrapDB("insert poll actor selection", err)
 			}
 		}
 	}
-
 	return tx.Commit()
 }
 
-func (s *Store) GetPollVoteCounts(ctx context.Context, canonicalID string) (map[string]int, error) {
+func validatePollIndexes(indexes []int) error {
+	seen := make(map[int]struct{}, len(indexes))
+	for _, index := range indexes {
+		if index < 0 {
+			return errors.New("poll option index must not be negative")
+		}
+		if _, ok := seen[index]; ok {
+			return errors.New("poll option indexes must be unique")
+		}
+		seen[index] = struct{}{}
+	}
+	return nil
+}
+
+// ReplacePollEndpointSnapshot atomically replaces an endpoint's absolute
+// aggregate and makes that endpoint snapshot-backed.
+func (s *Store) ReplacePollEndpointSnapshot(ctx context.Context, canonicalID, endpointID string, counts map[int]int, updatedAt time.Time) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	for index, count := range counts {
+		if index < 0 || count < 0 {
+			return errors.New("poll snapshot indexes and counts must not be negative")
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wrapDB("begin replace poll endpoint snapshot", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO poll_endpoint_sources(canonical_id, endpoint_id, source_kind) VALUES (?, ?, 'snapshot') ON CONFLICT(canonical_id, endpoint_id) DO UPDATE SET source_kind = 'snapshot'`, canonicalID, endpointID); err != nil {
+		return wrapDB("set snapshot poll source", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM poll_endpoint_snapshots WHERE canonical_id = ? AND endpoint_id = ?`, canonicalID, endpointID); err != nil {
+		return wrapDB("delete old poll endpoint snapshot", err)
+	}
+	for index, count := range counts {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO poll_endpoint_snapshots(canonical_id, endpoint_id, option_index, option_count, updated_at) VALUES (?, ?, ?, ?, ?)`, canonicalID, endpointID, index, count, unixMillis(updatedAt)); err != nil {
+			return wrapDB("insert poll endpoint snapshot", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetPollAggregateCounts(ctx context.Context, canonicalID string) (map[int]int, error) {
 	if err := requireOpaque("canonical id", canonicalID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT option_hash, COUNT(*) FROM poll_votes WHERE canonical_id = ? GROUP BY option_hash`, canonicalID)
+	counts := make(map[int]int)
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT option_index, SUM(count) FROM (
+			SELECT s.option_index, COUNT(*) AS count
+			FROM poll_endpoint_sources p
+			JOIN poll_actor_selections s ON s.canonical_id = p.canonical_id AND s.endpoint_id = p.endpoint_id
+			WHERE p.canonical_id = ? AND p.source_kind = 'actor'
+			GROUP BY s.option_index
+			UNION ALL
+			SELECT s.option_index, s.option_count AS count
+			FROM poll_endpoint_sources p
+			JOIN poll_endpoint_snapshots s ON s.canonical_id = p.canonical_id AND s.endpoint_id = p.endpoint_id
+			WHERE p.canonical_id = ? AND p.source_kind = 'snapshot'
+		) GROUP BY option_index`, canonicalID, canonicalID)
 	if err != nil {
-		return nil, wrapDB("get poll vote counts", err)
+		return nil, wrapDB("get poll aggregate counts", err)
 	}
 	defer rows.Close()
-
-	counts := make(map[string]int)
 	for rows.Next() {
-		var optHash string
-		var count int
-		if err := rows.Scan(&optHash, &count); err != nil {
-			return nil, wrapDB("scan poll vote count", err)
+		var index, count int
+		if err := rows.Scan(&index, &count); err != nil {
+			return nil, wrapDB("scan poll aggregate count", err)
 		}
-		counts[optHash] = count
+		counts[index] = count
 	}
 	return counts, rows.Err()
+}
+
+// GetPollVoteCounts retains the old hash-shaped read API for existing callers;
+// new code should use GetPollAggregateCounts.
+func (s *Store) GetPollVoteCounts(ctx context.Context, canonicalID string) (map[string]int, error) {
+	options, err := s.GetPollOptionMetadata(ctx, canonicalID)
+	if err != nil {
+		return nil, err
+	}
+	indexes, err := s.GetPollAggregateCounts(ctx, canonicalID)
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int)
+	for _, option := range options {
+		if option.WhatsAppHash != "" {
+			counts[option.WhatsAppHash] = indexes[option.Index]
+		}
+	}
+	return counts, nil
+}
+
+func (s *Store) SavePollProviderRef(ctx context.Context, ref PollProviderRef) error {
+	if err := requireOpaque("canonical id", ref.CanonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(ref.EndpointID); err != nil {
+		return err
+	}
+	if strings.TrimSpace(ref.Provider) == "" || strings.ContainsAny(ref.Provider, "\r\n\x00") {
+		return errors.New("poll provider is required")
+	}
+	if err := requireOpaque("poll provider reference", ref.Reference); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO poll_provider_refs(canonical_id, endpoint_id, provider_kind, provider_ref) VALUES (?, ?, ?, ?) ON CONFLICT(canonical_id, endpoint_id, provider_kind) DO UPDATE SET provider_ref = excluded.provider_ref`, ref.CanonicalID, ref.EndpointID, ref.Provider, ref.Reference)
+	return wrapDB("save poll provider reference", err)
+}
+
+func (s *Store) PollCanonicalForProviderRef(ctx context.Context, endpointID, provider, reference string) (string, error) {
+	if err := validateEndpoint(endpointID); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(provider) == "" {
+		return "", errors.New("poll provider is required")
+	}
+	if err := requireOpaque("poll provider reference", reference); err != nil {
+		return "", err
+	}
+	var canonicalID string
+	err := s.db.QueryRowContext(ctx, `SELECT canonical_id FROM poll_provider_refs WHERE endpoint_id = ? AND provider_kind = ? AND provider_ref = ?`, endpointID, provider, reference).Scan(&canonicalID)
+	if err != nil {
+		return "", wrapDB("resolve poll provider reference", err)
+	}
+	return canonicalID, nil
 }
 
 func validateCopy(copy MessageCopy) error {
