@@ -81,6 +81,7 @@ type Adapter struct {
 	recoveryMaxAge   time.Duration
 	recoveryMaxCount int
 	pcache           *participantCache
+	lifecycle        *lifecycleSuppression
 }
 
 type parsedHistoryMessage struct {
@@ -140,6 +141,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		recoveryMaxAge:   opts.RecoveryMaxAge,
 		recoveryMaxCount: opts.RecoveryMaxCount,
 		pcache:           newParticipantCache(1024),
+		lifecycle:        newLifecycleSuppression(),
 	}
 	client.AddEventHandler(adapter.handleEvent)
 
@@ -370,9 +372,14 @@ func (a *Adapter) React(ctx context.Context, r transport.Reaction) error {
 			SenderTimestampMS: proto.Int64(time.Now().UnixMilli()),
 		},
 	}
+	a.lifecycle.mark(r.Endpoint, r.TargetRemoteID, "reaction", r.Emoji, time.Now().UTC())
 	_, err := a.client.SendMessage(ctx, target, reactionMsg)
 	if err != nil {
-		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp native reaction: %w", err))
+		failure := classifyWhatsAppFailure(fmt.Errorf("send WhatsApp native reaction: %w", err))
+		if transport.Classify(failure).Certainty == transport.SendDefinitelyNotSent {
+			a.lifecycle.cancel(r.Endpoint, r.TargetRemoteID, "reaction", r.Emoji)
+		}
+		return failure
 	}
 	return nil
 }
@@ -397,9 +404,14 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 		Conversation: proto.String(formatWhatsAppText(text)),
 	}
 	editMsg := a.client.BuildEdit(target, types.MessageID(ref.RemoteMessageID), editContent)
+	a.lifecycle.mark(ref.Endpoint, ref.RemoteMessageID, "edit", "", time.Now().UTC())
 	_, err := a.client.SendMessage(ctx, target, editMsg)
 	if err != nil {
-		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp edit: %w", err))
+		failure := classifyWhatsAppFailure(fmt.Errorf("send WhatsApp edit: %w", err))
+		if transport.Classify(failure).Certainty == transport.SendDefinitelyNotSent {
+			a.lifecycle.cancel(ref.Endpoint, ref.RemoteMessageID, "edit", "")
+		}
+		return failure
 	}
 	return nil
 }
@@ -425,9 +437,14 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 		return err
 	}
 	revokeMsg := a.client.BuildRevoke(target, sender, types.MessageID(ref.RemoteMessageID))
+	a.lifecycle.mark(ref.Endpoint, ref.RemoteMessageID, "delete", "", time.Now().UTC())
 	_, err = a.client.SendMessage(ctx, target, revokeMsg)
 	if err != nil {
-		return classifyWhatsAppFailure(fmt.Errorf("send WhatsApp delete: %w", err))
+		failure := classifyWhatsAppFailure(fmt.Errorf("send WhatsApp delete: %w", err))
+		if transport.Classify(failure).Certainty == transport.SendDefinitelyNotSent {
+			a.lifecycle.cancel(ref.Endpoint, ref.RemoteMessageID, "delete", "")
+		}
+		return failure
 	}
 	return nil
 }
@@ -923,6 +940,9 @@ func (a *Adapter) handleEvent(raw any) {
 		if !ok {
 			return
 		}
+		if incoming.FromSelf && a.suppressLifecycleEcho(incoming) {
+			return
+		}
 		incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
 		select {
 		case a.events <- incoming:
@@ -1007,6 +1027,24 @@ func (a *Adapter) handleEvent(raw any) {
 	case *events.LoggedOut:
 		a.logger.Warn("WhatsApp logged out", "event", "whatsapp_logged_out")
 	}
+}
+
+func (a *Adapter) suppressLifecycleEcho(incoming transport.Incoming) bool {
+	if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+		return false
+	}
+	kind := incoming.Kind
+	if kind != "edit" && kind != "delete" && kind != "revoke" && kind != "reaction" {
+		return false
+	}
+	if kind == "revoke" {
+		kind = "delete"
+	}
+	emoji := ""
+	if kind == "reaction" {
+		emoji = strings.TrimSpace(incoming.Text)
+	}
+	return a.lifecycle.consume(incoming.Endpoint, incoming.ReplyTo.RemoteMessageID, kind, emoji, time.Now().UTC())
 }
 
 // WhatsApp does not expose a durable application-level update sequence for

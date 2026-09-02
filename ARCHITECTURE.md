@@ -169,6 +169,8 @@ Live messages and protocol HistorySync snapshots carry the same per-endpoint che
 
 For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
 
+WhatsApp bridge-generated edit, revoke/delete, and reaction sends install a bounded in-memory lifecycle marker before the provider call. Matching `FromSelf` lifecycle ingress consumes one marker and stops at the WhatsApp adapter boundary; unmatched `FromSelf` mutations remain eligible for routing because linked-device user actions also use `FromSelf`. The fallback marker uses only endpoint, target remote message ID, operation kind, and reaction emoji, expires promptly, and is not persisted. Since WhatsApp does not expose a separate mutation event ID for every lifecycle echo, an ambiguous provider result is retained until expiry and is not represented as exactly-once delivery.
+
 The router processes ingress events via an ordered worker:
 
 ```text
