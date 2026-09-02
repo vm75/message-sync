@@ -827,6 +827,23 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 	if companions != 3 {
 		t.Fatalf("result companions = %d, want one per endpoint", companions)
 	}
+
+	if err := r.Handle(ctx, transport.Incoming{
+		Endpoint:  "c1g1",
+		RemoteID:  "poll-orig-1-delete",
+		Kind:      "delete",
+		ReplyTo:   &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-orig-1"},
+		Timestamp: time.Unix(1_700_000_100, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("Handle poll delete error: %v", err)
+	}
+	waitForMutations(t, fake, 0, 0, 5)
+	if err := store.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM poll_result_companions WHERE canonical_id = ?`, canonicalID).Scan(&companions); err != nil {
+		t.Fatal(err)
+	}
+	if companions != 0 {
+		t.Fatalf("result companions after poll delete = %d, want 0", companions)
+	}
 }
 
 func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {

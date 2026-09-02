@@ -1099,6 +1099,17 @@ func (s *Store) SavePollResultCompanion(ctx context.Context, companion PollResul
 	return wrapDB("save poll result companion", err)
 }
 
+func (s *Store) DeletePollResultCompanion(ctx context.Context, canonicalID, endpointID string) error {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM poll_result_companions WHERE canonical_id = ? AND endpoint_id = ?`, canonicalID, endpointID)
+	return wrapDB("delete poll result companion", err)
+}
+
 func validateCopy(copy MessageCopy) error {
 	if err := requireOpaque("canonical id", copy.CanonicalID); err != nil {
 		return err

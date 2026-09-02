@@ -320,6 +320,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		for _, destination := range members {
+			if err := r.enqueuePollResultCompanionDelete(ctx, targetCanonical, destination); err != nil {
+				return fmt.Errorf("delete poll result companion: %w", err)
+			}
 			if destination == incoming.Endpoint {
 				continue
 			}
@@ -608,6 +611,27 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		r.updatePollResults(ctx, canonicalID, members)
 	}
 	return nil
+}
+
+func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonicalID string, endpoint transport.EndpointID) error {
+	companion, err := r.store.PollResultCompanion(ctx, canonicalID, string(endpoint))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	operation := store.DeliveryOperation{
+		CanonicalID: canonicalID, EndpointID: string(endpoint), OperationKind: "poll_result_delete",
+		OperationRevision: r.nextMutationRevision(), State: store.DeliveryQueued,
+		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	return r.enqueueMutation(ctx, operation, func() bool { return true }, func(jobCtx context.Context) error {
+		if err := r.sender.Delete(jobCtx, transport.MessageRef{Endpoint: endpoint, RemoteMessageID: companion.RemoteMessageID, IsTargetFromMe: true}); err != nil {
+			return err
+		}
+		return r.store.DeletePollResultCompanion(context.Background(), canonicalID, string(endpoint))
+	}, nil)
 }
 
 func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, destination transport.EndpointID, forwardedText string, replyTo *transport.MessageRef, mediaBytes []byte) error {
