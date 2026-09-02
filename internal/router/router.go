@@ -31,10 +31,14 @@ type copyKey struct {
 	remoteID string
 }
 
-type pollMeta struct {
+type pollPresentation struct {
 	Question string
 	Options  []string
-	Hashes   []string
+}
+
+type pollAggregate struct {
+	Options []store.PollOption
+	Counts  map[int]int
 }
 
 type mutationKey struct {
@@ -62,7 +66,7 @@ type Router struct {
 	usernameMode       config.UsernameMode
 	aggTrigger         string
 	knownCopies        map[copyKey]string
-	pollCache          map[string]pollMeta
+	pollPresentation   map[string]pollPresentation
 	pendingEdits       map[mutationKey]pendingEdit
 	pendingResultEdits map[mutationKey]pendingEdit
 	pendingReactions   map[mutationKey]map[string]pendingReaction
@@ -119,7 +123,7 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		usernameMode:       cfg.Identity.UsernameMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
 		knownCopies:        make(map[copyKey]string),
-		pollCache:          make(map[string]pollMeta),
+		pollPresentation:   make(map[string]pollPresentation),
 		pendingEdits:       make(map[mutationKey]pendingEdit),
 		pendingResultEdits: make(map[mutationKey]pendingEdit),
 		pendingReactions:   make(map[mutationKey]map[string]pendingReaction),
@@ -535,10 +539,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 		r.mu.Lock()
-		r.pollCache[canonicalID] = pollMeta{
+		r.pollPresentation[canonicalID] = pollPresentation{
 			Question: incoming.Text,
 			Options:  incoming.PollOptions,
-			Hashes:   optionHashes,
 		}
 		r.mu.Unlock()
 	}
@@ -707,20 +710,28 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 }
 
 func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (string, error) {
-	options, err := r.store.GetPollOptionMetadata(ctx, canonicalID)
-	if err != nil {
-		return "", err
-	}
-	counts, err := r.store.GetPollAggregateCounts(ctx, canonicalID)
+	aggregate, err := r.readPollAggregate(ctx, canonicalID)
 	if err != nil {
 		return "", err
 	}
 	var builder strings.Builder
 	builder.WriteString("📊 Live results across synced groups\n")
-	for _, option := range options {
-		fmt.Fprintf(&builder, "Option %d — %d\n", option.Index+1, counts[option.Index])
+	for _, option := range aggregate.Options {
+		fmt.Fprintf(&builder, "Option %d — %d\n", option.Index+1, aggregate.Counts[option.Index])
 	}
 	return strings.TrimSuffix(builder.String(), "\n"), nil
+}
+
+func (r *Router) readPollAggregate(ctx context.Context, canonicalID string) (pollAggregate, error) {
+	options, err := r.store.GetPollOptionMetadata(ctx, canonicalID)
+	if err != nil {
+		return pollAggregate{}, err
+	}
+	counts, err := r.store.GetPollAggregateCounts(ctx, canonicalID)
+	if err != nil {
+		return pollAggregate{}, err
+	}
+	return pollAggregate{Options: options, Counts: counts}, nil
 }
 
 func (r *Router) ensurePollResultCompanion(ctx context.Context, canonicalID string, endpoint transport.EndpointID) error {
@@ -899,21 +910,17 @@ func (r *Router) pendingReactionCurrent(key mutationKey, actor string, revision 
 }
 
 func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.Incoming, canonicalID string, members []transport.EndpointID) error {
-	options, err := r.store.GetPollOptionMetadata(ctx, canonicalID)
+	aggregate, err := r.readPollAggregate(ctx, canonicalID)
 	if err != nil {
-		return fmt.Errorf("get poll options: %w", err)
-	}
-	counts, err := r.store.GetPollAggregateCounts(ctx, canonicalID)
-	if err != nil {
-		return fmt.Errorf("get poll vote counts: %w", err)
+		return fmt.Errorf("get poll aggregate: %w", err)
 	}
 
 	r.mu.RLock()
-	meta, hasMeta := r.pollCache[canonicalID]
+	meta, hasMeta := r.pollPresentation[canonicalID]
 	r.mu.RUnlock()
 
 	var totalVotes int
-	for _, cnt := range counts {
+	for _, cnt := range aggregate.Counts {
 		totalVotes += cnt
 	}
 
@@ -924,12 +931,12 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 		sb.WriteString("📊 Aggregated Poll Results\n\n")
 	}
 
-	for i, option := range options {
+	for i, option := range aggregate.Options {
 		label := fmt.Sprintf("Option %d", i+1)
 		if hasMeta && i < len(meta.Options) {
 			label = meta.Options[i]
 		}
-		cnt := counts[option.Index]
+		cnt := aggregate.Counts[option.Index]
 		pct := 0
 		if totalVotes > 0 {
 			pct = (cnt * 100) / totalVotes
