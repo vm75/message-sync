@@ -251,6 +251,48 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	adapter := &Adapter{
+		normalizer: normalizer,
+		events:     make(chan transport.Incoming, 4),
+		botUserID:  testBotUserID,
+	}
+
+	tests := []struct {
+		name  string
+		new   []models.ReactionType
+		want  string
+		start int64
+	}{
+		{name: "add", new: []models.ReactionType{{Type: models.ReactionTypeTypeEmoji, ReactionTypeEmoji: &models.ReactionTypeEmoji{Type: models.ReactionTypeTypeEmoji, Emoji: "👍"}}}, want: "👍", start: 20},
+		{name: "remove", new: nil, want: "", start: 21},
+		{name: "change", new: []models.ReactionType{{Type: models.ReactionTypeTypeEmoji, ReactionTypeEmoji: &models.ReactionTypeEmoji{Type: models.ReactionTypeTypeEmoji, Emoji: "❤️"}}}, want: "❤️", start: 22},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter.handleUpdate(context.Background(), nil, &models.Update{ID: tt.start, MessageReaction: &models.MessageReactionUpdated{
+				Chat: models.Chat{ID: testGroupID, Type: models.ChatTypeSupergroup}, MessageID: 101,
+				User: &models.User{ID: 54321}, Date: 1_700_000_020, NewReaction: tt.new,
+			}})
+			select {
+			case incoming := <-adapter.events:
+				if incoming.Kind != "reaction" || incoming.Endpoint != "team-telegram" || incoming.RemoteID != "101" || incoming.Text != tt.want {
+					t.Fatalf("normalized reaction = %#v, want endpoint team-telegram, remote 101, text %q", incoming, tt.want)
+				}
+				if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "101" {
+					t.Fatalf("reaction target = %#v, want remote 101", incoming.ReplyTo)
+				}
+				if incoming.Checkpoint.StreamKey != "telegram" || incoming.Checkpoint.Position != tt.start {
+					t.Fatalf("reaction checkpoint = %#v", incoming.Checkpoint)
+				}
+			default:
+				t.Fatal("reaction update did not reach the shared ingress channel")
+			}
+		})
+	}
+}
+
 func TestPinnedBotClientLongPollReconnectUsesBackoff(t *testing.T) {
 	var (
 		mu           sync.Mutex
