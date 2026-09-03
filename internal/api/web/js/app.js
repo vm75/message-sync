@@ -298,16 +298,16 @@
 
   // ── Toast ────────────────────────────────────────────────────
   function showToast(message, type = 'success', duration = 3500) {
+    // Only show toasts for failures; suppress success/info noise.
+    if (type !== 'danger' && type !== 'warning') return;
     if (!toastContainer) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     const iconMap = {
-      success: `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
       danger:  `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`,
       warning: `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
-      info:    `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`,
     };
-    toast.innerHTML = `${iconMap[type] || iconMap.info}<div class="toast-message">${escapeHtml(message)}</div>`;
+    toast.innerHTML = `${iconMap[type] || iconMap.danger}<div class="toast-message">${escapeHtml(message)}</div>`;
     toastContainer.appendChild(toast);
     setTimeout(() => {
       toast.style.opacity = '0';
@@ -1133,8 +1133,6 @@
         telegram: '<path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path>'
       };
 
-      const isAdmin = currentUser && currentUser.role === 'admin';
-
       const cardsHtml = cachedConnections.map(conn => {
         const iconSvg = transportIcons[conn.transport] || '';
         const st = statuses[conn.id] || {};
@@ -1568,7 +1566,7 @@
     if (reassignConnSelect) {
       reassignConnSelect.innerHTML = compatible.map(c => {
         const isCurrent = c.id === ep.connectionId;
-        return `<option value="${escapeHtml(c.id)}" ${isCurrent ? 'selected' : ''}>${escapeHtml(c.label)} (${escapeHtml(c.id)})${isCurrent ? ' [current]' : ''}</option>`;
+        return `<option value="${escapeHtml(c.id)}" ${isCurrent ? 'selected' : ''}>${escapeHtml(c.label)}${isCurrent ? ' [current]' : ''}</option>`;
       }).join('');
     }
 
@@ -1946,7 +1944,7 @@
 
     const enabledConns = cachedConnections.filter(c => c.transport === transport && c.enabled);
     if (addEndpointConnSelect) {
-      addEndpointConnSelect.innerHTML = enabledConns.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)} (${escapeHtml(c.id)})</option>`).join('');
+      addEndpointConnSelect.innerHTML = enabledConns.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join('');
     }
     if (addEndpointNoConn) {
       addEndpointNoConn.classList.toggle('hidden', enabledConns.length > 0);
