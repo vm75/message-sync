@@ -72,7 +72,7 @@ Issues #76, #77, and #78 may be implemented independently after both #74 and #75
 | 3 | [#76](https://github.com/vm75/message-sync/issues/76) | Multi-instance Discord bots, connection-scoped discovery/status/webhooks/recovery, thread safety | #74, #75 | Complete |
 | 4 | [#77](https://github.com/vm75/message-sync/issues/77) | Multi-instance Telegram bots, isolated polling/cursors/poll refs, topic scopes, migration | #74, #75 | Complete |
 | 5 | [#78](https://github.com/vm75/message-sync/issues/78) | Multiple WhatsApp accounts, per-connection DBs, serialized QR pairing, recovery/cleanup/membership | #74, #75 | Complete |
-| 6 | [#79](https://github.com/vm75/message-sync/issues/79) | Authenticated connection APIs, RBAC, auditing, endpoint connectionId/reassignment/deletion semantics | #74-#78 | Pending |
+| 6 | [#79](https://github.com/vm75/message-sync/issues/79) | Authenticated connection APIs, RBAC, auditing, endpoint connectionId/reassignment/deletion semantics | #74-#78 | Complete |
 | 7 | [#80](https://github.com/vm75/message-sync/issues/80) | Web UI flow: Connections → Endpoints → Sync Sets; safe paste-once secrets and scoped discovery | #76-#79 | Pending |
 | 8 | [#81](https://github.com/vm75/message-sync/issues/81) | Cross-cutting recovery/delivery/membership/thread/topic/poll/local-message/failure-isolation hardening | #74-#80 | Pending |
 | 9 | [#82](https://github.com/vm75/message-sync/issues/82) | Final documentation/regression cleanup; remove stale singleton assumptions and delete this tracker | #74-#81 | Pending |

@@ -185,3 +185,39 @@ func (s *Store) DeleteConnection(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (s *Store) UpdateConnection(ctx context.Context, conn Connection) error {
+	if s == nil || s.db == nil {
+		return errors.New("control database is required")
+	}
+	if err := conn.Validate(); err != nil {
+		return err
+	}
+	now := time.Now().UnixMilli()
+	conn.UpdatedAt = now
+
+	var encCred, nonce any
+	if len(conn.EncryptedCredential) > 0 {
+		encCred = conn.EncryptedCredential
+	}
+	if len(conn.CredentialNonce) > 0 {
+		nonce = conn.CredentialNonce
+	}
+
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE transport_connections
+		SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+		WHERE id = ?
+	`, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.UpdatedAt, conn.ID)
+	if err != nil {
+		return fmt.Errorf("update connection: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("rows affected: %w", err)
+	}
+	if rows == 0 {
+		return errors.New("connection not found")
+	}
+	return nil
+}

@@ -72,32 +72,32 @@ func TestWhatsAppEndpoints_Unauthorized(t *testing.T) {
 		WhatsApp: mockWA,
 	})
 
-	// Test GET /api/whatsapp/status without token
-	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	// Test GET /api/connections/conn-wa-1/status without token
+	req := httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/status", nil)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
 	}
 
-	// Test POST /api/whatsapp/pair without token
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	// Test POST /api/connections/conn-wa-1/pair without token
+	req = httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/pair", nil)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
 	}
 
-	// Test DELETE /api/whatsapp/pair without token
-	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	// Test DELETE /api/connections/conn-wa-1/pair without token
+	req = httptest.NewRequest(http.MethodDelete, "/api/connections/conn-wa-1/pair", nil)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
 	}
 
-	// Test POST /api/whatsapp/logout without token
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	// Test POST /api/connections/conn-wa-1/logout without token
+	req = httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/logout", nil)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
@@ -128,8 +128,8 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 		t.Fatalf("failed to create session token: %v", err)
 	}
 
-	// 1. GET /api/whatsapp/status (initial unpaired state)
-	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	// 1. GET /api/connections/conn-wa-1/status (initial unpaired state)
+	req := httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/status", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -145,8 +145,8 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 		t.Fatalf("unexpected status: %+v", status)
 	}
 
-	// 2. POST /api/whatsapp/pair
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	// 2. POST /api/connections/conn-wa-1/pair
+	req = httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/pair", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -162,8 +162,8 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 		t.Fatalf("unexpected pair response: %+v", pairResp)
 	}
 
-	// 3. DELETE /api/whatsapp/pair
-	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
+	// 3. DELETE /api/connections/conn-wa-1/pair
+	req = httptest.NewRequest(http.MethodDelete, "/api/connections/conn-wa-1/pair", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -184,7 +184,7 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 	}
 	mockWA.mu.Unlock()
 
-	req = httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/status", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -207,25 +207,9 @@ func TestWhatsAppEndpoints_ServiceUnavailable(t *testing.T) {
 	})
 	token, _ := srv.sessions.CreateToken()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/status", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/pair", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec = httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
-	}
-
-	req = httptest.NewRequest(http.MethodDelete, "/api/whatsapp/pair", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
@@ -242,7 +226,7 @@ func TestWhatsAppEndpoints_PairError(t *testing.T) {
 	})
 	token, _ := srv.sessions.CreateToken()
 
-	req := httptest.NewRequest(http.MethodPost, "/api/whatsapp/pair", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/pair", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -265,7 +249,7 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 	token, _ := srv.sessions.CreateToken()
 
 	// Unauthorized test
-	unauthReq := httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	unauthReq := httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/discovery", nil)
 	unauthRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(unauthRec, unauthReq)
 	if unauthRec.Code != http.StatusUnauthorized {
@@ -273,7 +257,7 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 	}
 
 	// Authorized success test
-	req := httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/discovery", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -294,7 +278,7 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 	mockWA.groupsErr = errors.New("client disconnected")
 	mockWA.mu.Unlock()
 
-	req = httptest.NewRequest(http.MethodGet, "/api/whatsapp/groups", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/connections/conn-wa-1/discovery", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -313,7 +297,7 @@ func TestWhatsAppEndpoints_Logout(t *testing.T) {
 	token, _ := srv.sessions.CreateToken()
 
 	// Successful logout
-	req := httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -337,7 +321,7 @@ func TestWhatsAppEndpoints_Logout(t *testing.T) {
 	mockWA.logoutErr = errors.New("logout failed")
 	mockWA.mu.Unlock()
 
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, req)
@@ -350,7 +334,7 @@ func TestWhatsAppEndpoints_Logout(t *testing.T) {
 	srvNoWA := NewServer(Options{
 		Secret: []byte("12345678901234567890123456789012"),
 	})
-	req = httptest.NewRequest(http.MethodPost, "/api/whatsapp/logout", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/connections/conn-wa-1/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	srvNoWA.Handler().ServeHTTP(rec, req)

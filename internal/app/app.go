@@ -576,19 +576,21 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 	}
 	apiServer := api.NewServer(api.Options{
-		Addr:           apiAddr,
-		Logger:         logger,
-		DB:             syncStore.DB(),
-		ControlDB:      controlStore.DB(),
-		Secret:         []byte(secret),
-		WhatsApp:       waService,
-		Discord:        dc,
-		Telegram:       tg,
-		Delivery:       mesh,
-		OnConfigChange: onConfigChange,
-		EvidenceDir:    filepath.Join(dataDir, "membership-evidence"),
-		Mailer:         verification.NewResendMailerFromEnv(),
-		Analyzer:       verification.NewOpenRouterFromEnv(),
+		Addr:             apiAddr,
+		Logger:           logger,
+		DB:               syncStore.DB(),
+		ControlDB:        controlStore.DB(),
+		Secret:           []byte(secret),
+		CredentialCipher: credentialCipher,
+		Connections:      &appConnectionService{connMgr: connMgr, dataDir: dataDir},
+		WhatsApp:         waService,
+		Discord:          dc,
+		Telegram:         tg,
+		Delivery:         mesh,
+		OnConfigChange:   onConfigChange,
+		EvidenceDir:      filepath.Join(dataDir, "membership-evidence"),
+		Mailer:           verification.NewResendMailerFromEnv(),
+		Analyzer:         verification.NewOpenRouterFromEnv(),
 	})
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)
@@ -895,4 +897,107 @@ func (s *appWhatsAppService) RotateInviteLink(ctx context.Context, alias string)
 		return err
 	}
 	return admin.RotateInviteLink(ctx, alias)
+}
+
+type appConnectionService struct {
+	connMgr *connection.Manager
+	dataDir string
+}
+
+func (s *appConnectionService) ConnectionStatus(ctx context.Context, id string) (any, error) {
+	if s == nil || s.connMgr == nil {
+		return map[string]any{"id": id, "status": "stopped"}, nil
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return map[string]any{"id": id, "status": "stopped"}, nil
+	}
+	if wa, ok := adapter.(interface {
+		Status(context.Context) api.WhatsAppStatus
+	}); ok {
+		return wa.Status(ctx), nil
+	}
+	if dc, ok := adapter.(discord.AdminService); ok {
+		return dc.AdminStatus(ctx), nil
+	}
+	if tg, ok := adapter.(telegram.AdminService); ok {
+		return tg.AdminStatus(ctx), nil
+	}
+	return map[string]any{"id": id, "status": "running"}, nil
+}
+
+func (s *appConnectionService) ConnectionDiscovery(ctx context.Context, id string) (any, error) {
+	if s == nil || s.connMgr == nil {
+		return nil, errors.New("connection manager unavailable")
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return nil, errors.New("connection is not running")
+	}
+	if wa, ok := adapter.(interface {
+		GetJoinedGroups(context.Context) ([]api.WhatsAppGroup, error)
+	}); ok {
+		return wa.GetJoinedGroups(ctx)
+	}
+	if dc, ok := adapter.(discord.AdminService); ok {
+		return dc.DiscoverChannels(ctx)
+	}
+	if tg, ok := adapter.(telegram.AdminService); ok {
+		return tg.DiscoverChats(ctx)
+	}
+	return nil, errors.New("discovery not supported for this transport")
+}
+
+func (s *appConnectionService) WhatsAppPair(ctx context.Context, id string) (api.WhatsAppPairResponse, error) {
+	if s == nil || s.connMgr == nil {
+		return api.WhatsAppPairResponse{}, errors.New("connection manager unavailable")
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return api.WhatsAppPairResponse{}, errors.New("connection is not running")
+	}
+	if wa, ok := adapter.(interface {
+		Pair(context.Context) (api.WhatsAppPairResponse, error)
+	}); ok {
+		return wa.Pair(ctx)
+	}
+	return api.WhatsAppPairResponse{}, errors.New("pairing not supported for this connection")
+}
+
+func (s *appConnectionService) WhatsAppCancelPair(ctx context.Context, id string) error {
+	if s == nil || s.connMgr == nil {
+		return nil
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return nil
+	}
+	if wa, ok := adapter.(interface{ CancelPair(context.Context) error }); ok {
+		return wa.CancelPair(ctx)
+	}
+	return nil
+}
+
+func (s *appConnectionService) WhatsAppLogout(ctx context.Context, id string) error {
+	if s == nil || s.connMgr == nil {
+		return nil
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return nil
+	}
+	if wa, ok := adapter.(interface{ Logout(context.Context) error }); ok {
+		return wa.Logout(ctx)
+	}
+	return nil
+}
+
+func (s *appConnectionService) StopConnection(id string) error {
+	if s != nil && s.connMgr != nil {
+		_ = s.connMgr.Stop(id)
+	}
+	if s != nil && s.dataDir != "" {
+		_ = whatsapp.RemoveProtocolDB(s.dataDir, id)
+	}
+	return nil
 }

@@ -366,7 +366,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			WriteError(w, 401, "unauthorized")
 			return
 		}
-		if requiresAdmin(r.URL.Path) && p.Role != "admin" {
+		if requiresAdmin(r.Method, r.URL.Path) && p.Role != "admin" {
 			WriteError(w, http.StatusForbidden, "forbidden")
 			return
 		}
@@ -374,8 +374,16 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func requiresAdmin(path string) bool {
-	return path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit" || path == "/api/verification/pipelines" || strings.HasPrefix(path, "/api/verification/pipelines/")
+func requiresAdmin(method, path string) bool {
+	if path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit" || path == "/api/verification/pipelines" || strings.HasPrefix(path, "/api/verification/pipelines/") {
+		return true
+	}
+	if path == "/api/connections" || strings.HasPrefix(path, "/api/connections/") {
+		if method != http.MethodGet {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) extractToken(r *http.Request) string {

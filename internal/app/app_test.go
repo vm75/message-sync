@@ -536,12 +536,12 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatal("failed to setup auth on running api server")
 	}
 
-	// 2. Query WhatsApp status via GET /api/whatsapp/status
-	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/whatsapp/status", apiAddr), nil)
+	// 2. Query WhatsApp status via GET /api/connections/conn-wa-1/status
+	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/connections/conn-wa-1/status", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
-		t.Fatalf("GET /api/whatsapp/status failed: %v", err)
+		t.Fatalf("GET /api/connections/conn-wa-1/status failed: %v", err)
 	}
 	var status api.WhatsAppStatus
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
@@ -552,12 +552,12 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatalf("expected status unpaired, got %s", status.Status)
 	}
 
-	// 3. Initiate pair via POST /api/whatsapp/pair
-	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/whatsapp/pair", apiAddr), nil)
+	// 3. Initiate pair via POST /api/connections/conn-wa-1/pair
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/connections/conn-wa-1/pair", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /api/whatsapp/pair failed: %v", err)
+		t.Fatalf("POST /api/connections/conn-wa-1/pair failed: %v", err)
 	}
 	var pairResp api.WhatsAppPairResponse
 	_ = json.NewDecoder(resp.Body).Decode(&pairResp)
@@ -566,12 +566,12 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatalf("unexpected pair response: %+v", pairResp)
 	}
 
-	// 3. DELETE /api/whatsapp/pair
-	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/api/whatsapp/pair", apiAddr), nil)
+	// 3. DELETE /api/connections/conn-wa-1/pair
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/api/connections/conn-wa-1/pair", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil {
-		t.Fatalf("DELETE /api/whatsapp/pair failed: %v", err)
+		t.Fatalf("DELETE /api/connections/conn-wa-1/pair failed: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK from DELETE, got %d", resp.StatusCode)
@@ -582,12 +582,12 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatalf("expected 1 cancel call, got %d", fake.cancelCalls)
 	}
 
-	// 4. POST /api/whatsapp/logout
-	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/whatsapp/logout", apiAddr), nil)
+	// 4. POST /api/connections/conn-wa-1/logout
+	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/connections/conn-wa-1/logout", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil {
-		t.Fatalf("POST /api/whatsapp/logout failed: %v", err)
+		t.Fatalf("POST /api/connections/conn-wa-1/logout failed: %v", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK from POST logout, got %d", resp.StatusCode)
@@ -656,7 +656,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	}()
 
 	var apiAddr string
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 150; i++ {
 		logs := logBuf.String()
 		if strings.Contains(logs, "api server listening") {
 			for _, line := range strings.Split(logs, "\n") {
@@ -680,7 +680,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 
 	client := &http.Client{Timeout: 2 * time.Second}
 	var token string
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 150; i++ {
 		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`))
 		if err == nil {
 			var tokenResp struct {

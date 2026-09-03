@@ -147,54 +147,99 @@
     },
 
     /**
-     * WhatsApp Lifecycle Endpoints
+     * Connection Endpoints
      */
-    async getWhatsAppStatus() {
-      return this.request('/api/whatsapp/status');
+    async listConnections() {
+      return this.request('/api/connections');
     },
 
-    async pairWhatsApp() {
-      return this.request('/api/whatsapp/pair', {
-        method: 'POST'
+    async getConnection(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}`);
+    },
+
+    async createConnection(data) {
+      return this.request('/api/connections', {
+        method: 'POST',
+        body: data
       });
     },
 
-    async cancelPairWhatsApp() {
-      return this.request('/api/whatsapp/pair', {
+    async updateConnection(id, data) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: data
+      });
+    },
+
+    async deleteConnection(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
     },
 
-    async logoutWhatsApp() {
-      return this.request('/api/whatsapp/logout', {
+    async getConnectionStatus(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/status`);
+    },
+
+    async getConnectionDiscovery(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/discovery`);
+    },
+
+    async pairWhatsAppConnection(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/pair`, {
         method: 'POST'
       });
     },
 
-    async getWhatsAppJoinedGroups() {
-      return this.request('/api/whatsapp/groups');
+    async cancelPairWhatsAppConnection(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/pair`, {
+        method: 'DELETE'
+      });
+    },
+
+    async logoutWhatsAppConnection(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/logout`, {
+        method: 'POST'
+      });
     },
 
     /**
-     * Discord Admin Endpoints
+     * Connection-Scoped Helpers
      */
-    async getDiscordStatus() {
-      return this.request('/api/discord/status');
+    async getWhatsAppStatus(id = 'conn-wa-1') {
+      return this.getConnectionStatus(id);
     },
 
-    async getDiscordChannels() {
-      return this.request('/api/discord/channels');
+    async pairWhatsApp(id = 'conn-wa-1') {
+      return this.pairWhatsAppConnection(id);
     },
 
-    /**
-     * Telegram Admin Endpoints
-     */
-    async getTelegramStatus() {
-      return this.request('/api/telegram/status');
+    async cancelPairWhatsApp(id = 'conn-wa-1') {
+      return this.cancelPairWhatsAppConnection(id);
     },
 
-    async getTelegramChats() {
-      return this.request('/api/telegram/chats');
+    async logoutWhatsApp(id = 'conn-wa-1') {
+      return this.logoutWhatsAppConnection(id);
+    },
+
+    async getWhatsAppJoinedGroups(id = 'conn-wa-1') {
+      return this.getConnectionDiscovery(id);
+    },
+
+    async getDiscordStatus(id = 'conn-dc-1') {
+      return this.getConnectionStatus(id);
+    },
+
+    async getDiscordChannels(id = 'conn-dc-1') {
+      return this.getConnectionDiscovery(id);
+    },
+
+    async getTelegramStatus(id = 'conn-tg-1') {
+      return this.getConnectionStatus(id);
+    },
+
+    async getTelegramChats(id = 'conn-tg-1') {
+      return this.getConnectionDiscovery(id);
     },
 
     async getDeliveryStatus() {

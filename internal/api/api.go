@@ -47,6 +47,15 @@ type WhatsAppService interface {
 	GetJoinedGroups(ctx context.Context) ([]WhatsAppGroup, error)
 }
 
+type ConnectionService interface {
+	ConnectionStatus(ctx context.Context, id string) (any, error)
+	ConnectionDiscovery(ctx context.Context, id string) (any, error)
+	WhatsAppPair(ctx context.Context, id string) (WhatsAppPairResponse, error)
+	WhatsAppCancelPair(ctx context.Context, id string) error
+	WhatsAppLogout(ctx context.Context, id string) error
+	StopConnection(id string) error
+}
+
 type Options struct {
 	Addr       string
 	Logger     *slog.Logger
@@ -60,10 +69,12 @@ type Options struct {
 	Delivery   interface {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
-	OnConfigChange func(ctx context.Context) error
-	EvidenceDir    string
-	Mailer         verification.Mailer
-	Analyzer       verification.Analyzer
+	OnConfigChange   func(ctx context.Context) error
+	EvidenceDir      string
+	Mailer           verification.Mailer
+	Analyzer         verification.Analyzer
+	CredentialCipher *controlstore.CredentialCipher
+	Connections      ConnectionService
 }
 
 type Server struct {
@@ -81,11 +92,13 @@ type Server struct {
 	delivery          interface {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
-	onConfigChange func(ctx context.Context) error
-	evidenceDir    string
-	mailer         verification.Mailer
-	analyzer       verification.Analyzer
-	listener       net.Listener
+	onConfigChange   func(ctx context.Context) error
+	evidenceDir      string
+	mailer           verification.Mailer
+	analyzer         verification.Analyzer
+	credentialCipher *controlstore.CredentialCipher
+	connections      ConnectionService
+	listener         net.Listener
 }
 
 func NewServer(opts Options) *Server {
@@ -132,6 +145,20 @@ func NewServer(opts Options) *Server {
 		evidenceDir:       opts.EvidenceDir,
 		mailer:            opts.Mailer,
 		analyzer:          opts.Analyzer,
+		credentialCipher:  opts.CredentialCipher,
+		connections:       opts.Connections,
+	}
+
+	if s.credentialCipher == nil && len(opts.Secret) >= 32 {
+		s.credentialCipher, _ = controlstore.NewCredentialCipher(opts.Secret)
+	}
+
+	if s.connections == nil && (opts.WhatsApp != nil || opts.Discord != nil || opts.Telegram != nil) {
+		s.connections = &fallbackConnectionService{
+			wa: opts.WhatsApp,
+			dc: opts.Discord,
+			tg: opts.Telegram,
+		}
 	}
 
 	s.registerRoutes()
@@ -180,17 +207,17 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/verification/email/verify", s.handleVerifyEmail)
 	s.mux.HandleFunc("POST /api/verification/email/resend", s.handleResendEmail)
 
-	s.mux.HandleFunc("GET /api/whatsapp/status", s.handleWhatsAppStatus)
-	s.mux.HandleFunc("POST /api/whatsapp/pair", s.handleWhatsAppPair)
-	s.mux.HandleFunc("DELETE /api/whatsapp/pair", s.handleWhatsAppCancelPair)
-	s.mux.HandleFunc("POST /api/whatsapp/logout", s.handleWhatsAppLogout)
-	s.mux.HandleFunc("GET /api/whatsapp/groups", s.handleWhatsAppGroups)
-
-	s.mux.HandleFunc("GET /api/discord/status", s.handleDiscordStatus)
-	s.mux.HandleFunc("GET /api/discord/channels", s.handleDiscordChannels)
-
-	s.mux.HandleFunc("GET /api/telegram/status", s.handleTelegramStatus)
-	s.mux.HandleFunc("GET /api/telegram/chats", s.handleTelegramChats)
+	s.mux.HandleFunc("GET /api/connections", s.handleListConnections)
+	s.mux.HandleFunc("POST /api/connections", s.handleCreateConnection)
+	s.mux.HandleFunc("GET /api/connections/{id}", s.handleGetConnection)
+	s.mux.HandleFunc("PUT /api/connections/{id}", s.handleUpdateConnection)
+	s.mux.HandleFunc("PATCH /api/connections/{id}", s.handleUpdateConnection)
+	s.mux.HandleFunc("DELETE /api/connections/{id}", s.handleDeleteConnection)
+	s.mux.HandleFunc("GET /api/connections/{id}/status", s.handleGetConnectionStatus)
+	s.mux.HandleFunc("GET /api/connections/{id}/discovery", s.handleGetConnectionDiscovery)
+	s.mux.HandleFunc("POST /api/connections/{id}/pair", s.handleWhatsAppConnectionPair)
+	s.mux.HandleFunc("DELETE /api/connections/{id}/pair", s.handleWhatsAppConnectionCancelPair)
+	s.mux.HandleFunc("POST /api/connections/{id}/logout", s.handleWhatsAppConnectionLogout)
 	s.mux.HandleFunc("GET /api/delivery/status", s.handleDeliveryStatus)
 
 	s.mux.HandleFunc("GET /api/endpoints", s.handleListEndpoints)

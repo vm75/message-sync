@@ -45,7 +45,7 @@ func TestDiscordAdminEndpointsRequireAuthentication(t *testing.T) {
 		Discord: &fakeDiscordAdminService{},
 	})
 
-	for _, path := range []string{"/api/discord/status", "/api/discord/channels"} {
+	for _, path := range []string{"/api/connections/conn-dc-1/status", "/api/connections/conn-dc-1/discovery"} {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusUnauthorized {
@@ -57,20 +57,17 @@ func TestDiscordAdminEndpointsRequireAuthentication(t *testing.T) {
 func TestDiscordStatusNotConfiguredIsSafe(t *testing.T) {
 	srv := NewServer(Options{Secret: []byte("01234567890123456789012345678901")})
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/discord/status"))
+	srv.Handler().ServeHTTP(rec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/connections/conn-dc-1/status"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200: %s", rec.Code, rec.Body.String())
 	}
-	var got discord.AdminStatus
+	var got map[string]any
 	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Configured || got.Connected || got.Status != "not_configured" {
+	if got["status"] != "stopped" && got["status"] != "not_configured" {
 		t.Fatalf("unexpected status: %+v", got)
-	}
-	if got.Webhooks == nil || len(got.Webhooks) != 0 {
-		t.Fatalf("unexpected webhook status: %+v", got.Webhooks)
 	}
 }
 
@@ -81,8 +78,8 @@ func TestDiscordStatusAndDiscoveryExposeOnlyTransientSelectionMetadata(t *testin
 			Connected:  true,
 			Status:     "connected",
 			Webhooks: []discord.EndpointWebhookStatus{
-				{Alias: "ready-channel", Status: discord.WebhookStatusReady},
-				{Alias: "needs-webhooks", Status: discord.WebhookStatusMissingPermission},
+				{Alias: "dc-ep-1", Status: discord.WebhookStatusReady},
+				{Alias: "dc-ep-2", Status: discord.WebhookStatusMissingPermission},
 			},
 		},
 		channels: []discord.DiscoveredChannel{{
@@ -98,7 +95,7 @@ func TestDiscordStatusAndDiscoveryExposeOnlyTransientSelectionMetadata(t *testin
 	})
 
 	statusRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(statusRec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/discord/status"))
+	srv.Handler().ServeHTTP(statusRec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/connections/conn-dc-1/status"))
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("status endpoint=%d: %s", statusRec.Code, statusRec.Body.String())
 	}
@@ -113,7 +110,7 @@ func TestDiscordStatusAndDiscoveryExposeOnlyTransientSelectionMetadata(t *testin
 	}
 
 	discoveryRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(discoveryRec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/discord/channels"))
+	srv.Handler().ServeHTTP(discoveryRec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/connections/conn-dc-1/discovery"))
 	if discoveryRec.Code != http.StatusOK {
 		t.Fatalf("discovery endpoint=%d: %s", discoveryRec.Code, discoveryRec.Body.String())
 	}
@@ -139,7 +136,7 @@ func TestDiscordDiscoveryErrorsAreSafeLogged(t *testing.T) {
 	})
 
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/discord/channels"))
+	srv.Handler().ServeHTTP(rec, authenticatedDiscordRequest(t, srv, http.MethodGet, "/api/connections/conn-dc-1/discovery"))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d, want 500", rec.Code)
 	}

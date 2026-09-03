@@ -29,7 +29,7 @@ type CreateEndpointRequest struct {
 type UpdateEndpointRequest struct {
 	Alias        string           `json:"alias,omitempty"`
 	Transport    config.Transport `json:"transport"`
-	ConnectionID string           `json:"connectionId,omitempty"`
+	ConnectionID string           `json:"connectionId"`
 	RemoteID     string           `json:"remoteId"`
 	SyncSetID    *string          `json:"syncSetId,omitempty"`
 }
@@ -143,10 +143,11 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	if s.controlDB != nil {
 		var connTransport string
+		var enabled bool
 		err := s.controlDB.QueryRowContext(r.Context(),
-			`SELECT transport FROM transport_connections WHERE id = ?`,
+			`SELECT transport, enabled FROM transport_connections WHERE id = ?`,
 			req.ConnectionID,
-		).Scan(&connTransport)
+		).Scan(&connTransport, &enabled)
 		if errors.Is(err, sql.ErrNoRows) {
 			WriteError(w, http.StatusBadRequest, "connection not found")
 			return
@@ -154,6 +155,10 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			safelog.Error(s.logger, "check connection failed", "endpoint_create", err)
 			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if !enabled {
+			WriteError(w, http.StatusBadRequest, "connection is disabled")
 			return
 		}
 		if config.Transport(connTransport) != req.Transport {
@@ -262,7 +267,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	targetConnID := strings.TrimSpace(req.ConnectionID)
 	if targetConnID == "" {
-		targetConnID = existingConnID
+		WriteError(w, http.StatusBadRequest, "connectionId is required")
+		return
 	}
 	if err := config.ValidateConnectionID(targetConnID); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
@@ -271,10 +277,11 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	if s.controlDB != nil {
 		var connTransport string
+		var enabled bool
 		err := s.controlDB.QueryRowContext(r.Context(),
-			`SELECT transport FROM transport_connections WHERE id = ?`,
+			`SELECT transport, enabled FROM transport_connections WHERE id = ?`,
 			targetConnID,
-		).Scan(&connTransport)
+		).Scan(&connTransport, &enabled)
 		if errors.Is(err, sql.ErrNoRows) {
 			WriteError(w, http.StatusBadRequest, "connection not found")
 			return
@@ -282,6 +289,10 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			safelog.Error(s.logger, "check connection failed", "endpoint_update", err)
 			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if !enabled {
+			WriteError(w, http.StatusBadRequest, "connection is disabled")
 			return
 		}
 		if config.Transport(connTransport) != req.Transport {

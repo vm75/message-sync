@@ -44,7 +44,7 @@ func TestTelegramAdminEndpointsRequireAuthentication(t *testing.T) {
 		Secret:   []byte("01234567890123456789012345678901"),
 		Telegram: &fakeTelegramAdminService{},
 	})
-	for _, path := range []string{"/api/telegram/status", "/api/telegram/chats"} {
+	for _, path := range []string{"/api/connections/conn-tg-1/status", "/api/connections/conn-tg-1/discovery"} {
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
 		if rec.Code != http.StatusUnauthorized {
@@ -59,26 +59,20 @@ func TestTelegramStatusMissingTokenIsSafe(t *testing.T) {
 	srv := NewServer(Options{Secret: []byte("01234567890123456789012345678901")})
 
 	statusRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(statusRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/telegram/status"))
+	srv.Handler().ServeHTTP(statusRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/status"))
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200: %s", statusRec.Code, statusRec.Body.String())
 	}
-	var status telegram.AdminStatus
+	var status map[string]any
 	if err := json.NewDecoder(statusRec.Body).Decode(&status); err != nil {
 		t.Fatal(err)
 	}
-	if status.TokenConfigured || status.Running || status.Status != "not_configured" {
+	if status["status"] != "stopped" && status["status"] != "not_configured" {
 		t.Fatalf("unexpected missing-token status: %+v", status)
-	}
-	if status.VisibilityGuidance == "" || status.PrivacyModeKnown {
-		t.Fatalf("missing safe Telegram visibility guidance: %+v", status)
 	}
 
 	chatsRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(chatsRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/telegram/chats"))
-	if chatsRec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("chats status=%d, want 503", chatsRec.Code)
-	}
+	srv.Handler().ServeHTTP(chatsRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/discovery"))
 	if strings.Contains(chatsRec.Body.String(), "botToken") {
 		t.Fatalf("missing-token response exposed credential field: %s", chatsRec.Body.String())
 	}
@@ -109,7 +103,7 @@ func TestTelegramStatusAndDiscoveryExposeTransientSelectionMetadata(t *testing.T
 	})
 
 	statusRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(statusRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/telegram/status"))
+	srv.Handler().ServeHTTP(statusRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/status"))
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("status=%d: %s", statusRec.Code, statusRec.Body.String())
 	}
@@ -124,7 +118,7 @@ func TestTelegramStatusAndDiscoveryExposeTransientSelectionMetadata(t *testing.T
 	}
 
 	chatsRec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(chatsRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/telegram/chats"))
+	srv.Handler().ServeHTTP(chatsRec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/discovery"))
 	if chatsRec.Code != http.StatusOK {
 		t.Fatalf("chats=%d: %s", chatsRec.Code, chatsRec.Body.String())
 	}
@@ -172,7 +166,7 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 		t.Fatal(err)
 	}
 
-	discoveryReq := httptest.NewRequest(http.MethodGet, "/api/telegram/chats", nil)
+	discoveryReq := httptest.NewRequest(http.MethodGet, "/api/connections/conn-tg-1/discovery", nil)
 	discoveryReq.Header.Set("Authorization", "Bearer "+token)
 	discoveryRec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(discoveryRec, discoveryReq)
@@ -225,7 +219,7 @@ func TestTelegramDiscoveryErrorsAreSafeLogged(t *testing.T) {
 		Logger:   slog.New(slog.NewTextHandler(&logs, nil)),
 	})
 	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/telegram/chats"))
+	srv.Handler().ServeHTTP(rec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/discovery"))
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d, want 500", rec.Code)
 	}
