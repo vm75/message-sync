@@ -291,12 +291,31 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 	}
 	s.audit(r, "membership_fulfillment_retry", id)
 	var wa verification.WhatsAppAdmin
-	if candidate, ok := s.whatsapp.(verification.WhatsAppAdmin); ok {
-		wa = candidate
-	}
 	var dc verification.DiscordAdmin
-	if candidate, ok := s.discord.(verification.DiscordAdmin); ok {
-		dc = candidate
+
+	var connID string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(r.Context(), `SELECT connection_id FROM endpoints WHERE alias=?`, req.EndpointAlias).Scan(&connID)
+	}
+	if connID != "" && s.connections != nil {
+		if adapter, ok := s.connections.ConnectionAdapter(connID); ok {
+			if candidate, ok := adapter.(verification.WhatsAppAdmin); ok {
+				wa = candidate
+			}
+			if candidate, ok := adapter.(verification.DiscordAdmin); ok {
+				dc = candidate
+			}
+		}
+	}
+	if wa == nil {
+		if candidate, ok := s.whatsapp.(verification.WhatsAppAdmin); ok {
+			wa = candidate
+		}
+	}
+	if dc == nil {
+		if candidate, ok := s.discord.(verification.DiscordAdmin); ok {
+			dc = candidate
+		}
 	}
 	result, fulfillErr := verification.Fulfill(r.Context(), req, wa, dc)
 	if result.State == "action_pending" && s.mailer != nil {

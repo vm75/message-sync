@@ -54,6 +54,7 @@ type ConnectionService interface {
 	WhatsAppCancelPair(ctx context.Context, id string) error
 	WhatsAppLogout(ctx context.Context, id string) error
 	StopConnection(id string) error
+	ConnectionAdapter(id string) (any, bool)
 }
 
 type Options struct {

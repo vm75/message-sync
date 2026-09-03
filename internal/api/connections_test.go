@@ -65,6 +65,10 @@ func (m *mockConnectionService) StopConnection(id string) error {
 	return nil
 }
 
+func (m *mockConnectionService) ConnectionAdapter(id string) (any, bool) {
+	return nil, false
+}
+
 func setupConnectionsTestEnv(t *testing.T) (*Server, *sql.DB, *sql.DB, string, string) {
 	t.Helper()
 	st, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "sync.db"))

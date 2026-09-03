@@ -549,4 +549,14 @@ Membership-specific email challenges and advisory evidence analysis are implemen
 
 ## 20. Reliability verification
 
-The final integration harness in `internal/integration` connects fake WhatsApp, Discord, and Telegram adapters to the real alias registry, SQLite store, canonical router, and destination lanes. It verifies all-to-all fan-out, slow-destination isolation, transient retry, and ordered create/edit/reaction/delete delivery. Package-level tests compose this with bounded queue behavior, restart/replay state, accepted checkpoints, provider recovery/reconnect, configuration reload, webhook repair, and privacy canaries. Runtime and container smoke tests use a fresh disposable `/data` volume; no deployed database is upgraded.
+The integration harnesses in `internal/integration` connect fake WhatsApp, Discord, and Telegram adapters to the real alias registry, SQLite store, canonical router, and destination lanes. They verify:
+- All-to-all fan-out, slow-destination isolation, transient retry, and ordered create/edit/reaction/delete delivery across multiple concurrent connection instances per transport.
+- Cross-connection thread and topic reply lineage preserving native child scopes (`discord_thread`, `telegram_topic`) across independent connection instances.
+- Delivery lanes failure isolation where stopped or failing connections do not block healthy lanes, and endpoint reassignment retries delivery on the newly owning connection without duplicating canonical copies or creating a second endpoint identity.
+- Local-only message prefix suppression across multiple connections and child scopes.
+- Recovery cursors and poll provider references strictly namespaced per connection ID (`telegram:<connection-id>`) to prevent cross-connection cursor stomping or poll reference collisions.
+- Membership verification fulfillment resolving pipeline endpoint aliases dynamically to the active adapter on the owning connection via `ConnectionManager`, cleanly handling reassignment and offline connection states without leaking PII.
+- Privacy canaries asserting zero plaintext credentials, phone numbers, or participant names in `sync.db`, `control.db` searchable fields, application logs, or audit records.
+- Resource lifecycle verification asserting no goroutine, client, or handle leaks across rapid connection start/stop cycles.
+
+Runtime and container smoke tests use a fresh disposable `/data` volume; no deployed database is upgraded.

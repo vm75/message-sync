@@ -108,6 +108,14 @@ func (sm *SessionManager) CreateToken() (string, error) {
 	return sm.createSession(context.Background(), userID)
 }
 
+// CreateToken is retained for tests and test fixtures.
+func (s *Server) CreateToken() (string, error) {
+	if s.sessions == nil {
+		return "", errors.New("sessions not initialized")
+	}
+	return s.sessions.CreateToken()
+}
+
 func tokenHash(token string) string {
 	h := sha256.Sum256([]byte(token))
 	return base64.RawURLEncoding.EncodeToString(h[:])

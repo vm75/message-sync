@@ -699,3 +699,7 @@ func (s *fallbackConnectionService) WhatsAppLogout(ctx context.Context, id strin
 func (s *fallbackConnectionService) StopConnection(id string) error {
 	return nil
 }
+
+func (s *fallbackConnectionService) ConnectionAdapter(id string) (any, bool) {
+	return nil, false
+}

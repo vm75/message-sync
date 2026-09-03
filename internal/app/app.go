@@ -1001,3 +1001,10 @@ func (s *appConnectionService) StopConnection(id string) error {
 	}
 	return nil
 }
+
+func (s *appConnectionService) ConnectionAdapter(id string) (any, bool) {
+	if s == nil || s.connMgr == nil {
+		return nil, false
+	}
+	return s.connMgr.GetAdapter(id)
+}
