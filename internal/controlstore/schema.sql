@@ -101,3 +101,21 @@ CREATE TABLE IF NOT EXISTS verification_assessments (
     updated_at INTEGER NOT NULL,
     UNIQUE (membership_request_id, assessment_kind)
 );
+
+CREATE TABLE IF NOT EXISTS transport_connections (
+    id TEXT PRIMARY KEY,
+    transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
+    label TEXT NOT NULL CHECK (length(label) > 0),
+    enabled BOOLEAN NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    encrypted_credential BLOB,
+    credential_nonce BLOB,
+    credential_key_version INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    CHECK (
+        (transport = 'whatsapp' AND encrypted_credential IS NULL AND credential_nonce IS NULL) OR
+        (transport IN ('discord', 'telegram') AND encrypted_credential IS NOT NULL AND credential_nonce IS NOT NULL)
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_transport_connections_transport ON transport_connections(transport);

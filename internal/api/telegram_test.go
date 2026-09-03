@@ -181,7 +181,7 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 	}
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"tg_route_01","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`,
+		`{"alias":"tg_route_01","transport":"telegram","connectionId":"conn-tg-1","remoteId":"-1001234567890","syncSetId":"mesh"}`,
 	))
 	createReq.Header.Set("Authorization", "Bearer "+token)
 	createRec := httptest.NewRecorder()

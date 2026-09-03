@@ -12,8 +12,8 @@ import (
 func validConfig() Config {
 	return Config{
 		Endpoints: map[string]Endpoint{
-			"a": {Transport: TransportWhatsApp, RemoteID: "1@g.us"},
-			"b": {Transport: TransportWhatsApp, RemoteID: "2@g.us"},
+			"a": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "1@g.us"},
+			"b": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "2@g.us"},
 		},
 		SyncSets:           []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
 		Identity:           Identity{UsernameMode: UsernameModeHash},
@@ -92,7 +92,7 @@ func TestValidateUsernameModeEnum(t *testing.T) {
 
 func TestValidateRejectsGroupInMultipleSets(t *testing.T) {
 	cfg := validConfig()
-	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "3@g.us"}
 	cfg.SyncSets = append(cfg.SyncSets, SyncSet{ID: "two", Endpoints: []string{"a", "c"}})
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error")
@@ -101,13 +101,13 @@ func TestValidateRejectsGroupInMultipleSets(t *testing.T) {
 
 func TestValidateRejectsUnsafeAliasAndUnassignedGroup(t *testing.T) {
 	cfg := validConfig()
-	cfg.Endpoints["15551234567@s.whatsapp.net"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
+	cfg.Endpoints["15551234567@s.whatsapp.net"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "3@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected unsafe alias error")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "3@g.us"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "3@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected unassigned group error")
 	}
@@ -115,67 +115,67 @@ func TestValidateRejectsUnsafeAliasAndUnassignedGroup(t *testing.T) {
 
 func TestValidateTransportAwareEndpoints(t *testing.T) {
 	cfg := validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "123456789012345678"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() with Discord endpoint failed: %v", err)
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-1001234567890"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-1001234567890"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() with Telegram endpoint failed: %v", err)
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-123456789"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-123456789"}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate() with Telegram basic-group endpoint failed: %v", err)
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: "unknown", RemoteID: "opaque"}
+	cfg.Endpoints["b"] = Endpoint{Transport: "unknown", ConnectionID: "conn-1", RemoteID: "opaque"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for unknown transport")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "123456789"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "123456789"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for positive Telegram private chat id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-0"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-0"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for invalid Telegram chat id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: "-99999999999999999999"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-99999999999999999999"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for overflowing Telegram chat id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: " "}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: " "}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for empty remote id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "not-a-channel"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "not-a-channel"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for invalid Discord channel id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "99999999999999999999"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "99999999999999999999"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for overflowing Discord channel id")
 	}
 
 	cfg = validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, RemoteID: "1@g.us"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "1@g.us"}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Validate() expected error for duplicate WhatsApp remote target")
 	}
@@ -238,8 +238,8 @@ func TestSaveAndLoadThreeTransportSyncSet(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := validConfig()
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, RemoteID: "123456789012345678"}
-	cfg.Endpoints["c"] = Endpoint{Transport: TransportTelegram, RemoteID: "-1001234567890"}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"}
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-1001234567890"}
 	cfg.SyncSets[0].Endpoints = []string{"a", "b", "c"}
 
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
@@ -253,13 +253,13 @@ func TestSaveAndLoadThreeTransportSyncSet(t *testing.T) {
 	if len(loaded.Endpoints) != 3 {
 		t.Fatalf("got %d endpoints, want 3", len(loaded.Endpoints))
 	}
-	if got := loaded.Endpoints["a"]; got.Transport != TransportWhatsApp || got.RemoteID != "1@g.us" {
+	if got := loaded.Endpoints["a"]; got.Transport != TransportWhatsApp || got.ConnectionID != "conn-wa-1" || got.RemoteID != "1@g.us" {
 		t.Fatalf("loaded WhatsApp endpoint = %+v", got)
 	}
-	if got := loaded.Endpoints["b"]; got.Transport != TransportDiscord || got.RemoteID != "123456789012345678" {
+	if got := loaded.Endpoints["b"]; got.Transport != TransportDiscord || got.ConnectionID != "conn-dc-1" || got.RemoteID != "123456789012345678" {
 		t.Fatalf("loaded Discord endpoint = %+v", got)
 	}
-	if got := loaded.Endpoints["c"]; got.Transport != TransportTelegram || got.RemoteID != "-1001234567890" {
+	if got := loaded.Endpoints["c"]; got.Transport != TransportTelegram || got.ConnectionID != "conn-tg-1" || got.RemoteID != "-1001234567890" {
 		t.Fatalf("loaded Telegram endpoint = %+v", got)
 	}
 	if len(loaded.SyncSets) != 1 || loaded.SyncSets[0].ID != "mesh" || len(loaded.SyncSets[0].Endpoints) != 3 {
@@ -276,7 +276,7 @@ func TestLoadDefaultsWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = st.DB().ExecContext(ctx, `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES ('g1', 'whatsapp', '1@g.us', 'set1'), ('g2', 'whatsapp', '2@g.us', 'set1')`)
+	_, err = st.DB().ExecContext(ctx, `INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id) VALUES ('g1', 'whatsapp', 'conn-wa-1', '1@g.us', 'set1'), ('g2', 'whatsapp', 'conn-wa-1', '2@g.us', 'set1')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,7 +347,7 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 	cfg := validConfig()
 	const oldRemoteID = "-123456789"
 	const newRemoteID = "-1009876543210"
-	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, RemoteID: oldRemoteID}
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: oldRemoteID}
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
 		_ = st.Close()
 		t.Fatal(err)
@@ -390,5 +390,31 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 	// Replayed migration events are idempotent after restart.
 	if err := MigrateTelegramEndpoint(ctx, reopened.DB(), "b", oldRemoteID, newRemoteID); err != nil {
 		t.Fatalf("replayed Telegram migration failed: %v", err)
+	}
+}
+
+func TestValidateRejectsMissingOrInvalidConnectionID(t *testing.T) {
+	cfg := validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "", RemoteID: "2@g.us"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for empty connectionId")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "   ", RemoteID: "2@g.us"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for whitespace connectionId")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "!invalid#id", RemoteID: "2@g.us"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for invalid characters in connectionId")
+	}
+
+	cfg = validConfig()
+	cfg.Endpoints["b"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "2@g.us"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid config, got: %v", err)
 	}
 }

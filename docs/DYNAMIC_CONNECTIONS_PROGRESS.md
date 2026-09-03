@@ -67,7 +67,7 @@ Issues #76, #77, and #78 may be implemented independently after both #74 and #75
 
 | Order | Issue | Scope | Dependencies | Status |
 |---:|---|---|---|---|
-| 1 | [#74](https://github.com/vm75/message-sync/issues/74) | Connection data model, encrypted Discord/Telegram credentials, required endpoint ownership | None | Pending |
+| 1 | [#74](https://github.com/vm75/message-sync/issues/74) | Connection data model, encrypted Discord/Telegram credentials, required endpoint ownership | None | Complete |
 | 2 | [#75](https://github.com/vm75/message-sync/issues/75) | Dynamic ConnectionManager, connection-aware adapter dispatch, shared ingress, dynamic recovery-source lifecycle | #74 | Pending |
 | 3 | [#76](https://github.com/vm75/message-sync/issues/76) | Multi-instance Discord bots, connection-scoped discovery/status/webhooks/recovery, thread safety | #74, #75 | Pending |
 | 4 | [#77](https://github.com/vm75/message-sync/issues/77) | Multi-instance Telegram bots, isolated polling/cursors/poll refs, topic scopes, migration | #74, #75 | Pending |

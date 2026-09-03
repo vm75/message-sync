@@ -24,7 +24,7 @@ func (f fakeDeliveryStatus) DeliveryStatus(context.Context) ([]delivery.Endpoint
 func TestDeliveryStatusRequiresAuthAndIsContentFree(t *testing.T) {
 	syncStore, _ := store.Open(context.Background(), filepath.Join(t.TempDir(), "sync.db"))
 	defer syncStore.Close()
-	_, err := syncStore.DB().Exec(`INSERT INTO endpoints(alias, transport, remote_id) VALUES ('alpha', 'telegram', '-123456')`)
+	_, err := syncStore.DB().Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id) VALUES ('alpha', 'telegram', 'conn-tg-1', '-123456')`)
 	if err != nil {
 		t.Fatal(err)
 	}

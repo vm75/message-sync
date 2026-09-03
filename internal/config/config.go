@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	aliasPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	syncSetIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	jidPattern        = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
-	discordIDPattern  = regexp.MustCompile(`^[0-9]{1,20}$`)
-	telegramIDPattern = regexp.MustCompile(`^-[1-9][0-9]{0,18}$`)
+	aliasPattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	connectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	syncSetIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	jidPattern          = regexp.MustCompile(`^[0-9A-Za-z._-]+@g\.us$`)
+	discordIDPattern    = regexp.MustCompile(`^[0-9]{1,20}$`)
+	telegramIDPattern   = regexp.MustCompile(`^-[1-9][0-9]{0,18}$`)
 )
 
 const (
@@ -54,6 +55,17 @@ func ValidateLocalPrefix(prefix string) error {
 func ValidateAlias(alias string) error {
 	if !aliasPattern.MatchString(alias) {
 		return fmt.Errorf("endpoint alias %q must match %s", alias, aliasPattern.String())
+	}
+	return nil
+}
+
+func ValidateConnectionID(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("endpoint connection id is required")
+	}
+	if !connectionIDPattern.MatchString(id) {
+		return fmt.Errorf("endpoint connection id %q must match %s", id, connectionIDPattern.String())
 	}
 	return nil
 }
@@ -148,8 +160,9 @@ type Config struct {
 }
 
 type Endpoint struct {
-	Transport Transport `json:"transport"`
-	RemoteID  string    `json:"remoteId"`
+	Transport    Transport `json:"transport"`
+	ConnectionID string    `json:"connectionId"`
+	RemoteID     string    `json:"remoteId"`
 }
 
 type SyncSet struct {
@@ -234,20 +247,24 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 
 	applyDefaults(cfg)
 
-	endpointRows, err := db.QueryContext(ctx, `SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
+	endpointRows, err := db.QueryContext(ctx, `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read endpoints: %w", err)
 	}
 
 	syncSetMap := make(map[string][]string)
 	for endpointRows.Next() {
-		var alias, transportName, remoteID string
+		var alias, transportName, connectionID, remoteID string
 		var syncSetID sql.NullString
-		if err := endpointRows.Scan(&alias, &transportName, &remoteID, &syncSetID); err != nil {
+		if err := endpointRows.Scan(&alias, &transportName, &connectionID, &remoteID, &syncSetID); err != nil {
 			endpointRows.Close()
 			return nil, fmt.Errorf("scan endpoint: %w", err)
 		}
-		cfg.Endpoints[alias] = Endpoint{Transport: Transport(transportName), RemoteID: remoteID}
+		cfg.Endpoints[alias] = Endpoint{
+			Transport:    Transport(transportName),
+			ConnectionID: connectionID,
+			RemoteID:     remoteID,
+		}
 		if syncSetID.Valid && strings.TrimSpace(syncSetID.String) != "" {
 			syncSetMap[syncSetID.String] = append(syncSetMap[syncSetID.String], alias)
 		}
@@ -423,7 +440,7 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 
 	for alias, endpoint := range cfg.Endpoints {
 		syncSetID := endpointToSyncSet[alias]
-		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES (?, ?, ?, ?)`, alias, string(endpoint.Transport), endpoint.RemoteID, syncSetID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id) VALUES (?, ?, ?, ?, ?)`, alias, string(endpoint.Transport), endpoint.ConnectionID, endpoint.RemoteID, syncSetID); err != nil {
 			return fmt.Errorf("insert endpoint %q: %w", alias, err)
 		}
 	}
@@ -497,6 +514,9 @@ func (c Config) Validate() error {
 	for alias, endpoint := range c.Endpoints {
 		if err := ValidateAlias(alias); err != nil {
 			return err
+		}
+		if err := ValidateConnectionID(endpoint.ConnectionID); err != nil {
+			return fmt.Errorf("endpoint %q: %w", alias, err)
 		}
 		if err := ValidateEndpointRemoteID(endpoint.Transport, endpoint.RemoteID); err != nil {
 			return fmt.Errorf("endpoint %q: %w", alias, err)

@@ -61,11 +61,11 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 
 	// Create mixed-transport endpoints: g1 and g3 are WhatsApp, d1 is Discord, t1 is Telegram.
 	_, err = db.Exec(`
-		INSERT INTO endpoints (alias, transport, remote_id) VALUES
-			('g1', 'whatsapp', '1@g.us'),
-			('d1', 'discord', '123456789012345678'),
-			('t1', 'telegram', '-1001234567890'),
-			('g3', 'whatsapp', '3@g.us')
+		INSERT INTO endpoints (alias, transport, connection_id, remote_id) VALUES
+			('g1', 'whatsapp', 'conn-wa-1', '1@g.us'),
+			('d1', 'discord', 'conn-dc-1', '123456789012345678'),
+			('t1', 'telegram', 'conn-tg-1', '-1001234567890'),
+			('g3', 'whatsapp', 'conn-wa-1', '3@g.us')
 	`)
 	if err != nil {
 		t.Fatalf("insert test endpoints: %v", err)

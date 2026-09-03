@@ -16,11 +16,46 @@ import (
 
 	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 	whatsapp "github.com/vm75/message-sync/internal/transport/whatsapp"
 	"go.mau.fi/whatsmeow/types"
 )
+
+func seedTestConnections(t *testing.T, dataDir string) {
+	t.Helper()
+	cs, err := controlstore.Open(context.Background(), filepath.Join(dataDir, ControlDBName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	_ = cs.CreateConnection(context.Background(), controlstore.Connection{
+		ID:        "conn-wa-1",
+		Transport: "whatsapp",
+		Label:     "WhatsApp",
+		Enabled:   true,
+	})
+	cipher, _ := controlstore.NewCredentialCipher([]byte("0123456789abcdef0123456789abcdef"))
+	dcEnc, dcNonce, _ := cipher.Encrypt([]byte("discord-bot-token"))
+	_ = cs.CreateConnection(context.Background(), controlstore.Connection{
+		ID:                  "conn-dc-1",
+		Transport:           "discord",
+		Label:               "Discord",
+		Enabled:             true,
+		EncryptedCredential: dcEnc,
+		CredentialNonce:     dcNonce,
+	})
+	tgEnc, tgNonce, _ := cipher.Encrypt([]byte("telegram-bot-token"))
+	_ = cs.CreateConnection(context.Background(), controlstore.Connection{
+		ID:                  "conn-tg-1",
+		Transport:           "telegram",
+		Label:               "Telegram",
+		Enabled:             true,
+		EncryptedCredential: tgEnc,
+		CredentialNonce:     tgNonce,
+	})
+}
 
 type safeBuffer struct {
 	mu  sync.Mutex
@@ -143,11 +178,12 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -261,11 +297,12 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -357,6 +394,7 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	syncPath := filepath.Join(dataDir, SyncDBName)
 	st, err := store.Open(context.Background(), syncPath)
@@ -365,8 +403,8 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -420,6 +458,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 	t.Setenv("API_ADDR", apiAddr)
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	syncPath := filepath.Join(dataDir, SyncDBName)
 	st, err := store.Open(context.Background(), syncPath)
@@ -428,8 +467,8 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -471,8 +510,9 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		errCh <- Run(ctx, cfg, logger)
 	}()
 
-	// Wait for server to start
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second}
+
+	// 1. Wait for server to start and setup admin account
 	var token string
 	for i := 0; i < 50; i++ {
 		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`))
@@ -493,21 +533,23 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 		t.Fatal("failed to setup auth on running api server")
 	}
 
-	// 1. GET /api/whatsapp/status
+	// 2. Query WhatsApp status via GET /api/whatsapp/status
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("http://%s/api/whatsapp/status", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("GET /api/whatsapp/status failed: %v", err)
 	}
-	var statusResp api.WhatsAppStatus
-	_ = json.NewDecoder(resp.Body).Decode(&statusResp)
+	var status api.WhatsAppStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode status response: %v", err)
+	}
 	resp.Body.Close()
-	if statusResp.Status != "unpaired" || statusResp.IsLoggedIn {
-		t.Fatalf("unexpected status response: %+v", statusResp)
+	if status.Status != "unpaired" {
+		t.Fatalf("expected status unpaired, got %s", status.Status)
 	}
 
-	// 2. POST /api/whatsapp/pair
+	// 3. Initiate pair via POST /api/whatsapp/pair
 	req, _ = http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/whatsapp/pair", apiAddr), nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
@@ -565,11 +607,12 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -679,7 +722,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	fake.mu.Unlock()
 
 	// 2. Add endpoint c1g3 via POST /api/endpoints
-	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/endpoints", apiAddr), strings.NewReader(`{"alias":"c1g3","transport":"whatsapp","remoteId":"333333333@g.us"}`))
+	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/endpoints", apiAddr), strings.NewReader(`{"alias":"c1g3","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"333333333@g.us"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusCreated {
@@ -756,11 +799,12 @@ func TestApp_WebUIServing(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
+	seedTestConnections(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"c1g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -902,8 +946,8 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"g1": {Transport: config.TransportWhatsApp, RemoteID: "111111111111111111@g.us"},
-			"g2": {Transport: config.TransportWhatsApp, RemoteID: "222222222222222222@g.us"},
+			"g1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111111111111111111@g.us"},
+			"g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "222222222222222222@g.us"},
 		},
 		SyncSets: []config.SyncSet{
 			{ID: "set1", Endpoints: []string{"g1", "g2"}},

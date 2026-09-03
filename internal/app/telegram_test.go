@@ -368,11 +368,12 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
 	t.Setenv("TELEGRAM_BOT_TOKEN", "12345:test-reload-token")
 	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", "")
+	seedTestConnections(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"wa2": {Transport: config.TransportWhatsApp, RemoteID: "987654321@g.us"},
+			"wa1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"wa2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa1", "wa2"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -409,14 +410,19 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 		return tg, nil
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	var logBuf safeBuffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-	ctx, cancel := context.WithCancel(context.Background())
+
 	errCh := make(chan error, 1)
-	go func() { errCh <- Run(ctx, cfg, logger) }()
+	go func() {
+		errCh <- Run(ctx, cfg, logger)
+	}()
 
 	var apiAddr string
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 50; i++ {
 		for _, line := range strings.Split(logBuf.String(), "\n") {
 			if strings.Contains(line, "api server listening") && strings.Contains(line, "addr=") {
 				parts := strings.Split(line, "addr=")
@@ -466,7 +472,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	req, err := http.NewRequest(
 		http.MethodPost,
 		fmt.Sprintf("http://%s/api/endpoints", apiAddr),
-		strings.NewReader(`{"alias":"telegram","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`),
+		strings.NewReader(`{"alias":"telegram","transport":"telegram","connectionId":"conn-tg-1","remoteId":"-1001234567890","syncSetId":"mesh"}`),
 	)
 	if err != nil {
 		cancel()

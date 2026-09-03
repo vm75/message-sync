@@ -11,24 +11,27 @@ import (
 )
 
 type EndpointDTO struct {
-	Alias     string           `json:"alias"`
-	Transport config.Transport `json:"transport"`
-	RemoteID  string           `json:"remoteId"`
-	SyncSetID *string          `json:"syncSetId,omitempty"`
+	Alias        string           `json:"alias"`
+	Transport    config.Transport `json:"transport"`
+	ConnectionID string           `json:"connectionId"`
+	RemoteID     string           `json:"remoteId"`
+	SyncSetID    *string          `json:"syncSetId,omitempty"`
 }
 
 type CreateEndpointRequest struct {
-	Alias     string           `json:"alias"`
-	Transport config.Transport `json:"transport"`
-	RemoteID  string           `json:"remoteId"`
-	SyncSetID *string          `json:"syncSetId,omitempty"`
+	Alias        string           `json:"alias"`
+	Transport    config.Transport `json:"transport"`
+	ConnectionID string           `json:"connectionId"`
+	RemoteID     string           `json:"remoteId"`
+	SyncSetID    *string          `json:"syncSetId,omitempty"`
 }
 
 type UpdateEndpointRequest struct {
-	Alias     string           `json:"alias,omitempty"`
-	Transport config.Transport `json:"transport"`
-	RemoteID  string           `json:"remoteId"`
-	SyncSetID *string          `json:"syncSetId,omitempty"`
+	Alias        string           `json:"alias,omitempty"`
+	Transport    config.Transport `json:"transport"`
+	ConnectionID string           `json:"connectionId,omitempty"`
+	RemoteID     string           `json:"remoteId"`
+	SyncSetID    *string          `json:"syncSetId,omitempty"`
 }
 
 func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
@@ -37,7 +40,7 @@ func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, transport, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
 	if err != nil {
 		safelog.Error(s.logger, "query endpoints failed", "endpoint_list", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query endpoints")
@@ -50,7 +53,7 @@ func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
 		var dto EndpointDTO
 		var transportName string
 		var syncSetID sql.NullString
-		if err := rows.Scan(&dto.Alias, &transportName, &dto.RemoteID, &syncSetID); err != nil {
+		if err := rows.Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID); err != nil {
 			safelog.Error(s.logger, "scan endpoint failed", "endpoint_list", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read endpoints")
 			return
@@ -87,9 +90,9 @@ func (s *Server) handleGetEndpoint(w http.ResponseWriter, r *http.Request) {
 	var transportName string
 	var syncSetID sql.NullString
 	err := s.db.QueryRowContext(r.Context(),
-		`SELECT alias, transport, remote_id, sync_set_id FROM endpoints WHERE alias = ?`,
+		`SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints WHERE alias = ?`,
 		alias,
-	).Scan(&dto.Alias, &transportName, &dto.RemoteID, &syncSetID)
+	).Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -122,15 +125,41 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	req.Alias = strings.TrimSpace(req.Alias)
 	req.Transport = config.Transport(strings.TrimSpace(string(req.Transport)))
+	req.ConnectionID = strings.TrimSpace(req.ConnectionID)
 	req.RemoteID = strings.TrimSpace(req.RemoteID)
 
 	if err := config.ValidateAlias(req.Alias); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := config.ValidateConnectionID(req.ConnectionID); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := config.ValidateEndpointRemoteID(req.Transport, req.RemoteID); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	if s.controlDB != nil {
+		var connTransport string
+		err := s.controlDB.QueryRowContext(r.Context(),
+			`SELECT transport FROM transport_connections WHERE id = ?`,
+			req.ConnectionID,
+		).Scan(&connTransport)
+		if errors.Is(err, sql.ErrNoRows) {
+			WriteError(w, http.StatusBadRequest, "connection not found")
+			return
+		}
+		if err != nil {
+			safelog.Error(s.logger, "check connection failed", "endpoint_create", err)
+			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if config.Transport(connTransport) != req.Transport {
+			WriteError(w, http.StatusBadRequest, "endpoint transport does not match connection transport")
+			return
+		}
 	}
 
 	var existing string
@@ -165,8 +194,8 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = s.db.ExecContext(r.Context(),
-		`INSERT INTO endpoints (alias, transport, remote_id, sync_set_id) VALUES (?, ?, ?, ?)`,
-		req.Alias, string(req.Transport), req.RemoteID, syncSetValue,
+		`INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id) VALUES (?, ?, ?, ?, ?)`,
+		req.Alias, string(req.Transport), req.ConnectionID, req.RemoteID, syncSetValue,
 	)
 	if err != nil {
 		safelog.Error(s.logger, "insert endpoint failed", "endpoint_create", err)
@@ -176,10 +205,11 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 	_ = WriteJSON(w, http.StatusCreated, EndpointDTO{
-		Alias:     req.Alias,
-		Transport: req.Transport,
-		RemoteID:  req.RemoteID,
-		SyncSetID: responseSyncSet,
+		Alias:        req.Alias,
+		Transport:    req.Transport,
+		ConnectionID: req.ConnectionID,
+		RemoteID:     req.RemoteID,
+		SyncSetID:    responseSyncSet,
 	})
 }
 
@@ -218,7 +248,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias FROM endpoints WHERE alias = ?`, alias).Scan(&existing)
+	var existingAlias, existingTransport, existingConnID string
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -227,6 +258,36 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		safelog.Error(s.logger, "check endpoint existence failed", "endpoint_update", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
+	}
+
+	targetConnID := strings.TrimSpace(req.ConnectionID)
+	if targetConnID == "" {
+		targetConnID = existingConnID
+	}
+	if err := config.ValidateConnectionID(targetConnID); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if s.controlDB != nil {
+		var connTransport string
+		err := s.controlDB.QueryRowContext(r.Context(),
+			`SELECT transport FROM transport_connections WHERE id = ?`,
+			targetConnID,
+		).Scan(&connTransport)
+		if errors.Is(err, sql.ErrNoRows) {
+			WriteError(w, http.StatusBadRequest, "connection not found")
+			return
+		}
+		if err != nil {
+			safelog.Error(s.logger, "check connection failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if config.Transport(connTransport) != req.Transport {
+			WriteError(w, http.StatusBadRequest, "endpoint transport does not match connection transport")
+			return
+		}
 	}
 
 	if newAlias != alias {
@@ -270,8 +331,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`UPDATE endpoints SET alias = ?, transport = ?, remote_id = ?, sync_set_id = ? WHERE alias = ?`,
-		newAlias, string(req.Transport), req.RemoteID, syncSetValue, alias,
+		`UPDATE endpoints SET alias = ?, transport = ?, connection_id = ?, remote_id = ?, sync_set_id = ? WHERE alias = ?`,
+		newAlias, string(req.Transport), targetConnID, req.RemoteID, syncSetValue, alias,
 	)
 	if err != nil {
 		safelog.Error(s.logger, "update endpoint failed", "endpoint_update", err)
@@ -304,10 +365,11 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 	_ = WriteJSON(w, http.StatusOK, EndpointDTO{
-		Alias:     newAlias,
-		Transport: req.Transport,
-		RemoteID:  req.RemoteID,
-		SyncSetID: responseSyncSet,
+		Alias:        newAlias,
+		Transport:    req.Transport,
+		ConnectionID: targetConnID,
+		RemoteID:     req.RemoteID,
+		SyncSetID:    responseSyncSet,
 	})
 }
 

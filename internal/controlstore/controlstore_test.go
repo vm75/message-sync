@@ -1,9 +1,13 @@
 package controlstore
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -22,7 +26,7 @@ func TestOpenCreatesSensitiveSchemaAndRestrictsFile(t *testing.T) {
 	if foreignKeys != 1 {
 		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
 	}
-	for _, table := range []string{"users", "sessions", "user_invites", "audit_events", "verification_pipelines", "membership_requests", "email_challenges", "verification_assessments"} {
+	for _, table := range []string{"users", "sessions", "user_invites", "audit_events", "verification_pipelines", "membership_requests", "email_challenges", "verification_assessments", "transport_connections"} {
 		var count int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -100,5 +104,200 @@ func TestPruneRetentionRemovesBoundedTerminalStateAndReturnsEvidence(t *testing.
 	}
 	if count != 0 {
 		t.Fatalf("terminal request count = %d, want 0", count)
+	}
+}
+
+func TestCredentialCipherAndKeyDerivation(t *testing.T) {
+	_, err := DeriveCredentialKey([]byte("too-short"))
+	if err == nil || !errors.Is(err, ErrInvalidSecret) {
+		t.Fatalf("expected ErrInvalidSecret for short secret, got: %v", err)
+	}
+
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	cipher, err := NewCredentialCipher(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plaintext := []byte("bot_token_secret_12345")
+	ciphertext, nonce, err := cipher.Encrypt(plaintext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(ciphertext, plaintext) {
+		t.Fatal("ciphertext must not equal plaintext")
+	}
+
+	// Successful decryption
+	decrypted, err := cipher.Decrypt(ciphertext, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatalf("decrypted = %q, want %q", decrypted, plaintext)
+	}
+
+	// Tampered ciphertext returns safe fixed error
+	tamperedCiphertext := append([]byte(nil), ciphertext...)
+	tamperedCiphertext[0] ^= 0xff
+	if _, err := cipher.Decrypt(tamperedCiphertext, nonce); !errors.Is(err, ErrCredentialDecryptionFailed) {
+		t.Fatalf("expected ErrCredentialDecryptionFailed for tampered ciphertext, got: %v", err)
+	}
+
+	// Tampered nonce returns safe fixed error
+	tamperedNonce := append([]byte(nil), nonce...)
+	tamperedNonce[0] ^= 0xff
+	if _, err := cipher.Decrypt(ciphertext, tamperedNonce); !errors.Is(err, ErrCredentialDecryptionFailed) {
+		t.Fatalf("expected ErrCredentialDecryptionFailed for tampered nonce, got: %v", err)
+	}
+
+	// Wrong secret returns safe fixed error
+	otherSecret := []byte("fedcba9876543210fedcba9876543210")
+	otherCipher, err := NewCredentialCipher(otherSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := otherCipher.Decrypt(ciphertext, nonce); !errors.Is(err, ErrCredentialDecryptionFailed) {
+		t.Fatalf("expected ErrCredentialDecryptionFailed for different secret, got: %v", err)
+	}
+}
+
+func TestTransportConnectionConstraintsAndCRUD(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "control.db")
+	s, err := Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	ctx := context.Background()
+	secret := []byte("0123456789abcdef0123456789abcdef")
+	cipher, err := NewCredentialCipher(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rawToken := "discord-bot-secret-token"
+	encCred, nonce, err := cipher.Encrypt([]byte(rawToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// WhatsApp connection must not store credentials
+	waConn := Connection{
+		ID:                  "conn-wa-1",
+		Transport:           "whatsapp",
+		Label:               "WhatsApp Main",
+		Enabled:             true,
+		EncryptedCredential: encCred,
+		CredentialNonce:     nonce,
+	}
+	if err := s.CreateConnection(ctx, waConn); err == nil {
+		t.Fatal("expected error creating WhatsApp connection with credentials")
+	}
+
+	// Raw SQLite check constraint prevents WhatsApp credentials
+	if _, err := s.db.Exec(`INSERT INTO transport_connections (id, transport, label, enabled, encrypted_credential, credential_nonce, created_at, updated_at) VALUES ('wa-raw', 'whatsapp', 'wa', 1, X'1234', X'5678', 1, 1)`); err == nil {
+		t.Fatal("expected DB CHECK constraint violation inserting WhatsApp credentials")
+	}
+
+	// WhatsApp connection without credentials succeeds
+	waValid := Connection{
+		ID:        "conn-wa-1",
+		Transport: "whatsapp",
+		Label:     "WhatsApp Main",
+		Enabled:   true,
+	}
+	if err := s.CreateConnection(ctx, waValid); err != nil {
+		t.Fatalf("create valid WhatsApp connection failed: %v", err)
+	}
+
+	// Discord connection requires credentials
+	dcInvalid := Connection{
+		ID:        "conn-dc-1",
+		Transport: "discord",
+		Label:     "Discord Bot",
+		Enabled:   true,
+	}
+	if err := s.CreateConnection(ctx, dcInvalid); err == nil {
+		t.Fatal("expected error creating Discord connection without credentials")
+	}
+
+	// Discord connection with credentials succeeds
+	dcValid := Connection{
+		ID:                  "conn-dc-1",
+		Transport:           "discord",
+		Label:               "Discord Bot",
+		Enabled:             true,
+		EncryptedCredential: encCred,
+		CredentialNonce:     nonce,
+	}
+	if err := s.CreateConnection(ctx, dcValid); err != nil {
+		t.Fatalf("create valid Discord connection failed: %v", err)
+	}
+
+	// Telegram connection with credentials succeeds
+	tgToken := "telegram-bot-secret-token"
+	tgEncCred, tgNonce, err := cipher.Encrypt([]byte(tgToken))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tgValid := Connection{
+		ID:                  "conn-tg-1",
+		Transport:           "telegram",
+		Label:               "Telegram Bot",
+		Enabled:             true,
+		EncryptedCredential: tgEncCred,
+		CredentialNonce:     tgNonce,
+	}
+	if err := s.CreateConnection(ctx, tgValid); err != nil {
+		t.Fatalf("create valid Telegram connection failed: %v", err)
+	}
+
+	// Verify GetConnection and Decryption
+	retrieved, err := s.GetConnection(ctx, "conn-dc-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retrieved.ID != "conn-dc-1" || retrieved.Transport != "discord" || retrieved.Label != "Discord Bot" || !retrieved.Enabled {
+		t.Fatalf("unexpected connection details: %+v", retrieved)
+	}
+	decryptedToken, err := cipher.Decrypt(retrieved.EncryptedCredential, retrieved.CredentialNonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decryptedToken) != rawToken {
+		t.Fatalf("decrypted = %q, want %q", string(decryptedToken), rawToken)
+	}
+
+	// Verify ListConnections
+	all, err := s.ListConnections(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("ListConnections returned %d conns, want 3", len(all))
+	}
+
+	// Verify JSON marshaling does NOT expose credentials
+	jsonBytes, err := json.Marshal(retrieved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(jsonBytes), rawToken) || strings.Contains(string(jsonBytes), "encryptedCredential") || strings.Contains(string(jsonBytes), "credentialNonce") {
+		t.Fatalf("JSON marshaling exposed credentials: %s", string(jsonBytes))
+	}
+
+	// Plaintext secret tokens are absent from the SQLite database file bytes
+	s.Close()
+	fileBytes, err := os.ReadFile(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(fileBytes, []byte(rawToken)) {
+		t.Fatal("plaintext Discord bot token found in control.db file!")
+	}
+	if bytes.Contains(fileBytes, []byte(tgToken)) {
+		t.Fatal("plaintext Telegram bot token found in control.db file!")
 	}
 }

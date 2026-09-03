@@ -55,6 +55,12 @@ func setupTestServer(t *testing.T, db *sql.DB) *Server {
 	if _, err := cs.DB().Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES ('fixture','fixture','$2a$10$7EqJtq98hPqEX7fNZaFWoOe0VdZK0VdJf7hQJmJj1L2R7F1T9D3mK','admin',1,?,?)`, now, now); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := cs.DB().Exec(`INSERT INTO transport_connections (id, transport, label, enabled, encrypted_credential, credential_nonce, created_at, updated_at) VALUES
+		('conn-wa-1', 'whatsapp', 'wa', 1, NULL, NULL, ?, ?),
+		('conn-dc-1', 'discord', 'dc', 1, X'0102', X'0304', ?, ?),
+		('conn-tg-1', 'telegram', 'tg', 1, X'0506', X'0708', ?, ?)`, now, now, now, now, now, now); err != nil {
+		t.Fatal(err)
+	}
 	return NewServer(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: db, ControlDB: cs.DB(), SessionTTL: time.Hour})
 }
 

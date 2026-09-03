@@ -73,14 +73,26 @@ Configuration is stored in SQLite (`sync.db`) and managed programmatically via G
 
 The application-owned control plane opens `/data/control.db` independently of
 the routing store. Its fresh schema contains the account/session/invite/audit
-foundation and the planned verification pipeline/request, email challenge,
-and assessment records. This is the only application database permitted to
-hold the minimum PII needed for multi-user administration and membership
-verification. It uses foreign keys, explicit role/status checks, opaque IDs,
+foundation, connection records (`transport_connections`), and the planned
+verification pipeline/request, email challenge, and assessment records. This is
+the only application database permitted to hold the minimum PII needed for
+multi-user administration and membership verification, as well as encrypted
+transport credentials. It uses foreign keys, explicit role/status checks, opaque IDs,
 hashed bearer tokens, parameterized access APIs, and mode `0600` where the
 platform permits. It has no routing tables and is never queried by the
 canonical message router. The daemon closes it independently during shutdown;
 the existing `sync.db` and `whatsapp.db` boundaries remain unchanged.
+
+#### Connections and Encrypted Credentials
+
+`control.db` persists first-class transport connection records (`transport_connections`):
+- `id`: safe identifier matching `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`;
+- `transport`: `whatsapp`, `discord`, or `telegram`;
+- `label`: human-readable admin label;
+- `enabled`: boolean toggle;
+- `encrypted_credential`, `credential_nonce`, `credential_key_version`: encrypted bot token payload.
+
+Credential encryption uses a domain-separated symmetric key derived from `IDENTITY_SECRET` using HMAC-SHA256 with the domain separator `"message-sync-credential-encryption-v1"`. Credential payloads (such as Discord and Telegram bot tokens) are encrypted using AES-256-GCM with unique 12-byte cryptographically secure random nonces per write. Plaintext credentials never touch SQLite storage or logs. Changing or losing `IDENTITY_SECRET` renders stored bot credentials permanently unreadable. WhatsApp connections enforce that no credential blob or nonce is present; WhatsApp session credentials remain strictly isolated in `whatsapp.db`.
 
 Verification pipelines and membership requests remain in this control-plane
 boundary. Pipeline administration resolves the configured endpoint alias
@@ -136,11 +148,18 @@ state never enters canonical routing.
 - `local_message_prefix`: bounded text prefix (empty disables source-local messages; never logged);
 - `whatsapp_device_name`: bounded text identifier (default `message-sync`; customized device name shown in WhatsApp Linked Devices).
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
-- `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp`, `discord`, and `telegram`; all configured transports route through the shared adapter registry and canonical router.
+- `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, `connection_id`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp`, `discord`, and `telegram`; all configured transports route through the shared adapter registry and canonical router. Every endpoint requires a valid `connection_id` referencing a connection whose transport matches the endpoint's transport. Global uniqueness on `(transport, remote_id)` is retained.
 
 The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, for Discord it is the channel ID, and for Telegram it is the negative group/supergroup chat ID. Human-readable guild/channel/group/chat metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
 Each validated configured endpoint must belong to exactly one sync set.
+
+#### Connection → Endpoint → ChildScope Separation
+
+The system maintains a strict 3-tier hierarchy:
+1. **Connection (`control.db`)**: Owns transport authentication and client session lifecycle (e.g. Discord bot gateway, Telegram Bot API polling, WhatsApp protocol client). Stores encrypted credentials where applicable.
+2. **Endpoint (`sync.db`)**: Belongs to an owning connection (`connection_id`) and maps a safe local alias to an operational top-level destination (`remote_id`, such as a Discord channel, WhatsApp group, or Telegram supergroup).
+3. **ChildScope (`sync.db`)**: Endpoint-scoped sub-routing context (`canonical_scopes`), such as Discord threads or Telegram forum topics. Keyed strictly by `(canonical_id, endpoint_id)` without any connection identity.
 
 `canonical_scopes` stores `(canonical_id, endpoint_id, scope_kind,
 remote_scope_id, created_at)` with one row per canonical/endpoint pair.

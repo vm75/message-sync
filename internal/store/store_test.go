@@ -308,23 +308,27 @@ func TestEndpointSchemaEnforcesAliasAndTransportRemoteUniqueness(t *testing.T) {
 	if _, err := store.db.Exec(`INSERT INTO sync_sets(id) VALUES ('mesh')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('a', 'whatsapp', '1@g.us', 'mesh')`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('a', 'whatsapp', 'conn-wa-1', '1@g.us', 'mesh')`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('a', 'discord', '123', 'mesh')`); err == nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('a', 'discord', 'conn-dc-1', '123', 'mesh')`); err == nil {
 		t.Fatal("expected duplicate alias to be rejected")
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('b', 'whatsapp', '1@g.us', 'mesh')`); err == nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('b', 'whatsapp', 'conn-wa-1', '1@g.us', 'mesh')`); err == nil {
 		t.Fatal("expected duplicate WhatsApp remote target to be rejected")
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('b', 'discord', '1@g.us', 'mesh')`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('b', 'discord', 'conn-dc-1', '1@g.us', 'mesh')`); err != nil {
 		t.Fatalf("same opaque remote id on another transport should be allowed: %v", err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('t', 'telegram', '-1001234567890', 'mesh')`); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('t', 'telegram', 'conn-tg-1', '-1001234567890', 'mesh')`); err != nil {
 		t.Fatalf("Telegram endpoint should be allowed by schema: %v", err)
 	}
-	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('x', 'unknown', 'opaque', 'mesh')`); err == nil {
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('x', 'unknown', 'conn-x', 'opaque', 'mesh')`); err == nil {
 		t.Fatal("expected unknown transport to be rejected by schema")
+	}
+	// Missing connection_id is rejected by NOT NULL constraint
+	if _, err := store.db.Exec(`INSERT INTO endpoints(alias, transport, remote_id, sync_set_id) VALUES ('c', 'whatsapp', '3@g.us', 'mesh')`); err == nil {
+		t.Fatal("expected missing connection_id to be rejected by NOT NULL constraint")
 	}
 }
 

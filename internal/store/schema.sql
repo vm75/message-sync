@@ -69,11 +69,13 @@ CREATE TABLE IF NOT EXISTS sync_sets (
 CREATE TABLE IF NOT EXISTS endpoints (
     alias TEXT PRIMARY KEY,
     transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
+    connection_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
     UNIQUE (transport, remote_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);
+CREATE INDEX IF NOT EXISTS idx_endpoints_connection ON endpoints(connection_id);
 
 CREATE TABLE IF NOT EXISTS poll_options (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,

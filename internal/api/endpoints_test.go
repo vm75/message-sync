@@ -64,12 +64,16 @@ func TestEndpointsCRUDMixedTransportsAndReload(t *testing.T) {
 	}
 
 	invalid := []string{
-		`{"alias":"","transport":"discord","remoteId":"123456789012345678"}`,
-		`{"alias":"d1","transport":"unknown","remoteId":"123456789012345678"}`,
-		`{"alias":"d1","transport":"discord","remoteId":"not-a-channel"}`,
-		`{"alias":"w1","transport":"whatsapp","remoteId":"not-a-jid"}`,
-		`{"alias":"d1","transport":"discord","remoteId":"123456789012345678","syncSetId":"missing"}`,
-		`{"alias":"d1","transport":"discord","remoteId":"123456789012345678","botToken":"secret"}`,
+		`{"alias":"","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678"}`,
+		`{"alias":"d1","transport":"unknown","connectionId":"conn-dc-1","remoteId":"123456789012345678"}`,
+		`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"not-a-channel"}`,
+		`{"alias":"w1","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"not-a-jid"}`,
+		`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","syncSetId":"missing"}`,
+		`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","botToken":"secret"}`,
+		`{"alias":"d1","transport":"discord","remoteId":"123456789012345678"}`,                               // missing connectionId
+		`{"alias":"d1","transport":"discord","connectionId":"non-existent","remoteId":"123456789012345678"}`, // unknown connectionId
+		`{"alias":"d1","transport":"discord","connectionId":"conn-wa-1","remoteId":"123456789012345678"}`,    // transport mismatch
+		`{"alias":"w1","transport":"whatsapp","connectionId":"conn-dc-1","remoteId":"12345@g.us"}`,           // transport mismatch
 	}
 	for _, body := range invalid {
 		req := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(body))
@@ -100,12 +104,12 @@ func TestEndpointsCRUDMixedTransportsAndReload(t *testing.T) {
 		return dto
 	}
 
-	wa := create(`{"alias":"w1","transport":"whatsapp","remoteId":"12345@g.us","syncSetId":"mesh"}`)
-	if wa.Alias != "w1" || wa.Transport != "whatsapp" || wa.RemoteID != "12345@g.us" || wa.SyncSetID == nil || *wa.SyncSetID != "mesh" {
+	wa := create(`{"alias":"w1","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"12345@g.us","syncSetId":"mesh"}`)
+	if wa.Alias != "w1" || wa.Transport != "whatsapp" || wa.ConnectionID != "conn-wa-1" || wa.RemoteID != "12345@g.us" || wa.SyncSetID == nil || *wa.SyncSetID != "mesh" {
 		t.Fatalf("unexpected WhatsApp endpoint: %+v", wa)
 	}
-	discord := create(`{"alias":"d1","transport":"discord","remoteId":"123456789012345678","syncSetId":"mesh"}`)
-	if discord.Alias != "d1" || discord.Transport != "discord" || discord.RemoteID != "123456789012345678" || discord.SyncSetID == nil || *discord.SyncSetID != "mesh" {
+	discord := create(`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","syncSetId":"mesh"}`)
+	if discord.Alias != "d1" || discord.Transport != "discord" || discord.ConnectionID != "conn-dc-1" || discord.RemoteID != "123456789012345678" || discord.SyncSetID == nil || *discord.SyncSetID != "mesh" {
 		t.Fatalf("unexpected Discord endpoint: %+v", discord)
 	}
 	if configChanges != 2 {
@@ -113,7 +117,7 @@ func TestEndpointsCRUDMixedTransportsAndReload(t *testing.T) {
 	}
 
 	reqDup := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"d2","transport":"discord","remoteId":"123456789012345678"}`,
+		`{"alias":"d2","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678"}`,
 	))
 	reqDup.Header.Set("Authorization", authHeader)
 	recDup := httptest.NewRecorder()
@@ -151,12 +155,23 @@ func TestEndpointsCRUDMixedTransportsAndReload(t *testing.T) {
 	if err := json.NewDecoder(recGet.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Transport != "discord" || got.RemoteID != "123456789012345678" {
+	if got.Transport != "discord" || got.ConnectionID != "conn-dc-1" || got.RemoteID != "123456789012345678" {
 		t.Fatalf("unexpected endpoint: %+v", got)
 	}
 
+	// Update with transport mismatch is rejected
+	reqUpdateMismatch := httptest.NewRequest(http.MethodPut, "/api/endpoints/d1", strings.NewReader(
+		`{"alias":"d1","transport":"discord","connectionId":"conn-wa-1","remoteId":"223456789012345678","syncSetId":"mesh"}`,
+	))
+	reqUpdateMismatch.Header.Set("Authorization", authHeader)
+	recUpdateMismatch := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(recUpdateMismatch, reqUpdateMismatch)
+	if recUpdateMismatch.Code != http.StatusBadRequest {
+		t.Fatalf("PUT endpoint mismatch status = %d, want 400", recUpdateMismatch.Code)
+	}
+
 	reqUpdate := httptest.NewRequest(http.MethodPut, "/api/endpoints/d1", strings.NewReader(
-		`{"alias":"d1","transport":"discord","remoteId":"223456789012345678","syncSetId":"mesh"}`,
+		`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"223456789012345678","syncSetId":"mesh"}`,
 	))
 	reqUpdate.Header.Set("Authorization", authHeader)
 	recUpdate := httptest.NewRecorder()
@@ -202,7 +217,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	}
 
 	invalid := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"tg1","transport":"telegram","remoteId":"123456789","syncSetId":"mesh"}`,
+		`{"alias":"tg1","transport":"telegram","connectionId":"conn-tg-1","remoteId":"123456789","syncSetId":"mesh"}`,
 	))
 	invalid.Header.Set("Authorization", authHeader)
 	invalidRec := httptest.NewRecorder()
@@ -212,7 +227,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	}
 
 	create := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"tg1","transport":"telegram","remoteId":"-1001234567890","syncSetId":"mesh"}`,
+		`{"alias":"tg1","transport":"telegram","connectionId":"conn-tg-1","remoteId":"-1001234567890","syncSetId":"mesh"}`,
 	))
 	create.Header.Set("Authorization", authHeader)
 	createRec := httptest.NewRecorder()
@@ -224,7 +239,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	if err := json.NewDecoder(createRec.Body).Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Alias != "tg1" || created.Transport != "telegram" || created.RemoteID != "-1001234567890" || created.SyncSetID == nil || *created.SyncSetID != "mesh" {
+	if created.Alias != "tg1" || created.Transport != "telegram" || created.ConnectionID != "conn-tg-1" || created.RemoteID != "-1001234567890" || created.SyncSetID == nil || *created.SyncSetID != "mesh" {
 		t.Fatalf("unexpected Telegram endpoint: %+v", created)
 	}
 
@@ -239,7 +254,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	if err := json.NewDecoder(getRec.Body).Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if got.Transport != "telegram" || got.RemoteID != "-1001234567890" {
+	if got.Transport != "telegram" || got.ConnectionID != "conn-tg-1" || got.RemoteID != "-1001234567890" {
 		t.Fatalf("unexpected Telegram endpoint read: %+v", got)
 	}
 
@@ -259,7 +274,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	}
 
 	update := httptest.NewRequest(http.MethodPut, "/api/endpoints/tg1", strings.NewReader(
-		`{"alias":"tg1","transport":"telegram","remoteId":"-1009876543210","syncSetId":"mesh"}`,
+		`{"alias":"tg1","transport":"telegram","connectionId":"conn-tg-1","remoteId":"-1009876543210","syncSetId":"mesh"}`,
 	))
 	update.Header.Set("Authorization", authHeader)
 	updateRec := httptest.NewRecorder()
@@ -271,7 +286,7 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	if err := json.NewDecoder(updateRec.Body).Decode(&updated); err != nil {
 		t.Fatal(err)
 	}
-	if updated.RemoteID != "-1009876543210" || updated.Transport != "telegram" {
+	if updated.RemoteID != "-1009876543210" || updated.Transport != "telegram" || updated.ConnectionID != "conn-tg-1" {
 		t.Fatalf("unexpected updated Telegram endpoint: %+v", updated)
 	}
 
@@ -310,7 +325,7 @@ func TestEndpointErrorsDoNotLogRemoteIDs(t *testing.T) {
 
 	const remoteID = "123456789012345678"
 	req := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"d1","transport":"discord","remoteId":"`+remoteID+`"}`,
+		`{"alias":"d1","transport":"discord","connectionId":"conn-dc-1","remoteId":"`+remoteID+`"}`,
 	))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -338,7 +353,7 @@ func TestEndpointsRenameAlias(t *testing.T) {
 
 	// Create endpoint "old_alias"
 	reqCreate := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(
-		`{"alias":"old_alias","transport":"whatsapp","remoteId":"11111@g.us","syncSetId":"set1"}`,
+		`{"alias":"old_alias","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"11111@g.us","syncSetId":"set1"}`,
 	))
 	reqCreate.Header.Set("Authorization", authHeader)
 	recCreate := httptest.NewRecorder()
@@ -357,7 +372,7 @@ func TestEndpointsRenameAlias(t *testing.T) {
 
 	// Rename "old_alias" -> "new_alias"
 	reqUpdate := httptest.NewRequest(http.MethodPut, "/api/endpoints/old_alias", strings.NewReader(
-		`{"alias":"new_alias","transport":"whatsapp","remoteId":"11111@g.us","syncSetId":"set1"}`,
+		`{"alias":"new_alias","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"11111@g.us","syncSetId":"set1"}`,
 	))
 	reqUpdate.Header.Set("Authorization", authHeader)
 	recUpdate := httptest.NewRecorder()
