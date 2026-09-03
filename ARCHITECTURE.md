@@ -247,6 +247,8 @@ The canonical router remains completely unaware of connection IDs. If an endpoin
 
 All runtime and API transport operations use this explicit connection boundary. There is no singleton transport, implicit `conn-wa-1` ownership, empty connection-ID fallback, primary-transport selection, or unscoped transport recovery namespace. Endpoints with invalid or missing ownership are rejected by configuration validation and are never silently attached to another connection.
 
+When an encrypted Discord or Telegram credential changes, the application compares an in-memory fingerprint of the ciphertext and nonce, opens the replacement adapter with the decrypted credential, and atomically restarts only that connection in `ConnectionManager`. Plaintext credentials are not retained for change detection; unrelated connections continue running.
+
 Each active connection adapter emits normalized `transport.Incoming` events on its `Events()` channel. `ConnectionManager` forwards each connection's events into a unified shared ingress channel feeding the recovery coordinator and single ordered router worker. Event forwarding for each connection is isolated:
 - when an adapter stream closes or a connection is stopped, its forwarder terminates without interrupting other connections or closing the shared ingress stream;
 - connections support a safe register, start, stop, and atomic replace/restart lifecycle;

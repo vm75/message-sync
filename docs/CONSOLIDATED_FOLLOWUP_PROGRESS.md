@@ -21,7 +21,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | Order | Issue | Area | Dependencies / rationale | Status |
 |---:|---|---|---|---|
 | 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Complete |
-| 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Pending |
+| 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Complete |
 | 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Pending |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Pending |
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Pending |
@@ -101,6 +101,14 @@ Rules:
 - Routed membership administration strictly through the endpoint owner’s connection adapter.
 - Added explicit connection-bound API test coverage and documented the invariant.
 - Validation: `make fmt`, `make test`, `make vet`, and `git diff --check` passed.
+
+### #83 — Dynamic Discord/Telegram credential replacement
+
+- Track only an in-memory SHA-256 fingerprint of each active encrypted credential and nonce.
+- On replacement, construct the new adapter and use `ConnectionManager.Restart` for only the changed connection; unchanged connections are not restarted.
+- Preserve encrypted-at-rest storage and transient plaintext token handling.
+- Documented replacement behavior and isolation guarantees.
+- Focused validation passed; the full required gate is rerun before commit.
 
 ## Completion protocol
 

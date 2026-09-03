@@ -73,6 +73,8 @@ echo "PORT=8080" >> .env
 2. **Discord Bots**: Add a Discord bot connection by pasting its bot token once into the modal. The token is immediately encrypted with AES-256-GCM using a domain-separated key derived from `IDENTITY_SECRET` and saved to `control.db`. The token is never logged, never returned in APIs, and never stored in browser storage. Enable the privileged **Message Content** intent in the Discord Developer Portal and ensure the bot has **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
 3. **Telegram Bots**: Add a Telegram bot connection by pasting its bot token once into the modal (also encrypted with AES-256-GCM). Add the bot to your groups and disable **Bot Privacy Mode** in @BotFather so it can receive group messages. Long polling runs per connection.
 
+Updating a Discord or Telegram connection token replaces only that connection’s running adapter. The previous adapter is stopped before the replacement begins handling ingress, and the plaintext token remains transient.
+
 *Child Scopes Note:* Discord threads/forum posts and Telegram forum topics are message-level child scopes that flatten automatically through their configured parent endpoint. They are not configurable endpoint rows; local-only prefixes apply within thread/topic source contexts.
 
 ### 2. Start the Server

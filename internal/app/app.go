@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -71,6 +72,15 @@ type telegramTransport interface {
 	Close() error
 	UpdateConfig(*config.Config) error
 	telegram.AdminService
+}
+
+func credentialFingerprint(c controlstore.Connection) [32]byte {
+	h := sha256.New()
+	_, _ = h.Write(c.EncryptedCredential)
+	_, _ = h.Write(c.CredentialNonce)
+	var fingerprint [32]byte
+	copy(fingerprint[:], h.Sum(nil))
+	return fingerprint
 }
 
 var openTelegram = func(ctx context.Context, opts telegram.Options) (telegramTransport, error) {
@@ -175,6 +185,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 
 	discordAdapters := make(map[string]discordTransport)
+	credentialFingerprints := make(map[string][32]byte)
 	if controlStore != nil && credentialCipher != nil {
 		allConns, err := controlStore.ListConnections(ctx)
 		if err == nil {
@@ -206,6 +217,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						continue
 					}
 					discordAdapters[c.ID] = dcInst
+					credentialFingerprints[c.ID] = credentialFingerprint(c)
 					defer dcInst.Close()
 				}
 			}
@@ -261,6 +273,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						continue
 					}
 					telegramAdapters[c.ID] = tgInst
+					credentialFingerprints[c.ID] = credentialFingerprint(c)
 					defer tgInst.Close()
 				}
 			}
@@ -317,6 +330,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if controlStore != nil && credentialCipher != nil {
 			allConns, err := controlStore.ListConnections(updateCtx)
 			if err == nil {
+				credentialChanged := make(map[string]bool)
+				for _, c := range allConns {
+					if c.Enabled && (c.Transport == "discord" || c.Transport == "telegram") {
+						previous, known := credentialFingerprints[c.ID]
+						credentialChanged[c.ID] = known && previous != credentialFingerprint(c)
+					}
+				}
 				enabledWhatsApp := make(map[string]controlstore.Connection)
 				enabledDiscord := make(map[string]controlstore.Connection)
 				enabledTelegram := make(map[string]controlstore.Connection)
@@ -382,7 +402,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 				}
 				for connID, c := range enabledDiscord {
-					if _, exists := discordAdapters[connID]; !exists {
+					_, exists := discordAdapters[connID]
+					if !exists || credentialChanged[connID] {
 						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
@@ -408,8 +429,19 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
 							continue
 						}
+						var runtimeErr error
+						if exists {
+							runtimeErr = connMgr.Restart(ctx, c.ID, dcInst)
+						} else {
+							runtimeErr = connMgr.Register(ctx, c.ID, config.TransportDiscord, dcInst)
+						}
+						if runtimeErr != nil {
+							safelog.Error(logger, "replace Discord transport failed", "discord_replace", runtimeErr)
+							_ = dcInst.Close()
+							continue
+						}
 						discordAdapters[c.ID] = dcInst
-						_ = connMgr.Register(ctx, c.ID, config.TransportDiscord, dcInst)
+						credentialFingerprints[c.ID] = credentialFingerprint(c)
 					}
 				}
 
@@ -420,7 +452,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 				}
 				for connID, c := range enabledTelegram {
-					if _, exists := telegramAdapters[connID]; !exists {
+					_, exists := telegramAdapters[connID]
+					if !exists || credentialChanged[connID] {
 						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
@@ -463,8 +496,19 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
 							continue
 						}
+						var runtimeErr error
+						if exists {
+							runtimeErr = connMgr.Restart(ctx, c.ID, tgInst)
+						} else {
+							runtimeErr = connMgr.Register(ctx, c.ID, config.TransportTelegram, tgInst)
+						}
+						if runtimeErr != nil {
+							safelog.Error(logger, "replace Telegram transport failed", "telegram_replace", runtimeErr)
+							_ = tgInst.Close()
+							continue
+						}
 						telegramAdapters[c.ID] = tgInst
-						_ = connMgr.Register(ctx, c.ID, config.TransportTelegram, tgInst)
+						credentialFingerprints[c.ID] = credentialFingerprint(c)
 					}
 				}
 			}
