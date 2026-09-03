@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -89,6 +91,113 @@ func TestAmbiguousCreateIsNotBlindlyRetried(t *testing.T) {
 	}
 	if step.State != "ambiguous" {
 		t.Fatalf("primary step state = %q, want ambiguous", step.State)
+	}
+}
+
+func TestLocalPrefixSuppressesBeforeCanonicalizationAndMedia(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.db")
+	syncStore, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	fake := &fakeSender{}
+	cfg := testConfig(config.UsernameModeHash)
+	cfg.LocalPrefix = "!local"
+	r, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	loaded := false
+	incoming := testIncoming("c1g1", "local-1")
+	incoming.Text = "!local keep this here"
+	incoming.MediaLoader = func(context.Context) ([]byte, error) {
+		loaded = true
+		return []byte("must not load"), nil
+	}
+	if err := r.Handle(context.Background(), incoming); err != nil {
+		t.Fatal(err)
+	}
+	if loaded || len(fake.sent) != 0 {
+		t.Fatalf("local message loaded media or fanned out: loaded=%v sends=%d", loaded, len(fake.sent))
+	}
+	suppressed, err := syncStore.IsSuppressedLocalMessage(context.Background(), "c1g1", "local-1")
+	if err != nil || !suppressed {
+		t.Fatalf("suppressed marker = %v, err=%v", suppressed, err)
+	}
+	if _, err := syncStore.CanonicalForRemote(context.Background(), "c1g1", "local-1"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("local message created canonical state: %v", err)
+	}
+	reply := testIncoming("c1g1", "reply-1")
+	reply.Text = "ordinary reply"
+	reply.ReplyTo = &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "local-1"}
+	reply.QuotedText = "SECRET LOCAL CONTENT"
+	if err := r.Handle(context.Background(), reply); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for _, message := range fake.sent {
+		if message.outgoing.QuotedText != "" || strings.Contains(message.outgoing.Text, "SECRET LOCAL CONTENT") {
+			t.Fatal("local-only quoted content leaked into bridged reply")
+		}
+	}
+}
+
+func TestReplyLineageRetainsMultipleChildScopesAndOmitsNativeScopeHeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.db")
+	syncStore, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	fake := &fakeSender{}
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(testConfig(config.UsernameModeHash), syncStore, fake, hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	first := testIncoming("c1g1", "thread-message")
+	first.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "123456789012345678", Label: "Backend API"}
+	if err := r.Handle(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+	reply := testIncoming("c1g2", "topic-reply")
+	reply.Text = "reply from topic"
+	reply.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}
+	reply.ReplyTo = &transport.MessageRef{Endpoint: "c1g2", RemoteMessageID: "c1g2-sent-1"}
+	if err := r.Handle(context.Background(), reply); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 4)
+	canonical, err := syncStore.CanonicalForRemote(context.Background(), "c1g2", "topic-reply")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := syncStore.CanonicalScopes(context.Background(), canonical)
+	if err != nil || len(scopes) != 2 {
+		t.Fatalf("reply scopes = %#v, err=%v; want two endpoint scopes", scopes, err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	var sawNative, sawFlat bool
+	for _, sent := range fake.sent[2:] {
+		if sent.outgoing.Endpoint == "c1g1" {
+			sawNative = sent.outgoing.ChildScope != nil && sent.outgoing.ChildScope.Kind == transport.ScopeKindDiscordThread && sent.outgoing.ChildScope.RemoteID == "123456789012345678"
+		}
+		if sent.outgoing.Endpoint == "c1g3" {
+			sawFlat = strings.Contains(sent.outgoing.Text, "[contexts ") && strings.Contains(sent.outgoing.Text, hasher.ScopeToken("c1g1\x00discord_thread\x00123456789012345678"))
+		}
+	}
+	if !sawNative || !sawFlat {
+		t.Fatalf("scoped reply sends = %#v, native=%v flat=%v", fake.sent[2:], sawNative, sawFlat)
 	}
 }
 

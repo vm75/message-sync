@@ -15,6 +15,7 @@ import (
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 )
@@ -34,6 +35,32 @@ func (b *lockedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.Buffer.String()
+}
+
+func TestConfigureDeviceProps(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("WHATSAPP_DEVICE_NAME", "")
+		name := configureDeviceProps("")
+		if name != defaultDeviceName || waStore.DeviceProps.GetOs() != defaultDeviceName {
+			t.Fatalf("expected device os %q, got %q (returned: %q)", defaultDeviceName, waStore.DeviceProps.GetOs(), name)
+		}
+	})
+
+	t.Run("env_override", func(t *testing.T) {
+		t.Setenv("WHATSAPP_DEVICE_NAME", "EnvBridge")
+		name := configureDeviceProps("")
+		if name != "EnvBridge" || waStore.DeviceProps.GetOs() != "EnvBridge" {
+			t.Fatalf("expected device os %q, got %q (returned: %q)", "EnvBridge", waStore.DeviceProps.GetOs(), name)
+		}
+	})
+
+	t.Run("preferred_override", func(t *testing.T) {
+		t.Setenv("WHATSAPP_DEVICE_NAME", "EnvBridge")
+		name := configureDeviceProps("CustomSettingsBridge")
+		if name != "CustomSettingsBridge" || waStore.DeviceProps.GetOs() != "CustomSettingsBridge" {
+			t.Fatalf("expected device os %q, got %q (returned: %q)", "CustomSettingsBridge", waStore.DeviceProps.GetOs(), name)
+		}
+	})
 }
 
 func TestDisablePlaintextPersistence(t *testing.T) {

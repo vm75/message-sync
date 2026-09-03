@@ -17,6 +17,18 @@ CREATE TABLE IF NOT EXISTS message_copies (
 );
 CREATE INDEX IF NOT EXISTS idx_message_copies_canonical ON message_copies(canonical_id);
 
+-- One opaque native child scope may be retained per canonical message and
+-- endpoint. Labels and provider objects remain transient at transport edges.
+CREATE TABLE IF NOT EXISTS canonical_scopes (
+    canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
+    endpoint_id TEXT NOT NULL,
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('discord_thread', 'telegram_topic')),
+    remote_scope_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id)
+);
+CREATE INDEX IF NOT EXISTS idx_canonical_scopes_canonical ON canonical_scopes(canonical_id);
+
 CREATE TABLE IF NOT EXISTS reactions (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     source_endpoint_id TEXT NOT NULL,
@@ -44,7 +56,9 @@ CREATE TABLE IF NOT EXISTS global_config (
     storage_message_retention_days INTEGER NOT NULL DEFAULT 90,
     poll_aggregation_trigger TEXT NOT NULL DEFAULT 'aggregate-response',
     whatsapp_chat_cleanup_enabled BOOLEAN NOT NULL DEFAULT 0,
-    whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30
+    whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30,
+    local_message_prefix TEXT NOT NULL DEFAULT '',
+    whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync'
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
@@ -121,6 +135,13 @@ CREATE TABLE IF NOT EXISTS suppressed_reactions (
     emoji TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     PRIMARY KEY (endpoint_id, remote_message_id, emoji)
+);
+
+CREATE TABLE IF NOT EXISTS suppressed_local_messages (
+    endpoint_id TEXT NOT NULL,
+    remote_message_id TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (endpoint_id, remote_message_id)
 );
 
 CREATE TABLE IF NOT EXISTS delivery_operations (

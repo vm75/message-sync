@@ -331,6 +331,13 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 - [ ] **Reply on Telegram**: Reply to a bridged message in Telegram.
   - **Verify WhatsApp & Discord**: Mapped reply accurately references the original canonical message.
 
+- [ ] **Discord thread/forum post**: Send a message in a configured parent's thread or forum post.
+  - **Verify**: WhatsApp/Telegram flat copies show one deterministic `[contexts ...]` header without the raw thread ID; reply from either transport returns to the original thread.
+- [ ] **Telegram forum topic**: Send a message in a non-General topic.
+  - **Verify**: flat copies show a deterministic privacy-safe context header; a WhatsApp or Discord reply is sent with the original `MessageThreadID`.
+- [ ] **Cross-child reply lineage**: Reply to the flattened Discord message from inside a Telegram topic.
+  - **Verify**: the canonical lineage retains both endpoint-specific scopes, Telegram remains in its topic, Discord returns to its thread, and WhatsApp receives deterministic presentation only.
+
 ### Scenario 4: Emoji Reactions
 - [ ] **React in Discord**: Add a `:thumbsup:` reaction to a bridged message in Discord.
   - **Verify WhatsApp**: A thumbs-up reaction appears on the target message.
@@ -363,6 +370,16 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
   - **Verify Telegram**: Rendered with identical deterministic text formatting.
 - [ ] **Vote Aggregation**: Vote in WhatsApp, then reply `aggregate-response` to the poll message in WhatsApp.
   - **Verify All**: An aggregated vote summary is formatted and distributed across WhatsApp, Discord, and Telegram quoting the local poll copy.
+
+### Scenario 8: Source-local Messages
+
+- [ ] In authenticated Settings, set a global Local-only message prefix (for example `//local `); leave it empty to disable.
+- [ ] Send a new text, captioned media message, and representable poll beginning exactly with the prefix from each configured parent and, where available, a Discord thread/forum post and Telegram topic.
+  - **Verify**: each remains only in its source conversation, no destination delivery is queued, and captioned media is not downloaded.
+- [ ] Restart/replay the service, edit a suppressed message to remove the prefix, and exercise delete/reaction.
+  - **Verify**: the opaque suppression marker still prevents bridging and lifecycle events remain local.
+- [ ] Reply normally to a suppressed message.
+  - **Verify**: the reply may bridge, but its fallback contains no quoted local-only content. Manually typed `[contexts ...]` text never changes routing.
 
 ---
 

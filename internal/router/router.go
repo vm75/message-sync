@@ -15,6 +15,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/delivery"
+	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -66,6 +67,7 @@ type Router struct {
 	routes             map[transport.EndpointID][]transport.EndpointID
 	usernameMode       config.UsernameMode
 	aggTrigger         string
+	localPrefix        string
 	knownCopies        map[copyKey]string
 	pollPresentation   map[string]pollPresentation
 	pendingEdits       map[mutationKey]pendingEdit
@@ -76,6 +78,7 @@ type Router struct {
 	afterPersist       func(transport.EndpointID) error
 	mu                 sync.RWMutex
 	pollResultMu       sync.Mutex
+	scopeHasher        *identity.Hasher
 }
 
 type Outcome struct {
@@ -87,6 +90,17 @@ type Outcome struct {
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
+	return newRouter(cfg, syncStore, transportSender, nil)
+}
+
+func NewWithHasher(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher) (*Router, error) {
+	if hasher == nil {
+		return nil, errors.New("identity hasher is required")
+	}
+	return newRouter(cfg, syncStore, transportSender, hasher)
+}
+
+func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher) (*Router, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
 	}
@@ -126,12 +140,14 @@ func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*R
 		routes:             routes,
 		usernameMode:       cfg.Identity.UsernameMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
+		localPrefix:        cfg.LocalPrefix,
 		knownCopies:        make(map[copyKey]string),
 		pollPresentation:   make(map[string]pollPresentation),
 		pendingEdits:       make(map[mutationKey]pendingEdit),
 		pendingResultEdits: make(map[mutationKey]pendingEdit),
 		pendingReactions:   make(map[mutationKey]map[string]pendingReaction),
 		newCanonical:       newCanonicalID,
+		scopeHasher:        hasher,
 	}, nil
 }
 
@@ -164,6 +180,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	r.routes = routes
 	r.usernameMode = cfg.Identity.UsernameMode
 	r.aggTrigger = cfg.Polls.AggregationTrigger
+	r.localPrefix = cfg.LocalPrefix
 	r.mu.Unlock()
 	return nil
 }
@@ -242,6 +259,25 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	if strings.TrimSpace(incoming.RemoteID) == "" {
 		return errors.New("incoming remote message id is required")
+	}
+	// Existing copies, including bridge echoes, must continue through the
+	// normal idempotence/lifecycle path and must not be newly classified local.
+	if _, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.RemoteID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check existing canonical message: %w", err)
+	}
+	if suppressed, err := r.store.IsSuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID); err != nil {
+		return fmt.Errorf("check local message suppression: %w", err)
+	} else if suppressed {
+		return nil
+	}
+	r.mu.RLock()
+	localPrefix := r.localPrefix
+	r.mu.RUnlock()
+	if incoming.Kind != "edit" && incoming.Kind != "delete" && incoming.Kind != "revoke" && incoming.Kind != "reaction" && localPrefix != "" && strings.HasPrefix(incoming.Text, localPrefix) {
+		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
+			return fmt.Errorf("suppress local message: %w", err)
+		}
+		return nil
 	}
 	if incoming.Kind == "poll_snapshot" {
 		canonicalID, err := r.store.PollCanonicalForProviderRef(ctx, string(incoming.Endpoint), incoming.PollProvider, incoming.PollProviderReference)
@@ -346,7 +382,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "delete", OperationRevision: r.nextMutationRevision(), State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := r.enqueueMutation(ctx, op, func() bool { return true }, func(jobCtx context.Context) error {
-				return r.sender.Delete(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf})
+				ref := r.destinationMessageRef(jobCtx, targetCanonical, destination, targetCopy)
+				return r.sender.Delete(jobCtx, ref)
 			}, nil); err != nil {
 				return fmt.Errorf("send destination delete: %w", err)
 			}
@@ -399,7 +436,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			r.mu.Unlock()
 			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := r.enqueueMutation(ctx, op, func() bool { return r.pendingEditCurrent(key, revision) }, func(jobCtx context.Context) error {
-				return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf}, forwardedText)
+				ref := r.destinationMessageRef(jobCtx, targetCanonical, destination, targetCopy)
+				return r.sender.Edit(jobCtx, ref, forwardedText)
 			}, func() {
 				r.mu.Lock()
 				if current, ok := r.pendingEdits[key]; ok && current.revision == revision {
@@ -504,7 +542,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			r.mu.Unlock()
 			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "reaction", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := r.enqueueMutation(ctx, op, func() bool { return r.pendingReactionCurrent(key, pending.actor, revision) }, func(jobCtx context.Context) error {
-				if err := r.sender.React(jobCtx, transport.Reaction{Endpoint: destination, TargetRemoteID: targetCopy.RemoteMessageID, IsTargetFromMe: targetCopy.FromSelf, Emoji: emoji, FallbackText: fallbackText}); err != nil {
+				ref := r.destinationMessageRef(jobCtx, targetCanonical, destination, targetCopy)
+				if err := r.sender.React(jobCtx, transport.Reaction{Endpoint: destination, TargetRemoteID: ref.RemoteMessageID, IsTargetFromMe: ref.IsTargetFromMe, ChildScope: ref.ChildScope, Emoji: emoji, FallbackText: fallbackText}); err != nil {
 					return err
 				}
 				return r.store.RecordSuppressedReaction(context.Background(), string(destination), targetCopy.RemoteMessageID, emoji, time.Now().UTC())
@@ -575,6 +614,43 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		rc, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
 		if err == nil {
 			replyToCanonical = rc
+		} else if errors.Is(err, sql.ErrNoRows) {
+			// A local-only source has no canonical copy. Its quoted payload is
+			// transient ingress data and must not become a fallback attribution
+			// on a bridged reply.
+			suppressed, suppressionErr := r.store.IsSuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
+			if suppressionErr != nil {
+				return fmt.Errorf("check suppressed reply target: %w", suppressionErr)
+			}
+			if suppressed {
+				incoming.QuotedText = ""
+			}
+		}
+	}
+	// A reply carries the complete child-scope lineage of its target. The
+	// source endpoint's live scope, when supplied, wins over the inherited
+	// value; other endpoint scopes remain independent.
+	if replyToCanonical != "" {
+		inherited, err := r.store.CanonicalScopes(ctx, replyToCanonical)
+		if err != nil {
+			return fmt.Errorf("load replied-to child scopes: %w", err)
+		}
+		for _, scope := range inherited {
+			if scope.EndpointID == string(incoming.Endpoint) && incoming.ChildScope != nil {
+				continue
+			}
+			if err := r.store.UpsertCanonicalScope(ctx, store.CanonicalScope{
+				CanonicalID: canonicalID, EndpointID: scope.EndpointID, ScopeKind: scope.ScopeKind, RemoteScopeID: scope.RemoteScopeID, CreatedAt: scope.CreatedAt,
+			}); err != nil {
+				return fmt.Errorf("inherit child scope: %w", err)
+			}
+		}
+	}
+	if incoming.ChildScope != nil && strings.TrimSpace(incoming.ChildScope.RemoteID) != "" {
+		if err := r.store.UpsertCanonicalScope(ctx, store.CanonicalScope{
+			CanonicalID: canonicalID, EndpointID: string(incoming.Endpoint), ScopeKind: string(incoming.ChildScope.Kind), RemoteScopeID: incoming.ChildScope.RemoteID, CreatedAt: incoming.Timestamp,
+		}); err != nil {
+			return fmt.Errorf("persist incoming child scope: %w", err)
 		}
 	}
 
@@ -612,8 +688,27 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				}
 			}
 		}
+		var childScope *transport.ChildScope
+		if scope, err := r.store.CanonicalScope(ctx, canonicalID, string(destination)); err == nil {
+			childScope = &transport.ChildScope{Kind: transport.ScopeKind(scope.ScopeKind), RemoteID: scope.RemoteScopeID}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("look up destination child scope: %w", err)
+		}
+		if outgoingReplyTo != nil {
+			if scope, err := r.store.CanonicalScope(ctx, replyToCanonical, string(destination)); err == nil {
+				outgoingReplyTo.ChildScope = &transport.ChildScope{Kind: transport.ScopeKind(scope.ScopeKind), RemoteID: scope.RemoteScopeID}
+			} else if !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("look up reply child scope: %w", err)
+			}
+		}
+		destinationText := forwardedText
+		if scopes, err := r.store.CanonicalScopes(ctx, canonicalID); err == nil {
+			destinationText = r.withChildContextHeaders(incoming, destination, scopes, forwardedText)
+		} else {
+			return fmt.Errorf("load presentation child scopes: %w", err)
+		}
 
-		if err := r.enqueueCreate(ctx, canonicalID, incoming, destination, forwardedText, outgoingReplyTo, mediaBytes); err != nil {
+		if err := r.enqueueCreate(ctx, canonicalID, incoming, destination, destinationText, outgoingReplyTo, childScope, mediaBytes); err != nil {
 			return err
 		}
 	}
@@ -621,6 +716,24 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		r.updatePollResults(ctx, canonicalID, members)
 	}
 	return nil
+}
+
+func (r *Router) destinationMessageRef(ctx context.Context, canonicalID string, endpoint transport.EndpointID, copy store.MessageCopy) transport.MessageRef {
+	ref := transport.MessageRef{Endpoint: endpoint, RemoteMessageID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf}
+	ref.ChildScope = r.childScope(ctx, canonicalID, endpoint)
+	return ref
+}
+
+func (r *Router) childScope(ctx context.Context, canonicalID string, endpoint transport.EndpointID) *transport.ChildScope {
+	scope, err := r.store.CanonicalScope(ctx, canonicalID, string(endpoint))
+	if err != nil {
+		return nil
+	}
+	return &transport.ChildScope{Kind: transport.ScopeKind(scope.ScopeKind), RemoteID: scope.RemoteScopeID}
+}
+
+func (r *Router) companionMessageRef(ctx context.Context, canonicalID string, endpoint transport.EndpointID, remoteID string) transport.MessageRef {
+	return transport.MessageRef{Endpoint: endpoint, RemoteMessageID: remoteID, IsTargetFromMe: true, ChildScope: r.childScope(ctx, canonicalID, endpoint)}
 }
 
 func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonicalID string, endpoint transport.EndpointID) error {
@@ -637,14 +750,14 @@ func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonical
 		CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}
 	return r.enqueueMutation(ctx, operation, func() bool { return true }, func(jobCtx context.Context) error {
-		if err := r.sender.Delete(jobCtx, transport.MessageRef{Endpoint: endpoint, RemoteMessageID: companion.RemoteMessageID, IsTargetFromMe: true}); err != nil {
+		if err := r.sender.Delete(jobCtx, r.companionMessageRef(jobCtx, canonicalID, endpoint, companion.RemoteMessageID)); err != nil {
 			return err
 		}
 		return r.store.DeletePollResultCompanion(context.Background(), canonicalID, string(endpoint))
 	}, nil)
 }
 
-func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, destination transport.EndpointID, forwardedText string, replyTo *transport.MessageRef, mediaBytes []byte) error {
+func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, destination transport.EndpointID, forwardedText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
 	now := time.Now().UTC()
 	operation := store.DeliveryOperation{
 		CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "create", OperationRevision: 1,
@@ -717,7 +830,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 					SourceText: incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
-					ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+					ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
 						_ = r.store.CompleteCreateStep(context.Background(), step, "", true, time.Now().UTC())
@@ -744,7 +857,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
-				MediaBytes: mediaBytes, ReplyTo: replyTo, QuotedText: incoming.QuotedText,
+				MediaBytes: mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 				PollDurationHours: incoming.PollDurationHours,
 			})
@@ -859,7 +972,7 @@ func (r *Router) ensurePollResultCompanion(ctx context.Context, canonicalID stri
 	if err != nil {
 		return err
 	}
-	ref, err := r.sender.Send(ctx, transport.Outgoing{Endpoint: endpoint, Kind: "text", Text: text})
+	ref, err := r.sender.Send(ctx, transport.Outgoing{Endpoint: endpoint, Kind: "text", Text: text, ChildScope: r.childScope(ctx, canonicalID, endpoint)})
 	if err != nil {
 		return err
 	}
@@ -898,7 +1011,7 @@ func (r *Router) updatePollResults(ctx context.Context, canonicalID string, memb
 		r.mu.Unlock()
 		op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(endpoint), OperationKind: "poll_result_edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 		_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingResultEditCurrent(key, revision) }, func(jobCtx context.Context) error {
-			return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: endpoint, RemoteMessageID: companion.RemoteMessageID, IsTargetFromMe: true}, text)
+			return r.sender.Edit(jobCtx, r.companionMessageRef(jobCtx, canonicalID, endpoint, companion.RemoteMessageID), text)
 		}, func() {
 			r.mu.Lock()
 			if current, ok := r.pendingResultEdits[key]; ok && current.revision == revision {
@@ -1067,13 +1180,16 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 				RemoteMessageID: targetCopy.RemoteMessageID,
 				IsTargetFromMe:  targetCopy.FromSelf,
 			}
+			if scope := r.childScope(ctx, canonicalID, destination); scope != nil {
+				outgoingReplyTo.ChildScope = scope
+			}
 		}
 
 		if _, err := r.sender.Send(ctx, transport.Outgoing{
 			Endpoint: destination,
 			Kind:     "text",
 			Text:     summaryText,
-			ReplyTo:  outgoingReplyTo,
+			ReplyTo:  outgoingReplyTo, ChildScope: r.childScope(ctx, canonicalID, destination),
 		}); err != nil {
 			return fmt.Errorf("send aggregated poll results: %w", err)
 		}
@@ -1133,6 +1249,41 @@ func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 		return "", errors.New("incoming sender identity is required")
 	}
 	return fmt.Sprintf("*_%s/%s_*: %s", incoming.Endpoint, username, incoming.Text), nil
+}
+
+func (r *Router) withChildContextHeaders(incoming transport.Incoming, destination transport.EndpointID, scopes []store.CanonicalScope, text string) string {
+	if r.scopeHasher == nil || len(scopes) == 0 {
+		return text
+	}
+	sort.SliceStable(scopes, func(i, j int) bool {
+		if scopes[i].EndpointID != scopes[j].EndpointID {
+			return scopes[i].EndpointID < scopes[j].EndpointID
+		}
+		return scopes[i].ScopeKind < scopes[j].ScopeKind
+	})
+	labels := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.EndpointID == string(destination) {
+			continue
+		}
+		token := r.scopeHasher.ScopeToken(scope.EndpointID + "\x00" + scope.ScopeKind + "\x00" + scope.RemoteScopeID)
+		label := ""
+		if scope.EndpointID == string(incoming.Endpoint) && incoming.ChildScope != nil && incoming.ChildScope.RemoteID == scope.RemoteScopeID && string(incoming.ChildScope.Kind) == scope.ScopeKind {
+			label = strings.Join(strings.Fields(incoming.ChildScope.Label), " ")
+			if len([]rune(label)) > 80 {
+				label = string([]rune(label)[:80])
+			}
+		}
+		if label != "" {
+			labels = append(labels, token+": "+label)
+		} else {
+			labels = append(labels, token)
+		}
+	}
+	if len(labels) == 0 {
+		return text
+	}
+	return "[contexts " + strings.Join(labels, " ") + "]\n" + text
 }
 
 func normalizeDisplayName(value string) string {

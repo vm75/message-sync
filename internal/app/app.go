@@ -144,6 +144,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		RecoveryEnabled:  cfg.Recovery.Enabled,
 		RecoveryMaxAge:   time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour,
 		RecoveryMaxCount: cfg.Recovery.MaxMessagesPerGroup,
+		DeviceName:       cfg.WhatsAppDeviceName,
 	})
 	if err != nil {
 		return fmt.Errorf("start WhatsApp transport: %w", err)
@@ -221,7 +222,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("create transport adapter registry: %w", err)
 	}
 
-	mesh, err := router.New(cfg, syncStore, adapterRegistry)
+	mesh, err := router.NewWithHasher(cfg, syncStore, adapterRegistry, hasher)
 	if err != nil {
 		return fmt.Errorf("create canonical router: %w", err)
 	}

@@ -591,6 +591,20 @@
               </div>
             </div>
 
+            <!-- Local messages -->
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <div class="settings-card-meta"><div class="settings-card-title">Source-local Messages</div></div>
+              </div>
+              <div class="settings-card-body">
+                <div class="form-group">
+                  <label for="settings-local-prefix" class="form-label">Local-only Prefix</label>
+                  <input type="text" id="settings-local-prefix" class="form-input" maxlength="64" placeholder="Leave empty to disable">
+                  <div class="form-hint">New messages beginning with this exact, case-sensitive prefix stay in their source conversation.</div>
+                </div>
+              </div>
+            </div>
+
             <!-- WhatsApp Cleanup -->
             <div class="settings-card">
               <div class="settings-card-header">
@@ -609,6 +623,11 @@
                 <div class="form-group">
                   <label for="settings-whatsapp-cleanup-retention-days" class="form-label">WhatsApp Retention (Days)</label>
                   <input type="number" id="settings-whatsapp-cleanup-retention-days" class="form-input" min="1" max="365" required>
+                </div>
+                <div class="form-group">
+                  <label for="settings-whatsapp-device-name" class="form-label">Companion Device Name</label>
+                  <input type="text" id="settings-whatsapp-device-name" class="form-input" maxlength="64" placeholder="message-sync">
+                  <div class="form-hint">Name displayed in WhatsApp under Linked Devices for new pairings (default: message-sync).</div>
                 </div>
               </div>
             </div>

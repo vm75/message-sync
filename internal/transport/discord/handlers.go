@@ -27,7 +27,8 @@ func (a *Adapter) handlePollVote(session *discordgo.Session, channelID, messageI
 	a.mu.RLock()
 	normalizer, api, hasher := a.normalizer, a.api, a.hasher
 	a.mu.RUnlock()
-	_, ok := normalizer.endpointFor(channelID)
+	routeChannelID := configuredIngressChannelID(session, normalizer, channelID)
+	_, ok := normalizer.endpointFor(routeChannelID)
 	if !ok || hasher == nil || api == nil {
 		return
 	}
@@ -56,8 +57,9 @@ func (a *Adapter) handlePollVote(session *discordgo.Session, channelID, messageI
 		indexes = append(indexes, index)
 	}
 	a.mu.Unlock()
-	incoming, ok := normalizer.NormalizePollVote(channelID, messageID, userID, indexes, hasher)
+	incoming, ok := normalizer.NormalizePollVote(routeChannelID, messageID, userID, indexes, hasher)
 	if ok {
+		incoming.ChildScope = discordChildScope(session, channelID, routeChannelID)
 		a.emit(incoming)
 	}
 }
@@ -117,6 +119,7 @@ func (a *Adapter) handleMessageUpdate(session *discordgo.Session, event *discord
 	if !ok {
 		return
 	}
+	incoming.ChildScope = discordChildScope(session, message.ChannelID, routeChannelID)
 	a.emit(incoming)
 }
 
@@ -195,6 +198,7 @@ func (a *Adapter) handleMessageReactionAdd(session *discordgo.Session, event *di
 	if !ok {
 		return
 	}
+	incoming.ChildScope = discordChildScope(session, event.ChannelID, routeChannelID)
 	a.emit(incoming)
 }
 
@@ -218,6 +222,7 @@ func (a *Adapter) handleMessageReactionRemove(session *discordgo.Session, event 
 	if !ok {
 		return
 	}
+	incoming.ChildScope = discordChildScope(session, event.ChannelID, routeChannelID)
 	a.emit(incoming)
 }
 

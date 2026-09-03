@@ -331,6 +331,7 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	if !ok {
 		return
 	}
+	incoming.ChildScope = discordChildScope(session, evt.Message.ChannelID, routeChannelID)
 	incoming, ok = a.withDiscordMedia(incoming, evt.Message)
 	if !ok {
 		return
@@ -425,6 +426,19 @@ func configuredIngressChannelID(session *discordgo.Session, normalizer *Normaliz
 		return ""
 	}
 	return parentID
+}
+
+func discordChildScope(session *discordgo.Session, channelID, parentID string) *transport.ChildScope {
+	channelID = strings.TrimSpace(channelID)
+	parentID = strings.TrimSpace(parentID)
+	if channelID == "" || channelID == parentID || session == nil || session.State == nil {
+		return nil
+	}
+	channel, err := session.State.Channel(channelID)
+	if err != nil || channel == nil || !isDiscordThreadChannel(channel.Type) || strings.TrimSpace(channel.ParentID) != parentID {
+		return nil
+	}
+	return &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: channelID, Label: strings.TrimSpace(channel.Name)}
 }
 
 func isDiscordThreadChannel(channelType discordgo.ChannelType) bool {

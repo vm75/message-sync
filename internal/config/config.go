@@ -18,6 +18,39 @@ var (
 	telegramIDPattern = regexp.MustCompile(`^-[1-9][0-9]{0,18}$`)
 )
 
+const (
+	MaxLocalPrefixBytes        = 64
+	MaxWhatsAppDeviceNameBytes = 64
+	DefaultWhatsAppDeviceName  = "message-sync"
+)
+
+func ValidateWhatsAppDeviceName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errors.New("WhatsApp device name cannot be empty")
+	}
+	if strings.ContainsAny(name, "\x00\r\n") {
+		return errors.New("WhatsApp device name contains invalid control characters")
+	}
+	if len([]byte(name)) > MaxWhatsAppDeviceNameBytes {
+		return fmt.Errorf("WhatsApp device name must be at most %d UTF-8 bytes", MaxWhatsAppDeviceNameBytes)
+	}
+	return nil
+}
+
+func ValidateLocalPrefix(prefix string) error {
+	if strings.ContainsAny(prefix, "\x00\r\n") {
+		return errors.New("local message prefix contains invalid control characters")
+	}
+	if prefix != "" && strings.TrimSpace(prefix) == "" {
+		return errors.New("local message prefix must contain a non-whitespace character")
+	}
+	if len([]byte(prefix)) > MaxLocalPrefixBytes {
+		return fmt.Errorf("local message prefix must be at most %d UTF-8 bytes", MaxLocalPrefixBytes)
+	}
+	return nil
+}
+
 func ValidateAlias(alias string) error {
 	if !aliasPattern.MatchString(alias) {
 		return fmt.Errorf("endpoint alias %q must match %s", alias, aliasPattern.String())
@@ -102,14 +135,16 @@ func (m UsernameMode) IsValid() bool {
 }
 
 type Config struct {
-	Endpoints       map[string]Endpoint `json:"endpoints"`
-	SyncSets        []SyncSet           `json:"syncSets"`
-	Identity        Identity            `json:"identity"`
-	Media           Media               `json:"media"`
-	Recovery        Recovery            `json:"recovery"`
-	Storage         Storage             `json:"storage"`
-	Polls           Polls               `json:"polls"`
-	WhatsAppCleanup WhatsAppCleanup     `json:"whatsappCleanup"`
+	Endpoints          map[string]Endpoint `json:"endpoints"`
+	SyncSets           []SyncSet           `json:"syncSets"`
+	Identity           Identity            `json:"identity"`
+	Media              Media               `json:"media"`
+	Recovery           Recovery            `json:"recovery"`
+	Storage            Storage             `json:"storage"`
+	Polls              Polls               `json:"polls"`
+	WhatsAppCleanup    WhatsAppCleanup     `json:"whatsappCleanup"`
+	LocalPrefix        string              `json:"localPrefix"`
+	WhatsAppDeviceName string              `json:"whatsappDeviceName"`
 }
 
 type Endpoint struct {
@@ -171,12 +206,14 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		aggTrigger             string
 		whatsappCleanupEnabled bool
 		whatsappCleanupDays    int
+		localPrefix            string
+		whatsappDeviceName     string
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -191,6 +228,8 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		cfg.Polls.AggregationTrigger = aggTrigger
 		cfg.WhatsAppCleanup.Enabled = whatsappCleanupEnabled
 		cfg.WhatsAppCleanup.RetentionDays = whatsappCleanupDays
+		cfg.LocalPrefix = localPrefix
+		cfg.WhatsAppDeviceName = whatsappDeviceName
 	}
 
 	applyDefaults(cfg)
@@ -342,8 +381,8 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -354,8 +393,10 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			storage_message_retention_days = excluded.storage_message_retention_days,
 			poll_aggregation_trigger = excluded.poll_aggregation_trigger,
 			whatsapp_chat_cleanup_enabled = excluded.whatsapp_chat_cleanup_enabled,
-			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays)
+			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days,
+			local_message_prefix = excluded.local_message_prefix,
+			whatsapp_device_name = excluded.whatsapp_device_name
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName)
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
 	}
@@ -415,6 +456,9 @@ func applyDefaults(cfg *Config) {
 	if cfg.WhatsAppCleanup.RetentionDays == 0 {
 		cfg.WhatsAppCleanup.RetentionDays = 30
 	}
+	if strings.TrimSpace(cfg.WhatsAppDeviceName) == "" {
+		cfg.WhatsAppDeviceName = DefaultWhatsAppDeviceName
+	}
 }
 
 func (c Config) Validate() error {
@@ -426,6 +470,12 @@ func (c Config) Validate() error {
 	}
 	if !c.Identity.UsernameMode.IsValid() {
 		return errors.New("identity.usernameMode must be push_name or hash")
+	}
+	if err := ValidateLocalPrefix(c.LocalPrefix); err != nil {
+		return err
+	}
+	if err := ValidateWhatsAppDeviceName(c.WhatsAppDeviceName); err != nil {
+		return err
 	}
 	if c.Media.MaxSizeMB < 1 {
 		return errors.New("media.maxSizeMB must be positive")

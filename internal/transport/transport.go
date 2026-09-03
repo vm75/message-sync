@@ -37,6 +37,23 @@ type MessageRef struct {
 	IsTargetFromMe    bool
 	Provider          string
 	ProviderReference string
+	ChildScope        *ChildScope
+}
+
+// ChildScope identifies a provider-native conversation below a configured
+// endpoint (for example a Discord thread or Telegram topic). Scope IDs are
+// opaque operational values; labels are transient presentation data.
+type ScopeKind string
+
+const (
+	ScopeKindDiscordThread ScopeKind = "discord_thread"
+	ScopeKindTelegramTopic ScopeKind = "telegram_topic"
+)
+
+type ChildScope struct {
+	Kind     ScopeKind
+	RemoteID string
+	Label    string
 }
 
 type Sender struct {
@@ -60,6 +77,7 @@ type Incoming struct {
 	Text                  string // transient only; never persist
 	Mentions              []Mention
 	ReplyTo               *MessageRef
+	ChildScope            *ChildScope
 	QuotedText            string
 	Timestamp             time.Time
 	MediaLoader           func(context.Context) ([]byte, error)
@@ -84,6 +102,7 @@ type Outgoing struct {
 	Text                string
 	Mentions            []Mention
 	ReplyTo             *MessageRef
+	ChildScope          *ChildScope
 	QuotedText          string
 	MediaBytes          []byte
 	Kind                string
@@ -96,6 +115,7 @@ type Reaction struct {
 	Endpoint       EndpointID
 	TargetRemoteID string
 	IsTargetFromMe bool
+	ChildScope     *ChildScope
 	Emoji          string
 	FallbackText   string
 }

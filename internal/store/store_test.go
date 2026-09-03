@@ -78,6 +78,54 @@ func TestFreshSchemaCreatesTransportAwareEndpoints(t *testing.T) {
 	}
 }
 
+func TestCanonicalScopesArePerEndpointAndIdempotent(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	if err := store.CreateCanonical(ctx, "canon-scope", time.Unix(1700000000, 0).UTC()); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []CanonicalScope{
+		{CanonicalID: "canon-scope", EndpointID: "endpoint1", ScopeKind: "discord_thread", RemoteScopeID: "thread-1"},
+		{CanonicalID: "canon-scope", EndpointID: "endpoint2", ScopeKind: "telegram_topic", RemoteScopeID: "topic-2"},
+		{CanonicalID: "canon-scope", EndpointID: "endpoint1", ScopeKind: "discord_thread", RemoteScopeID: "thread-1-replayed"},
+	} {
+		if err := store.UpsertCanonicalScope(ctx, scope); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scopes, err := store.CanonicalScopes(ctx, "canon-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scopes) != 2 {
+		t.Fatalf("scope count = %d, want 2", len(scopes))
+	}
+	scope, err := store.CanonicalScope(ctx, "canon-scope", "endpoint1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scope.RemoteScopeID != "thread-1-replayed" {
+		t.Fatalf("endpoint1 scope = %q, want replayed scope", scope.RemoteScopeID)
+	}
+	rows, err := store.db.Query(`SELECT canonical_id, endpoint_id, remote_scope_id FROM canonical_scopes`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var canonical, endpoint, scopeID string
+		if err := rows.Scan(&canonical, &endpoint, &scopeID); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(canonical+endpoint+scopeID, "body") {
+			t.Fatal("scope table unexpectedly contains content")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDeliveryLedgerSchemaIsContentFree(t *testing.T) {
 	store, _ := openTestStore(t)
 
