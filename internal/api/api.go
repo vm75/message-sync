@@ -15,8 +15,6 @@ import (
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/safelog"
-	discord "github.com/vm75/message-sync/internal/transport/discord"
-	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 	"github.com/vm75/message-sync/internal/verification"
 )
 
@@ -39,14 +37,6 @@ type WhatsAppGroup struct {
 	Name string `json:"name"`
 }
 
-type WhatsAppService interface {
-	Status(ctx context.Context) WhatsAppStatus
-	Pair(ctx context.Context) (WhatsAppPairResponse, error)
-	CancelPair(ctx context.Context) error
-	Logout(ctx context.Context) error
-	GetJoinedGroups(ctx context.Context) ([]WhatsAppGroup, error)
-}
-
 type ConnectionService interface {
 	ConnectionStatus(ctx context.Context, id string) (any, error)
 	ConnectionDiscovery(ctx context.Context, id string) (any, error)
@@ -64,9 +54,6 @@ type Options struct {
 	ControlDB  *sql.DB
 	Secret     []byte
 	SessionTTL time.Duration
-	WhatsApp   WhatsAppService
-	Discord    discord.AdminService
-	Telegram   telegram.AdminService
 	Delivery   interface {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
@@ -87,9 +74,6 @@ type Server struct {
 	controlDB         *sql.DB
 	ownedControlStore *controlstore.Store
 	sessions          *SessionManager
-	whatsapp          WhatsAppService
-	discord           discord.AdminService
-	telegram          telegram.AdminService
 	delivery          interface {
 		DeliveryStatus(context.Context) ([]delivery.EndpointStatus, error)
 	}
@@ -138,9 +122,6 @@ func NewServer(opts Options) *Server {
 		controlDB:         controlDB,
 		ownedControlStore: ownedControlStore,
 		sessions:          sessions,
-		whatsapp:          opts.WhatsApp,
-		discord:           opts.Discord,
-		telegram:          opts.Telegram,
 		delivery:          opts.Delivery,
 		onConfigChange:    opts.OnConfigChange,
 		evidenceDir:       opts.EvidenceDir,
@@ -152,14 +133,6 @@ func NewServer(opts Options) *Server {
 
 	if s.credentialCipher == nil && len(opts.Secret) >= 32 {
 		s.credentialCipher, _ = controlstore.NewCredentialCipher(opts.Secret)
-	}
-
-	if s.connections == nil && (opts.WhatsApp != nil || opts.Discord != nil || opts.Telegram != nil) {
-		s.connections = &fallbackConnectionService{
-			wa: opts.WhatsApp,
-			dc: opts.Discord,
-			tg: opts.Telegram,
-		}
 	}
 
 	s.registerRoutes()

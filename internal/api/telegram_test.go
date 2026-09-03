@@ -41,8 +41,8 @@ func authenticatedTelegramRequest(t *testing.T, srv *Server, method, path string
 
 func TestTelegramAdminEndpointsRequireAuthentication(t *testing.T) {
 	srv := NewServer(Options{
-		Secret:   []byte("01234567890123456789012345678901"),
-		Telegram: &fakeTelegramAdminService{},
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{tg: &fakeTelegramAdminService{}},
 	})
 	for _, path := range []string{"/api/connections/conn-tg-1/status", "/api/connections/conn-tg-1/discovery"} {
 		rec := httptest.NewRecorder()
@@ -98,8 +98,8 @@ func TestTelegramStatusAndDiscoveryExposeTransientSelectionMetadata(t *testing.T
 		}},
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("01234567890123456789012345678901"),
-		Telegram: service,
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{tg: service},
 	})
 
 	statusRec := httptest.NewRecorder()
@@ -153,9 +153,9 @@ func TestTelegramDiscoveryEndpointCreationPersistsOnlyOpaqueChatID(t *testing.T)
 	}
 	configChanges := 0
 	srv := NewServer(Options{
-		DB:       db,
-		Secret:   []byte("01234567890123456789012345678901"),
-		Telegram: service,
+		DB:          db,
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{tg: service},
 		OnConfigChange: func(context.Context) error {
 			configChanges++
 			return nil
@@ -214,9 +214,9 @@ func TestTelegramDiscoveryErrorsAreSafeLogged(t *testing.T) {
 		discoverErr: errors.New("chat -100999 private-title secret-token"),
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("01234567890123456789012345678901"),
-		Telegram: service,
-		Logger:   slog.New(slog.NewTextHandler(&logs, nil)),
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{tg: service},
+		Logger:      slog.New(slog.NewTextHandler(&logs, nil)),
 	})
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, authenticatedTelegramRequest(t, srv, http.MethodGet, "/api/connections/conn-tg-1/discovery"))

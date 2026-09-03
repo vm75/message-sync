@@ -57,6 +57,20 @@ func seedTestConnections(t *testing.T, dataDir string) {
 	})
 }
 
+func seedTestWhatsAppConnection(t *testing.T, dataDir string) {
+	t.Helper()
+	cs, err := controlstore.Open(context.Background(), filepath.Join(dataDir, ControlDBName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	if err := cs.CreateConnection(context.Background(), controlstore.Connection{
+		ID: "conn-wa-1", Transport: "whatsapp", Label: "WhatsApp", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 type safeBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -808,7 +822,7 @@ func TestApp_WebUIServing(t *testing.T) {
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	secret := "0123456789abcdef0123456789abcdef"
 	t.Setenv("IDENTITY_SECRET", secret)
-	seedTestConnections(t, dataDir)
+	seedTestWhatsAppConnection(t, dataDir)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
@@ -981,7 +995,7 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 		status: api.WhatsAppStatus{IsLoggedIn: true, IsConnected: true, Status: "connected"},
 	}
 
-	runWhatsAppChatCleanup(context.Background(), logger, st.DB(), fake)
+	runWhatsAppChatCleanup(context.Background(), logger, st.DB(), map[string]whatsappTransport{"conn-wa-1": fake})
 
 	logStr := logBuf.String()
 	if !strings.Contains(logStr, "whatsapp chat cleanup completed") {

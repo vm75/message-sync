@@ -41,8 +41,8 @@ func authenticatedDiscordRequest(t *testing.T, srv *Server, method, path string)
 
 func TestDiscordAdminEndpointsRequireAuthentication(t *testing.T) {
 	srv := NewServer(Options{
-		Secret:  []byte("01234567890123456789012345678901"),
-		Discord: &fakeDiscordAdminService{},
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{dc: &fakeDiscordAdminService{}},
 	})
 
 	for _, path := range []string{"/api/connections/conn-dc-1/status", "/api/connections/conn-dc-1/discovery"} {
@@ -90,8 +90,8 @@ func TestDiscordStatusAndDiscoveryExposeOnlyTransientSelectionMetadata(t *testin
 		}},
 	}
 	srv := NewServer(Options{
-		Secret:  []byte("01234567890123456789012345678901"),
-		Discord: service,
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{dc: service},
 	})
 
 	statusRec := httptest.NewRecorder()
@@ -130,9 +130,9 @@ func TestDiscordDiscoveryErrorsAreSafeLogged(t *testing.T) {
 		discoverErr: errors.New("guild private-name channel 222 secret-token"),
 	}
 	srv := NewServer(Options{
-		Secret:  []byte("01234567890123456789012345678901"),
-		Discord: service,
-		Logger:  slog.New(slog.NewTextHandler(&logs, nil)),
+		Secret:      []byte("01234567890123456789012345678901"),
+		Connections: testConnectionService{dc: service},
+		Logger:      slog.New(slog.NewTextHandler(&logs, nil)),
 	})
 
 	rec := httptest.NewRecorder()

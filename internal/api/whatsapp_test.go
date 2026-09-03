@@ -68,8 +68,8 @@ func TestWhatsAppEndpoints_Unauthorized(t *testing.T) {
 		status: WhatsAppStatus{Status: "unpaired"},
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: mockWA,
+		Secret:      []byte("12345678901234567890123456789012"),
+		Connections: testConnectionService{wa: mockWA},
 	})
 
 	// Test GET /api/connections/conn-wa-1/status without token
@@ -119,8 +119,8 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 		},
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: mockWA,
+		Secret:      []byte("12345678901234567890123456789012"),
+		Connections: testConnectionService{wa: mockWA},
 	})
 
 	token, err := srv.sessions.CreateToken()
@@ -202,8 +202,7 @@ func TestWhatsAppEndpoints_Authorized(t *testing.T) {
 
 func TestWhatsAppEndpoints_ServiceUnavailable(t *testing.T) {
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: nil,
+		Secret: []byte("12345678901234567890123456789012"),
 	})
 	token, _ := srv.sessions.CreateToken()
 
@@ -221,8 +220,8 @@ func TestWhatsAppEndpoints_PairError(t *testing.T) {
 		pairErr: errors.New("network error"),
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: mockWA,
+		Secret:      []byte("12345678901234567890123456789012"),
+		Connections: testConnectionService{wa: mockWA},
 	})
 	token, _ := srv.sessions.CreateToken()
 
@@ -243,8 +242,8 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 		},
 	}
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: mockWA,
+		Secret:      []byte("12345678901234567890123456789012"),
+		Connections: testConnectionService{wa: mockWA},
 	})
 	token, _ := srv.sessions.CreateToken()
 
@@ -291,8 +290,8 @@ func TestWhatsAppEndpoints_GetJoinedGroups(t *testing.T) {
 func TestWhatsAppEndpoints_Logout(t *testing.T) {
 	mockWA := &mockWhatsAppService{}
 	srv := NewServer(Options{
-		Secret:   []byte("12345678901234567890123456789012"),
-		WhatsApp: mockWA,
+		Secret:      []byte("12345678901234567890123456789012"),
+		Connections: testConnectionService{wa: mockWA},
 	})
 	token, _ := srv.sessions.CreateToken()
 

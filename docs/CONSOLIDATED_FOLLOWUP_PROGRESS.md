@@ -20,7 +20,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 
 | Order | Issue | Area | Dependencies / rationale | Status |
 |---:|---|---|---|---|
-| 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Pending |
+| 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Complete |
 | 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Pending |
 | 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Pending |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Pending |
@@ -91,6 +91,16 @@ Rules:
 - If a friendly name is unknown, display generic `thread` or `topic`; never expose raw provider IDs or opaque `s_...` tokens in friendly mode.
 - Disabling friendly mode clears persisted child-scope names while preserving `canonical_scopes` and all routing history.
 - Pre-existing Telegram topics may remain unnamed until a supported lifecycle event reveals their name; no MTProto/backfill/topic registry is required.
+
+## Completion summaries
+
+### #84 — Remove singleton/backward-compatibility fallbacks
+
+- Removed production API transport fields and the fallback connection service.
+- Removed implicit WhatsApp ownership, automatic singleton startup/registration, primary transport selection, and unscoped Telegram poll/recovery lookups.
+- Routed membership administration strictly through the endpoint owner’s connection adapter.
+- Added explicit connection-bound API test coverage and documented the invariant.
+- Validation: `make fmt`, `make test`, `make vet`, and `git diff --check` passed.
 
 ## Completion protocol
 

@@ -138,36 +138,5 @@ func (s *Server) transportStatuses(r *http.Request) map[string]string {
 			}
 		}
 	}
-	if s.whatsapp != nil {
-		status := s.whatsapp.Status(r.Context()).Status
-		rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE transport = 'whatsapp'`)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var alias string
-				if rows.Scan(&alias) == nil {
-					if _, exists := result[alias]; !exists {
-						result[alias] = status
-					}
-				}
-			}
-		}
-	}
-	if s.discord != nil {
-		status := s.discord.AdminStatus(r.Context())
-		for _, item := range status.Webhooks {
-			if _, exists := result[item.Alias]; !exists {
-				result[item.Alias] = string(item.Status)
-			}
-		}
-	}
-	if s.telegram != nil {
-		status := s.telegram.AdminStatus(r.Context())
-		for _, item := range status.Endpoints {
-			if _, exists := result[item.Alias]; !exists {
-				result[item.Alias] = item.Status
-			}
-		}
-	}
 	return result
 }

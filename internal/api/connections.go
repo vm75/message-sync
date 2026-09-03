@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -10,8 +9,6 @@ import (
 
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/safelog"
-	"github.com/vm75/message-sync/internal/transport/discord"
-	"github.com/vm75/message-sync/internal/transport/telegram"
 )
 
 type ConnectionDTO struct {
@@ -641,65 +638,4 @@ func (s *Server) handleWhatsAppConnectionLogout(w http.ResponseWriter, r *http.R
 
 	s.audit(r, "whatsapp_logged_out", id)
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
-}
-
-type fallbackConnectionService struct {
-	wa WhatsAppService
-	dc discord.AdminService
-	tg telegram.AdminService
-}
-
-func (s *fallbackConnectionService) ConnectionStatus(ctx context.Context, id string) (any, error) {
-	if s.wa != nil && id == "conn-wa-1" {
-		return s.wa.Status(ctx), nil
-	}
-	if s.dc != nil && id == "conn-dc-1" {
-		return s.dc.AdminStatus(ctx), nil
-	}
-	if s.tg != nil && id == "conn-tg-1" {
-		return s.tg.AdminStatus(ctx), nil
-	}
-	return map[string]any{"id": id, "status": "stopped"}, nil
-}
-
-func (s *fallbackConnectionService) ConnectionDiscovery(ctx context.Context, id string) (any, error) {
-	if s.wa != nil && id == "conn-wa-1" {
-		return s.wa.GetJoinedGroups(ctx)
-	}
-	if s.dc != nil && id == "conn-dc-1" {
-		return s.dc.DiscoverChannels(ctx)
-	}
-	if s.tg != nil && id == "conn-tg-1" {
-		return s.tg.DiscoverChats(ctx)
-	}
-	return nil, errors.New("discovery not supported for this connection")
-}
-
-func (s *fallbackConnectionService) WhatsAppPair(ctx context.Context, id string) (WhatsAppPairResponse, error) {
-	if s.wa != nil && id == "conn-wa-1" {
-		return s.wa.Pair(ctx)
-	}
-	return WhatsAppPairResponse{}, errors.New("pairing not supported for this connection")
-}
-
-func (s *fallbackConnectionService) WhatsAppCancelPair(ctx context.Context, id string) error {
-	if s.wa != nil && id == "conn-wa-1" {
-		return s.wa.CancelPair(ctx)
-	}
-	return nil
-}
-
-func (s *fallbackConnectionService) WhatsAppLogout(ctx context.Context, id string) error {
-	if s.wa != nil && id == "conn-wa-1" {
-		return s.wa.Logout(ctx)
-	}
-	return nil
-}
-
-func (s *fallbackConnectionService) StopConnection(id string) error {
-	return nil
-}
-
-func (s *fallbackConnectionService) ConnectionAdapter(id string) (any, bool) {
-	return nil, false
 }

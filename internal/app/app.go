@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/vm75/message-sync/internal/api"
@@ -118,15 +117,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		cfg = loadedCfg
 	}
 
-	groupJIDs := make(map[string]string)
-	discordChannelIDs := make(map[string]string)
 	telegramChatIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		switch endpoint.Transport {
-		case config.TransportWhatsApp:
-			groupJIDs[alias] = endpoint.RemoteID
-		case config.TransportDiscord:
-			discordChannelIDs[alias] = endpoint.RemoteID
 		case config.TransportTelegram:
 			telegramChatIDs[alias] = endpoint.RemoteID
 		}
@@ -140,7 +133,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				if c.Transport == "whatsapp" && c.Enabled {
 					connGroupJIDs := make(map[string]string)
 					for alias, ep := range cfg.Endpoints {
-						if ep.Transport == config.TransportWhatsApp && (ep.ConnectionID == c.ID || (c.ID == "conn-wa-1" && ep.ConnectionID == "")) {
+						if ep.Transport == config.TransportWhatsApp && ep.ConnectionID == c.ID {
 							connGroupJIDs[alias] = ep.RemoteID
 						}
 					}
@@ -174,37 +167,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				}
 			}
 		}
-	}
-
-	if len(whatsappAdapters) == 0 && len(groupJIDs) > 0 {
-		dbPath, _ := whatsapp.ProtocolDBPath(dataDir, "conn-wa-1")
-		waInst, err := openWhatsApp(ctx, whatsapp.Options{
-			ConnectionID:     "conn-wa-1",
-			DatabasePath:     dbPath,
-			GroupJIDs:        groupJIDs,
-			Hasher:           hasher,
-			UsernameMode:     cfg.Identity.UsernameMode,
-			Logger:           logger,
-			QROut:            os.Stdout,
-			EnableTerminalQR: false,
-			MediaEnabled:     cfg.Media.Enabled,
-			MediaMaxBytes:    uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-			RecoveryEnabled:  cfg.Recovery.Enabled,
-			RecoveryMaxAge:   time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour,
-			RecoveryMaxCount: cfg.Recovery.MaxMessagesPerGroup,
-			DeviceName:       cfg.WhatsAppDeviceName,
-		})
-		if err != nil {
-			return fmt.Errorf("start WhatsApp transport: %w", err)
-		}
-		whatsappAdapters["conn-wa-1"] = waInst
-		defer waInst.Close()
-	}
-
-	var wa whatsappTransport
-	for _, w := range whatsappAdapters {
-		wa = w
-		break
 	}
 
 	var credentialCipher *controlstore.CredentialCipher
@@ -250,14 +212,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 	}
 
-	var dc discord.AdminService
-	for _, da := range discordAdapters {
-		if s, ok := da.(discord.AdminService); ok {
-			dc = s
-			break
-		}
-	}
-
 	telegramAdapters := make(map[string]telegramTransport)
 	if controlStore != nil && credentialCipher != nil {
 		allConns, err := controlStore.ListConnections(ctx)
@@ -297,9 +251,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
 							endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram:"+connID, pollID)
 							if resolveErr != nil {
-								endpoint, resolveErr = syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
-							}
-							if resolveErr != nil {
 								return "", false
 							}
 							return transport.EndpointID(endpoint), true
@@ -318,26 +269,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	if len(telegramChatIDs) > 0 && len(telegramAdapters) == 0 {
 		return errors.New("Telegram bot token is not configured")
-	}
-
-	var tg telegramTransport
-	for _, ta := range telegramAdapters {
-		tg = ta
-		break
-	}
-
-	var currentCfgMu sync.RWMutex
-	currentCfg := cfg
-
-	waService := &appWhatsAppService{
-		getAdapters: func() map[string]whatsappTransport {
-			return whatsappAdapters
-		},
-		getEndpoints: func() map[string]config.Endpoint {
-			currentCfgMu.RLock()
-			defer currentCfgMu.RUnlock()
-			return currentCfg.Endpoints
-		},
 	}
 
 	adapterRegistry, err := router.NewAdapterRegistry(cfg, nil)
@@ -375,9 +306,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				registered[connID] = true
 			}
 		}
-		if wa != nil && !registered["conn-wa-1"] {
-			_ = connMgr.Register(ctx, "conn-wa-1", config.TransportWhatsApp, wa)
-		}
 	}
 	registerActiveConnections(cfg)
 
@@ -386,9 +314,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("reload config: %w", err)
 		}
-		currentCfgMu.Lock()
-		currentCfg = updatedCfg
-		currentCfgMu.Unlock()
 		if controlStore != nil && credentialCipher != nil {
 			allConns, err := controlStore.ListConnections(updateCtx)
 			if err == nil {
@@ -417,7 +342,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					if _, exists := whatsappAdapters[connID]; !exists {
 						connGroupJIDs := make(map[string]string)
 						for alias, ep := range updatedCfg.Endpoints {
-							if ep.Transport == config.TransportWhatsApp && (ep.ConnectionID == c.ID || (c.ID == "conn-wa-1" && ep.ConnectionID == "")) {
+							if ep.Transport == config.TransportWhatsApp && ep.ConnectionID == c.ID {
 								connGroupJIDs[alias] = ep.RemoteID
 							}
 						}
@@ -529,9 +454,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
 								endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram:"+cid, pollID)
 								if resolveErr != nil {
-									endpoint, resolveErr = syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
-								}
-								if resolveErr != nil {
 									return "", false
 								}
 								return transport.EndpointID(endpoint), true
@@ -582,9 +504,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		Secret:           []byte(secret),
 		CredentialCipher: credentialCipher,
 		Connections:      &appConnectionService{connMgr: connMgr, dataDir: dataDir},
-		WhatsApp:         waService,
-		Discord:          dc,
-		Telegram:         tg,
 		Delivery:         mesh,
 		OnConfigChange:   onConfigChange,
 		EvidenceDir:      filepath.Join(dataDir, "membership-evidence"),
@@ -683,10 +602,7 @@ func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store, connec
 	if syncStore == nil {
 		return 0, nil
 	}
-	streamKey := "telegram"
-	if connectionID != "" {
-		streamKey = "telegram:" + connectionID
-	}
+	streamKey := "telegram:" + connectionID
 	cursor, err := syncStore.RecoveryCursor(ctx, streamKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -697,7 +613,7 @@ func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store, connec
 	return cursor.Position, nil
 }
 
-func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB, wa any) {
+func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB, wa map[string]whatsappTransport) {
 	cfg, err := config.LoadRaw(ctx, db)
 	if err != nil {
 		safelog.Error(logger, "failed to load config for whatsapp cleanup", "whatsapp_cleanup", err)
@@ -712,13 +628,9 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
 
-	adapters := make(map[string]any)
-	if m, ok := wa.(map[string]whatsappTransport); ok {
-		for k, v := range m {
-			adapters[k] = v
-		}
-	} else if wa != nil {
-		adapters["conn-wa-1"] = wa
+	adapters := make(map[string]any, len(wa))
+	for k, v := range wa {
+		adapters[k] = v
 	}
 
 	syncSetGroupAliases := make(map[string]struct{})
@@ -740,7 +652,7 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 		connJIDs := make(map[string]types.JID)
 		for alias := range syncSetGroupAliases {
 			if endpoint, ok := cfg.Endpoints[alias]; ok && endpoint.Transport == config.TransportWhatsApp {
-				if endpoint.ConnectionID == connID || (connID == "conn-wa-1" && endpoint.ConnectionID == "") {
+				if endpoint.ConnectionID == connID {
 					if strings.TrimSpace(endpoint.RemoteID) != "" {
 						parsedJID, err := types.ParseJID(endpoint.RemoteID)
 						if err == nil {
@@ -772,130 +684,6 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 			)
 		}
 	}
-}
-
-type appWhatsAppService struct {
-	getAdapters  func() map[string]whatsappTransport
-	getEndpoints func() map[string]config.Endpoint
-}
-
-func (s *appWhatsAppService) primary() api.WhatsAppService {
-	if s == nil || s.getAdapters == nil {
-		return nil
-	}
-	adapters := s.getAdapters()
-	if a, ok := adapters["conn-wa-1"].(api.WhatsAppService); ok {
-		return a
-	}
-	for _, raw := range adapters {
-		if a, ok := raw.(api.WhatsAppService); ok {
-			return a
-		}
-	}
-	return nil
-}
-
-func (s *appWhatsAppService) Status(ctx context.Context) api.WhatsAppStatus {
-	p := s.primary()
-	if p == nil {
-		return api.WhatsAppStatus{Status: "unpaired"}
-	}
-	return p.Status(ctx)
-}
-
-func (s *appWhatsAppService) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
-	p := s.primary()
-	if p == nil {
-		return api.WhatsAppPairResponse{}, errors.New("WhatsApp service unavailable")
-	}
-	return p.Pair(ctx)
-}
-
-func (s *appWhatsAppService) CancelPair(ctx context.Context) error {
-	p := s.primary()
-	if p == nil {
-		return nil
-	}
-	return p.CancelPair(ctx)
-}
-
-func (s *appWhatsAppService) Logout(ctx context.Context) error {
-	p := s.primary()
-	if p == nil {
-		return errors.New("WhatsApp service unavailable")
-	}
-	return p.Logout(ctx)
-}
-
-func (s *appWhatsAppService) GetJoinedGroups(ctx context.Context) ([]api.WhatsAppGroup, error) {
-	p := s.primary()
-	if p == nil {
-		return []api.WhatsAppGroup{}, nil
-	}
-	return p.GetJoinedGroups(ctx)
-}
-
-func (s *appWhatsAppService) findAdmin(alias string) (verification.WhatsAppAdmin, error) {
-	if s == nil || s.getAdapters == nil {
-		return nil, verification.ErrDestinationMissing
-	}
-	adapters := s.getAdapters()
-	for _, raw := range adapters {
-		if hasEp, ok := raw.(interface{ HasEndpoint(string) bool }); ok && hasEp.HasEndpoint(alias) {
-			if admin, ok := raw.(verification.WhatsAppAdmin); ok {
-				return admin, nil
-			}
-		}
-	}
-	if s.getEndpoints != nil {
-		if ep, ok := s.getEndpoints()[alias]; ok && ep.Transport == config.TransportWhatsApp {
-			connID := ep.ConnectionID
-			if connID == "" {
-				connID = "conn-wa-1"
-			}
-			if raw, ok := adapters[connID]; ok {
-				if admin, ok := raw.(verification.WhatsAppAdmin); ok {
-					return admin, nil
-				}
-			}
-		}
-	}
-	if p, ok := s.primary().(verification.WhatsAppAdmin); ok {
-		return p, nil
-	}
-	return nil, verification.ErrDestinationMissing
-}
-
-func (s *appWhatsAppService) AddParticipant(ctx context.Context, alias, phone string) error {
-	admin, err := s.findAdmin(alias)
-	if err != nil {
-		return err
-	}
-	return admin.AddParticipant(ctx, alias, phone)
-}
-
-func (s *appWhatsAppService) InviteLink(ctx context.Context, alias string) (string, error) {
-	admin, err := s.findAdmin(alias)
-	if err != nil {
-		return "", err
-	}
-	return admin.InviteLink(ctx, alias)
-}
-
-func (s *appWhatsAppService) IsMember(ctx context.Context, alias, phone string) (bool, error) {
-	admin, err := s.findAdmin(alias)
-	if err != nil {
-		return false, err
-	}
-	return admin.IsMember(ctx, alias, phone)
-}
-
-func (s *appWhatsAppService) RotateInviteLink(ctx context.Context, alias string) error {
-	admin, err := s.findAdmin(alias)
-	if err != nil {
-		return err
-	}
-	return admin.RotateInviteLink(ctx, alias)
 }
 
 type appConnectionService struct {

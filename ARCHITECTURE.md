@@ -245,6 +245,8 @@ endpoint alias -> connection id -> adapter instance
 
 The canonical router remains completely unaware of connection IDs. If an endpoint's connection is stopped or unavailable, outbound calls safely return a classified transient failure without leaking provider details.
 
+All runtime and API transport operations use this explicit connection boundary. There is no singleton transport, implicit `conn-wa-1` ownership, empty connection-ID fallback, primary-transport selection, or unscoped transport recovery namespace. Endpoints with invalid or missing ownership are rejected by configuration validation and are never silently attached to another connection.
+
 Each active connection adapter emits normalized `transport.Incoming` events on its `Events()` channel. `ConnectionManager` forwards each connection's events into a unified shared ingress channel feeding the recovery coordinator and single ordered router worker. Event forwarding for each connection is isolated:
 - when an adapter stream closes or a connection is stopped, its forwarder terminates without interrupting other connections or closing the shared ingress stream;
 - connections support a safe register, start, stop, and atomic replace/restart lifecycle;

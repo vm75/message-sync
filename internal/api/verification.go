@@ -307,16 +307,6 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 			}
 		}
 	}
-	if wa == nil {
-		if candidate, ok := s.whatsapp.(verification.WhatsAppAdmin); ok {
-			wa = candidate
-		}
-	}
-	if dc == nil {
-		if candidate, ok := s.discord.(verification.DiscordAdmin); ok {
-			dc = candidate
-		}
-	}
 	result, fulfillErr := verification.Fulfill(r.Context(), req, wa, dc)
 	if result.State == "action_pending" && s.mailer != nil {
 		if link, linkErr := wa.InviteLink(r.Context(), req.EndpointAlias); linkErr == nil {
@@ -338,7 +328,17 @@ func (s *Server) handleConfirmFallback(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, 404, "request not found")
 		return
 	}
-	wa, ok := s.whatsapp.(verification.WhatsAppAdmin)
+	var connID string
+	if s.db == nil || s.db.QueryRowContext(r.Context(), `SELECT connection_id FROM endpoints WHERE alias=?`, alias).Scan(&connID) != nil || s.connections == nil {
+		WriteError(w, 503, "WhatsApp membership administration unavailable")
+		return
+	}
+	adapter, ok := s.connections.ConnectionAdapter(connID)
+	if !ok {
+		WriteError(w, 503, "WhatsApp membership administration unavailable")
+		return
+	}
+	wa, ok := adapter.(verification.WhatsAppAdmin)
 	if !ok {
 		WriteError(w, 503, "WhatsApp membership administration unavailable")
 		return
