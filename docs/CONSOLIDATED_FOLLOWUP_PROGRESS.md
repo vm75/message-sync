@@ -22,7 +22,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 |---:|---|---|---|---|
 | 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Complete |
 | 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Complete |
-| 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Pending |
+| 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Complete |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Pending |
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Pending |
 | 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Pending |
@@ -109,6 +109,13 @@ Rules:
 - Preserve encrypted-at-rest storage and transient plaintext token handling.
 - Documented replacement behavior and isolation guarantees.
 - Focused validation passed; the full required gate is rerun before commit.
+
+### #85 — Telegram groups/supergroups-only endpoint validation
+
+- The existing endpoint boundary accepts only negative Telegram group/supergroup chat IDs.
+- Discovery and ingress both reject private chats and broadcast channels by chat type; migration reuses the same validator.
+- Permanent README and architecture documentation already describe Telegram parent endpoints as groups/supergroups only.
+- Validation: existing configuration, API, discovery, normalizer, and migration tests pass under the full repository gate.
 
 ## Completion protocol
 
