@@ -59,7 +59,9 @@ func (f *fakeDiscordTransport) DiscoverChannels(context.Context) ([]discord.Disc
 }
 
 func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DISCORD_BOT_TOKEN", "test-discord-token")
@@ -67,8 +69,8 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa":      {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"discord": {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
+			"wa":      {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -158,7 +160,9 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 }
 
 func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DISCORD_BOT_TOKEN", "test-discord-token")
@@ -166,8 +170,8 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa":      {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"discord": {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
+			"wa":      {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -266,7 +270,9 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 }
 
 func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DISCORD_BOT_TOKEN", "test-discovery-token")
@@ -274,7 +280,7 @@ func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
 		},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 		Media:    config.Media{MaxSizeMB: 100},

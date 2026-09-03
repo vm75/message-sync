@@ -205,9 +205,9 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa-one":  {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"discord": {Transport: config.TransportDiscord, RemoteID: testChannelID},
-			"wa-two":  {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
+			"wa-one":  {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
+			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: testChannelID},
+			"wa-two":  {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa-one", "discord", "wa-two"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
@@ -239,9 +239,9 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 		suppressedDeletes: make(map[string]struct{}),
 	}
 	whatsAppAdapter := &e2eWhatsAppOutbound{}
-	registry, err := router.NewAdapterRegistry(cfg, map[config.Transport]router.OutboundAdapter{
-		config.TransportWhatsApp: whatsAppAdapter,
-		config.TransportDiscord:  discordAdapter,
+	registry, err := router.NewAdapterRegistry(cfg, map[string]router.OutboundAdapter{
+		"conn-wa-1": whatsAppAdapter,
+		"conn-dc-1": discordAdapter,
 	})
 	if err != nil {
 		t.Fatal(err)

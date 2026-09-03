@@ -80,7 +80,9 @@ func (f *fakeTelegramTransport) DiscoverChats(context.Context) ([]telegram.Disco
 }
 
 func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DISCORD_BOT_TOKEN", "test-discord-token")
@@ -92,9 +94,9 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	const discordRemoteID = "123456789012345678"
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa":       {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"discord":  {Transport: config.TransportDiscord, RemoteID: discordRemoteID},
-			"telegram": {Transport: config.TransportTelegram, RemoteID: telegramRemoteID},
+			"wa":       {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"discord":  {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: discordRemoteID},
+			"telegram": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: telegramRemoteID},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord", "telegram"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -280,8 +282,8 @@ func TestRunRequiresTelegramCredentialOnlyWhenRuntimeIsConfigured(t *testing.T) 
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa":       {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
-			"telegram": {Transport: config.TransportTelegram, RemoteID: "-1001234567890"},
+			"wa":       {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
+			"telegram": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-1001234567890"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "telegram"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -304,7 +306,9 @@ func TestRunRequiresTelegramCredentialOnlyWhenRuntimeIsConfigured(t *testing.T) 
 }
 
 func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
-	t.Setenv("DATA_DIR", t.TempDir())
+	dataDir := t.TempDir()
+	t.Setenv("DATA_DIR", dataDir)
+	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("DISCORD_BOT_TOKEN", "")
@@ -329,7 +333,7 @@ func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa": {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
+			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
 		},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 		Media:    config.Media{MaxSizeMB: 100},

@@ -25,9 +25,9 @@ func TestAdapterRegistryMixedTransportFanout(t *testing.T) {
 	cfg := mixedTransportConfig()
 	wa := &fakeSender{}
 	dc := &fakeSender{}
-	registry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: wa,
-		config.TransportDiscord:  dc,
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": wa,
+		"conn-dc-1": dc,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,9 +81,9 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 	cfg := mixedTransportConfig()
 	firstWA := &fakeSender{}
 	firstDC := &fakeSender{}
-	firstRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: firstWA,
-		config.TransportDiscord:  firstDC,
+	firstRegistry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": firstWA,
+		"conn-dc-1": firstDC,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,9 +115,9 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 
 	secondWA := &fakeSender{}
 	secondDC := &fakeSender{}
-	secondRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: secondWA,
-		config.TransportDiscord:  secondDC,
+	secondRegistry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": secondWA,
+		"conn-dc-1": secondDC,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -141,14 +141,19 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 func TestAdapterRegistryUnavailableTransportErrorDoesNotLeakRemoteID(t *testing.T) {
 	cfg := mixedTransportConfig()
 	remoteID := cfg.Endpoints["discord"].RemoteID
-	_, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: &fakeSender{},
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": &fakeSender{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord",
+		Kind:     "text",
+		Text:     "test",
 	})
 	if err == nil {
 		t.Fatal("expected unavailable Discord adapter error")
-	}
-	if !strings.Contains(err.Error(), "discord") {
-		t.Fatalf("error = %q, want safe transport classification", err)
 	}
 	if strings.Contains(err.Error(), remoteID) {
 		t.Fatalf("error leaked Discord remote ID: %q", err)
@@ -158,9 +163,9 @@ func TestAdapterRegistryUnavailableTransportErrorDoesNotLeakRemoteID(t *testing.
 func mixedTransportConfig() *config.Config {
 	return &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa1":     {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"discord": {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
-			"wa2":     {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
+			"wa1":     {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
+			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
+			"wa2":     {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{
 			ID:        "mesh",
@@ -207,10 +212,10 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 	wa := &fakeSender{}
 	dc := &fakeSender{}
 	tg := &fakeSender{}
-	registry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: wa,
-		config.TransportDiscord:  dc,
-		config.TransportTelegram: tg,
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": wa,
+		"conn-dc-1": dc,
+		"conn-tg-1": tg,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -279,10 +284,10 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	firstDC := &fakeSender{}
 	sendFailure := errors.New("simulated Telegram send failure")
 	firstTG := &failingOutboundAdapter{err: sendFailure}
-	firstRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: firstWA,
-		config.TransportDiscord:  firstDC,
-		config.TransportTelegram: firstTG,
+	firstRegistry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": firstWA,
+		"conn-dc-1": firstDC,
+		"conn-tg-1": firstTG,
 	})
 	if err != nil {
 		_ = firstStore.Close()
@@ -330,10 +335,10 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	secondWA := &fakeSender{}
 	secondDC := &fakeSender{}
 	secondTG := &fakeSender{}
-	secondRegistry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: secondWA,
-		config.TransportDiscord:  secondDC,
-		config.TransportTelegram: secondTG,
+	secondRegistry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": secondWA,
+		"conn-dc-1": secondDC,
+		"conn-tg-1": secondTG,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -366,10 +371,10 @@ func TestAdapterRegistryTelegramMessageIDIsOnlyRemoteCopyIdentity(t *testing.T) 
 	t.Cleanup(func() { _ = syncStore.Close() })
 
 	cfg := threeTransportConfig()
-	registry, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: &fakeSender{},
-		config.TransportDiscord:  &fakeSender{},
-		config.TransportTelegram: &fakeSender{},
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": &fakeSender{},
+		"conn-dc-1": &fakeSender{},
+		"conn-tg-1": &fakeSender{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -398,10 +403,10 @@ func TestAdapterRegistryRuntimeReloadAddsTelegramRoutingAlias(t *testing.T) {
 	wa := &fakeSender{}
 	dc := &fakeSender{}
 	tg := &fakeSender{}
-	registry, err := NewAdapterRegistry(initial, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: wa,
-		config.TransportDiscord:  dc,
-		config.TransportTelegram: tg,
+	registry, err := NewAdapterRegistry(initial, map[string]OutboundAdapter{
+		"conn-wa-1": wa,
+		"conn-dc-1": dc,
+		"conn-tg-1": tg,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -426,27 +431,86 @@ func TestAdapterRegistryRuntimeReloadAddsTelegramRoutingAlias(t *testing.T) {
 func TestAdapterRegistryUnavailableTelegramErrorDoesNotLeakRemoteID(t *testing.T) {
 	cfg := threeTransportConfig()
 	remoteID := cfg.Endpoints["telegram"].RemoteID
-	_, err := NewAdapterRegistry(cfg, map[config.Transport]OutboundAdapter{
-		config.TransportWhatsApp: &fakeSender{},
-		config.TransportDiscord:  &fakeSender{},
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-wa-1": &fakeSender{},
+		"conn-dc-1": &fakeSender{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = registry.Send(context.Background(), transport.Outgoing{
+		Endpoint: "telegram",
+		Kind:     "text",
+		Text:     "test",
 	})
 	if err == nil {
 		t.Fatal("expected unavailable Telegram adapter error")
-	}
-	if !strings.Contains(err.Error(), "telegram") {
-		t.Fatalf("error = %q, want safe transport classification", err)
 	}
 	if strings.Contains(err.Error(), remoteID) {
 		t.Fatalf("error leaked Telegram remote ID: %q", err)
 	}
 }
 
+func TestAdapterRegistryMultiConnectionSameTransport(t *testing.T) {
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"dc-guild-1": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "111"},
+			"dc-guild-2": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-2", RemoteID: "222"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:        "mesh",
+			Endpoints: []string{"dc-guild-1", "dc-guild-2"},
+		}},
+	}
+
+	dc1 := &fakeSender{}
+	dc2 := &fakeSender{}
+	registry, err := NewAdapterRegistry(cfg, map[string]OutboundAdapter{
+		"conn-dc-1": dc1,
+		"conn-dc-2": dc2,
+	})
+	if err != nil {
+		t.Fatalf("NewAdapterRegistry error: %v", err)
+	}
+
+	if _, err := registry.Send(context.Background(), transport.Outgoing{Endpoint: "dc-guild-1", Text: "to-1"}); err != nil {
+		t.Fatalf("Send to dc-guild-1 error: %v", err)
+	}
+	if _, err := registry.Send(context.Background(), transport.Outgoing{Endpoint: "dc-guild-2", Text: "to-2"}); err != nil {
+		t.Fatalf("Send to dc-guild-2 error: %v", err)
+	}
+
+	if len(dc1.sent) != 1 || dc1.sent[0].outgoing.Text != "to-1" {
+		t.Fatalf("dc1 expected 1 send with to-1, got: %+v", dc1.sent)
+	}
+	if len(dc2.sent) != 1 || dc2.sent[0].outgoing.Text != "to-2" {
+		t.Fatalf("dc2 expected 1 send with to-2, got: %+v", dc2.sent)
+	}
+
+	// Dynamic unregister and re-register
+	registry.UnregisterAdapter("conn-dc-2")
+	if _, err := registry.Send(context.Background(), transport.Outgoing{Endpoint: "dc-guild-2", Text: "fail"}); err == nil {
+		t.Fatal("expected error sending to stopped connection conn-dc-2")
+	}
+
+	dc2New := &fakeSender{}
+	if err := registry.RegisterAdapter("conn-dc-2", dc2New); err != nil {
+		t.Fatalf("RegisterAdapter error: %v", err)
+	}
+	if _, err := registry.Send(context.Background(), transport.Outgoing{Endpoint: "dc-guild-2", Text: "recovered"}); err != nil {
+		t.Fatalf("Send after re-register error: %v", err)
+	}
+	if len(dc2New.sent) != 1 || dc2New.sent[0].outgoing.Text != "recovered" {
+		t.Fatalf("dc2New expected 1 send, got: %+v", dc2New.sent)
+	}
+}
+
 func threeTransportConfig() *config.Config {
 	return &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa":       {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"discord":  {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
-			"telegram": {Transport: config.TransportTelegram, RemoteID: "-1001234567890"},
+			"wa":       {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
+			"discord":  {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
+			"telegram": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-1001234567890"},
 		},
 		SyncSets: []config.SyncSet{{
 			ID:        "mesh",

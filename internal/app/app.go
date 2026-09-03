@@ -13,6 +13,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/api"
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/connection"
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/recovery"
@@ -208,16 +209,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		waService = s
 	}
 
-	adapters := map[config.Transport]router.OutboundAdapter{
-		config.TransportWhatsApp: wa,
-	}
-	if dc != nil {
-		adapters[config.TransportDiscord] = dc
-	}
-	if tg != nil {
-		adapters[config.TransportTelegram] = tg
-	}
-	adapterRegistry, err := router.NewAdapterRegistry(cfg, adapters)
+	adapterRegistry, err := router.NewAdapterRegistry(cfg, nil)
 	if err != nil {
 		return fmt.Errorf("create transport adapter registry: %w", err)
 	}
@@ -231,36 +223,60 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("create recovery coordinator: %w", err)
 	}
-	var recoverySources []transport.RecoverySource
-	for _, adapter := range []any{wa, dc, tg} {
-		if source, ok := adapter.(transport.RecoverySource); ok {
-			recoverySources = append(recoverySources, source)
+
+	connMgr := connection.NewManager(ctx, logger, adapterRegistry, recoveryCoordinator)
+	defer connMgr.Close()
+
+	registerActiveConnections := func(c *config.Config) {
+		registered := make(map[string]bool)
+		for _, ep := range c.Endpoints {
+			if registered[ep.ConnectionID] {
+				continue
+			}
+			switch ep.Transport {
+			case config.TransportWhatsApp:
+				if wa != nil {
+					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportWhatsApp, wa); err == nil {
+						registered[ep.ConnectionID] = true
+					}
+				}
+			case config.TransportDiscord:
+				if dc != nil {
+					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportDiscord, dc); err == nil {
+						registered[ep.ConnectionID] = true
+					}
+				}
+			case config.TransportTelegram:
+				if tg != nil {
+					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportTelegram, tg); err == nil {
+						registered[ep.ConnectionID] = true
+					}
+				}
+			}
+		}
+		if wa != nil && !registered["conn-wa-1"] {
+			_ = connMgr.Register(ctx, "conn-wa-1", config.TransportWhatsApp, wa)
+		}
+		if dc != nil && !registered["conn-dc-1"] {
+			_ = connMgr.Register(ctx, "conn-dc-1", config.TransportDiscord, dc)
+		}
+		if tg != nil && !registered["conn-tg-1"] {
+			_ = connMgr.Register(ctx, "conn-tg-1", config.TransportTelegram, tg)
 		}
 	}
+	registerActiveConnections(cfg)
 
 	onConfigChange := func(updateCtx context.Context) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
 		if err != nil {
 			return fmt.Errorf("reload config: %w", err)
 		}
-		if err := adapterRegistry.UpdateConfig(updatedCfg); err != nil {
-			return fmt.Errorf("update transport adapter registry: %w", err)
+		registerActiveConnections(updatedCfg)
+		if err := connMgr.UpdateConfig(updatedCfg); err != nil {
+			return fmt.Errorf("update connection manager: %w", err)
 		}
 		if err := mesh.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update router config: %w", err)
-		}
-		if err := wa.UpdateConfig(updatedCfg); err != nil {
-			return fmt.Errorf("update whatsapp config: %w", err)
-		}
-		if dc != nil {
-			if err := dc.UpdateConfig(updatedCfg); err != nil {
-				return fmt.Errorf("update Discord config: %w", err)
-			}
-		}
-		if tg != nil {
-			if err := tg.UpdateConfig(updatedCfg); err != nil {
-				return fmt.Errorf("update Telegram config: %w", err)
-			}
 		}
 		logger.Info("configuration reloaded",
 			"endpoints", len(updatedCfg.Endpoints),
@@ -300,7 +316,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := apiServer.Start(); err != nil {
 		return fmt.Errorf("start api server: %w", err)
 	}
-	recoveryCoordinator.Start(ctx, recoverySources)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -348,16 +363,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	pruneTicker := time.NewTicker(24 * time.Hour)
 	defer pruneTicker.Stop()
 
-	whatsAppEvents := wa.Events()
-	var discordEvents <-chan transport.Incoming
-	if dc != nil {
-		discordEvents = dc.Events()
-	}
-	var telegramEvents <-chan transport.Incoming
-	if tg != nil {
-		telegramEvents = tg.Events()
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -379,35 +384,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					"sync_db_bytes", metrics.DatabaseSizeBytes,
 				)
 			}
-		case incoming, ok := <-whatsAppEvents:
+		case incoming, ok := <-connMgr.Events():
 			if !ok {
-				return errors.New("WhatsApp event stream closed")
-			}
-			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
-				safelog.Error(logger, "message routing failed", "route_message", err)
-				continue
-			}
-			logger.Info("message routed",
-				"event", "message_routed",
-				"endpoint", string(incoming.Endpoint),
-				"kind", incoming.Kind,
-			)
-		case incoming, ok := <-discordEvents:
-			if !ok {
-				return errors.New("Discord event stream closed")
-			}
-			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
-				safelog.Error(logger, "message routing failed", "route_message", err)
-				continue
-			}
-			logger.Info("message routed",
-				"event", "message_routed",
-				"endpoint", string(incoming.Endpoint),
-				"kind", incoming.Kind,
-			)
-		case incoming, ok := <-telegramEvents:
-			if !ok {
-				return errors.New("Telegram event stream closed")
+				return errors.New("connection manager event stream closed")
 			}
 			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)

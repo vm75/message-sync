@@ -95,9 +95,9 @@ func (f *fakeAdapter) Name() string { return f.name }
 func reliabilityConfig() *config.Config {
 	return &config.Config{
 		Endpoints: map[string]config.Endpoint{
-			"wa": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"dc": {Transport: config.TransportDiscord, RemoteID: "222"},
-			"tg": {Transport: config.TransportTelegram, RemoteID: "-333"},
+			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
+			"dc": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "222"},
+			"tg": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-333"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "dc", "tg"}}},
 		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
@@ -116,10 +116,10 @@ func TestThreeTransportHarnessIsolatesDeliveryAndPreservesLifecycleOrder(t *test
 	wa := &fakeAdapter{name: "wa"}
 	dc := &fakeAdapter{name: "dc", delay: releaseSlow}
 	tg := &fakeAdapter{name: "tg"}
-	registry, err := router.NewAdapterRegistry(reliabilityConfig(), map[config.Transport]router.OutboundAdapter{
-		config.TransportWhatsApp: wa,
-		config.TransportDiscord:  dc,
-		config.TransportTelegram: tg,
+	registry, err := router.NewAdapterRegistry(reliabilityConfig(), map[string]router.OutboundAdapter{
+		"conn-wa-1": wa,
+		"conn-dc-1": dc,
+		"conn-tg-1": tg,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -194,8 +194,8 @@ func TestThreeTransportHarnessDoesNotBlindlyRetryAmbiguousCreate(t *testing.T) {
 	wa := &fakeAdapter{name: "wa"}
 	dc := &fakeAdapter{name: "dc", failures: 1, failure: transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("ambiguous provider result"))}
 	tg := &fakeAdapter{name: "tg"}
-	registry, err := router.NewAdapterRegistry(reliabilityConfig(), map[config.Transport]router.OutboundAdapter{
-		config.TransportWhatsApp: wa, config.TransportDiscord: dc, config.TransportTelegram: tg,
+	registry, err := router.NewAdapterRegistry(reliabilityConfig(), map[string]router.OutboundAdapter{
+		"conn-wa-1": wa, "conn-dc-1": dc, "conn-tg-1": tg,
 	})
 	if err != nil {
 		t.Fatal(err)

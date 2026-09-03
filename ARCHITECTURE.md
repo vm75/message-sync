@@ -236,6 +236,22 @@ Push names are never persisted.
 
 ## 6. Ingress and router event flow
 
+### Dynamic Connection Runtime, Shared Ingress, and Adapter Dispatch
+
+The application runtime uses a dynamic `ConnectionManager` (`internal/connection`) that owns active connection adapter instances by opaque connection ID. Outbound operations from the canonical router remain strictly endpoint-addressed; `AdapterRegistry` resolves each configured endpoint alias to its owning connection's adapter:
+
+```text
+endpoint alias -> connection id -> adapter instance
+```
+
+The canonical router remains completely unaware of connection IDs. If an endpoint's connection is stopped or unavailable, outbound calls safely return a classified transient failure without leaking provider details.
+
+Each active connection adapter emits normalized `transport.Incoming` events on its `Events()` channel. `ConnectionManager` forwards each connection's events into a unified shared ingress channel feeding the recovery coordinator and single ordered router worker. Event forwarding for each connection is isolated:
+- when an adapter stream closes or a connection is stopped, its forwarder terminates without interrupting other connections or closing the shared ingress stream;
+- connections support a safe register, start, stop, and atomic replace/restart lifecycle;
+- recovery-capable connections dynamically register with `recovery.Coordinator` upon startup, run bounded recovery, and monitor reconnect signals until stopped;
+- `transport.ChildScope` (such as Discord threads or Telegram topics) passes through outbound dispatch and shared ingress without modification.
+
 ### WhatsApp ingress boundary
 
 The WhatsApp ingress boundary normalizes incoming events before fan-out:
@@ -294,7 +310,7 @@ Discord MESSAGE_CREATE
 
 Only **Guild Messages**, **Guild Message Reactions**, and **Message Content** gateway intents are requested; direct-message intents are not requested, and DMs are also rejected defensively by the normalizer. Discord user IDs, display names, guild/channel names, message bodies, and raw gateway events are never persisted or logged. User mentions are converted at ingress to transient display text, with an HMAC-derived actor fallback when no display name is available; role and channel mention IDs become generic `@role` / `#channel` text. Structured Discord member IDs therefore do not cross the adapter privacy boundary.
 
-The gateway bot is intentionally distinct from outbound Discord sender rendering. The bot owns gateway ingress, discovery, reactions, and gateway lifecycle; each configured Discord destination reuses one bridge-managed incoming webhook for outbound sender rendering. Only the webhook manager's in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the sender's transient display name (from WhatsApp or Telegram) as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. These APP/webhook identities are presentation overrides, not real Discord user accounts, and no per-user webhook is created. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application reads the Discord event channel alongside WhatsApp and Telegram in one select loop and feeds all into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
+The gateway bot is intentionally distinct from outbound Discord sender rendering. The bot owns gateway ingress, discovery, reactions, and gateway lifecycle; each configured Discord destination reuses one bridge-managed incoming webhook for outbound sender rendering. Only the webhook manager's in-memory credential map knows the webhook ID/token. The router passes transient sender metadata separately from the transport-neutral attributed text, letting the Discord adapter render the sender's transient display name (from WhatsApp or Telegram) as the webhook APP username (or the HMAC actor ID when no display name is available) without persisting either display name or message content. These APP/webhook identities are presentation overrides, not real Discord user accounts, and no per-user webhook is created. A `ManagedWebhookChecker` suppresses bridge webhook message-create loops, while bridge-bot reaction events and bridge-initiated delete echoes are filtered at the Discord boundary. The application feeds the Discord adapter's event stream through the ConnectionManager's shared ingress path into the same ordered router worker; no second canonical worker or platform-specific canonical-ID path is introduced.
 
 Discord attachments are downloaded only when routing needs them, bounded by the configured media limit, held in memory, and re-uploaded with bridge-generated safe filenames. Source filenames, CDN URLs, and media bytes are never stored in `sync.db`. Discord incoming-webhook execution does not accept `message_reference`; when a destination copy exists the adapter adds a transient clickable message link labelled with the source endpoint and first line of the quoted message to the single sender-attributed webhook message. If transient channel metadata or the destination copy is unavailable, an alias-based textual reply fallback is used instead.
 

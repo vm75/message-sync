@@ -21,37 +21,62 @@ type OutboundAdapter interface {
 }
 
 // AdapterRegistry dispatches outbound operations to the adapter responsible
-// for each configured endpoint transport.
+// for each configured endpoint's owning connection.
 type AdapterRegistry struct {
 	mu        sync.RWMutex
-	adapters  map[config.Transport]OutboundAdapter
-	endpoints map[transport.EndpointID]config.Transport
+	adapters  map[string]OutboundAdapter
+	endpoints map[transport.EndpointID]string
 }
 
-func NewAdapterRegistry(cfg *config.Config, adapters map[config.Transport]OutboundAdapter) (*AdapterRegistry, error) {
+func NewAdapterRegistry(cfg *config.Config, adapters map[string]OutboundAdapter) (*AdapterRegistry, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
 	}
-	if len(adapters) == 0 {
-		return nil, errors.New("at least one transport adapter is required")
-	}
 
-	copied := make(map[config.Transport]OutboundAdapter, len(adapters))
-	for transportType, adapter := range adapters {
-		if !transportType.IsValid() {
-			return nil, errors.New("transport adapter registry contains unknown transport")
+	copied := make(map[string]OutboundAdapter, len(adapters))
+	for connID, adapter := range adapters {
+		if connID == "" {
+			return nil, errors.New("connection ID is required")
 		}
 		if adapter == nil {
-			return nil, fmt.Errorf("transport adapter %q is unavailable", transportType)
+			return nil, fmt.Errorf("connection adapter %q is unavailable", connID)
 		}
-		copied[transportType] = adapter
+		copied[connID] = adapter
 	}
 
-	registry := &AdapterRegistry{adapters: copied}
+	registry := &AdapterRegistry{
+		adapters:  copied,
+		endpoints: make(map[transport.EndpointID]string),
+	}
 	if err := registry.UpdateConfig(cfg); err != nil {
 		return nil, err
 	}
 	return registry, nil
+}
+
+func (r *AdapterRegistry) RegisterAdapter(connectionID string, adapter OutboundAdapter) error {
+	if r == nil {
+		return errors.New("transport adapter registry is not initialized")
+	}
+	if connectionID == "" {
+		return errors.New("connection ID is required")
+	}
+	if adapter == nil {
+		return errors.New("adapter is required")
+	}
+	r.mu.Lock()
+	r.adapters[connectionID] = adapter
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *AdapterRegistry) UnregisterAdapter(connectionID string) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	delete(r.adapters, connectionID)
+	r.mu.Unlock()
 }
 
 func (r *AdapterRegistry) UpdateConfig(cfg *config.Config) error {
@@ -62,15 +87,15 @@ func (r *AdapterRegistry) UpdateConfig(cfg *config.Config) error {
 		return errors.New("config is required")
 	}
 
-	endpoints := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
+	endpoints := make(map[transport.EndpointID]string, len(cfg.Endpoints))
 	for alias, endpoint := range cfg.Endpoints {
 		if !endpoint.Transport.IsValid() {
 			return errors.New("configured endpoint has unknown transport")
 		}
-		if _, ok := r.adapters[endpoint.Transport]; !ok {
-			return fmt.Errorf("transport adapter %q is unavailable", endpoint.Transport)
+		if endpoint.ConnectionID == "" {
+			return errors.New("configured endpoint has empty connection ID")
 		}
-		endpoints[transport.EndpointID(alias)] = endpoint.Transport
+		endpoints[transport.EndpointID(alias)] = endpoint.ConnectionID
 	}
 
 	r.mu.Lock()
@@ -85,15 +110,15 @@ func (r *AdapterRegistry) adapterFor(endpoint transport.EndpointID) (OutboundAda
 	}
 
 	r.mu.RLock()
-	transportType, ok := r.endpoints[endpoint]
+	connID, ok := r.endpoints[endpoint]
 	if !ok {
 		r.mu.RUnlock()
 		return nil, transport.NewFailure(transport.FailureDestinationMissing, 0, errors.New("destination endpoint is not configured"))
 	}
-	adapter := r.adapters[transportType]
+	adapter := r.adapters[connID]
 	r.mu.RUnlock()
 	if adapter == nil {
-		return nil, fmt.Errorf("transport adapter %q is unavailable", transportType)
+		return nil, transport.NewFailure(transport.FailureTransient, 0, fmt.Errorf("connection %q is stopped or unavailable", connID))
 	}
 	return adapter, nil
 }

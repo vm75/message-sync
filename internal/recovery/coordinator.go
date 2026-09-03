@@ -24,6 +24,8 @@ type Coordinator struct {
 	mu        sync.Mutex
 	recoverMu sync.Mutex
 	streams   map[string]*streamState
+	sourcesMu sync.Mutex
+	sources   map[transport.RecoverySource]context.CancelFunc
 }
 
 type streamState struct {
@@ -39,7 +41,12 @@ func NewCoordinator(syncStore *store.Store, canonicalRouter *router.Router) (*Co
 	if syncStore == nil || canonicalRouter == nil {
 		return nil, errors.New("recovery store and router are required")
 	}
-	return &Coordinator{store: syncStore, router: canonicalRouter, streams: make(map[string]*streamState)}, nil
+	return &Coordinator{
+		store:   syncStore,
+		router:  canonicalRouter,
+		streams: make(map[string]*streamState),
+		sources: make(map[transport.RecoverySource]context.CancelFunc),
+	}, nil
 }
 
 func (c *Coordinator) stream(key string) *streamState {
@@ -162,31 +169,65 @@ func (c *Coordinator) Recover(ctx context.Context, sources []transport.RecoveryS
 	wg.Wait()
 }
 
-// Start launches startup recovery and listens for adapter reconnect signals.
-// A single recovery run is active at a time across all sources.
-func (c *Coordinator) Start(ctx context.Context, sources []transport.RecoverySource) {
-	if c == nil || len(sources) == 0 {
+// RegisterSource registers a new recovery-capable source, runs its bounded recovery,
+// and begins listening for its reconnect signals.
+func (c *Coordinator) RegisterSource(ctx context.Context, source transport.RecoverySource) {
+	if c == nil || source == nil {
 		return
 	}
-	var runMu sync.Mutex
-	run := func() { runMu.Lock(); defer runMu.Unlock(); c.Recover(ctx, sources) }
-	go run()
-	for _, source := range sources {
-		if source == nil || source.RecoverySignals() == nil {
-			continue
-		}
-		go func(source transport.RecoverySource) {
-			for {
-				select {
-				case <-ctx.Done():
+	c.sourcesMu.Lock()
+	if c.sources == nil {
+		c.sources = make(map[transport.RecoverySource]context.CancelFunc)
+	}
+	if _, exists := c.sources[source]; exists {
+		c.sourcesMu.Unlock()
+		return
+	}
+	sourceCtx, cancel := context.WithCancel(ctx)
+	c.sources[source] = cancel
+	c.sourcesMu.Unlock()
+
+	go c.Recover(sourceCtx, []transport.RecoverySource{source})
+
+	signals := source.RecoverySignals()
+	if signals == nil {
+		return
+	}
+	go func() {
+		for {
+			select {
+			case <-sourceCtx.Done():
+				return
+			case _, ok := <-signals:
+				if !ok {
 					return
-				case _, ok := <-source.RecoverySignals():
-					if !ok {
-						return
-					}
-					go run()
 				}
+				c.Recover(sourceCtx, []transport.RecoverySource{source})
 			}
-		}(source)
+		}
+	}()
+}
+
+// UnregisterSource unregisters a recovery source, stopping signal monitoring.
+func (c *Coordinator) UnregisterSource(source transport.RecoverySource) {
+	if c == nil || source == nil {
+		return
+	}
+	c.sourcesMu.Lock()
+	defer c.sourcesMu.Unlock()
+	if cancel, ok := c.sources[source]; ok {
+		cancel()
+		delete(c.sources, source)
+	}
+}
+
+// Start launches startup recovery and listens for adapter reconnect signals.
+// Dynamic sources may also be added/removed with RegisterSource/UnregisterSource.
+func (c *Coordinator) Start(ctx context.Context, sources []transport.RecoverySource) {
+	if c == nil {
+		return
+	}
+	for _, source := range sources {
+		c.RegisterSource(ctx, source)
 	}
 }
