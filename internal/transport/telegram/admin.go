@@ -50,16 +50,13 @@ type observedChatEntry struct {
 
 func (a *Adapter) AdminStatus(ctx context.Context) AdminStatus {
 	status := AdminStatus{
-		TokenConfigured:    BotTokenConfigured(),
+		TokenConfigured:    false,
 		Status:             "not_configured",
 		Endpoints:          []EndpointReadiness{},
 		PrivacyModeKnown:   false,
 		VisibilityGuidance: VisibilityGuidance,
 	}
 	if a == nil {
-		if status.TokenConfigured {
-			status.Status = "stopped"
-		}
 		return status
 	}
 

@@ -9,8 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,56 +22,99 @@ import (
 	"github.com/vm75/message-sync/internal/transport"
 )
 
-func TestLoadBotTokenFromEnvironment(t *testing.T) {
-	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", "")
-	t.Setenv("TELEGRAM_BOT_TOKEN", "  12345:environment-token  ")
-
-	token, err := LoadBotToken()
+func TestTelegramTokenInjectionFromOptions(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "12345:environment-token" {
-		t.Fatalf("token = %q", token)
-	}
-}
 
-func TestLoadBotTokenFromSecretFile(t *testing.T) {
-	t.Setenv("TELEGRAM_BOT_TOKEN", "")
-	path := filepath.Join(t.TempDir(), "telegram-token")
-	if err := os.WriteFile(path, []byte("12345:mounted-secret-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("TELEGRAM_BOT_TOKEN_FILE", path)
-
-	token, err := LoadBotToken()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if token != "12345:mounted-secret-token" {
-		t.Fatalf("token = %q", token)
-	}
-}
-
-func TestLoadBotTokenRejectsMissingAndAmbiguousSources(t *testing.T) {
-	t.Run("missing", func(t *testing.T) {
-		t.Setenv("TELEGRAM_BOT_TOKEN", "")
-		t.Setenv("TELEGRAM_BOT_TOKEN_FILE", "")
-		if _, err := LoadBotToken(); err == nil {
-			t.Fatal("expected missing token error")
+	t.Run("missing token returns error", func(t *testing.T) {
+		_, err := Open(context.Background(), Options{
+			ChatIDs:      map[string]string{"tg": "-1001234567890"},
+			Hasher:       hasher,
+			UsernameMode: config.UsernameModeHash,
+			Logger:       slog.Default(),
+			Token:        "",
+		})
+		if err == nil || !strings.Contains(err.Error(), "Telegram bot token is required") {
+			t.Fatalf("expected token required error, got: %v", err)
 		}
 	})
 
-	t.Run("both", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "telegram-token")
-		if err := os.WriteFile(path, []byte("12345:secret"), 0o600); err != nil {
+	t.Run("injected token passed to factory and adapter", func(t *testing.T) {
+		var capturedToken string
+		factory := func(token string, handler telegrambot.HandlerFunc, errorsHandler telegrambot.ErrorsHandler) (botClient, error) {
+			capturedToken = token
+			return &fakeBotClient{id: 12345, started: make(chan struct{}, 1)}, nil
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		adapter, err := Open(ctx, Options{
+			ConnectionID:  "conn-tg-1",
+			Token:         "12345:injected-secret-token",
+			ChatIDs:       map[string]string{"tg": "-1001234567890"},
+			Hasher:        hasher,
+			UsernameMode:  config.UsernameModeHash,
+			Logger:        slog.Default(),
+			clientFactory: factory,
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
-		t.Setenv("TELEGRAM_BOT_TOKEN", "12345:environment-token")
-		t.Setenv("TELEGRAM_BOT_TOKEN_FILE", path)
-		if _, err := LoadBotToken(); err == nil {
-			t.Fatal("expected ambiguous token source error")
+		defer adapter.Close()
+
+		if capturedToken != "12345:injected-secret-token" {
+			t.Fatalf("factory received token %q, want %q", capturedToken, "12345:injected-secret-token")
+		}
+		if adapter.ConnectionID() != "conn-tg-1" {
+			t.Fatalf("adapter connection ID = %q, want %q", adapter.ConnectionID(), "conn-tg-1")
 		}
 	})
+}
+
+func TestTelegramAdapterEndpointOwnership(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := &Adapter{
+		connectionID: "conn-tg-1",
+		hasher:       hasher,
+	}
+
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"tg-owned": {
+				Transport:    config.TransportTelegram,
+				ConnectionID: "conn-tg-1",
+				RemoteID:     "-1001234567890",
+			},
+			"tg-other": {
+				Transport:    config.TransportTelegram,
+				ConnectionID: "conn-tg-2",
+				RemoteID:     "-1009876543210",
+			},
+		},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+	}
+
+	if err := adapter.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter.mu.RLock()
+	defer adapter.mu.RUnlock()
+	if len(adapter.normalizer.endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint for conn-tg-1, got: %d", len(adapter.normalizer.endpoints))
+	}
+	if _, ok := adapter.normalizer.endpoints[-1001234567890]; !ok {
+		t.Fatal("expected -1001234567890 to be configured on adapter")
+	}
+	if _, ok := adapter.normalizer.endpoints[-1009876543210]; ok {
+		t.Fatal("expected -1009876543210 to be excluded from adapter")
+	}
 }
 
 func TestTelegramErrorHandlerDropsRawProtocolErrorText(t *testing.T) {
@@ -361,9 +402,13 @@ func (f *fakeBotClient) GetMe(context.Context) (*models.User, error) {
 }
 
 func (f *fakeBotClient) Start(ctx context.Context) {
-	f.once.Do(func() { close(f.started) })
+	if f.started != nil {
+		f.once.Do(func() { close(f.started) })
+	}
 	<-ctx.Done()
-	close(f.stopped)
+	if f.stopped != nil {
+		close(f.stopped)
+	}
 }
 
 func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
@@ -392,6 +437,7 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 	var logBuf bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
 	adapter, err := Open(ctx, Options{
+		Token: "12345:test-token",
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
@@ -485,6 +531,7 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
 	_, err = Open(context.Background(), Options{
+		Token: "12345:test-token",
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},

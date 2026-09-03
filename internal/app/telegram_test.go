@@ -137,6 +137,9 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	select {
+	case err := <-errCh:
+		cancel()
+		t.Fatalf("Run returned early with error: %v, logs: %s", err, logBuf.String())
 	case opts := <-openedTelegram:
 		if len(opts.ChatIDs) != 1 || opts.ChatIDs["telegram"] != telegramRemoteID {
 			cancel()
@@ -156,7 +159,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		cancel()
-		t.Fatal("Telegram adapter was not opened")
+		t.Fatalf("Telegram adapter was not opened, logs: %s", logBuf.String())
 	}
 
 	waitStarted := func() {

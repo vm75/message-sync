@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +28,8 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
+	ConnectionID        string
+	Token               string
 	ChatIDs             map[string]string
 	Hasher              *identity.Hasher
 	UsernameMode        config.UsernameMode
@@ -44,14 +45,15 @@ type Options struct {
 }
 
 type Adapter struct {
-	client     botClient
-	normalizer *Normalizer
-	hasher     *identity.Hasher
-	events     chan transport.Incoming
-	logger     *slog.Logger
-	botUserID  int64
-	token      string
-	httpClient *http.Client
+	connectionID string
+	client       botClient
+	normalizer   *Normalizer
+	hasher       *identity.Hasher
+	events       chan transport.Incoming
+	logger       *slog.Logger
+	botUserID    int64
+	token        string
+	httpClient   *http.Client
 
 	mediaEnabled        bool
 	mediaMaxBytes       uint64
@@ -89,11 +91,11 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	default:
 	}
 
-	token, err := LoadBotToken()
-	if err != nil {
-		return nil, err
+	token := strings.TrimSpace(opts.Token)
+	if token == "" {
+		return nil, errors.New("Telegram bot token is required")
 	}
-	normalizer, err := NewNormalizer(opts.ChatIDs, opts.Hasher, opts.UsernameMode)
+	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +106,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
+		connectionID:        strings.TrimSpace(opts.ConnectionID),
 		normalizer:          normalizer,
 		hasher:              opts.Hasher,
 		events:              make(chan transport.Incoming, eventBufferSize),
@@ -188,6 +191,27 @@ func (a *Adapter) Name() string {
 	return "telegram"
 }
 
+func (a *Adapter) ConnectionID() string {
+	if a == nil {
+		return ""
+	}
+	return a.connectionID
+}
+
+func (a *Adapter) checkpointStreamKey() string {
+	if a == nil || a.connectionID == "" {
+		return "telegram"
+	}
+	return "telegram:" + a.connectionID
+}
+
+func (a *Adapter) pollProviderNamespace() string {
+	if a == nil || a.connectionID == "" {
+		return "telegram"
+	}
+	return "telegram:" + a.connectionID
+}
+
 func (a *Adapter) Events() <-chan transport.Incoming {
 	if a == nil {
 		return nil
@@ -219,10 +243,13 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	chatIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportTelegram {
+			if a.connectionID != "" && endpoint.ConnectionID != a.connectionID {
+				continue
+			}
 			chatIDs[alias] = endpoint.RemoteID
 		}
 	}
-	normalizer, err := NewNormalizer(chatIDs, a.hasher, cfg.Identity.UsernameMode)
+	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, cfg.Identity.UsernameMode, a.connectionID)
 	if err != nil {
 		return err
 	}
@@ -240,7 +267,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		return
 	}
 	a.observeUpdate(update)
-	checkpoint := transport.Checkpoint{StreamKey: "telegram", Position: update.ID, EventTimestamp: telegramUpdateTimestamp(update), Valid: update.ID > 0}
+	checkpoint := transport.Checkpoint{StreamKey: a.checkpointStreamKey(), Position: update.ID, EventTimestamp: telegramUpdateTimestamp(update), Valid: update.ID > 0}
 
 	a.mu.RLock()
 	normalizer := a.normalizer
@@ -283,7 +310,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		for index, option := range update.Poll.Options {
 			counts[index] = option.VoterCount
 		}
-		incoming = transport.Incoming{Endpoint: endpoint, RemoteID: update.Poll.ID, Kind: "poll_snapshot", PollSnapshot: counts, PollProvider: "telegram", PollProviderReference: update.Poll.ID, Timestamp: time.Now().UTC()}
+		incoming = transport.Incoming{Endpoint: endpoint, RemoteID: update.Poll.ID, Kind: "poll_snapshot", PollSnapshot: counts, PollProvider: a.pollProviderNamespace(), PollProviderReference: update.Poll.ID, Timestamp: time.Now().UTC()}
 		ok = true
 	default:
 		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
@@ -344,36 +371,4 @@ func (a *Adapter) emit(incoming transport.Incoming) {
 			)
 		}
 	}
-}
-
-// BotTokenConfigured reports whether a supported deployment credential source
-// is present. LoadBotToken rejects ambiguous configuration when both sources
-// are set. The token itself never enters application configuration or persistence.
-func BotTokenConfigured() bool {
-	return strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")) != "" ||
-		strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN_FILE")) != ""
-}
-
-func LoadBotToken() (string, error) {
-	token := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN"))
-	secretFile := strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN_FILE"))
-	if token != "" && secretFile != "" {
-		return "", errors.New("configure only one Telegram bot token source")
-	}
-	if token != "" {
-		return token, nil
-	}
-	if secretFile == "" {
-		return "", errors.New("Telegram bot token is not configured")
-	}
-
-	data, err := os.ReadFile(secretFile)
-	if err != nil {
-		return "", errors.New("read Telegram bot token secret")
-	}
-	token = strings.TrimSpace(string(data))
-	if token == "" {
-		return "", errors.New("Telegram bot token secret is empty")
-	}
-	return token, nil
 }

@@ -10,15 +10,12 @@ import (
 func (s *Server) handleTelegramStatus(w http.ResponseWriter, r *http.Request) {
 	if s.telegram == nil {
 		status := telegram.AdminStatus{
-			TokenConfigured:    telegram.BotTokenConfigured(),
+			TokenConfigured:    false,
 			Running:            false,
 			Status:             "not_configured",
 			Endpoints:          []telegram.EndpointReadiness{},
 			PrivacyModeKnown:   false,
 			VisibilityGuidance: telegram.VisibilityGuidance,
-		}
-		if status.TokenConfigured {
-			status.Status = "stopped"
 		}
 		_ = WriteJSON(w, http.StatusOK, status)
 		return
@@ -36,7 +33,7 @@ func (s *Server) handleTelegramStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTelegramChats(w http.ResponseWriter, r *http.Request) {
 	if s.telegram == nil {
-		WriteError(w, http.StatusServiceUnavailable, "Telegram bot is not configured; set TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN_FILE and restart message-sync")
+		WriteError(w, http.StatusServiceUnavailable, "Telegram bot is not configured")
 		return
 	}
 

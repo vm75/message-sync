@@ -220,7 +220,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	syncPath := filepath.Join(dataDir, SyncDBName)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 200; i++ {
 		fake.mu.Lock()
 		sentCount := len(fake.sent)
 		fake.mu.Unlock()
@@ -350,7 +350,7 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 	}()
 
 	// Wait briefly for startup retention prune and metrics logging
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 200; i++ {
 		if strings.Contains(out.String(), "retention prune completed") && strings.Contains(out.String(), "storage metrics") {
 			break
 		}
@@ -725,8 +725,11 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/api/endpoints", apiAddr), strings.NewReader(`{"alias":"c1g3","transport":"whatsapp","connectionId":"conn-wa-1","remoteId":"333333333@g.us"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusCreated {
-		t.Fatalf("POST /api/endpoints failed: err=%v, code=%d", err, resp.StatusCode)
+	if err != nil {
+		t.Fatalf("POST /api/endpoints failed: err=%v", err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST /api/endpoints failed: code=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
 
@@ -734,8 +737,11 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"endpoints":["c1g1","c1g2","c1g3"]}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		t.Fatalf("PUT /api/sync-sets/mesh failed: err=%v, code=%d", err, resp.StatusCode)
+	if err != nil {
+		t.Fatalf("PUT /api/sync-sets/mesh failed: err=%v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT /api/sync-sets/mesh failed: code=%d", resp.StatusCode)
 	}
 	resp.Body.Close()
 

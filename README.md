@@ -79,15 +79,7 @@ The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISC
 
 If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
 
-The Telegram Bot API adapter uses **long polling** and resumes its single global Bot API update stream from the last contiguously accepted update after restart. Replayed updates use the normal canonical routing and idempotency path. Telegram only retains updates for a limited provider window, so updates older than that window cannot be recovered. The adapter reads its credential only from one deployment source:
-
-```sh
-# Environment source
-echo "TELEGRAM_BOT_TOKEN=your-bot-token" >> .env
-
-# Or mount a secret file and set its in-container path:
-# TELEGRAM_BOT_TOKEN_FILE=/run/secrets/telegram_bot_token
-```
+The Telegram Bot API adapters use **long polling** and resume their connection-scoped Bot API update streams from the last contiguously accepted update after restart (`telegram:<connection-id>`). Multiple Telegram bots run concurrently through the connection management model, with bot credentials encrypted in the control store using domain-separated keys derived from `IDENTITY_SECRET`. Replayed updates use the normal canonical routing and idempotency path. Telegram only retains updates for a limited provider window, so updates older than that window cannot be recovered.
 
 Create the bot with **BotFather**, add it to each intended Telegram group/supergroup, and ensure it can receive the messages you intend to synchronize. For ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The admin status derives Bot Privacy Mode readiness from Telegram's safe `getMe` capability flag when the probe succeeds; it retains only the boolean state, never the returned bot user object. If the probe is unavailable, the UI falls back to fixed operator guidance.
 

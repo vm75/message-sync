@@ -316,13 +316,14 @@ func Load(ctx context.Context, db *sql.DB) (*Config, error) {
 // MigrateTelegramEndpoint atomically replaces only the operational Telegram
 // remote address for an existing endpoint. Alias and sync-set membership are
 // intentionally left untouched so canonical routing identity does not change.
-func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, oldRemoteID, newRemoteID string) error {
+func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, connectionID, oldRemoteID, newRemoteID string) error {
 	if db == nil {
 		return errors.New("database connection is required")
 	}
 	if err := ValidateAlias(alias); err != nil {
 		return err
 	}
+	connectionID = strings.TrimSpace(connectionID)
 	oldRemoteID = strings.TrimSpace(oldRemoteID)
 	newRemoteID = strings.TrimSpace(newRemoteID)
 	if err := ValidateEndpointRemoteID(TransportTelegram, oldRemoteID); err != nil {
@@ -339,10 +340,17 @@ func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, oldRemoteID
 	defer tx.Rollback()
 
 	var currentRemoteID string
-	err = tx.QueryRowContext(ctx,
-		`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ?`,
-		alias, string(TransportTelegram),
-	).Scan(&currentRemoteID)
+	if connectionID != "" {
+		err = tx.QueryRowContext(ctx,
+			`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ? AND connection_id = ?`,
+			alias, string(TransportTelegram), connectionID,
+		).Scan(&currentRemoteID)
+	} else {
+		err = tx.QueryRowContext(ctx,
+			`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ?`,
+			alias, string(TransportTelegram),
+		).Scan(&currentRemoteID)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return errors.New("Telegram endpoint is not configured")
 	}
@@ -362,10 +370,18 @@ func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, oldRemoteID
 		return errors.New("Telegram endpoint addressing changed concurrently")
 	}
 
-	result, err := tx.ExecContext(ctx,
-		`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND remote_id = ?`,
-		newRemoteID, alias, string(TransportTelegram), oldRemoteID,
-	)
+	var result sql.Result
+	if connectionID != "" {
+		result, err = tx.ExecContext(ctx,
+			`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND connection_id = ? AND remote_id = ?`,
+			newRemoteID, alias, string(TransportTelegram), connectionID, oldRemoteID,
+		)
+	} else {
+		result, err = tx.ExecContext(ctx,
+			`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND remote_id = ?`,
+			newRemoteID, alias, string(TransportTelegram), oldRemoteID,
+		)
+	}
 	if err != nil {
 		return errors.New("update Telegram endpoint addressing")
 	}

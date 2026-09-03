@@ -203,35 +203,72 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		}
 	}
 
-	var tg telegramTransport
-	if len(telegramChatIDs) > 0 || telegram.BotTokenConfigured() {
-		initialUpdateID, err := telegramInitialUpdateID(ctx, syncStore)
-		if err != nil {
-			return fmt.Errorf("load Telegram recovery cursor: %w", err)
-		}
-		tg, err = openTelegram(ctx, telegram.Options{
-			ChatIDs:         telegramChatIDs,
-			Hasher:          hasher,
-			UsernameMode:    cfg.Identity.UsernameMode,
-			Logger:          logger,
-			MediaEnabled:    cfg.Media.Enabled,
-			MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-			InitialUpdateID: initialUpdateID,
-			MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
-				return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), oldRemoteID, newRemoteID)
-			},
-			ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
-				endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
-				if resolveErr != nil {
-					return "", false
+	telegramAdapters := make(map[string]telegramTransport)
+	if controlStore != nil && credentialCipher != nil {
+		allConns, err := controlStore.ListConnections(ctx)
+		if err == nil {
+			for _, c := range allConns {
+				if c.Transport == "telegram" && c.Enabled {
+					tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+					if err != nil {
+						safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
+						continue
+					}
+					connChatIDs := make(map[string]string)
+					for alias, ep := range cfg.Endpoints {
+						if ep.Transport == config.TransportTelegram && ep.ConnectionID == c.ID {
+							connChatIDs[alias] = ep.RemoteID
+						}
+					}
+					initialUpdateID, err := telegramInitialUpdateID(ctx, syncStore, c.ID)
+					if err != nil {
+						safelog.Error(logger, "load Telegram recovery cursor failed", "telegram_cursor", err)
+						continue
+					}
+					connID := c.ID
+					tgInst, err := openTelegram(ctx, telegram.Options{
+						ConnectionID:    connID,
+						Token:           string(tokenBytes),
+						ChatIDs:         connChatIDs,
+						Hasher:          hasher,
+						UsernameMode:    cfg.Identity.UsernameMode,
+						Logger:          logger,
+						MediaEnabled:    cfg.Media.Enabled,
+						MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+						InitialUpdateID: initialUpdateID,
+						MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
+							return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), connID, oldRemoteID, newRemoteID)
+						},
+						ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
+							endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram:"+connID, pollID)
+							if resolveErr != nil {
+								endpoint, resolveErr = syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
+							}
+							if resolveErr != nil {
+								return "", false
+							}
+							return transport.EndpointID(endpoint), true
+						},
+					})
+					if err != nil {
+						safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
+						continue
+					}
+					telegramAdapters[c.ID] = tgInst
+					defer tgInst.Close()
 				}
-				return transport.EndpointID(endpoint), true
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("start Telegram transport: %w", err)
+			}
 		}
-		defer tg.Close()
+	}
+
+	if len(telegramChatIDs) > 0 && len(telegramAdapters) == 0 {
+		return errors.New("Telegram bot token is not configured")
+	}
+
+	var tg telegramTransport
+	for _, ta := range telegramAdapters {
+		tg = ta
+		break
 	}
 
 	var waService api.WhatsAppService
@@ -264,6 +301,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				registered[connID] = true
 			}
 		}
+		for connID, ta := range telegramAdapters {
+			if err := connMgr.Register(ctx, connID, config.TransportTelegram, ta); err == nil {
+				registered[connID] = true
+			}
+		}
 		for _, ep := range c.Endpoints {
 			if registered[ep.ConnectionID] {
 				continue
@@ -275,19 +317,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						registered[ep.ConnectionID] = true
 					}
 				}
-			case config.TransportTelegram:
-				if tg != nil {
-					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportTelegram, tg); err == nil {
-						registered[ep.ConnectionID] = true
-					}
-				}
 			}
 		}
 		if wa != nil && !registered["conn-wa-1"] {
 			_ = connMgr.Register(ctx, "conn-wa-1", config.TransportWhatsApp, wa)
-		}
-		if tg != nil && !registered["conn-tg-1"] {
-			_ = connMgr.Register(ctx, "conn-tg-1", config.TransportTelegram, tg)
 		}
 	}
 	registerActiveConnections(cfg)
@@ -301,9 +334,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			allConns, err := controlStore.ListConnections(updateCtx)
 			if err == nil {
 				enabledDiscord := make(map[string]controlstore.Connection)
+				enabledTelegram := make(map[string]controlstore.Connection)
 				for _, c := range allConns {
-					if c.Transport == "discord" && c.Enabled {
-						enabledDiscord[c.ID] = c
+					if c.Enabled {
+						switch c.Transport {
+						case "discord":
+							enabledDiscord[c.ID] = c
+						case "telegram":
+							enabledTelegram[c.ID] = c
+						}
 					}
 				}
 				for connID := range discordAdapters {
@@ -341,6 +380,64 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 						discordAdapters[c.ID] = dcInst
 						_ = connMgr.Register(ctx, c.ID, config.TransportDiscord, dcInst)
+					}
+				}
+
+				for connID := range telegramAdapters {
+					if _, ok := enabledTelegram[connID]; !ok {
+						_ = connMgr.Stop(connID)
+						delete(telegramAdapters, connID)
+					}
+				}
+				for connID, c := range enabledTelegram {
+					if _, exists := telegramAdapters[connID]; !exists {
+						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+						if err != nil {
+							safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
+							continue
+						}
+						connChatIDs := make(map[string]string)
+						for alias, ep := range updatedCfg.Endpoints {
+							if ep.Transport == config.TransportTelegram && ep.ConnectionID == c.ID {
+								connChatIDs[alias] = ep.RemoteID
+							}
+						}
+						initialUpdateID, err := telegramInitialUpdateID(ctx, syncStore, c.ID)
+						if err != nil {
+							safelog.Error(logger, "load Telegram recovery cursor failed", "telegram_cursor", err)
+							continue
+						}
+						cid := c.ID
+						tgInst, err := openTelegram(ctx, telegram.Options{
+							ConnectionID:    cid,
+							Token:           string(tokenBytes),
+							ChatIDs:         connChatIDs,
+							Hasher:          hasher,
+							UsernameMode:    updatedCfg.Identity.UsernameMode,
+							Logger:          logger,
+							MediaEnabled:    updatedCfg.Media.Enabled,
+							MediaMaxBytes:   uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+							InitialUpdateID: initialUpdateID,
+							MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
+								return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), cid, oldRemoteID, newRemoteID)
+							},
+							ResolvePollEndpoint: func(resolveCtx context.Context, pollID string) (transport.EndpointID, bool) {
+								endpoint, resolveErr := syncStore.PollEndpointForProviderRef(resolveCtx, "telegram:"+cid, pollID)
+								if resolveErr != nil {
+									endpoint, resolveErr = syncStore.PollEndpointForProviderRef(resolveCtx, "telegram", pollID)
+								}
+								if resolveErr != nil {
+									return "", false
+								}
+								return transport.EndpointID(endpoint), true
+							},
+						})
+						if err != nil {
+							safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
+							continue
+						}
+						telegramAdapters[c.ID] = tgInst
+						_ = connMgr.Register(ctx, c.ID, config.TransportTelegram, tgInst)
 					}
 				}
 			}
@@ -475,11 +572,15 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 }
 
-func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store) (int64, error) {
+func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store, connectionID string) (int64, error) {
 	if syncStore == nil {
 		return 0, nil
 	}
-	cursor, err := syncStore.RecoveryCursor(ctx, "telegram")
+	streamKey := "telegram"
+	if connectionID != "" {
+		streamKey = "telegram:" + connectionID
+	}
+	cursor, err := syncStore.RecoveryCursor(ctx, streamKey)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, nil

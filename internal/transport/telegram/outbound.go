@@ -99,7 +99,14 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			}
 			remoteID := strconv.Itoa(message.ID)
 			a.rememberMessageKind(outgoing.Endpoint, remoteID, "poll")
-			return transport.MessageRef{Endpoint: outgoing.Endpoint, RemoteMessageID: remoteID, IsTargetFromMe: true, Provider: "telegram", ProviderReference: message.Poll.ID}, nil
+			return transport.MessageRef{
+				Endpoint:          outgoing.Endpoint,
+				RemoteMessageID:   remoteID,
+				IsTargetFromMe:    true,
+				Provider:          a.pollProviderNamespace(),
+				ProviderReference: message.Poll.ID,
+				ChildScope:        outgoing.ChildScope,
+			}, nil
 		}
 		pollText, pollErr := telegramPollText(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount)
 		if pollErr != nil {
@@ -161,6 +168,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		Endpoint:        outgoing.Endpoint,
 		RemoteMessageID: remoteID,
 		IsTargetFromMe:  true,
+		ChildScope:      outgoing.ChildScope,
 	}, nil
 }
 

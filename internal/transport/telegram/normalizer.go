@@ -21,12 +21,17 @@ import (
 // chat IDs are mapped to safe endpoint aliases, and user IDs are immediately
 // replaced by HMAC-derived actor IDs.
 type Normalizer struct {
+	connectionID string
 	endpoints    map[int64]transport.EndpointID
 	hasher       *identity.Hasher
 	usernameMode config.UsernameMode
 }
 
 func NewNormalizer(chatIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
+	return NewNormalizerWithConnection(chatIDs, hasher, usernameMode, "")
+}
+
+func NewNormalizerWithConnection(chatIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode, connectionID string) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
 	}
@@ -54,6 +59,7 @@ func NewNormalizer(chatIDs map[string]string, hasher *identity.Hasher, usernameM
 	}
 
 	return &Normalizer{
+		connectionID: strings.TrimSpace(connectionID),
 		endpoints:    endpoints,
 		hasher:       hasher,
 		usernameMode: usernameMode,
@@ -103,6 +109,7 @@ func (n *Normalizer) withChatMigration(endpoint transport.EndpointID, oldChatID,
 	delete(endpoints, oldChatID)
 	endpoints[newChatID] = endpoint
 	return &Normalizer{
+		connectionID: n.connectionID,
 		endpoints:    endpoints,
 		hasher:       n.hasher,
 		usernameMode: n.usernameMode,
@@ -202,6 +209,9 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		PollOptions: pollOptions, PollSelectableCount: selectableCount,
 		PollProvider: func() string {
 			if providerReference != "" {
+				if n != nil && n.connectionID != "" {
+					return "telegram:" + n.connectionID
+				}
 				return "telegram"
 			}
 			return ""

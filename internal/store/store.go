@@ -19,8 +19,9 @@ var (
 	//go:embed schema.sql
 	schemaSQL string
 
-	endpointPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-	actorPattern    = regexp.MustCompile(`^u_[a-z2-7]{10}$`)
+	endpointPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	streamKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_:-]{0,63}$`)
+	actorPattern     = regexp.MustCompile(`^u_[a-z2-7]{10}$`)
 )
 
 type Store struct {
@@ -585,7 +586,7 @@ func (s *Store) DeleteReaction(ctx context.Context, canonicalID, sourceEndpointI
 }
 
 func (s *Store) PutRecoveryCursor(ctx context.Context, cursor RecoveryCursor) error {
-	if !endpointPattern.MatchString(cursor.StreamKey) {
+	if !streamKeyPattern.MatchString(cursor.StreamKey) {
 		return errors.New("recovery stream key is required")
 	}
 	if cursor.Position < 0 {
@@ -604,7 +605,7 @@ func (s *Store) PutRecoveryCursor(ctx context.Context, cursor RecoveryCursor) er
 }
 
 func (s *Store) RecoveryCursor(ctx context.Context, streamKey string) (RecoveryCursor, error) {
-	if !endpointPattern.MatchString(streamKey) {
+	if !streamKeyPattern.MatchString(streamKey) {
 		return RecoveryCursor{}, errors.New("recovery stream key is required")
 	}
 	var cursor RecoveryCursor

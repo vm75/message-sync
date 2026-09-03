@@ -352,7 +352,13 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 		_ = st.Close()
 		t.Fatal(err)
 	}
-	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", oldRemoteID, newRemoteID); err != nil {
+	// Migration with mismatched connection ID fails
+	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", "wrong-conn", oldRemoteID, newRemoteID); err == nil {
+		_ = st.Close()
+		t.Fatal("expected error migrating endpoint with wrong connection ID")
+	}
+
+	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", "conn-tg-1", oldRemoteID, newRemoteID); err != nil {
 		_ = st.Close()
 		t.Fatal(err)
 	}
@@ -388,7 +394,7 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 	}
 
 	// Replayed migration events are idempotent after restart.
-	if err := MigrateTelegramEndpoint(ctx, reopened.DB(), "b", oldRemoteID, newRemoteID); err != nil {
+	if err := MigrateTelegramEndpoint(ctx, reopened.DB(), "b", "conn-tg-1", oldRemoteID, newRemoteID); err != nil {
 		t.Fatalf("replayed Telegram migration failed: %v", err)
 	}
 }
