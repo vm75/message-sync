@@ -605,6 +605,16 @@ func telegramMessageID(value string) (int, error) {
 
 func telegramOutgoingText(outgoing transport.Outgoing) string {
 	label := telegramSenderLabel(outgoing.Sender)
+	if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
+		origin := sanitizeTelegramAttribution(string(outgoing.OriginEndpoint))
+		if origin != "" {
+			if label == "" {
+				label = origin
+			} else {
+				label = origin + "/" + label
+			}
+		}
+	}
 	source := sanitizeTelegramMentions(outgoing.SourceText, outgoing.Mentions)
 	if strings.TrimSpace(source) == "" && label == "" {
 		return outgoing.Text

@@ -30,6 +30,8 @@ Polls retain their native UI on destinations that support the source semantics. 
 
 Flattened thread/topic headers are presentation-only HMAC tokens and have no routing authority; native reply lineage and persisted opaque scope metadata determine return placement. If a scoped child destination is unavailable, delivery fails safely rather than silently falling back to the parent or General chat.
 
+Cross-endpoint messages rendered by Telegram include the source endpoint alias with the transient sender attribution (for example, `wa/Alice: hello`); the alias is presentation-only and is never used for routing.
+
 Remote providers do not all offer deterministic client-assigned create IDs. When a provider response is ambiguous, the bridge preserves content-free retry state and requires provider recovery or operator reconciliation rather than claiming exactly-once remote creation. WhatsApp bridge-generated lifecycle echoes use bounded in-memory suppression markers; genuine unmatched linked-device `FromSelf` mutations remain routable.
 
 ## Privacy Model

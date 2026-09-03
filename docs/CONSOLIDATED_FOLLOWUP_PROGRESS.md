@@ -24,7 +24,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Complete |
 | 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Complete |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Complete |
-| 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Pending |
+| 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Complete |
 | 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Pending |
 | 7 | [#91](https://github.com/vm75/message-sync/issues/91) | Friendly contexts 2/4: learn Discord thread / Telegram topic names | Depends on #90 and #85. Persist names only in friendly mode. | Pending |
 | 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Pending |
@@ -123,6 +123,13 @@ Rules:
 - Added adapter-level regression coverage for Telegram reaction add, removal, replacement, endpoint/message targeting, and recovery checkpoint emission.
 - Unsupported custom, paid, and multiple reactions remain safely rejected by the existing normalizer.
 - Validation: the full required repository gate passes.
+
+### #88 — Telegram destination source alias
+
+- Telegram outbound text rendering now prefixes cross-endpoint sender labels with the configured source alias.
+- The shared renderer is used by text, media captions, poll fallbacks, and reply fallback content, while same-endpoint/local presentation remains unchanged.
+- Added permanent documentation and regression coverage for the exact `source/sender: content` form.
+- Provider names/IDs remain transient and visible prefixes have no routing authority.
 
 ## Completion protocol
 

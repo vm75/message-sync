@@ -241,8 +241,35 @@ func TestSendUsesNativeReplyAndPrivacySafeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if api.replyID != 0 || len(api.texts) != 1 || !strings.Contains(api.texts[0], "reply to wa: quoted source body") || !strings.Contains(api.texts[0], "u_hash: fallback reply") {
+	if api.replyID != 0 || len(api.texts) != 1 || !strings.Contains(api.texts[0], "reply to wa: quoted source body") || !strings.Contains(api.texts[0], "wa/u_hash: fallback reply") {
 		t.Fatalf("unexpected fallback send: reply=%d text=%q", api.replyID, api.texts)
+	}
+}
+
+func TestSendPrefixesCrossEndpointOriginForAllTelegramTextPaths(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	outgoing := transport.Outgoing{
+		Endpoint: "tg", OriginEndpoint: "wa",
+		Sender:     transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+		SourceText: "hello", Kind: "text",
+	}
+	if _, err := adapter.Send(context.Background(), outgoing); err != nil {
+		t.Fatal(err)
+	}
+	if got := api.texts[len(api.texts)-1]; got != "wa/Alice: hello" {
+		t.Fatalf("cross-endpoint Telegram text = %q, want %q", got, "wa/Alice: hello")
+	}
+
+	api.texts = nil
+	if _, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", OriginEndpoint: "wa", Sender: outgoing.Sender,
+		SourceText: "caption", Kind: "image", MediaBytes: []byte("image"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if api.caption != "wa/Alice: caption" {
+		t.Fatalf("cross-endpoint Telegram media caption = %q, want %q", api.caption, "wa/Alice: caption")
 	}
 }
 
