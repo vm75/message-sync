@@ -206,39 +206,90 @@
     /**
      * Connection-Scoped Helpers
      */
-    async getWhatsAppStatus(id = 'conn-wa-1') {
+    async getWhatsAppStatus(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
+        if (!c) return { status: 'not_configured' };
+        id = c.id;
+      }
       return this.getConnectionStatus(id);
     },
 
-    async pairWhatsApp(id = 'conn-wa-1') {
+    async pairWhatsApp(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
+        id = c ? c.id : 'conn-wa-1';
+      }
       return this.pairWhatsAppConnection(id);
     },
 
-    async cancelPairWhatsApp(id = 'conn-wa-1') {
+    async cancelPairWhatsApp(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
+        id = c ? c.id : 'conn-wa-1';
+      }
       return this.cancelPairWhatsAppConnection(id);
     },
 
-    async logoutWhatsApp(id = 'conn-wa-1') {
+    async logoutWhatsApp(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
+        id = c ? c.id : 'conn-wa-1';
+      }
       return this.logoutWhatsAppConnection(id);
     },
 
-    async getWhatsAppJoinedGroups(id = 'conn-wa-1') {
+    async getWhatsAppJoinedGroups(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
+        if (!c) return [];
+        id = c.id;
+      }
       return this.getConnectionDiscovery(id);
     },
 
-    async getDiscordStatus(id = 'conn-dc-1') {
+    async getDiscordStatus(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'discord') : null;
+        if (!c) return { status: 'not_configured', configured: false, connected: false };
+        id = c.id;
+      }
       return this.getConnectionStatus(id);
     },
 
-    async getDiscordChannels(id = 'conn-dc-1') {
+    async getDiscordChannels(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'discord') : null;
+        if (!c) return [];
+        id = c.id;
+      }
       return this.getConnectionDiscovery(id);
     },
 
-    async getTelegramStatus(id = 'conn-tg-1') {
+    async getTelegramStatus(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'telegram') : null;
+        if (!c) return { status: 'not_configured', tokenConfigured: false, running: false };
+        id = c.id;
+      }
       return this.getConnectionStatus(id);
     },
 
-    async getTelegramChats(id = 'conn-tg-1') {
+    async getTelegramChats(id) {
+      if (!id) {
+        const conns = await this.listConnections().catch(() => []);
+        const c = Array.isArray(conns) ? conns.find(x => x.transport === 'telegram') : null;
+        if (!c) return [];
+        id = c.id;
+      }
       return this.getConnectionDiscovery(id);
     },
 

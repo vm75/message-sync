@@ -248,6 +248,10 @@
                       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                       Pair Device
                     </button>
+                    <button class="dropdown-item" id="btn-wa-manage">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+                      Manage Connections
+                    </button>
                     <button class="dropdown-item danger" id="btn-wa-logout">
                       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
                       Log Out
@@ -280,6 +284,10 @@
                       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
                       Refresh Status
                     </button>
+                    <button class="dropdown-item" id="btn-discord-manage">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+                      Manage Connections
+                    </button>
                   </div>
                 </div>
               </div>
@@ -307,6 +315,10 @@
                     <button class="dropdown-item" id="btn-telegram-refresh-status">
                       <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
                       Refresh Status
+                    </button>
+                    <button class="dropdown-item" id="btn-telegram-manage">
+                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+                      Manage Connections
                     </button>
                   </div>
                 </div>
@@ -351,7 +363,6 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Connections</h1>
-              <p class="page-subtitle" style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">Manage platform authentications, bot tokens, and linked accounts.</p>
             </div>
             <div style="display:flex;gap:8px;">
               <button id="btn-connections-refresh" class="btn btn-ghost btn-sm">

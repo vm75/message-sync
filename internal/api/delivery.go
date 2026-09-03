@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/delivery"
+	discord "github.com/vm75/message-sync/internal/transport/discord"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 )
 
 type deliveryStatusResponse struct {
@@ -38,14 +40,14 @@ func (s *Server) handleDeliveryStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 	type endpoint struct{ alias, transport string }
-	endpoints := make([]endpoint, 0)
+	configured := make([]endpoint, 0)
 	for rows.Next() {
 		var item endpoint
 		if err := rows.Scan(&item.alias, &item.transport); err != nil {
 			WriteError(w, http.StatusInternalServerError, "failed to read delivery endpoints")
 			return
 		}
-		endpoints = append(endpoints, item)
+		configured = append(configured, item)
 	}
 	if err := rows.Err(); err != nil {
 		WriteError(w, http.StatusInternalServerError, "failed to iterate delivery endpoints")
@@ -53,23 +55,23 @@ func (s *Server) handleDeliveryStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	statuses, err := s.delivery.DeliveryStatus(r.Context())
 	if err != nil {
-		WriteError(w, http.StatusInternalServerError, "failed to query delivery status")
+		WriteError(w, http.StatusInternalServerError, "failed to collect delivery status")
 		return
 	}
-	byAlias := make(map[string]delivery.EndpointStatus, len(statuses))
-	for _, status := range statuses {
-		byAlias[status.EndpointID] = status
+	statusByEndpoint := make(map[string]delivery.EndpointStatus, len(statuses))
+	for _, st := range statuses {
+		statusByEndpoint[st.EndpointID] = st
 	}
 	transportStatus := s.transportStatuses(r)
-	result := deliveryStatusResponse{Endpoints: make([]deliveryStatusDTO, 0, len(endpoints))}
-	for _, endpoint := range endpoints {
-		status := byAlias[endpoint.alias]
+	result := deliveryStatusResponse{Endpoints: make([]deliveryStatusDTO, 0, len(configured))}
+	for _, item := range configured {
+		status := statusByEndpoint[item.alias]
 		if status.LaneState == "" {
 			status.LaneState = "stopped"
 		}
 		result.Endpoints = append(result.Endpoints, deliveryStatusDTO{
-			Alias: endpoint.alias, Transport: endpoint.transport,
-			TransportStatus: transportStatus[endpoint.alias], LaneState: status.LaneState,
+			Alias: item.alias, Transport: item.transport,
+			TransportStatus: transportStatus[item.alias], LaneState: status.LaneState,
 			QueueDepth: status.QueueDepth, QueueCapacity: status.QueueCapacity,
 			Queued: status.Queued, Retrying: status.Retrying, AwaitingReplay: status.AwaitingReplay,
 			Failed: status.Failed, OldestActiveAge: int64(status.OldestActiveAge / time.Second),
@@ -81,6 +83,61 @@ func (s *Server) handleDeliveryStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) transportStatuses(r *http.Request) map[string]string {
 	result := make(map[string]string)
+	if s.connections != nil && s.db != nil {
+		rows, err := s.db.QueryContext(r.Context(), `SELECT alias, transport, connection_id FROM endpoints`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var alias, transport, connID string
+				if rows.Scan(&alias, &transport, &connID) == nil && connID != "" {
+					if st, err := s.connections.ConnectionStatus(r.Context(), connID); err == nil && st != nil {
+						switch v := st.(type) {
+						case WhatsAppStatus:
+							result[alias] = v.Status
+						case *WhatsAppStatus:
+							result[alias] = v.Status
+						case discord.AdminStatus:
+							result[alias] = string(v.Status)
+							for _, wh := range v.Webhooks {
+								if wh.Alias == alias {
+									result[alias] = string(wh.Status)
+									break
+								}
+							}
+						case *discord.AdminStatus:
+							result[alias] = string(v.Status)
+							for _, wh := range v.Webhooks {
+								if wh.Alias == alias {
+									result[alias] = string(wh.Status)
+									break
+								}
+							}
+						case telegram.AdminStatus:
+							result[alias] = "polling"
+							for _, ep := range v.Endpoints {
+								if ep.Alias == alias {
+									result[alias] = ep.Status
+									break
+								}
+							}
+						case *telegram.AdminStatus:
+							result[alias] = "polling"
+							for _, ep := range v.Endpoints {
+								if ep.Alias == alias {
+									result[alias] = ep.Status
+									break
+								}
+							}
+						case map[string]any:
+							if stat, ok := v["status"].(string); ok {
+								result[alias] = stat
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	if s.whatsapp != nil {
 		status := s.whatsapp.Status(r.Context()).Status
 		rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE transport = 'whatsapp'`)
@@ -89,7 +146,9 @@ func (s *Server) transportStatuses(r *http.Request) map[string]string {
 			for rows.Next() {
 				var alias string
 				if rows.Scan(&alias) == nil {
-					result[alias] = status
+					if _, exists := result[alias]; !exists {
+						result[alias] = status
+					}
 				}
 			}
 		}
@@ -97,13 +156,17 @@ func (s *Server) transportStatuses(r *http.Request) map[string]string {
 	if s.discord != nil {
 		status := s.discord.AdminStatus(r.Context())
 		for _, item := range status.Webhooks {
-			result[item.Alias] = string(item.Status)
+			if _, exists := result[item.Alias]; !exists {
+				result[item.Alias] = string(item.Status)
+			}
 		}
 	}
 	if s.telegram != nil {
 		status := s.telegram.AdminStatus(r.Context())
 		for _, item := range status.Endpoints {
-			result[item.Alias] = item.Status
+			if _, exists := result[item.Alias]; !exists {
+				result[item.Alias] = item.Status
+			}
 		}
 	}
 	return result

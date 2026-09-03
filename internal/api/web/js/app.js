@@ -652,24 +652,21 @@
 
   async function loadDashboard() {
     try {
-      const [wa, discord, telegram, endpoints, syncSets] = await Promise.allSettled([
-        window.API.getWhatsAppStatus(),
-        window.API.getDiscordStatus(),
-        window.API.getTelegramStatus(),
+      const [connsRes, endpointsRes, syncSetsRes] = await Promise.allSettled([
+        window.API.listConnections(),
         window.API.getEndpoints(),
         window.API.getSyncSets(),
       ]);
-      try {
-        renderWaStatus(wa.status === 'fulfilled' ? wa.value : null);
-      } catch (e) {}
-      try {
-        renderDiscordStatus(discord.status === 'fulfilled' ? discord.value : null);
-      } catch (e) {}
-      try {
-        renderTelegramStatus(telegram.status === 'fulfilled' ? telegram.value : null);
-      } catch (e) {}
-      if (endpoints.status === 'fulfilled') cachedEndpoints = Array.isArray(endpoints.value) ? endpoints.value : [];
-      if (syncSets.status === 'fulfilled') cachedSyncSets = Array.isArray(syncSets.value) ? syncSets.value : [];
+      if (connsRes.status === 'fulfilled' && Array.isArray(connsRes.value)) {
+        cachedConnections = connsRes.value;
+      }
+      if (endpointsRes.status === 'fulfilled' && Array.isArray(endpointsRes.value)) {
+        cachedEndpoints = endpointsRes.value;
+      }
+      if (syncSetsRes.status === 'fulfilled' && Array.isArray(syncSetsRes.value)) {
+        cachedSyncSets = syncSetsRes.value;
+      }
+      await refreshDashboardPlatformStatuses();
     } catch (e) {}
     await loadDeliveryStatus();
     startDeliveryPolling();
@@ -683,8 +680,176 @@
     if (desc) desc.textContent = descText || '';
   }
 
+  async function refreshDashboardPlatformStatuses() {
+    if (!cachedConnections || cachedConnections.length === 0) {
+      try {
+        const conns = await window.API.listConnections().catch(() => []);
+        cachedConnections = Array.isArray(conns) ? conns : [];
+      } catch (e) {
+        cachedConnections = [];
+      }
+    }
+
+    const statuses = {};
+    if (cachedConnections && cachedConnections.length > 0) {
+      await Promise.all(cachedConnections.map(async (conn) => {
+        try {
+          statuses[conn.id] = await window.API.getConnectionStatus(conn.id);
+        } catch (err) {
+          statuses[conn.id] = { status: 'error', error: err.message };
+        }
+      }));
+    }
+
+    renderDashboardWhatsApp(statuses);
+    renderDashboardDiscord(statuses);
+    renderDashboardTelegram(statuses);
+  }
+
+  function renderDashboardWhatsApp(statuses) {
+    const conns = (cachedConnections || []).filter(c => c.transport === 'whatsapp');
+    if (conns.length === 0) {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Not Configured', 'No WhatsApp accounts configured.');
+      return;
+    }
+    if (conns.length === 1) {
+      const c = conns[0];
+      const st = (statuses && statuses[c.id]) || {};
+      if (!c.enabled) {
+        setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Disabled', `${c.label} · Connection disabled.`);
+      } else if (st.status === 'connected' || (st.isConnected && st.isLoggedIn)) {
+        setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'connected', 'Connected & Active', `${c.label} · Active session`);
+      } else if (st.status === 'pairing' || (st.qrCode && st.qrCode.length > 0)) {
+        setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'warning', 'Pairing In Progress', `${c.label} · Scan QR code to link.`);
+      } else if (st.isLoggedIn) {
+        setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'warning', 'Authenticated (Standby)', `${c.label}`);
+      } else {
+        setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Unlinked', `${c.label} · Account not linked.`);
+      }
+      return;
+    }
+    const enabled = conns.filter(c => c.enabled);
+    const connected = conns.filter(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && (st.status === 'connected' || (st.isConnected && st.isLoggedIn));
+    });
+    const pairing = conns.filter(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && (st.status === 'pairing' || (st.qrCode && st.qrCode.length > 0));
+    });
+    if (connected.length === enabled.length && enabled.length > 0) {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'connected', 'Connected & Active', `${connected.length} of ${conns.length} accounts active`);
+    } else if (pairing.length > 0) {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'warning', 'Pairing In Progress', `${pairing.length} account${pairing.length > 1 ? 's' : ''} waiting for QR scan`);
+    } else if (connected.length > 0) {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'connected', `${connected.length}/${conns.length} Active`, `${connected.length} connected, ${conns.length - connected.length} unlinked/disabled`);
+    } else if (enabled.length === 0) {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Disabled', `All ${conns.length} accounts disabled`);
+    } else {
+      setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Unlinked', `${conns.length} accounts configured (none linked)`);
+    }
+  }
+
+  function renderDashboardDiscord(statuses) {
+    const conns = (cachedConnections || []).filter(c => c.transport === 'discord');
+    if (conns.length === 0) {
+      setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Not Configured', 'No Discord bots configured.');
+      return;
+    }
+    if (conns.length === 1) {
+      const c = conns[0];
+      const st = (statuses && statuses[c.id]) || {};
+      cachedDiscordStatus = st;
+      if (!c.enabled) {
+        setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Disabled', `${c.label} · Bot disabled.`);
+      } else if (st && st.connected) {
+        const hasPermIssue = Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
+        if (hasPermIssue) {
+          setStatusCard(discordDot, discordText, discordDesc, 'warning', 'Connected · Permission Needed', `${c.label} · Grant Manage Webhooks.`);
+        } else {
+          setStatusCard(discordDot, discordText, discordDesc, 'connected', 'Connected & Active', `${c.label} · Gateway connected.`);
+        }
+      } else if (st && st.configured) {
+        setStatusCard(discordDot, discordText, discordDesc, 'warning', 'Connecting', `${c.label} · Gateway connecting…`);
+      } else {
+        setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Not Connected', `${c.label} · No active connection.`);
+      }
+      return;
+    }
+    const enabled = conns.filter(c => c.enabled);
+    const connected = conns.filter(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && st.connected;
+    });
+    const hasPermIssue = conns.some(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
+    });
+    if (connected.length === enabled.length && enabled.length > 0) {
+      setStatusCard(discordDot, discordText, discordDesc, hasPermIssue ? 'warning' : 'connected',
+        hasPermIssue ? 'Connected · Permission Needed' : 'Connected & Active',
+        `${connected.length} of ${conns.length} bots active`);
+    } else if (connected.length > 0) {
+      setStatusCard(discordDot, discordText, discordDesc, 'connected',
+        `${connected.length}/${conns.length} Active`,
+        `${connected.length} connected, ${conns.length - connected.length} disconnected`);
+    } else if (enabled.length === 0) {
+      setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Disabled', `All ${conns.length} bots disabled`);
+    } else {
+      setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Not Connected', `${conns.length} bots configured (0 connected)`);
+    }
+  }
+
+  function renderDashboardTelegram(statuses) {
+    const conns = (cachedConnections || []).filter(c => c.transport === 'telegram');
+    if (conns.length === 0) {
+      setStatusCard(telegramDot, telegramText, telegramDesc, 'neutral', 'Not Configured', 'No Telegram bots configured.');
+      return;
+    }
+    if (conns.length === 1) {
+      const c = conns[0];
+      const st = (statuses && statuses[c.id]) || {};
+      cachedTelegramStatus = st;
+      if (!c.enabled) {
+        setStatusCard(telegramDot, telegramText, telegramDesc, 'neutral', 'Disabled', `${c.label} · Bot disabled.`);
+      } else if (st && st.running) {
+        const privacyDisabled = st.privacyModeEnabled === false;
+        if (!privacyDisabled) {
+          setStatusCard(telegramDot, telegramText, telegramDesc, 'warning', 'Running · Privacy Mode Warning', `${c.label} · Disable Privacy Mode via @BotFather.`);
+        } else {
+          setStatusCard(telegramDot, telegramText, telegramDesc, 'connected', 'Long Polling Active', `${c.label} · Polling active.`);
+        }
+      } else {
+        setStatusCard(telegramDot, telegramText, telegramDesc, 'warning', 'Configured · Polling Stopped', `${c.label} · Bot stopped.`);
+      }
+      return;
+    }
+    const enabled = conns.filter(c => c.enabled);
+    const running = conns.filter(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && st.running;
+    });
+    const privacyIssue = conns.some(c => {
+      const st = statuses && statuses[c.id];
+      return c.enabled && st && st.running && st.privacyModeEnabled === true;
+    });
+    if (running.length === enabled.length && enabled.length > 0) {
+      setStatusCard(telegramDot, telegramText, telegramDesc, privacyIssue ? 'warning' : 'connected',
+        privacyIssue ? 'Running · Privacy Mode Warning' : 'Long Polling Active',
+        `${running.length} of ${conns.length} bots active`);
+    } else if (running.length > 0) {
+      setStatusCard(telegramDot, telegramText, telegramDesc, 'connected',
+        `${running.length}/${conns.length} Active`,
+        `${running.length} polling, ${conns.length - running.length} stopped`);
+    } else if (enabled.length === 0) {
+      setStatusCard(telegramDot, telegramText, telegramDesc, 'neutral', 'Disabled', `All ${conns.length} bots disabled`);
+    } else {
+      setStatusCard(telegramDot, telegramText, telegramDesc, 'warning', 'Configured · Polling Stopped', `${conns.length} bots configured (0 running)`);
+    }
+  }
+
   function renderWaStatus(data) {
-    if (!data) {
+    if (!data || data.status === 'not_configured') {
       setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Unlinked', '');
       return;
     }
@@ -817,10 +982,17 @@
     waCountdownTimer = setInterval(tick, 1000);
   }
 
-  async function openWaPairModal(connId = 'conn-wa-1') {
+  async function openWaPairModal(connId) {
     if (typeof connId !== 'string' || !connId) {
-      const waConn = cachedConnections.find(c => c.transport === 'whatsapp');
-      connId = waConn ? waConn.id : 'conn-wa-1';
+      if (!cachedConnections || cachedConnections.length === 0) {
+        try { cachedConnections = await window.API.listConnections(); } catch (e) {}
+      }
+      const waConn = (cachedConnections || []).find(c => c.transport === 'whatsapp');
+      if (!waConn) {
+        openAddConnectionModal('whatsapp');
+        return;
+      }
+      connId = waConn.id;
     }
     activePairingConnId = connId;
 
@@ -834,7 +1006,7 @@
       const res = await window.API.pairWhatsAppConnection(connId);
       if (res.isLoggedIn || res.status === 'connected') {
         if (waPairStatus) { waPairStatus.className = 'alert alert-success'; waPairStatus.textContent = 'WhatsApp is already linked and active.'; }
-        if (connId === 'conn-wa-1') renderWaStatus(res);
+        refreshDashboardPlatformStatuses();
         if (window.Router.getRoute() === 'connections') loadConnections();
         return;
       }
@@ -866,14 +1038,19 @@
       if (waPairStatus) { waPairStatus.className = 'alert alert-info'; waPairStatus.textContent = 'Pairing cancelled.'; }
       if (waQrSection) waQrSection.classList.add('hidden');
       if (btnWaCancelPair) btnWaCancelPair.classList.add('hidden');
+      refreshDashboardPlatformStatuses();
       if (window.Router.getRoute() === 'connections') loadConnections();
     } catch (err) { showToast(err.message || 'Failed to cancel pairing', 'danger'); }
   }
 
-  function handleWaLogout(connId = 'conn-wa-1') {
+  function handleWaLogout(connId) {
     if (typeof connId !== 'string' || !connId) {
-      const waConn = cachedConnections.find(c => c.transport === 'whatsapp');
-      connId = waConn ? waConn.id : 'conn-wa-1';
+      const waConn = (cachedConnections || []).find(c => c.transport === 'whatsapp');
+      if (!waConn) {
+        showToast('No WhatsApp connection configured.', 'info');
+        return;
+      }
+      connId = waConn.id;
     }
     closeAllDropdowns();
     showConfirmDialog({
@@ -886,9 +1063,7 @@
         stopQrCountdown();
         stopWaPolling();
         showToast(`WhatsApp connection '${connId}' logged out.`, 'success');
-        if (connId === 'conn-wa-1') {
-          try { const d = await window.API.getConnectionStatus(connId); renderWaStatus(d); } catch (e) {}
-        }
+        refreshDashboardPlatformStatuses();
         if (window.Router.getRoute() === 'connections') loadConnections();
       }
     });
@@ -952,149 +1127,145 @@
 
       const isAdmin = currentUser && currentUser.role === 'admin';
 
-      connectionsContainer.innerHTML = transports.map(t => {
-        const matching = cachedConnections.filter(c => c.transport === t.key);
-        if (matching.length === 0) return '';
+      const transportIcons = {
+        whatsapp: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>',
+        discord: '<path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>',
+        telegram: '<path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path>'
+      };
 
-        const cardsHtml = matching.map(conn => {
-          const st = statuses[conn.id] || {};
-          const connEps = connEndpointMap[conn.id] || [];
+      const isAdmin = currentUser && currentUser.role === 'admin';
 
-          let statusBadgeClass = 'badge-neutral';
-          let statusText = 'Stopped';
-          let detailHtml = '';
-          let nextAction = '';
+      const cardsHtml = cachedConnections.map(conn => {
+        const iconSvg = transportIcons[conn.transport] || '';
+        const st = statuses[conn.id] || {};
+        const connEps = connEndpointMap[conn.id] || [];
 
-          if (!conn.enabled) {
+        let statusBadgeClass = 'badge-neutral';
+        let statusText = 'Stopped';
+        let detailHtml = '';
+        let nextAction = '';
+
+        if (!conn.enabled) {
+          statusBadgeClass = 'badge-neutral';
+          statusText = 'Disabled';
+          nextAction = 'Enable connection to resume routing.';
+          detailHtml = 'Connection is disabled. Ingress and delivery are suspended.';
+        } else if (conn.transport === 'whatsapp') {
+          const isConn = st.status === 'connected' || (st.isConnected && st.isLoggedIn);
+          const isPairing = st.status === 'pairing' || (st.qrCode && st.qrCode.length > 0);
+          if (isConn) {
+            statusBadgeClass = 'badge-success';
+            statusText = 'Connected';
+            nextAction = connEps.length === 0 ? 'Discover & add groups as endpoints.' : 'Ready to sync.';
+            detailHtml = `Active session (${connEps.length} linked endpoint${connEps.length === 1 ? '' : 's'}).`;
+          } else if (isPairing) {
+            statusBadgeClass = 'badge-warning';
+            statusText = 'Pairing';
+            nextAction = 'Scan QR code with WhatsApp.';
+            detailHtml = 'Pairing session is waiting for mobile device scan.';
+          } else {
             statusBadgeClass = 'badge-neutral';
-            statusText = 'Disabled';
-            nextAction = 'Enable connection to resume routing.';
-            detailHtml = 'Connection is disabled. Ingress and delivery are suspended.';
-          } else if (conn.transport === 'whatsapp') {
-            const isConn = st.status === 'connected' || (st.isConnected && st.isLoggedIn);
-            const isPairing = st.status === 'pairing' || (st.qrCode && st.qrCode.length > 0);
-            if (isConn) {
-              statusBadgeClass = 'badge-success';
-              statusText = 'Connected';
-              nextAction = connEps.length === 0 ? 'Discover & add groups as endpoints.' : 'Ready to sync.';
-              detailHtml = `Active session (${connEps.length} linked endpoint${connEps.length === 1 ? '' : 's'}).`;
-            } else if (isPairing) {
-              statusBadgeClass = 'badge-warning';
-              statusText = 'Pairing';
-              nextAction = 'Scan QR code with WhatsApp.';
-              detailHtml = 'Pairing session is waiting for mobile device scan.';
-            } else {
-              statusBadgeClass = 'badge-neutral';
-              statusText = 'Unpaired';
-              nextAction = 'Pair device to link account.';
-              detailHtml = 'Account not linked. Pairing requires mobile camera scan.';
-            }
-          } else if (conn.transport === 'discord') {
-            if (st.connected) {
-              const hasPermIssue = Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
-              statusBadgeClass = hasPermIssue ? 'badge-warning' : 'badge-success';
-              statusText = hasPermIssue ? 'Permission Needed' : 'Connected';
-              nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? 'Discover & add channels as endpoints.' : 'Ready to sync.');
-              detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : `Gateway active (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`;
-            } else if (st.configured) {
-              statusBadgeClass = 'badge-warning';
-              statusText = 'Connecting';
-              nextAction = 'Connecting to Discord Gateway…';
-              detailHtml = 'Token configured. Gateway connecting.';
-            } else {
-              statusBadgeClass = 'badge-neutral';
-              statusText = 'Not Connected';
-              nextAction = 'Set or replace bot token.';
-              detailHtml = 'No active connection.';
-            }
-          } else if (conn.transport === 'telegram') {
-            if (st.running) {
-              const privacyDisabled = st.privacyModeEnabled === false;
-              statusBadgeClass = privacyDisabled ? 'badge-success' : 'badge-warning';
-              statusText = 'Running';
-              nextAction = !privacyDisabled ? 'Disable Bot Privacy Mode via @BotFather to receive group messages.' : (connEps.length === 0 ? 'Discover observed group chats.' : 'Ready to sync.');
-              detailHtml = `Long polling active. Bot Privacy Mode: ${privacyDisabled ? 'Disabled (can read group messages)' : 'Enabled (may miss group messages)'}.`;
-            } else {
-              statusBadgeClass = 'badge-neutral';
-              statusText = 'Stopped';
-              nextAction = 'Polling stopped. Check token or enable connection.';
-              detailHtml = 'Bot is not running.';
-            }
+            statusText = 'Unpaired';
+            nextAction = 'Pair device to link account.';
+            detailHtml = 'Account not linked. Pairing requires mobile camera scan.';
           }
+        } else if (conn.transport === 'discord') {
+          if (st.connected) {
+            const hasPermIssue = Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
+            statusBadgeClass = hasPermIssue ? 'badge-warning' : 'badge-success';
+            statusText = hasPermIssue ? 'Permission Needed' : 'Connected';
+            nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? 'Discover & add channels as endpoints.' : 'Ready to sync.');
+            detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : `Gateway active (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`;
+          } else if (st.configured) {
+            statusBadgeClass = 'badge-warning';
+            statusText = 'Connecting';
+            nextAction = 'Connecting to Discord Gateway…';
+            detailHtml = 'Token configured. Gateway connecting.';
+          } else {
+            statusBadgeClass = 'badge-neutral';
+            statusText = 'Not Connected';
+            nextAction = 'Set or replace bot token.';
+            detailHtml = 'No active connection.';
+          }
+        } else if (conn.transport === 'telegram') {
+          if (st.running) {
+            const privacyDisabled = st.privacyModeEnabled === false;
+            statusBadgeClass = privacyDisabled ? 'badge-success' : 'badge-warning';
+            statusText = 'Running';
+            nextAction = !privacyDisabled ? 'Disable Bot Privacy Mode via @BotFather to receive group messages.' : (connEps.length === 0 ? 'Discover observed group chats.' : 'Ready to sync.');
+            detailHtml = `Long polling active. Bot Privacy Mode: ${privacyDisabled ? 'Disabled (can read group messages)' : 'Enabled (may miss group messages)'}.`;
+          } else {
+            statusBadgeClass = 'badge-neutral';
+            statusText = 'Stopped';
+            nextAction = 'Polling stopped. Check token or enable connection.';
+            detailHtml = 'Bot is not running.';
+          }
+        }
 
-          const epListText = connEps.length > 0
-            ? `Endpoints (${connEps.length}): ` + connEps.map(e => escapeHtml(e.alias)).join(', ')
-            : 'No endpoints configured under this connection.';
+        const epListText = connEps.length > 0
+          ? `Endpoints (${connEps.length}): ` + connEps.map(e => escapeHtml(e.alias)).join(', ')
+          : 'No endpoints configured under this connection.';
 
-          let actionButtons = `<button class="btn btn-ghost btn-sm" onclick="window.App.openDiscovery('${escapeHtml(conn.id)}')">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            Discover
+        let actionButtons = `<button class="btn btn-ghost btn-sm" onclick="window.App.openDiscovery('${escapeHtml(conn.id)}')">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          Discover
+        </button>`;
+
+        if (isAdmin) {
+          actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.toggleConnection('${escapeHtml(conn.id)}', ${!conn.enabled})">
+            ${conn.enabled ? 'Disable' : 'Enable'}
           </button>`;
 
-          if (isAdmin) {
-            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.toggleConnection('${escapeHtml(conn.id)}', ${!conn.enabled})">
-              ${conn.enabled ? 'Disable' : 'Enable'}
+          if (conn.transport === 'whatsapp') {
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">
+              Pair
             </button>`;
-
-            if (conn.transport === 'whatsapp') {
-              actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">
-                Pair
-              </button>`;
-              actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">
-                Logout
-              </button>`;
-            } else {
-              actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.openReplaceTokenModal('${escapeHtml(conn.id)}', '${escapeHtml(conn.label)}')">
-                Replace Token
-              </button>`;
-            }
-
-            actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.deleteConnection('${escapeHtml(conn.id)}', ${connEps.length})">
-              Delete
+            actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">
+              Logout
+            </button>`;
+          } else {
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.openReplaceTokenModal('${escapeHtml(conn.id)}', '${escapeHtml(conn.label)}')">
+              Replace Token
             </button>`;
           }
 
-          return `<div class="connection-card" data-connection-id="${escapeHtml(conn.id)}">
-            <div class="connection-card-top">
-              <div class="connection-header-left">
-                <div class="platform-card-icon ${conn.transport}">
-                  <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${t.icon}</svg>
-                </div>
-                <div>
-                  <div class="connection-title">${escapeHtml(conn.label)}</div>
-                  <div class="connection-id">${escapeHtml(conn.id)}</div>
-                </div>
+          actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.deleteConnection('${escapeHtml(conn.id)}', ${connEps.length})">
+            Delete
+          </button>`;
+        }
+
+        return `<div class="connection-card" data-connection-id="${escapeHtml(conn.id)}">
+          <div class="connection-card-top">
+            <div class="connection-header-left">
+              <div class="platform-card-icon ${conn.transport}">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${iconSvg}</svg>
               </div>
-              <div class="connection-badges">
-                <span class="badge ${conn.transport === 'discord' ? 'badge-discord' : conn.transport === 'telegram' ? 'badge-telegram' : 'badge-wa'}">${escapeHtml(conn.transport)}</span>
-                <span class="badge ${conn.enabled ? 'badge-primary' : 'badge-neutral'}">${conn.enabled ? 'Enabled' : 'Disabled'}</span>
-                <span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>
+              <div>
+                <div class="connection-title">${escapeHtml(conn.label)}</div>
+                <div class="connection-id">${escapeHtml(conn.id)}</div>
               </div>
             </div>
-
-            <div class="connection-meta">
-              <div>${escapeHtml(detailHtml)}</div>
-              <div style="margin-top:4px;color:var(--text-muted);"><strong>Next:</strong> ${escapeHtml(nextAction)}</div>
+            <div class="connection-badges">
+              <span class="badge ${conn.transport === 'discord' ? 'badge-discord' : conn.transport === 'telegram' ? 'badge-telegram' : 'badge-wa'}">${escapeHtml(conn.transport)}</span>
+              <span class="badge ${conn.enabled ? 'badge-primary' : 'badge-neutral'}">${conn.enabled ? 'Enabled' : 'Disabled'}</span>
+              <span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>
             </div>
-
-            <div class="connection-endpoints-list">${epListText}</div>
-
-            <div class="connection-actions">
-              ${actionButtons}
-            </div>
-          </div>`;
-        }).join('');
-
-        return `<div class="connections-section">
-          <div class="connections-section-title">
-            <svg class="icon" style="width:16px;height:16px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${t.icon}</svg>
-            ${escapeHtml(t.label)} (${matching.length})
           </div>
-          <div class="connections-grid">
-            ${cardsHtml}
+
+          <div class="connection-meta">
+            <div>${escapeHtml(detailHtml)}</div>
+            <div style="margin-top:4px;color:var(--text-muted);"><strong>Next:</strong> ${escapeHtml(nextAction)}</div>
+          </div>
+
+          <div class="connection-endpoints-list">${epListText}</div>
+
+          <div class="connection-actions">
+            ${actionButtons}
           </div>
         </div>`;
       }).join('');
+
+      connectionsContainer.innerHTML = `<div class="connections-grid">${cardsHtml}</div>`;
 
     } catch (err) {
       if (connectionsAlert) {
@@ -2388,35 +2559,49 @@
     });
 
     // WA actions
-    if (btnWaPair)   btnWaPair.addEventListener('click', openWaPairModal);
-    if (btnWaLogout) btnWaLogout.addEventListener('click', handleWaLogout);
+    if (btnWaPair)   btnWaPair.addEventListener('click', () => openWaPairModal());
+    if (btnWaLogout) btnWaLogout.addEventListener('click', () => handleWaLogout());
     if (btnWaCancelPair) btnWaCancelPair.addEventListener('click', cancelWaPairing);
 
-    // Discord refresh
+    const btnWaManage = document.getElementById('btn-wa-manage');
+    if (btnWaManage) {
+      btnWaManage.addEventListener('click', () => {
+        closeAllDropdowns();
+        window.Router.navigate('connections');
+      });
+    }
+
+    // Discord refresh and manage
     const btnDiscordRefreshStatus = document.getElementById('btn-discord-refresh-status');
     if (btnDiscordRefreshStatus) {
       btnDiscordRefreshStatus.addEventListener('click', async () => {
         closeAllDropdowns();
-        try {
-          const s = await window.API.getDiscordStatus();
-          renderDiscordStatus(s);
-        } catch (e) {
-          renderDiscordStatus(null);
-        }
+        await refreshDashboardPlatformStatuses();
+        showToast('Discord status refreshed.', 'info');
+      });
+    }
+    const btnDiscordManage = document.getElementById('btn-discord-manage');
+    if (btnDiscordManage) {
+      btnDiscordManage.addEventListener('click', () => {
+        closeAllDropdowns();
+        window.Router.navigate('connections');
       });
     }
 
-    // Telegram refresh
+    // Telegram refresh and manage
     const btnTelegramRefreshStatus = document.getElementById('btn-telegram-refresh-status');
     if (btnTelegramRefreshStatus) {
       btnTelegramRefreshStatus.addEventListener('click', async () => {
         closeAllDropdowns();
-        try {
-          const s = await window.API.getTelegramStatus();
-          renderTelegramStatus(s);
-        } catch (e) {
-          renderTelegramStatus(null);
-        }
+        await refreshDashboardPlatformStatuses();
+        showToast('Telegram status refreshed.', 'info');
+      });
+    }
+    const btnTelegramManage = document.getElementById('btn-telegram-manage');
+    if (btnTelegramManage) {
+      btnTelegramManage.addEventListener('click', () => {
+        closeAllDropdowns();
+        window.Router.navigate('connections');
       });
     }
 
