@@ -86,6 +86,12 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if username == "" {
 		username = "message-sync"
 	}
+	// Prefix with the origin group alias when the message comes from a different
+	// endpoint so Discord users see "g1/Alice" rather than a bare "Alice",
+	// matching the symmetry of the forwarded-text body format.
+	if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
+		username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
+	}
 
 	content := outgoing.SourceText
 	if content == "" && outgoing.Sender.DisplayName == "" && outgoing.Sender.OpaqueID == "" {
@@ -126,7 +132,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			replyChannelID = outgoing.ReplyTo.ChildScope.RemoteID
 		}
 		if link := a.replyLink(replyChannelID, outgoing.ReplyTo.RemoteMessageID); link != "" {
-			content = fmt.Sprintf("[%s](%s)\n\n%s", discordReplyLinkLabel(outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
+			content = fmt.Sprintf("[%s](%s)\n\n%s", discordReplyLinkLabel(outgoing.Endpoint, outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
 		} else {
 			content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 		}
@@ -204,24 +210,58 @@ func discordMessageLink(guildID, channelID, messageID string) string {
 	return fmt.Sprintf("https://discord.com/channels/%s/%s/%s", guildID, channelID, messageID)
 }
 
-func discordReplyLinkLabel(origin transport.EndpointID, quotedText string) string {
-	label := "message"
-	if line := strings.TrimSpace(strings.SplitN(strings.ReplaceAll(quotedText, "\r", ""), "\n", 2)[0]); line != "" {
-		label = line
-		if strings.HasPrefix(label, "*_") {
-			label = strings.TrimPrefix(label, "*_")
-			label = strings.Replace(label, "_*: ", ": ", 1)
+// discordReplyLinkLabel builds the clickable reply-link label shown in Discord.
+// It parses the structured forwarded-text header (*_ep/name_*: text) from
+// quotedText so the label reads "↪ reply to <sender>: <first line>".
+// The group prefix is omitted from <sender> when the quoted message came from
+// the same destination endpoint (i.e. another Discord user in the same channel).
+// Falls back to origin when quotedText is unstructured.
+func discordReplyLinkLabel(destination, origin transport.EndpointID, quotedText string) string {
+	senderLabel := string(origin)
+	firstLine := "message"
+
+	line := strings.TrimSpace(strings.SplitN(strings.ReplaceAll(quotedText, "\r", ""), "\n", 2)[0])
+	if line != "" {
+		if strings.HasPrefix(line, "*_") {
+			inner := strings.TrimPrefix(line, "*_")
+			if idx := strings.Index(inner, "_*: "); idx >= 0 {
+				senderPart := inner[:idx]
+				firstLine = inner[idx+4:]
+				// Strip group prefix when the quoted message belongs to the
+				// same Discord endpoint (no need to show "d1/Alice" in d1).
+				if slashIdx := strings.Index(senderPart, "/"); slashIdx >= 0 {
+					ep := senderPart[:slashIdx]
+					name := senderPart[slashIdx+1:]
+					if transport.EndpointID(ep) == destination {
+						senderLabel = name
+					} else {
+						senderLabel = senderPart
+					}
+				} else {
+					senderLabel = senderPart
+				}
+			} else {
+				// Malformed header: use line as-is for the body.
+				firstLine = line
+			}
+		} else {
+			firstLine = line
 		}
 	}
-	label = strings.Join(strings.Fields(label), " ")
-	label = strings.NewReplacer("[", "(", "]", ")").Replace(label)
-	if len([]rune(label)) > 400 {
-		label = string([]rune(label)[:400]) + "…"
+
+	if senderLabel == "" {
+		senderLabel = string(origin)
 	}
-	if origin == "" {
-		origin = "source"
+	if senderLabel == "" {
+		senderLabel = "source"
 	}
-	return fmt.Sprintf("↪ reply to %s: %s", origin, label)
+
+	firstLine = strings.Join(strings.Fields(firstLine), " ")
+	firstLine = strings.NewReplacer("[", "(", "]", ")").Replace(firstLine)
+	if len([]rune(firstLine)) > 400 {
+		firstLine = string([]rune(firstLine)[:400]) + "…"
+	}
+	return fmt.Sprintf("↪ reply to %s: %s", senderLabel, firstLine)
 }
 
 func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error {

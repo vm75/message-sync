@@ -130,6 +130,65 @@ func TestWebhookSenderRenderingUsesDistinctTransientNamesAndHashFallback(t *test
 	}
 }
 
+func TestWebhookUsernameIncludesGroupPrefixForCrossEndpointMessages(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+
+	cases := []struct {
+		name           string
+		endpoint       transport.EndpointID
+		originEndpoint transport.EndpointID
+		sender         transport.Sender
+		wantUser       string
+	}{
+		// Cross-endpoint: message from g1 forwarded to discord → prefix g1/
+		{
+			name:     "cross-endpoint display name",
+			endpoint: "discord", originEndpoint: "g1",
+			sender:   transport.Sender{DisplayName: "Alice", OpaqueID: "u_hash"},
+			wantUser: "g1/Alice",
+		},
+		{
+			name:     "cross-endpoint hash fallback",
+			endpoint: "discord", originEndpoint: "g1",
+			sender:   transport.Sender{OpaqueID: "u_hash"},
+			wantUser: "g1/u_hash",
+		},
+		// Same-endpoint: Discord message echoed back → no prefix
+		{
+			name:     "same-endpoint no prefix",
+			endpoint: "discord", originEndpoint: "discord",
+			sender:   transport.Sender{DisplayName: "Bob", OpaqueID: "u_bobhash"},
+			wantUser: "Bob",
+		},
+		// No originEndpoint set → no prefix
+		{
+			name:     "no origin no prefix",
+			endpoint: "discord", originEndpoint: "",
+			sender:   transport.Sender{DisplayName: "Carol", OpaqueID: "u_carolhash"},
+			wantUser: "Carol",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint:       tc.endpoint,
+				OriginEndpoint: tc.originEndpoint,
+				Sender:         tc.sender,
+				SourceText:     "hello",
+				Kind:           "text",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := webhook.executed[len(webhook.executed)-1]
+			if got.Username != tc.wantUser {
+				t.Fatalf("webhook username = %q, want %q", got.Username, tc.wantUser)
+			}
+		})
+	}
+}
+
 func TestDiscordSuppressesAttributionOnlyCompanion(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
@@ -244,7 +303,7 @@ func TestDiscordReplyUsesTransientChannelLookupForClickableLink(t *testing.T) {
 		t.Fatalf("webhook messages = %d, want 1", len(webhook.executed))
 	}
 	content := webhook.executed[0].Content
-	if !strings.Contains(content, "[↪ reply to g1: d1/vm: original message](https://discord.com/channels/guild/"+testChannelID+"/known-discord-copy)") {
+	if !strings.Contains(content, "[↪ reply to d1/vm: original message](https://discord.com/channels/guild/"+testChannelID+"/known-discord-copy)") {
 		t.Fatalf("clickable reply link missing: %q", content)
 	}
 	if !strings.Contains(content, "reply body") {
@@ -253,9 +312,20 @@ func TestDiscordReplyUsesTransientChannelLookupForClickableLink(t *testing.T) {
 }
 
 func TestDiscordReplyLinkLabelUsesFirstQuotedLine(t *testing.T) {
-	got := discordReplyLinkLabel("g1", "*_d1/vm_*: first line\nsecond line")
-	if got != "↪ reply to g1: d1/vm: first line" {
-		t.Fatalf("reply link label = %q", got)
+	// Quoted message from d1 posted to destination "discord": d1 != "discord" → show "d1/vm".
+	got := discordReplyLinkLabel("discord", "g1", "*_d1/vm_*: first line\nsecond line")
+	if got != "↪ reply to d1/vm: first line" {
+		t.Fatalf("reply link label (cross-endpoint) = %q", got)
+	}
+	// Quoted message from the same endpoint as destination: strip group prefix → show "vm".
+	got = discordReplyLinkLabel("d1", "g1", "*_d1/vm_*: first line\nsecond line")
+	if got != "↪ reply to vm: first line" {
+		t.Fatalf("reply link label (same-endpoint) = %q", got)
+	}
+	// Unstructured quotedText: fall back to origin as sender label.
+	got = discordReplyLinkLabel("discord", "wa-one", "raw quoted text")
+	if got != "↪ reply to wa-one: raw quoted text" {
+		t.Fatalf("reply link label (unstructured) = %q", got)
 	}
 }
 

@@ -278,7 +278,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if executeCalls != 3 || len(messagesSnapshot) != 3 {
 		t.Fatalf("Discord webhook sends=%d messages=%d, want 3", executeCalls, len(messagesSnapshot))
 	}
-	wantUsers := []string{"Vidhya Private", "Ravi Private", "u_cdefg23456"}
+	wantUsers := []string{"wa-one/Vidhya Private", "wa-one/Ravi Private", "wa-one/u_cdefg23456"}
 	for i, want := range wantUsers {
 		if got := messagesSnapshot[i].Username; got != want {
 			t.Fatalf("webhook username[%d]=%q, want %q", i, got, want)
@@ -333,7 +333,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if len(replyTargets) != 0 {
 		t.Fatalf("single-message reply emitted a separate marker: %#v", replyTargets)
 	}
-	if got := messagesSnapshot[len(messagesSnapshot)-1].Username; got != "Vidhya Private" {
+	if got := messagesSnapshot[len(messagesSnapshot)-1].Username; got != "wa-one/Vidhya Private" {
 		t.Fatalf("reply lost sender-specific APP username: %q", got)
 	}
 	if got := messagesSnapshot[len(messagesSnapshot)-1].Content; !strings.Contains(got, "reply to wa-one") || !strings.Contains(got, "PRIVATE_REPLY_BODY") {
