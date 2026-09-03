@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="Message Sync - Privacy-first message synchronization console">
   <!-- Discovery: Discord Bot & Channel Discovery | Telegram Bot & Observed Chat Discovery -->
-  <!-- Credentials are deployment-only: DISCORD_BOT_TOKEN DISCORD_BOT_TOKEN_FILE TELEGRAM_BOT_TOKEN TELEGRAM_BOT_TOKEN_FILE -->
+  <!-- Credentials: encrypted domain-key AES storage in control.db, paste-once UI inputs, zero browser retention -->
   <!-- Bot Privacy Mode | Send a group message | Transient Observed Chats | Configured Endpoints -->
   <title>Message Sync • Admin Console</title>
   <link rel="stylesheet" href="/css/app.css?v=8">
@@ -177,6 +177,10 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
           <span class="nav-item-label">Dashboard</span>
         </button>
+        <button class="nav-item" data-nav="connections" id="nav-connections">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+          <span class="nav-item-label">Connections</span>
+        </button>
         <button class="nav-item" data-nav="sync-sets" id="nav-sync-sets">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
           <span class="nav-item-label">Sync Sets</span>
@@ -341,6 +345,52 @@
         </div>
       </div>
 
+      <!-- ═══ CONNECTIONS ══════════════════════════════════════ -->
+      <div id="view-connections" class="view hidden" style="overflow-y:auto;">
+        <div class="view-body">
+          <div class="page-header">
+            <div>
+              <h1 class="page-title">Connections</h1>
+              <p class="page-subtitle" style="font-size:0.8rem;color:var(--text-muted);margin-top:4px;">Manage platform authentications, bot tokens, and linked accounts.</p>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button id="btn-connections-refresh" class="btn btn-ghost btn-sm">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
+                Refresh
+              </button>
+              <button id="btn-add-connection" class="btn btn-primary btn-sm admin-only">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Add Connection
+              </button>
+            </div>
+          </div>
+
+          <div id="connections-alert" class="alert hidden" style="margin-bottom:16px;"></div>
+
+          <!-- Architecture & Scope guidance -->
+          <div class="card" style="padding:14px 18px;margin-bottom:20px;background:var(--bg-elevated);border:1px solid var(--border);">
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+              <svg class="icon" style="width:18px;height:18px;color:var(--primary-400);flex-shrink:0;margin-top:2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+              <div style="font-size:.78rem;color:var(--text-secondary);line-height:1.55;">
+                <strong>Connection Architecture:</strong>
+                <code>Connections → discovered parent conversations → Endpoints → Sync Sets</code>.<br>
+                Connections authenticate with external platforms. Discovered parent channels, groups, and supergroups become configured <strong>Endpoints</strong>.
+                <em>Note:</em> Discord threads/forum posts and Telegram topics are automatic runtime child scopes that flatten through their parent endpoint. They are not configurable endpoint rows. The local-only prefix applies within thread/topic contexts.
+              </div>
+            </div>
+          </div>
+
+          <div id="connections-container"></div>
+
+          <div id="connections-empty" class="empty-state hidden">
+            <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
+            <p class="empty-title">No Connections Configured</p>
+            <p class="empty-desc">Connect a WhatsApp, Discord, or Telegram account to begin bridging conversations.</p>
+            <button class="btn btn-primary btn-sm admin-only" id="btn-empty-add-connection" style="margin-top:14px;">Add Connection</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ═══ SYNC SETS ═══════════════════════════════════════ -->
       <div id="view-sync-sets" class="view hidden" style="overflow:hidden;">
         <div style="padding:20px 24px 12px; flex-shrink:0;">
@@ -429,6 +479,13 @@
                           Telegram
                         </button>
                       </div>
+                    </div>
+
+                    <!-- Owning connection picker -->
+                    <div class="form-group" style="margin-bottom:10px;">
+                      <label class="form-label" for="add-endpoint-conn-select">Owning Connection</label>
+                      <select id="add-endpoint-conn-select" class="form-select"></select>
+                      <div id="add-endpoint-no-conn" class="alert alert-warning hidden" style="margin-top:6px;font-size:.78rem;"></div>
                     </div>
 
                     <!-- Remote selection + alias -->
@@ -825,6 +882,186 @@
           <div class="btn-spinner hidden"></div>
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Add Connection Modal -->
+  <div id="modal-add-connection" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:540px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Add Connection</h3>
+        <button type="button" class="btn-modal-close" data-modal="modal-add-connection" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <form id="form-add-connection" class="modal-form" novalidate>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+          <div id="add-conn-alert" class="alert alert-danger hidden"></div>
+
+          <div class="form-group">
+            <label class="form-label">Platform Transport</label>
+            <div class="transport-tabs" id="add-conn-transport-tabs">
+              <button type="button" class="transport-tab active wa" data-transport="whatsapp" id="add-conn-tab-wa">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
+                WhatsApp
+              </button>
+              <button type="button" class="transport-tab discord" data-transport="discord" id="add-conn-tab-discord">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path></svg>
+                Discord
+              </button>
+              <button type="button" class="transport-tab telegram" data-transport="telegram" id="add-conn-tab-telegram">
+                <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path></svg>
+                Telegram
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="add-conn-label" class="form-label">Connection Label</label>
+            <input type="text" id="add-conn-label" class="form-input" placeholder="e.g. Community Discord Bot" required>
+            <p class="form-hint">Descriptive name for operators.</p>
+          </div>
+
+          <div class="form-group">
+            <label for="add-conn-id" class="form-label">Connection ID (Optional)</label>
+            <input type="text" id="add-conn-id" class="form-input font-mono" placeholder="e.g. conn-dc-1 (auto-generated if blank)">
+            <p class="form-hint">Alphanumeric, dashes, underscores. 1–64 characters.</p>
+          </div>
+
+          <div id="add-conn-token-group" class="form-group hidden">
+            <label for="conn-bot-token" class="form-label">Bot Token (Paste once)</label>
+            <input type="password" id="conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste bot token">
+            <p class="form-hint">Token is encrypted immediately with a domain-separated AES key. It is never logged or exposed in read APIs.</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-modal="modal-add-connection">Cancel</button>
+          <button type="submit" id="btn-submit-add-conn" class="btn btn-primary">
+            <span class="btn-text">Create Connection</span>
+            <div class="btn-spinner hidden"></div>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Replace Token Modal -->
+  <div id="modal-replace-token" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3 class="modal-title">Replace Bot Token</h3>
+        <button type="button" class="btn-modal-close" data-modal="modal-replace-token" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <form id="form-replace-token" class="modal-form" novalidate>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+          <div id="replace-token-alert" class="alert alert-danger hidden"></div>
+          <div id="replace-token-conn-info" style="font-size:.82rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;"></div>
+          <div class="form-group">
+            <label for="replace-conn-bot-token" class="form-label">New Bot Token (Paste once)</label>
+            <input type="password" id="replace-conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste replacement token" required>
+            <p class="form-hint">The new token immediately replaces the previous encrypted secret.</p>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-modal="modal-replace-token">Cancel</button>
+          <button type="submit" id="btn-submit-replace-token" class="btn btn-primary">
+            <span class="btn-text">Update Token</span>
+            <div class="btn-spinner hidden"></div>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Discovery Modal -->
+  <div id="modal-discovery" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:640px;">
+      <div class="modal-header">
+        <div>
+          <h3 class="modal-title">Discovered Conversations</h3>
+          <div id="discovery-conn-badge" class="alias-badge" style="margin-top:4px;"></div>
+        </div>
+        <button type="button" class="btn-modal-close" data-modal="modal-discovery" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div id="discovery-alert" class="alert hidden" style="margin-bottom:12px;"></div>
+        <div id="discovery-loading" style="padding:20px;text-align:center;color:var(--text-muted);">
+          <div class="btn-spinner" style="margin:0 auto 10px;border-top-color:var(--primary);width:24px;height:24px;"></div>
+          Discovering active channels / groups…
+        </div>
+        <div id="discovery-empty" class="empty-state hidden" style="padding:24px 12px;">
+          <p class="empty-title" id="discovery-empty-title">No Conversations Found</p>
+          <p class="empty-desc" id="discovery-empty-desc"></p>
+        </div>
+        <div id="discovery-items" class="table-responsive hidden" style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius-sm);">
+          <table class="data-table">
+            <thead><tr><th>Target Name</th><th>Remote ID</th><th>Action</th></tr></thead>
+            <tbody id="discovery-tbody"></tbody>
+          </table>
+        </div>
+
+        <!-- Inline endpoint creation form for selected discovered target -->
+        <div id="discovery-create-form" class="card hidden" style="margin-top:16px;padding:14px;background:var(--bg-elevated);border:1px solid var(--border);">
+          <div style="font-weight:600;font-size:.82rem;margin-bottom:8px;">Create Endpoint for Target</div>
+          <div style="display:flex;flex-direction:column;gap:10px;">
+            <div class="form-group">
+              <label for="discovery-alias-input" class="form-label">Endpoint Alias</label>
+              <input type="text" id="discovery-alias-input" class="form-input font-mono" placeholder="e.g. community-chat">
+            </div>
+            <div class="form-group">
+              <label for="discovery-syncset-select" class="form-label">Assign to Sync Set (Optional)</label>
+              <select id="discovery-syncset-select" class="form-select"></select>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px;">
+              <button type="button" id="btn-discovery-cancel-create" class="btn btn-ghost btn-sm">Cancel</button>
+              <button type="button" id="btn-discovery-submit-create" class="btn btn-primary btn-sm">
+                <span class="btn-text">Create Endpoint</span>
+                <div class="btn-spinner hidden"></div>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" data-modal="modal-discovery">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reassign Endpoint Modal -->
+  <div id="modal-reassign-endpoint" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card modal-card-sm">
+      <div class="modal-header">
+        <h3 class="modal-title">Reassign Endpoint</h3>
+        <button type="button" class="btn-modal-close" data-modal="modal-reassign-endpoint" aria-label="Close">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <form id="form-reassign-endpoint" class="modal-form" novalidate>
+        <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+          <div id="reassign-alert" class="alert alert-danger hidden"></div>
+          <div id="reassign-endpoint-info" style="font-size:.82rem;font-weight:600;color:var(--text-primary);"></div>
+          <div class="form-group">
+            <label for="reassign-conn-select" class="form-label">Target Connection</label>
+            <select id="reassign-conn-select" class="form-select" required></select>
+          </div>
+          <div class="info-callout">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+            Reassignment updates which connection owns transport delivery. Alias, message history, sync-set membership, and child scopes are preserved.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-modal="modal-reassign-endpoint">Cancel</button>
+          <button type="submit" id="btn-submit-reassign" class="btn btn-primary">
+            <span class="btn-text">Reassign</span>
+            <div class="btn-spinner hidden"></div>
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 

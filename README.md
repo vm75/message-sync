@@ -63,27 +63,17 @@ echo "DATA_DIR=/data" >> .env
 echo "PORT=8080" >> .env
 ```
 
-If you want Discord channel discovery or your configuration contains Discord endpoints, also configure a Discord bot credential. Use one source only:
+### Dynamic Platform Connections
 
-```sh
-# Environment source (automatically passed by the repository's env_file setup)
-echo "DISCORD_BOT_TOKEN=your-bot-token" >> .env
+`message-sync` uses a connection-centric model where external platforms are connected and managed dynamically through the Web UI or authenticated API (`/api/connections`):
 
-# Or mount a secret file into the container and set its in-container path:
-# DISCORD_BOT_TOKEN_FILE=/run/secrets/discord_bot_token
-```
+`Connections → discovered parent conversations → Endpoints → Sync Sets`
 
-The Discord application must enable the privileged **Message Content** intent in the Discord Developer Portal. The bridge requests **Guild Messages** and **Guild Message Reactions** gateway intents at runtime. In each channel you want to bridge, grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**. `message-sync` finds or creates one bridge-managed incoming webhook per configured Discord channel and reuses it across source users and restarts.
+1. **WhatsApp Accounts**: Add a connection and scan the QR companion code (**Linked Devices** → **Link a Device**). Each connection owns an isolated SQLite session store (`/data/whatsapp-<connection-id>.db`).
+2. **Discord Bots**: Add a Discord bot connection by pasting its bot token once into the modal. The token is immediately encrypted with AES-256-GCM using a domain-separated key derived from `IDENTITY_SECRET` and saved to `control.db`. The token is never logged, never returned in APIs, and never stored in browser storage. Enable the privileged **Message Content** intent in the Discord Developer Portal and ensure the bot has **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
+3. **Telegram Bots**: Add a Telegram bot connection by pasting its bot token once into the modal (also encrypted with AES-256-GCM). Add the bot to your groups and disable **Bot Privacy Mode** in @BotFather so it can receive group messages. Long polling runs per connection.
 
-The Web UI never accepts a Discord token. Configure `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE` at deployment time and restart the service. When a token source is configured, the Discord gateway starts even before the first Discord endpoint exists so the authenticated admin UI can discover guild text/announcement channels. Guild and channel display names returned by discovery are transient response/UI data only; only the selected channel ID is persisted as the endpoint's operational `remote_id`. Bot tokens and managed-webhook credentials are never stored in `sync.db`.
-
-If **Manage Webhooks** is missing, Discord ingress/discovery can remain connected but the admin status reports the affected endpoint alias as `missing_permission`; grant **Manage Webhooks** in that destination channel and refresh. Webhook IDs, URLs, and tokens are never exposed by the management API.
-
-The Telegram Bot API adapters use **long polling** and resume their connection-scoped Bot API update streams from the last contiguously accepted update after restart (`telegram:<connection-id>`). Multiple Telegram bots run concurrently through the connection management model, with bot credentials encrypted in the control store using domain-separated keys derived from `IDENTITY_SECRET`. Replayed updates use the normal canonical routing and idempotency path. Telegram only retains updates for a limited provider window, so updates older than that window cannot be recovered.
-
-Create the bot with **BotFather**, add it to each intended Telegram group/supergroup, and ensure it can receive the messages you intend to synchronize. For ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required by your deployment. The admin status derives Bot Privacy Mode readiness from Telegram's safe `getMe` capability flag when the probe succeeds; it retains only the boolean state, never the returned bot user object. If the probe is unavailable, the UI falls back to fixed operator guidance.
-
-Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. After the bot is added and has suitable visibility, send a message in the target group/supergroup and open **Telegram → Refresh Observed Chats** in the authenticated Web UI. Observed chat titles/usernames live only in a bounded in-memory cache and disappear on process restart; only the selected opaque negative chat ID is persisted as endpoint `remote_id`. The browser never accepts or stores the bot token.
+*Child Scopes Note:* Discord threads/forum posts and Telegram forum topics are message-level child scopes that flatten automatically through their configured parent endpoint. They are not configurable endpoint rows; local-only prefixes apply within thread/topic source contexts.
 
 ### 2. Start the Server
 
@@ -94,12 +84,13 @@ docker compose up -d
 ```
 *(If using Podman, simply replace `docker` with `podman`)*
 
-### 3. Setup and Pairing
+### 3. Setup and Configuration
 
 1. Open `http://localhost:8080` in your web browser.
 2. Complete the first-run setup with an account username and password; this creates the first active administrator.
-3. Go to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp on your phone (**Linked Devices** → **Link a Device**). The companion device identifies as `message-sync` by default; this can be customized in the web console Settings page or overridden via `WHATSAPP_DEVICE_NAME` before linking.
-4. Configure WhatsApp, Discord, and Telegram endpoints and sync sets in the web console. For Telegram, send a group message first so the Bot API observation cache can discover the chat.
+3. In **Connections**, add your WhatsApp, Discord, or Telegram connections. For WhatsApp, click **Pair** to display the QR code.
+4. Use **Discover** on any connection to browse discovered parent channels or observed groups and add them as **Endpoints**.
+5. Group endpoints into **Sync Sets** to begin bi-directional message synchronization.
 
 The authenticated Settings page includes an optional Local-only message prefix and customizable WhatsApp Companion Device Name.
 The local prefix is exact and case-sensitive (including leading whitespace rules); an empty

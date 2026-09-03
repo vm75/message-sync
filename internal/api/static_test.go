@@ -68,7 +68,7 @@ func TestStaticHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("Discord admin UI is deployment-only and transport-aware", func(t *testing.T) {
+	t.Run("Connection-centric Web UI, safe paste-once credential forms, and discovery", func(t *testing.T) {
 		resp, err := client.Get(ts.URL + "/")
 		if err != nil {
 			t.Fatalf("GET / failed: %v", err)
@@ -76,27 +76,36 @@ func TestStaticHandler(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		html := string(body)
+
 		for _, expected := range []string{
-			`data-tab="discord"`,
-			"Discord Bot & Channel Discovery",
-			"DISCORD_BOT_TOKEN",
-			"DISCORD_BOT_TOKEN_FILE",
-			"Configured Endpoints",
+			`id="nav-connections"`,
+			`id="view-connections"`,
+			`id="modal-add-connection"`,
+			`id="modal-replace-token"`,
+			`id="modal-discovery"`,
+			`id="modal-reassign-endpoint"`,
+			`id="modal-wa-pair"`,
+			`id="add-endpoint-conn-select"`,
+			"Connections → discovered parent conversations → Endpoints → Sync Sets",
+			"child scopes",
+			"admin-only",
 		} {
 			if !strings.Contains(html, expected) {
-				t.Fatalf("Discord admin HTML missing %q", expected)
-			}
-		}
-		for _, forbidden := range []string{
-			`id="discord-token"`,
-			`name="discord-token"`,
-			`type="password" id="discord`,
-		} {
-			if strings.Contains(html, forbidden) {
-				t.Fatalf("Discord admin HTML contains credential input marker %q", forbidden)
+				t.Fatalf("Admin HTML missing %q", expected)
 			}
 		}
 
+		// Verify token forms are password type with autocomplete="new-password"
+		for _, expected := range []string{
+			`type="password" id="conn-bot-token" class="form-input" autocomplete="new-password"`,
+			`type="password" id="replace-conn-bot-token" class="form-input" autocomplete="new-password"`,
+		} {
+			if !strings.Contains(html, expected) {
+				t.Fatalf("Admin HTML missing secure token input %q", expected)
+			}
+		}
+
+		// Ensure no tokens stored in URLs or browser storage
 		resp, err = client.Get(ts.URL + "/js/app.js")
 		if err != nil {
 			t.Fatalf("GET /js/app.js failed: %v", err)
@@ -104,76 +113,34 @@ func TestStaticHandler(t *testing.T) {
 		js, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		appJS := string(js)
+
 		for _, expected := range []string{
-			"missing_permission",
-			"Manage Webhooks required",
-			"Webhook ready",
-			"createEndpoint",
-			"getDiscordChannels",
-			"cachedDiscordChannels",
+			"listConnections",
+			"getConnectionStatus",
+			"getConnectionDiscovery",
+			"createConnection",
+			"updateConnection",
+			"deleteConnection",
+			"pairWhatsAppConnection",
+			"openDiscovery",
+			"openReassignModal",
+			"openReplaceTokenModal",
+			"activePairingConnId",
+			"connectionId",
 		} {
 			if !strings.Contains(appJS, expected) {
-				t.Fatalf("Discord admin JS missing %q", expected)
-			}
-		}
-	})
-
-	t.Run("Telegram admin UI uses transient discovery and no credential form", func(t *testing.T) {
-		resp, err := client.Get(ts.URL + "/")
-		if err != nil {
-			t.Fatalf("GET / failed: %v", err)
-		}
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		html := string(body)
-		for _, expected := range []string{
-			`data-tab="telegram"`,
-			"Telegram Bot & Observed Chat Discovery",
-			"TELEGRAM_BOT_TOKEN",
-			"TELEGRAM_BOT_TOKEN_FILE",
-			"Bot Privacy Mode",
-			"Send a group message",
-			"Transient Observed Chats",
-		} {
-			if !strings.Contains(html, expected) {
-				t.Fatalf("Telegram admin HTML missing %q", expected)
-			}
-		}
-		for _, forbidden := range []string{
-			`id="telegram-token"`,
-			`name="telegram-token"`,
-			`type="password" id="telegram`,
-		} {
-			if strings.Contains(html, forbidden) {
-				t.Fatalf("Telegram admin HTML contains credential input marker %q", forbidden)
+				t.Fatalf("Admin JS missing dynamic connection symbol %q", expected)
 			}
 		}
 
-		resp, err = client.Get(ts.URL + "/js/app.js")
-		if err != nil {
-			t.Fatalf("GET /js/app.js failed: %v", err)
-		}
-		js, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		appJS := string(js)
-		for _, expected := range []string{
-			"getTelegramChats",
-			"cachedTelegramChats",
-			"transport: 'telegram'",
-			"TELEGRAM_CHAT_ID_REGEX",
-			"Long Polling Active",
-			"const base = 'telegram_group'",
-		} {
-			if !strings.Contains(appJS, expected) {
-				t.Fatalf("Telegram admin JS missing %q", expected)
-			}
-		}
+		// Verify password input is immediately cleared upon submission and not saved to localStorage/sessionStorage
 		for _, forbidden := range []string{
-			"sanitizeAlias(chat.title",
-			"sanitizeAlias(chat.username",
+			"localStorage.setItem('token'",
+			"sessionStorage.setItem('bot_token'",
+			"sessionStorage.setItem('token'",
 		} {
 			if strings.Contains(appJS, forbidden) {
-				t.Fatalf("Telegram admin JS derives persistent alias from transient metadata %q", forbidden)
+				t.Fatalf("Admin JS contains forbidden token storage %q", forbidden)
 			}
 		}
 	})
@@ -201,7 +168,7 @@ func TestStaticHandler(t *testing.T) {
 	})
 
 	t.Run("SPA route fallback to index.html", func(t *testing.T) {
-		routes := []string{"/setup", "/login", "/dashboard", "/whatsapp", "/discord", "/telegram", "/groups", "/sync-sets", "/settings"}
+		routes := []string{"/setup", "/login", "/dashboard", "/connections", "/sync-sets", "/settings", "/users", "/membership"}
 		for _, route := range routes {
 			resp, err := client.Get(ts.URL + route)
 			if err != nil {

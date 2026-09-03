@@ -1553,3 +1553,79 @@ code, .font-mono {
   color: var(--text-secondary);
   line-height: 1.6;
 }
+
+/* ── Connection Management ──────────────────────────────────── */
+.connections-section { margin-bottom: 28px; }
+.connections-section-title {
+  font-size: .88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.connections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 14px;
+}
+.connection-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color var(--dur);
+}
+.connection-card:hover { border-color: var(--border-strong); }
+.connection-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.connection-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.connection-title {
+  font-weight: 600;
+  font-size: .88rem;
+  color: var(--text-primary);
+}
+.connection-id {
+  font-size: .72rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+.connection-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.connection-meta {
+  font-size: .78rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  background: var(--bg-base);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+}
+.connection-endpoints-list {
+  font-size: .75rem;
+  color: var(--text-muted);
+}
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
