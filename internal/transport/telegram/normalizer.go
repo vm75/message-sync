@@ -210,8 +210,14 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		PollSourceUnavailable: providerReference != "",
 		Mentions:              mentions,
 		ReplyTo:               replyTo,
-		QuotedText:            quotedText,
-		Timestamp:             timestamp,
+		ChildScope: func() *transport.ChildScope {
+			if msg.MessageThreadID > 0 {
+				return &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(msg.MessageThreadID)}
+			}
+			return nil
+		}(),
+		QuotedText: quotedText,
+		Timestamp:  timestamp,
 	}, true
 }
 

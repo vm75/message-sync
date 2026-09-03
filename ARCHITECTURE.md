@@ -132,13 +132,20 @@ state never enters canonical routing.
 - `storage_message_retention_days`: integer (default `90`);
 - `poll_aggregation_trigger`: text (default `aggregate-response`);
 - `whatsapp_chat_cleanup_enabled`: boolean (default `0`);
-- `whatsapp_chat_retention_days`: integer (default `30`).
+- `whatsapp_chat_retention_days`: integer (default `30`);
+- `local_message_prefix`: bounded text prefix (empty disables source-local messages; never logged);
+- `whatsapp_device_name`: bounded text identifier (default `message-sync`; customized device name shown in WhatsApp Linked Devices).
 - `sync_sets`: Table of sync sets (`id TEXT PRIMARY KEY`).
 - `endpoints`: Transport-aware endpoint configuration (`alias`, `transport`, opaque `remote_id`, and `sync_set_id`). Supported transport values are `whatsapp`, `discord`, and `telegram`; all configured transports route through the shared adapter registry and canonical router.
 
 The alias is the safe endpoint ID. `remote_id` is a narrow operational addressing exception: for WhatsApp it is the configured group JID, for Discord it is the channel ID, and for Telegram it is the negative group/supergroup chat ID. Human-readable guild/channel/group/chat metadata, participant identifiers, credentials, and message content are never stored in this table or application logs.
 
 Each validated configured endpoint must belong to exactly one sync set.
+
+`canonical_scopes` stores `(canonical_id, endpoint_id, scope_kind,
+remote_scope_id, created_at)` with one row per canonical/endpoint pair.
+`scope_kind` is a fixed `discord_thread` or `telegram_topic` enum; the remote
+scope ID is opaque operational addressing and labels are never persisted.
 
 ### REST API, Web UI & Authentication
 
@@ -181,6 +188,14 @@ canonical c_...
 
 `message_copies` maps each endpoint’s opaque remote message ID back to the canonical ID. This is the basis for replies, reactions, edits, deletes, deduplication and restart recovery.
 
+Child conversation context is stored separately in `canonical_scopes`, keyed by
+canonical message and configured endpoint alias. Each row contains only the
+opaque provider child ID needed for native reply/lifecycle targeting; child
+names and provider objects remain transient. Reply ingress copies all scopes
+from the replied-to canonical message, with a live native scope on the source
+endpoint taking precedence. This preserves independent Discord-thread and
+Telegram-topic lineage without creating dynamic endpoints or sync-set members.
+
 Uniqueness rules prevent two copies of the same canonical message in one endpoint and prevent one remote message from mapping to multiple canonicals.
 
 ## 5. Identity and attribution
@@ -219,7 +234,7 @@ The normalized event may temporarily carry message text/caption and push-name da
 
 Live messages and protocol HistorySync snapshots carry the same per-endpoint checkpoint stream, using the provider message timestamp as the ordered position. HistorySync snapshots are parsed in memory, filtered by the configured age/count bounds, sorted oldest-first (with the protocol order as a tie-breaker), and serialized with live WhatsApp ingress. They then enter the ordinary recovery coordinator and router, so a replay repairs only missing copies and advances the cursor only after payload-dependent work is safe to forget. WhatsApp does not provide a durable application-level sequence for every live message; messages sharing a timestamp remain idempotent by remote-copy ID.
 
-For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
+For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. The companion device registration identifies as `message-sync` by default (configurable via `WHATSAPP_DEVICE_NAME`). When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
 
 WhatsApp bridge-generated edit, revoke/delete, and reaction sends install a bounded in-memory lifecycle marker before the provider call. Matching `FromSelf` lifecycle ingress consumes one marker and stops at the WhatsApp adapter boundary; unmatched `FromSelf` mutations remain eligible for routing because linked-device user actions also use `FromSelf`. The fallback marker uses only endpoint, target remote message ID, operation kind, and reaction emoji, expires promptly, and is not persisted. Since WhatsApp does not expose a separate mutation event ID for every lifecycle echo, an ambiguous provider result is retained until expiry and is not represented as exactly-once delivery.
 
@@ -236,6 +251,12 @@ normalized event
 ```
 
 Sequential fan-out is deliberate for MVP. It makes crash semantics and SQLite state easy to reason about. Concurrency should be added only if measurement proves it necessary.
+
+Before canonical resolution, the router checks the configured global local-only
+prefix. An exact case-sensitive match on an eligible new message records only
+the source alias, opaque remote message ID, and timestamp in
+`suppressed_local_messages`, then stops processing. This prevents fan-out,
+canonical persistence, and media loading; later lifecycle events remain local.
 
 ### Discord gateway ingress boundary
 
@@ -299,7 +320,7 @@ The application registers Telegram in the existing transport adapter registry an
 
 #### Telegram forum topics, group migration, mentions, polls, and media handling
 
-Telegram forum topics deliberately flatten into the configured parent group/supergroup alias. `message_thread_id` and forum-topic names stay transient and never become endpoint, canonical, or database keys. Ordinary cross-platform outbound messages target the configured parent/general chat context; mapped replies use only the existing remote-copy reply reference and do not create a persisted topic mapping.
+Telegram forum topics deliberately flatten into the configured parent group/supergroup alias while preserving a message-level `telegram_topic` scope. `message_thread_id` and forum-topic names stay out of endpoint configuration; only the opaque topic ID is retained in canonical scope lineage. Ordinary cross-platform messages target the configured parent/general context, while mapped scoped replies and lifecycle operations set the explicit Bot API `MessageThreadID` when returning to a topic. No permanent topic mapping or discovery registry exists.
 
 A basic-group to supergroup migration is handled as addressing maintenance: the adapter recognizes Telegram's migration service message, transactionally changes only the matching Telegram endpoint `remote_id`, preserves alias and `sync_set_id`, then replaces its in-memory chat mapping so subsequent messages from the supergroup continue routing under the same alias. Migration logs never include old/new chat IDs.
 

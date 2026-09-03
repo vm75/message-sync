@@ -21,6 +21,7 @@
 - **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
 - **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
 - **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
+- **Source-local Messages**: Configure one optional global prefix in the authenticated Web UI to keep matching new messages local to their source conversation. Suppression is restart-safe and content-free.
 - **Embedded Web UI**: Zero-dependency management console for WhatsApp pairing, Discord status/channel discovery, transient Telegram observed-chat discovery, endpoint aliases, and mixed sync sets.
 - **Hardened Security**: Runs as a static, non-root binary in read-only containers.
 
@@ -55,6 +56,8 @@ Create a `.env` file:
 IDENTITY_SECRET=your-generated-32-byte-hex-secret
 DATA_DIR=/data
 PORT=8080
+# Optional companion device name shown in WhatsApp Linked Devices (default: message-sync)
+WHATSAPP_DEVICE_NAME=
 # Required for Discord discovery or configured Discord endpoints. Use this OR DISCORD_BOT_TOKEN_FILE.
 DISCORD_BOT_TOKEN=
 # For a mounted secret instead, set its in-container path and leave DISCORD_BOT_TOKEN empty.
@@ -84,7 +87,7 @@ The Telegram adapter uses Bot API **long polling**. It accepts only configured g
 
 Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. Send activity in the target group, then use the authenticated Web UI to refresh observed chats and assign a safe alias. Titles/usernames remain in a bounded in-memory cache only; only the selected opaque chat ID becomes endpoint `remote_id`.
 
-Telegram text/media plus replies, reactions, edits, and deletes use the same canonical/message-copy lifecycle as WhatsApp and Discord. WhatsApp/Discord senders are rendered in Telegram content with a transient display name or HMAC fallback; Telegram sender display identity can flow transiently to Discord's existing managed-webhook APP rendering. Forum topics flatten to the configured parent alias, basic-group to supergroup migration updates only endpoint addressing, and polls use deterministic text instead of a separate vote-state system. Contacts/locations and unsupported service-only payloads are ignored. Hosted Bot API uploads are conservatively limited to 10 MiB photos, 50 MiB general files, and Telegram's tighter sticker format caps; over-limit media fails deterministically.
+Telegram text/media plus replies, reactions, edits, and deletes use the same canonical/message-copy lifecycle as WhatsApp and Discord. WhatsApp/Discord senders are rendered in Telegram content with a transient display name or HMAC fallback; Telegram sender display identity can flow transiently to Discord's existing managed-webhook APP rendering. Forum topics flatten to the configured parent alias while preserving opaque topic scope for native replies and lifecycle targeting; basic-group to supergroup migration updates only endpoint addressing, and polls use deterministic text instead of a separate vote-state system. Contacts/locations and unsupported service-only payloads are ignored. Hosted Bot API uploads are conservatively limited to 10 MiB photos, 50 MiB general files, and Telegram's tighter sticker format caps; over-limit media fails deterministically.
 
 ### 2. Docker Compose / Podman Compose
 

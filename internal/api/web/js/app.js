@@ -135,8 +135,10 @@
   const settingsRecoveryMaxMsgs      = document.getElementById('settings-recovery-max-msgs');
   const settingsRetentionDays        = document.getElementById('settings-retention-days');
   const settingsPollsAggTrigger      = document.getElementById('settings-polls-aggregation-trigger');
+  const settingsLocalPrefix          = document.getElementById('settings-local-prefix');
   const settingsWaCleanupEnabled     = document.getElementById('settings-whatsapp-cleanup-enabled');
   const settingsWaCleanupRetention   = document.getElementById('settings-whatsapp-cleanup-retention-days');
+  const settingsWaDeviceName         = document.getElementById('settings-whatsapp-device-name');
   const btnResetSettings             = document.getElementById('btn-reset-settings');
   const btnSaveSettings              = document.getElementById('btn-save-settings');
 
@@ -483,6 +485,7 @@
     setButtonLoading(btnSubmitSetup, true);
     try {
       const res = await window.API.setupPassword(username, password);
+      isSetup = true;
       isAuthenticated = true;
       currentUser = (res && res.user) ? res.user : { username, role: 'admin' };
       updateSessionDisplay();
@@ -505,6 +508,7 @@
     setButtonLoading(btnSubmitLogin, true);
     try {
       const result = await window.API.login(username, password);
+      isSetup = true;
       isAuthenticated = true;
       currentUser = result && result.user ? result.user : null;
       updateSessionDisplay();
@@ -555,6 +559,7 @@
     alert.classList.add('hidden');
     try {
       const res = await window.API.redeemInvite(token, username, password);
+      isSetup = true;
       isAuthenticated = true;
       currentUser = res && res.user ? res.user : null;
       if (!currentUser) {
@@ -1416,8 +1421,10 @@
     if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value  = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
     if (settingsRetentionDays)   settingsRetentionDays.value    = cfg.storage ? cfg.storage.messageRetentionDays : 14;
     if (settingsPollsAggTrigger) settingsPollsAggTrigger.value  = cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response';
+    if (settingsLocalPrefix) settingsLocalPrefix.value = cfg.localPrefix || '';
     if (settingsWaCleanupEnabled) settingsWaCleanupEnabled.checked = cfg.whatsappCleanup ? cfg.whatsappCleanup.enabled : false;
     if (settingsWaCleanupRetention) settingsWaCleanupRetention.value = cfg.whatsappCleanup ? cfg.whatsappCleanup.retentionDays : 30;
+    if (settingsWaDeviceName) settingsWaDeviceName.value = cfg.whatsappDeviceName || 'message-sync';
   }
 
   if (formSettings) {
@@ -1431,6 +1438,8 @@
       const retentionDays  = parseInt(settingsRetentionDays ? settingsRetentionDays.value : 14, 10);
       const waRetention    = parseInt(settingsWaCleanupRetention ? settingsWaCleanupRetention.value : 30, 10);
       const aggTrigger     = settingsPollsAggTrigger ? settingsPollsAggTrigger.value.trim() : '';
+      const localPrefix    = settingsLocalPrefix ? settingsLocalPrefix.value : '';
+      const waDeviceName   = settingsWaDeviceName ? settingsWaDeviceName.value.trim() : '';
 
       if (isNaN(mediaMaxSize) || mediaMaxSize < 1)  { settingsAlert.textContent = 'Media max size must be ≥1 MB.'; settingsAlert.classList.remove('hidden'); return; }
       if (isNaN(recovMaxAge) || recovMaxAge < 1)     { settingsAlert.textContent = 'Recovery max age must be ≥1 hour.'; settingsAlert.classList.remove('hidden'); return; }
@@ -1444,7 +1453,9 @@
         recovery: { enabled: settingsRecoveryEnabled ? settingsRecoveryEnabled.checked : true, maxAgeHours: recovMaxAge, maxMessagesPerGroup: recovMaxMsgs },
         storage: { messageRetentionDays: retentionDays },
         polls: { aggregationTrigger: aggTrigger },
-        whatsappCleanup: { enabled: settingsWaCleanupEnabled ? settingsWaCleanupEnabled.checked : false, retentionDays: isNaN(waRetention) ? 30 : waRetention }
+        whatsappCleanup: { enabled: settingsWaCleanupEnabled ? settingsWaCleanupEnabled.checked : false, retentionDays: isNaN(waRetention) ? 30 : waRetention },
+        localPrefix: localPrefix,
+        whatsappDeviceName: waDeviceName || 'message-sync'
       };
 
       setButtonLoading(btnSaveSettings, true);
@@ -1755,6 +1766,7 @@
       if (route === 'invite' || route === 'reset') return route;
 
       if (!isSetup) return 'setup';
+      if (route === 'setup') return isAuthenticated ? 'dashboard' : 'login';
       if (!isAuthenticated) return 'login';
       if (!authRequiredRoutes.has(route)) return 'dashboard';
       return route;

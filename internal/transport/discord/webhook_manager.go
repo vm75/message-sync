@@ -3,8 +3,10 @@ package discord
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 
@@ -35,6 +37,81 @@ type managedWebhookClient struct {
 	hooks  map[string]managedWebhookCredential
 	states map[string]WebhookStatus
 	repair map[string]*sync.Mutex
+}
+
+// ExecuteInThread uses Discord's webhook thread query while keeping the
+// credential and provider request details inside this adapter boundary.
+func (m *managedWebhookClient) ExecuteInThread(ctx context.Context, channelID, threadID string, message WebhookMessage) (string, error) {
+	credential, ok := m.credential(channelID)
+	if !ok || strings.TrimSpace(threadID) == "" {
+		return "", errors.New("Discord managed webhook child scope is unavailable")
+	}
+	params := &discordgo.WebhookParams{Content: message.Content, Username: message.Username, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+	if message.File != nil {
+		params.Files = []*discordgo.File{{Name: message.File.Name, ContentType: message.File.ContentType, Reader: bytes.NewReader(message.File.Data)}}
+	}
+	if executor, ok := m.api.(interface {
+		WebhookThreadExecute(string, string, bool, string, *discordgo.WebhookParams, ...discordgo.RequestOption) (*discordgo.Message, error)
+	}); ok {
+		created, err := executor.WebhookThreadExecute(credential.id, credential.token, true, strings.TrimSpace(threadID), params, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+		if err != nil {
+			return "", classifyDiscordFailure(err)
+		}
+		if created == nil || strings.TrimSpace(created.ID) == "" {
+			return "", errors.New("Discord threaded webhook returned an incomplete message")
+		}
+		return strings.TrimSpace(created.ID), nil
+	}
+
+	// Keep a small fallback for compatible REST clients that expose the generic
+	// request boundary but not DiscordGo's convenience method.
+	requester, ok := m.api.(interface {
+		RequestWithBucketID(string, string, interface{}, string, ...discordgo.RequestOption) ([]byte, error)
+	})
+	if !ok {
+		return "", errors.New("Discord client does not support threaded webhook execution")
+	}
+	endpoint := discordgo.EndpointWebhookToken(credential.id, credential.token) + "?wait=true&thread_id=" + url.QueryEscape(strings.TrimSpace(threadID))
+	response, err := requester.RequestWithBucketID(http.MethodPost, endpoint, params, endpoint, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+	if err != nil {
+		return "", classifyDiscordFailure(err)
+	}
+	var created discordgo.Message
+	if err := json.Unmarshal(response, &created); err != nil || strings.TrimSpace(created.ID) == "" {
+		return "", errors.New("Discord threaded webhook returned an incomplete message")
+	}
+	return strings.TrimSpace(created.ID), nil
+}
+
+func (m *managedWebhookClient) EditInThread(ctx context.Context, channelID, threadID, messageID, content string) error {
+	return m.threadMessageRequest(ctx, http.MethodPatch, channelID, threadID, messageID, &discordgo.WebhookEdit{Content: &content})
+}
+
+func (m *managedWebhookClient) DeleteInThread(ctx context.Context, channelID, threadID, messageID string) error {
+	return m.threadMessageRequest(ctx, http.MethodDelete, channelID, threadID, messageID, nil)
+}
+
+func (m *managedWebhookClient) threadMessageRequest(ctx context.Context, method, channelID, threadID, messageID string, payload *discordgo.WebhookEdit) error {
+	credential, ok := m.credential(channelID)
+	if !ok || strings.TrimSpace(threadID) == "" || strings.TrimSpace(messageID) == "" {
+		return errors.New("Discord managed webhook child scope is unavailable")
+	}
+	requester, ok := m.api.(interface {
+		RequestWithBucketID(string, string, interface{}, string, ...discordgo.RequestOption) ([]byte, error)
+	})
+	if !ok {
+		return errors.New("Discord client does not support threaded webhook lifecycle")
+	}
+	endpoint := discordgo.EndpointWebhookToken(credential.id, credential.token) + "/messages/" + url.PathEscape(strings.TrimSpace(messageID)) + "?thread_id=" + url.QueryEscape(strings.TrimSpace(threadID))
+	var body interface{}
+	if payload != nil {
+		body = payload
+	}
+	_, err := requester.RequestWithBucketID(method, endpoint, body, endpoint, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+	if err != nil {
+		return classifyDiscordFailure(err)
+	}
+	return nil
 }
 
 func newManagedWebhookClient(session *discordgo.Session) *managedWebhookClient {

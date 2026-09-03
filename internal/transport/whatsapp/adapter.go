@@ -36,6 +36,7 @@ import (
 const (
 	eventBufferSize              = 128
 	anonymisedLiveResultsHeading = "Aggregated anonymised live results"
+	defaultDeviceName            = "message-sync"
 )
 
 func formatWhatsAppText(text string) string {
@@ -55,6 +56,7 @@ type Options struct {
 	RecoveryEnabled  bool
 	RecoveryMaxAge   time.Duration
 	RecoveryMaxCount int
+	DeviceName       string
 }
 
 type Adapter struct {
@@ -80,6 +82,7 @@ type Adapter struct {
 	recoveryEnabled  bool
 	recoveryMaxAge   time.Duration
 	recoveryMaxCount int
+	deviceName       string
 	pcache           *participantCache
 	lifecycle        *lifecycleSuppression
 }
@@ -123,6 +126,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		return nil, err
 	}
 
+	deviceName := configureDeviceProps(opts.DeviceName)
 	client := whatsmeow.NewClient(device, nil)
 	disablePlaintextPersistence(client)
 
@@ -140,6 +144,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		recoveryEnabled:  opts.RecoveryEnabled,
 		recoveryMaxAge:   opts.RecoveryMaxAge,
 		recoveryMaxCount: opts.RecoveryMaxCount,
+		deviceName:       deviceName,
 		pcache:           newParticipantCache(1024),
 		lifecycle:        newLifecycleSuppression(),
 	}
@@ -736,6 +741,7 @@ func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
 	codeChan := make(chan string, 1)
 	a.pairingCodeChan = codeChan
 
+	configureDeviceProps(a.deviceName)
 	qrChan, qrErr := a.client.GetQRChannel(qrCtx)
 	if qrErr != nil {
 		cancel()
@@ -955,6 +961,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	a.recoveryEnabled = cfg.Recovery.Enabled
 	a.recoveryMaxAge = time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour
 	a.recoveryMaxCount = cfg.Recovery.MaxMessagesPerGroup
+	a.deviceName = configureDeviceProps(cfg.WhatsAppDeviceName)
 	a.mu.Unlock()
 
 	return nil
@@ -1205,6 +1212,18 @@ func outgoingTargets(groupJIDs map[string]string) (map[transport.EndpointID]type
 		targets[transport.EndpointID(alias)] = jid
 	}
 	return targets, nil
+}
+
+func configureDeviceProps(preferred string) string {
+	name := strings.TrimSpace(preferred)
+	if name == "" {
+		name = strings.TrimSpace(os.Getenv("WHATSAPP_DEVICE_NAME"))
+	}
+	if name == "" {
+		name = defaultDeviceName
+	}
+	waStore.SetOSInfo(name, [3]uint32{0, 1, 0})
+	return name
 }
 
 func disablePlaintextPersistence(client *whatsmeow.Client) {

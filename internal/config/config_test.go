@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vm75/message-sync/internal/store"
@@ -14,11 +15,12 @@ func validConfig() Config {
 			"a": {Transport: TransportWhatsApp, RemoteID: "1@g.us"},
 			"b": {Transport: TransportWhatsApp, RemoteID: "2@g.us"},
 		},
-		SyncSets: []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
-		Identity: Identity{UsernameMode: UsernameModeHash},
-		Media:    Media{MaxSizeMB: 100},
-		Recovery: Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
-		Storage:  Storage{MessageRetentionDays: 90},
+		SyncSets:           []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
+		Identity:           Identity{UsernameMode: UsernameModeHash},
+		Media:              Media{MaxSizeMB: 100},
+		Recovery:           Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
+		Storage:            Storage{MessageRetentionDays: 90},
+		WhatsAppDeviceName: "message-sync",
 	}
 }
 
@@ -36,6 +38,32 @@ func openTestStore(t *testing.T) *store.Store {
 func TestValidateAcceptsSimpleMesh(t *testing.T) {
 	if err := validConfig().Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateLocalPrefix(t *testing.T) {
+	for _, prefix := range []string{"", "!local ", "é"} {
+		if err := ValidateLocalPrefix(prefix); err != nil {
+			t.Fatalf("ValidateLocalPrefix(%q) error = %v", prefix, err)
+		}
+	}
+	for _, prefix := range []string{"   ", "bad\n", strings.Repeat("x", MaxLocalPrefixBytes+1)} {
+		if err := ValidateLocalPrefix(prefix); err == nil {
+			t.Fatalf("ValidateLocalPrefix(%q) accepted invalid prefix", prefix)
+		}
+	}
+}
+
+func TestValidateWhatsAppDeviceName(t *testing.T) {
+	for _, name := range []string{"message-sync", "my-bridge", "Custom 123", "a"} {
+		if err := ValidateWhatsAppDeviceName(name); err != nil {
+			t.Fatalf("ValidateWhatsAppDeviceName(%q) error = %v", name, err)
+		}
+	}
+	for _, name := range []string{"", "   ", "bad\nname", strings.Repeat("x", MaxWhatsAppDeviceNameBytes+1)} {
+		if err := ValidateWhatsAppDeviceName(name); err == nil {
+			t.Fatalf("ValidateWhatsAppDeviceName(%q) accepted invalid name", name)
+		}
 	}
 }
 
@@ -173,6 +201,8 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 
 	cfg := validConfig()
 	cfg.Identity.UsernameMode = UsernameModePushName
+	cfg.LocalPrefix = "!local"
+	cfg.WhatsAppDeviceName = "CustomBridge"
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -184,6 +214,12 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 
 	if loaded.Identity.UsernameMode != UsernameModePushName {
 		t.Errorf("got usernameMode %q, want %q", loaded.Identity.UsernameMode, UsernameModePushName)
+	}
+	if loaded.LocalPrefix != "!local" {
+		t.Errorf("got localPrefix %q, want %q", loaded.LocalPrefix, "!local")
+	}
+	if loaded.WhatsAppDeviceName != "CustomBridge" {
+		t.Errorf("got whatsappDeviceName %q, want %q", loaded.WhatsAppDeviceName, "CustomBridge")
 	}
 	if len(loaded.Endpoints) != 2 {
 		t.Fatalf("got %d endpoints, want 2", len(loaded.Endpoints))

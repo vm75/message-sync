@@ -2,28 +2,33 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/safelog"
 )
 
 type GlobalConfigDTO struct {
-	UsernameMode    config.UsernameMode    `json:"usernameMode"`
-	Media           config.Media           `json:"media"`
-	Recovery        config.Recovery        `json:"recovery"`
-	Storage         config.Storage         `json:"storage"`
-	Polls           config.Polls           `json:"polls"`
-	WhatsAppCleanup config.WhatsAppCleanup `json:"whatsappCleanup"`
+	UsernameMode       config.UsernameMode    `json:"usernameMode"`
+	Media              config.Media           `json:"media"`
+	Recovery           config.Recovery        `json:"recovery"`
+	Storage            config.Storage         `json:"storage"`
+	Polls              config.Polls           `json:"polls"`
+	WhatsAppCleanup    config.WhatsAppCleanup `json:"whatsappCleanup"`
+	LocalPrefix        string                 `json:"localPrefix"`
+	WhatsAppDeviceName string                 `json:"whatsappDeviceName"`
 }
 
 type UpdateConfigRequest struct {
-	Identity        *config.Identity        `json:"identity,omitempty"`
-	UsernameMode    *config.UsernameMode    `json:"usernameMode,omitempty"`
-	Media           *config.Media           `json:"media,omitempty"`
-	Recovery        *config.Recovery        `json:"recovery,omitempty"`
-	Storage         *config.Storage         `json:"storage,omitempty"`
-	Polls           *config.Polls           `json:"polls,omitempty"`
-	WhatsAppCleanup *config.WhatsAppCleanup `json:"whatsappCleanup,omitempty"`
+	Identity           *config.Identity        `json:"identity,omitempty"`
+	UsernameMode       *config.UsernameMode    `json:"usernameMode,omitempty"`
+	Media              *config.Media           `json:"media,omitempty"`
+	Recovery           *config.Recovery        `json:"recovery,omitempty"`
+	Storage            *config.Storage         `json:"storage,omitempty"`
+	Polls              *config.Polls           `json:"polls,omitempty"`
+	WhatsAppCleanup    *config.WhatsAppCleanup `json:"whatsappCleanup,omitempty"`
+	LocalPrefix        *string                 `json:"localPrefix,omitempty"`
+	WhatsAppDeviceName *string                 `json:"whatsappDeviceName,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -40,12 +45,14 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dto := GlobalConfigDTO{
-		UsernameMode:    cfg.Identity.UsernameMode,
-		Media:           cfg.Media,
-		Recovery:        cfg.Recovery,
-		Storage:         cfg.Storage,
-		Polls:           cfg.Polls,
-		WhatsAppCleanup: cfg.WhatsAppCleanup,
+		UsernameMode:       cfg.Identity.UsernameMode,
+		Media:              cfg.Media,
+		Recovery:           cfg.Recovery,
+		Storage:            cfg.Storage,
+		Polls:              cfg.Polls,
+		WhatsAppCleanup:    cfg.WhatsAppCleanup,
+		LocalPrefix:        cfg.LocalPrefix,
+		WhatsAppDeviceName: cfg.WhatsAppDeviceName,
 	}
 
 	_ = WriteJSON(w, http.StatusOK, dto)
@@ -131,10 +138,30 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	localPrefix := currentCfg.LocalPrefix
+	if req.LocalPrefix != nil {
+		localPrefix = *req.LocalPrefix
+	}
+	if err := config.ValidateLocalPrefix(localPrefix); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	whatsappDeviceName := currentCfg.WhatsAppDeviceName
+	if req.WhatsAppDeviceName != nil {
+		whatsappDeviceName = *req.WhatsAppDeviceName
+	}
+	if strings.TrimSpace(whatsappDeviceName) == "" {
+		whatsappDeviceName = config.DefaultWhatsAppDeviceName
+	}
+	if err := config.ValidateWhatsAppDeviceName(whatsappDeviceName); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	_, err = s.db.ExecContext(r.Context(), `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -145,8 +172,10 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			storage_message_retention_days = excluded.storage_message_retention_days,
 			poll_aggregation_trigger = excluded.poll_aggregation_trigger,
 			whatsapp_chat_cleanup_enabled = excluded.whatsapp_chat_cleanup_enabled,
-			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days
-	`, string(mode), media.Enabled, media.MaxSizeMB, recovery.Enabled, recovery.MaxAgeHours, recovery.MaxMessagesPerGroup, storage.MessageRetentionDays, polls.AggregationTrigger, whatsappCleanup.Enabled, whatsappCleanup.RetentionDays)
+			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days,
+			local_message_prefix = excluded.local_message_prefix,
+			whatsapp_device_name = excluded.whatsapp_device_name
+	`, string(mode), media.Enabled, media.MaxSizeMB, recovery.Enabled, recovery.MaxAgeHours, recovery.MaxMessagesPerGroup, storage.MessageRetentionDays, polls.AggregationTrigger, whatsappCleanup.Enabled, whatsappCleanup.RetentionDays, localPrefix, whatsappDeviceName)
 	if err != nil {
 		safelog.Error(s.logger, "save global_config failed", "config_save", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update config")
@@ -156,12 +185,14 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	s.notifyConfigChange(r.Context())
 
 	dto := GlobalConfigDTO{
-		UsernameMode:    mode,
-		Media:           media,
-		Recovery:        recovery,
-		Storage:         storage,
-		Polls:           polls,
-		WhatsAppCleanup: whatsappCleanup,
+		UsernameMode:       mode,
+		Media:              media,
+		Recovery:           recovery,
+		Storage:            storage,
+		Polls:              polls,
+		WhatsAppCleanup:    whatsappCleanup,
+		LocalPrefix:        localPrefix,
+		WhatsAppDeviceName: whatsappDeviceName,
 	}
 
 	_ = WriteJSON(w, http.StatusOK, dto)

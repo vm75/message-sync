@@ -68,6 +68,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if api == nil {
 		return transport.MessageRef{}, errors.New("Telegram Bot API is unavailable")
 	}
+	threadID, err := telegramChildThreadID(outgoing.ChildScope)
+	if err != nil {
+		return transport.MessageRef{}, err
+	}
 
 	reply, err := telegramReplyParameters(outgoing.ReplyTo)
 	if err != nil {
@@ -81,6 +85,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 	if kind == "poll" {
 		if params, ok := telegramNativePoll(chatID, outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
+			params.MessageThreadID = threadID
 			err = a.callWithRetry(ctx, func() error {
 				var callErr error
 				message, callErr = api.SendPoll(ctx, params)
@@ -119,6 +124,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			var callErr error
 			message, callErr = api.SendMessage(ctx, &telegrambot.SendMessageParams{
 				ChatID:          chatID,
+				MessageThreadID: threadID,
 				Text:            content,
 				ReplyParameters: reply,
 			})
@@ -138,7 +144,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		if limit > 0 && uint64(len(outgoing.MediaBytes)) > limit {
 			return transport.MessageRef{}, errors.New("Telegram media exceeds configured or hosted Bot API size limit")
 		}
-		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, truncateTelegramText(content, telegramCaptionLimit), reply)
+		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, truncateTelegramText(content, telegramCaptionLimit), reply, threadID)
 		if err != nil {
 			return transport.MessageRef{}, err
 		}
@@ -183,7 +189,7 @@ func telegramNativePoll(chatID int64, question string, options []string, selecta
 
 func boolPtr(value bool) *bool { return &value }
 
-func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID int64, kind string, data []byte, caption string, reply *models.ReplyParameters) (*models.Message, error) {
+func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID int64, kind string, data []byte, caption string, reply *models.ReplyParameters, threadID int) (*models.Message, error) {
 	var (
 		message *models.Message
 		err     error
@@ -194,7 +200,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 		err = a.callWithRetry(ctx, func() error {
 			var callErr error
 			message, callErr = api.SendPhoto(ctx, &telegrambot.SendPhotoParams{
-				ChatID: chatID,
+				ChatID:          chatID,
+				MessageThreadID: threadID,
 				Photo: &models.InputFileUpload{
 					Filename: "image.jpg",
 					Data:     bytes.NewReader(data),
@@ -208,7 +215,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 		err = a.callWithRetry(ctx, func() error {
 			var callErr error
 			message, callErr = api.SendVideo(ctx, &telegrambot.SendVideoParams{
-				ChatID: chatID,
+				ChatID:          chatID,
+				MessageThreadID: threadID,
 				Video: &models.InputFileUpload{
 					Filename: "video.mp4",
 					Data:     bytes.NewReader(data),
@@ -223,7 +231,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 			err = a.callWithRetry(ctx, func() error {
 				var callErr error
 				message, callErr = api.SendVoice(ctx, &telegrambot.SendVoiceParams{
-					ChatID: chatID,
+					ChatID:          chatID,
+					MessageThreadID: threadID,
 					Voice: &models.InputFileUpload{
 						Filename: "voice.ogg",
 						Data:     bytes.NewReader(data),
@@ -237,7 +246,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 			err = a.callWithRetry(ctx, func() error {
 				var callErr error
 				message, callErr = api.SendAudio(ctx, &telegrambot.SendAudioParams{
-					ChatID: chatID,
+					ChatID:          chatID,
+					MessageThreadID: threadID,
 					Audio: &models.InputFileUpload{
 						Filename: telegramAudioFilename(data),
 						Data:     bytes.NewReader(data),
@@ -252,7 +262,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 		err = a.callWithRetry(ctx, func() error {
 			var callErr error
 			message, callErr = api.SendDocument(ctx, &telegrambot.SendDocumentParams{
-				ChatID: chatID,
+				ChatID:          chatID,
+				MessageThreadID: threadID,
 				Document: &models.InputFileUpload{
 					Filename: "document.bin",
 					Data:     bytes.NewReader(data),
@@ -273,7 +284,8 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 		err = a.callWithRetry(ctx, func() error {
 			var callErr error
 			message, callErr = api.SendSticker(ctx, &telegrambot.SendStickerParams{
-				ChatID: chatID,
+				ChatID:          chatID,
+				MessageThreadID: threadID,
 				Sticker: &models.InputFileUpload{
 					Filename: filename,
 					Data:     bytes.NewReader(data),
@@ -296,8 +308,9 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 			companion = truncateTelegramText(companion, telegramTextLimit)
 			_ = a.callWithRetry(ctx, func() error {
 				_, sendErr := api.SendMessage(ctx, &telegrambot.SendMessageParams{
-					ChatID: chatID,
-					Text:   companion,
+					ChatID:          chatID,
+					MessageThreadID: threadID,
+					Text:            companion,
 				})
 				return sendErr
 			})
@@ -560,6 +573,17 @@ func telegramReplyParameters(ref *transport.MessageRef) (*models.ReplyParameters
 		return nil, errors.New("Telegram reply target is invalid")
 	}
 	return &models.ReplyParameters{MessageID: messageID}, nil
+}
+
+func telegramChildThreadID(scope *transport.ChildScope) (int, error) {
+	if scope == nil || strings.TrimSpace(scope.RemoteID) == "" {
+		return 0, nil
+	}
+	threadID, err := strconv.Atoi(strings.TrimSpace(scope.RemoteID))
+	if err != nil || threadID <= 0 {
+		return 0, errors.New("Telegram child scope is invalid")
+	}
+	return threadID, nil
 }
 
 func telegramMessageID(value string) (int, error) {

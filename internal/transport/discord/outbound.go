@@ -52,13 +52,17 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if !ok {
 		return transport.MessageRef{}, errors.New("unknown Discord endpoint")
 	}
+	nativeChannelID := channelID
+	if outgoing.ChildScope != nil && strings.TrimSpace(outgoing.ChildScope.RemoteID) != "" {
+		nativeChannelID = strings.TrimSpace(outgoing.ChildScope.RemoteID)
+	}
 	if outgoing.Kind == "poll" {
 		if poll, ok := discordNativePoll(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
 			message := &discordgo.MessageSend{Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
 			if outgoing.ReplyTo != nil {
-				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: channelID}
+				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: nativeChannelID}
 			}
-			created, err := a.api.ChannelMessageSendComplex(channelID, message, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+			created, err := a.api.ChannelMessageSendComplex(nativeChannelID, message, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
 			if err != nil {
 				return transport.MessageRef{}, err
 			}
@@ -117,18 +121,37 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	if outgoing.ReplyTo != nil {
-		if link := a.replyLink(channelID, outgoing.ReplyTo.RemoteMessageID); link != "" {
+		replyChannelID := channelID
+		if outgoing.ReplyTo.ChildScope != nil && outgoing.ReplyTo.ChildScope.RemoteID != "" {
+			replyChannelID = outgoing.ReplyTo.ChildScope.RemoteID
+		}
+		if link := a.replyLink(replyChannelID, outgoing.ReplyTo.RemoteMessageID); link != "" {
 			content = fmt.Sprintf("[%s](%s)\n\n%s", discordReplyLinkLabel(outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
 		} else {
 			content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 		}
 	}
 
-	remoteID, err := webhook.Execute(ctx, channelID, WebhookMessage{
+	webhookMessage := WebhookMessage{
 		Username: username,
 		Content:  content,
 		File:     file,
-	})
+	}
+	var (
+		remoteID string
+		err      error
+	)
+	if outgoing.ChildScope != nil && strings.TrimSpace(outgoing.ChildScope.RemoteID) != "" {
+		threaded, ok := webhook.(interface {
+			ExecuteInThread(context.Context, string, string, WebhookMessage) (string, error)
+		})
+		if !ok {
+			return transport.MessageRef{}, errors.New("Discord child scope is unsupported by webhook")
+		}
+		remoteID, err = threaded.ExecuteInThread(ctx, channelID, outgoing.ChildScope.RemoteID, webhookMessage)
+	} else {
+		remoteID, err = webhook.Execute(ctx, channelID, webhookMessage)
+	}
 	if err != nil {
 		return transport.MessageRef{}, err
 	}
@@ -216,6 +239,9 @@ func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error 
 	if messageID == "" {
 		return errors.New("Discord reaction target is required")
 	}
+	if reaction.ChildScope != nil && strings.TrimSpace(reaction.ChildScope.RemoteID) != "" {
+		channelID = strings.TrimSpace(reaction.ChildScope.RemoteID)
+	}
 
 	key := reactionKey{endpoint: reaction.Endpoint, message: messageID}
 	emoji := strings.TrimSpace(reaction.Emoji)
@@ -276,6 +302,15 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	if messageID == "" {
 		return errors.New("Discord edit target is required")
 	}
+	if ref.ChildScope != nil && strings.TrimSpace(ref.ChildScope.RemoteID) != "" {
+		threaded, ok := webhook.(interface {
+			EditInThread(context.Context, string, string, string, string) error
+		})
+		if !ok {
+			return errors.New("Discord child scope is unsupported by webhook lifecycle")
+		}
+		return threaded.EditInThread(ctx, channelID, ref.ChildScope.RemoteID, messageID, sourceBodyFromForwarded(text))
+	}
 
 	if err := webhook.Edit(ctx, channelID, messageID, sourceBodyFromForwarded(text)); err != nil {
 		return err
@@ -297,6 +332,20 @@ func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
 	messageID := strings.TrimSpace(ref.RemoteMessageID)
 	if messageID == "" {
 		return errors.New("Discord delete target is required")
+	}
+	if ref.ChildScope != nil && strings.TrimSpace(ref.ChildScope.RemoteID) != "" {
+		threaded, ok := webhook.(interface {
+			DeleteInThread(context.Context, string, string, string) error
+		})
+		if !ok {
+			return errors.New("Discord child scope is unsupported by webhook lifecycle")
+		}
+		a.markSuppressedDelete(ref.ChildScope.RemoteID, messageID)
+		if err := threaded.DeleteInThread(ctx, channelID, ref.ChildScope.RemoteID, messageID); err != nil {
+			a.consumeSuppressedDelete(ref.ChildScope.RemoteID, messageID)
+			return err
+		}
+		return nil
 	}
 
 	a.markSuppressedDelete(channelID, messageID)

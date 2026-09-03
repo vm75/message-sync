@@ -1,6 +1,9 @@
 package identity
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestUserIDStableAndOpaque(t *testing.T) {
 	h, err := New([]byte("0123456789abcdef0123456789abcdef"))
@@ -20,5 +23,22 @@ func TestUserIDStableAndOpaque(t *testing.T) {
 func TestSecretMinimumLength(t *testing.T) {
 	if _, err := New([]byte("short")); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestScopeTokenStableAndOpaque(t *testing.T) {
+	h, err := New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := h.ScopeToken("123456789012345678")
+	if first != h.ScopeToken("123456789012345678") {
+		t.Fatal("scope token is not stable")
+	}
+	if first == h.UserID("123456789012345678") || !strings.HasPrefix(first, "s_") {
+		t.Fatalf("scope token = %q, expected domain-separated s_ token", first)
+	}
+	if strings.Contains(first, "123456789012345678") {
+		t.Fatal("scope token exposes the provider scope")
 	}
 }

@@ -42,6 +42,14 @@ type MessageCopy struct {
 	FromSelf        bool
 }
 
+type CanonicalScope struct {
+	CanonicalID   string
+	EndpointID    string
+	ScopeKind     string
+	RemoteScopeID string
+	CreatedAt     time.Time
+}
+
 type Reaction struct {
 	CanonicalID      string
 	SourceEndpointID string
@@ -229,6 +237,9 @@ func (s *Store) PruneOlderThan(ctx context.Context, cutoff time.Time, batchSize 
 
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM suppressed_reactions WHERE created_at < ?`, cutoffMillis); err != nil {
 		return 0, wrapDB("prune suppressed reactions", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM suppressed_local_messages WHERE created_at < ?`, cutoffMillis); err != nil {
+		return 0, wrapDB("prune suppressed local messages", err)
 	}
 
 	for {
@@ -432,6 +443,105 @@ func (s *Store) MessageCopyForEndpoint(ctx context.Context, canonicalID, endpoin
 	}
 	copy.CreatedAt = fromUnixMillis(createdAt)
 	return copy, nil
+}
+
+func (s *Store) SuppressedLocalMessage(ctx context.Context, endpointID, remoteMessageID string, createdAt time.Time) error {
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	if err := requireOpaque("remote message id", remoteMessageID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO suppressed_local_messages(endpoint_id, remote_message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(endpoint_id, remote_message_id) DO NOTHING`, endpointID, remoteMessageID, unixMillis(createdAt))
+	return wrapDB("record suppressed local message", err)
+}
+
+func (s *Store) IsSuppressedLocalMessage(ctx context.Context, endpointID, remoteMessageID string) (bool, error) {
+	if err := validateEndpoint(endpointID); err != nil {
+		return false, err
+	}
+	if err := requireOpaque("remote message id", remoteMessageID); err != nil {
+		return false, err
+	}
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM suppressed_local_messages WHERE endpoint_id = ? AND remote_message_id = ?`, endpointID, remoteMessageID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, wrapDB("check suppressed local message", err)
+	}
+	return exists == 1, nil
+}
+
+// UpsertCanonicalScope records only the opaque operational child ID needed to
+// route future replies. It is intentionally separate from message copies so a
+// canonical message can carry independent scopes for multiple endpoints.
+func (s *Store) UpsertCanonicalScope(ctx context.Context, scope CanonicalScope) error {
+	if err := requireOpaque("canonical id", scope.CanonicalID); err != nil {
+		return err
+	}
+	if err := validateEndpoint(scope.EndpointID); err != nil {
+		return err
+	}
+	if scope.ScopeKind != "discord_thread" && scope.ScopeKind != "telegram_topic" {
+		return errors.New("child scope kind is invalid")
+	}
+	if err := requireOpaque("child scope id", scope.RemoteScopeID); err != nil {
+		return err
+	}
+	createdAt := scope.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO canonical_scopes(canonical_id, endpoint_id, scope_kind, remote_scope_id, created_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(canonical_id, endpoint_id) DO UPDATE SET scope_kind = excluded.scope_kind, remote_scope_id = excluded.remote_scope_id, created_at = excluded.created_at`,
+		scope.CanonicalID, scope.EndpointID, scope.ScopeKind, scope.RemoteScopeID, unixMillis(createdAt))
+	return wrapDB("upsert canonical child scope", err)
+}
+
+func (s *Store) CanonicalScope(ctx context.Context, canonicalID, endpointID string) (CanonicalScope, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return CanonicalScope{}, err
+	}
+	if err := validateEndpoint(endpointID); err != nil {
+		return CanonicalScope{}, err
+	}
+	var scope CanonicalScope
+	var createdAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT canonical_id, endpoint_id, scope_kind, remote_scope_id, created_at FROM canonical_scopes WHERE canonical_id = ? AND endpoint_id = ?`, canonicalID, endpointID).
+		Scan(&scope.CanonicalID, &scope.EndpointID, &scope.ScopeKind, &scope.RemoteScopeID, &createdAt)
+	if err != nil {
+		return CanonicalScope{}, wrapDB("find canonical child scope", err)
+	}
+	scope.CreatedAt = fromUnixMillis(createdAt)
+	return scope, nil
+}
+
+func (s *Store) CanonicalScopes(ctx context.Context, canonicalID string) ([]CanonicalScope, error) {
+	if err := requireOpaque("canonical id", canonicalID); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT canonical_id, endpoint_id, scope_kind, remote_scope_id, created_at FROM canonical_scopes WHERE canonical_id = ?`, canonicalID)
+	if err != nil {
+		return nil, wrapDB("find canonical child scopes", err)
+	}
+	defer rows.Close()
+	var scopes []CanonicalScope
+	for rows.Next() {
+		var scope CanonicalScope
+		var createdAt int64
+		if err := rows.Scan(&scope.CanonicalID, &scope.EndpointID, &scope.ScopeKind, &scope.RemoteScopeID, &createdAt); err != nil {
+			return nil, wrapDB("scan canonical child scope", err)
+		}
+		scope.CreatedAt = fromUnixMillis(createdAt)
+		scopes = append(scopes, scope)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrapDB("iterate canonical child scopes", err)
+	}
+	return scopes, nil
 }
 
 func (s *Store) UpsertReaction(ctx context.Context, reaction Reaction) error {

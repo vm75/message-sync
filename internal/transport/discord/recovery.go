@@ -14,6 +14,11 @@ import (
 
 var _ transport.RecoverySource = (*Adapter)(nil)
 
+type discordThreadRecoveryAPI interface {
+	ThreadsActive(string, ...discordgo.RequestOption) (*discordgo.ThreadsList, error)
+	ThreadsArchived(string, *time.Time, int, ...discordgo.RequestOption) (*discordgo.ThreadsList, error)
+}
+
 // RecoveryStreams returns one safe stream key per configured Discord endpoint.
 func (a *Adapter) RecoveryStreams() []string {
 	if a == nil {
@@ -152,6 +157,66 @@ func (a *Adapter) Recover(ctx context.Context, request transport.RecoveryRequest
 		}
 		afterID = strings.TrimSpace(last.ID)
 	}
+	if emitted < maxEvents {
+		if threadAPI, ok := api.(discordThreadRecoveryAPI); ok {
+			for _, listRequest := range []func() (*discordgo.ThreadsList, error){
+				func() (*discordgo.ThreadsList, error) {
+					return threadAPI.ThreadsActive(channelID, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+				},
+				func() (*discordgo.ThreadsList, error) {
+					return threadAPI.ThreadsArchived(channelID, nil, 100, discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+				},
+			} {
+				threads, err := listRequest()
+				if err != nil {
+					if isDiscordForbidden(err) {
+						a.setHistoryStatus(alias, HistoryStatusMissingPermission)
+						return classifyDiscordFailure(err)
+					}
+					continue
+				}
+				if threads == nil {
+					continue
+				}
+				sort.SliceStable(threads.Threads, func(i, j int) bool {
+					return discordChannelPosition(threads.Threads[i]) < discordChannelPosition(threads.Threads[j])
+				})
+				for _, thread := range threads.Threads {
+					if emitted >= maxEvents || thread == nil || strings.TrimSpace(thread.ID) == "" {
+						break
+					}
+					messages, err := api.ChannelMessages(thread.ID, maxEvents-emitted, "", afterID, "", discordgo.WithContext(ctx), discordgo.WithRetryOnRatelimit(true))
+					if err != nil {
+						continue
+					}
+					sort.SliceStable(messages, func(i, j int) bool { return discordMessagePosition(messages[i]) < discordMessagePosition(messages[j]) })
+					for _, message := range messages {
+						if emitted >= maxEvents || message == nil || discordMessagePosition(message) <= request.Cursor.Position {
+							continue
+						}
+						if !cutoff.IsZero() && discordMessageTime(message).Before(cutoff) {
+							continue
+						}
+						routed := routeDiscordMessage(message, channelID)
+						incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routed}, discordBotUserID(a.session), webhooks)
+						if !ok {
+							continue
+						}
+						incoming.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: thread.ID, Label: strings.TrimSpace(thread.Name)}
+						incoming, ok = a.withDiscordMedia(incoming, message)
+						if !ok {
+							continue
+						}
+						addCheckpoint(&incoming)
+						if err := emit(ctx, incoming); err != nil {
+							return err
+						}
+						emitted++
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -160,6 +225,17 @@ func discordMessagePosition(message *discordgo.Message) int64 {
 		return 0
 	}
 	position, err := strconv.ParseInt(strings.TrimSpace(message.ID), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return position
+}
+
+func discordChannelPosition(channel *discordgo.Channel) int64 {
+	if channel == nil {
+		return 0
+	}
+	position, err := strconv.ParseInt(strings.TrimSpace(channel.ID), 10, 64)
 	if err != nil {
 		return 0
 	}
