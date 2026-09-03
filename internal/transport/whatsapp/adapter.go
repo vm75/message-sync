@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -39,11 +40,54 @@ const (
 	defaultDeviceName            = "message-sync"
 )
 
+var (
+	connectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
+	globalPairingMu     sync.Mutex
+	globalPairingActive bool
+	globalPairingConn   string
+
+	ErrPairingBusy = errors.New("WhatsApp pairing already in progress")
+)
+
+func resetGlobalPairing(connID string) {
+	globalPairingMu.Lock()
+	defer globalPairingMu.Unlock()
+	if connID == "" || globalPairingConn == connID {
+		globalPairingActive = false
+		globalPairingConn = ""
+	}
+}
+
+// ProtocolDBPath returns the isolated protocol SQLite database path for a connection.
+func ProtocolDBPath(dataDir, connectionID string) (string, error) {
+	connectionID = strings.TrimSpace(connectionID)
+	if !connectionIDPattern.MatchString(connectionID) {
+		return "", fmt.Errorf("invalid WhatsApp connection ID %q", connectionID)
+	}
+	return filepath.Join(dataDir, "whatsapp", connectionID+".db"), nil
+}
+
+// RemoveProtocolDB removes the isolated protocol database and associated WAL/SHM files.
+func RemoveProtocolDB(dataDir, connectionID string) error {
+	path, err := ProtocolDBPath(dataDir, connectionID)
+	if err != nil {
+		return err
+	}
+	_ = os.Remove(path + "-wal")
+	_ = os.Remove(path + "-shm")
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func formatWhatsAppText(text string) string {
 	return strings.ReplaceAll(text, "***"+anonymisedLiveResultsHeading+"***", "*_"+anonymisedLiveResultsHeading+"_*")
 }
 
 type Options struct {
+	ConnectionID     string
 	DatabasePath     string
 	GroupJIDs        map[string]string
 	Hasher           *identity.Hasher
@@ -60,6 +104,7 @@ type Options struct {
 }
 
 type Adapter struct {
+	connectionID     string
 	client           *whatsmeow.Client
 	container        *sqlstore.Container
 	normalizer       *Normalizer
@@ -131,6 +176,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	disablePlaintextPersistence(client)
 
 	adapter := &Adapter{
+		connectionID:     opts.ConnectionID,
 		client:           client,
 		container:        container,
 		normalizer:       normalizer,
@@ -163,6 +209,23 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 
 	return adapter, nil
+}
+
+func (a *Adapter) ConnectionID() string {
+	if a == nil {
+		return ""
+	}
+	return a.connectionID
+}
+
+func (a *Adapter) HasEndpoint(alias string) bool {
+	if a == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.targets[transport.EndpointID(alias)]
+	return ok
 }
 
 func (a *Adapter) getContactInfo(jid types.JID) types.ContactInfo {
@@ -636,6 +699,7 @@ func (a *Adapter) Close() error {
 	if a == nil {
 		return nil
 	}
+	resetGlobalPairing(a.connectionID)
 	a.closeOnce.Do(func() {
 		a.mu.Lock()
 		if a.qrCancel != nil {
@@ -701,9 +765,19 @@ func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
 		return api.WhatsAppPairResponse{}, errors.New("WhatsApp transport is not initialized")
 	}
 
+	globalPairingMu.Lock()
+	if globalPairingActive && globalPairingConn != a.connectionID {
+		globalPairingMu.Unlock()
+		return api.WhatsAppPairResponse{}, ErrPairingBusy
+	}
+	globalPairingActive = true
+	globalPairingConn = a.connectionID
+	globalPairingMu.Unlock()
+
 	a.mu.Lock()
 	if a.client.IsLoggedIn() {
 		a.mu.Unlock()
+		resetGlobalPairing(a.connectionID)
 		return api.WhatsAppPairResponse{
 			Status:     "connected",
 			IsLoggedIn: true,
@@ -748,6 +822,7 @@ func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
 		a.pairingActive = false
 		a.pairingCodeChan = nil
 		a.mu.Unlock()
+		resetGlobalPairing(a.connectionID)
 		return api.WhatsAppPairResponse{}, fmt.Errorf("prepare WhatsApp QR pairing: %w", qrErr)
 	}
 
@@ -758,6 +833,7 @@ func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
 		a.pairingActive = false
 		a.pairingCodeChan = nil
 		a.mu.Unlock()
+		resetGlobalPairing(a.connectionID)
 		return api.WhatsAppPairResponse{}, fmt.Errorf("connect WhatsApp transport: %w", err)
 	}
 	a.mu.Unlock()
@@ -776,8 +852,10 @@ func (a *Adapter) Pair(ctx context.Context) (api.WhatsAppPairResponse, error) {
 			TimeoutSeconds: timeout,
 		}, nil
 	case <-ctx.Done():
+		resetGlobalPairing(a.connectionID)
 		return api.WhatsAppPairResponse{}, ctx.Err()
 	case <-time.After(15 * time.Second):
+		resetGlobalPairing(a.connectionID)
 		return api.WhatsAppPairResponse{}, errors.New("timeout waiting for WhatsApp QR code")
 	}
 }
@@ -786,6 +864,7 @@ func (a *Adapter) CancelPair(ctx context.Context) error {
 	if a == nil {
 		return nil
 	}
+	resetGlobalPairing(a.connectionID)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -796,6 +875,7 @@ func (a *Adapter) CancelPair(ctx context.Context) error {
 	a.pairingActive = false
 	a.currentQRCode = ""
 	a.pairingCodeChan = nil
+
 	if a.client != nil && !a.client.IsLoggedIn() && a.client.IsConnected() {
 		a.client.Disconnect()
 	}
@@ -807,6 +887,7 @@ func (a *Adapter) Logout(ctx context.Context) error {
 	if a == nil {
 		return errors.New("WhatsApp adapter is not initialized")
 	}
+	resetGlobalPairing(a.connectionID)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -933,6 +1014,9 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	groupJIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportWhatsApp {
+			if a.connectionID != "" && endpoint.ConnectionID != "" && endpoint.ConnectionID != a.connectionID {
+				continue
+			}
 			groupJIDs[alias] = endpoint.RemoteID
 		}
 	}
@@ -1120,6 +1204,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 	for {
 		select {
 		case <-qrCtx.Done():
+			resetGlobalPairing(a.connectionID)
 			a.mu.Lock()
 			a.pairingActive = false
 			a.currentQRCode = ""
@@ -1128,6 +1213,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 			return
 		case item, ok := <-items:
 			if !ok {
+				resetGlobalPairing(a.connectionID)
 				a.mu.Lock()
 				a.pairingActive = false
 				a.currentQRCode = ""
@@ -1158,6 +1244,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 					qrterminal.GenerateHalfBlock(item.Code, qrterminal.L, a.qrOut)
 				}
 			case whatsmeow.QRChannelSuccess.Event:
+				resetGlobalPairing(a.connectionID)
 				a.mu.Lock()
 				a.pairingActive = false
 				a.currentQRCode = ""
@@ -1165,9 +1252,10 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 				a.mu.Unlock()
 				a.logger.Info("WhatsApp pairing complete", "event", "whatsapp_pairing_success")
 				if a.enableTerminalQR && a.qrOut != nil {
-					fmt.Fprintln(a.qrOut, "WhatsApp pairing complete. The linked session is stored in whatsapp.db.")
+					fmt.Fprintln(a.qrOut, "WhatsApp pairing complete.")
 				}
 			case "timeout":
+				resetGlobalPairing(a.connectionID)
 				a.mu.Lock()
 				a.pairingActive = false
 				a.currentQRCode = ""
@@ -1175,6 +1263,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 				a.mu.Unlock()
 				a.logger.Warn("WhatsApp QR pairing timed out", "event", "whatsapp_pairing_timeout")
 			case "error":
+				resetGlobalPairing(a.connectionID)
 				a.mu.Lock()
 				a.pairingActive = false
 				a.currentQRCode = ""
@@ -1182,6 +1271,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 				a.mu.Unlock()
 				safelog.Error(a.logger, "WhatsApp QR pairing failed", "whatsapp_pairing", item.Error)
 			default:
+				resetGlobalPairing(a.connectionID)
 				a.mu.Lock()
 				a.pairingActive = false
 				a.currentQRCode = ""
@@ -1189,7 +1279,7 @@ func (a *Adapter) consumeQR(qrCtx context.Context, items <-chan whatsmeow.QRChan
 				a.mu.Unlock()
 				a.logger.Error("WhatsApp QR pairing failed",
 					"event", "whatsapp_pairing_failed",
-					"reason", item.Event,
+					"error_class", item.Event,
 				)
 			}
 		}

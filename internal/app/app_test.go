@@ -196,6 +196,9 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	defer func() { openWhatsApp = originalOpen }()
 	fake := &fakeWhatsAppTransport{}
 	openWhatsApp = func(_ context.Context, opts whatsapp.Options) (whatsappTransport, error) {
+		if err := os.MkdirAll(filepath.Dir(opts.DatabasePath), 0o700); err != nil {
+			return nil, err
+		}
 		if err := os.WriteFile(opts.DatabasePath, []byte("sensitive protocol state: 123456789@g.us 15551234567 Alice Example private body"), 0o600); err != nil {
 			return nil, err
 		}
@@ -255,8 +258,8 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	if err := <-errCh; err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, WhatsAppDBName)); err != nil {
-		t.Fatalf("whatsapp.db missing: %v", err)
+	if _, err := os.Stat(filepath.Join(dataDir, "whatsapp", "conn-wa-1.db")); err != nil {
+		t.Fatalf("whatsapp protocol db missing: %v", err)
 	}
 
 	forbiddenValues := []string{

@@ -39,13 +39,13 @@
                 | whatsmeow        |   | gateway/webhook  |   | Bot API polling  |
                 +--------+---------+   +------------------+   +------------------+
                          |
-                         +--------------------> /data/whatsapp.db
+                         +--------------------> /data/whatsapp/<connection-id>.db
                                                sensitive protocol state
 ```
 
-### `whatsapp.db`
+### `/data/whatsapp/<connection-id>.db`
 
-Owned by whatsmeow. It stores linked-device credentials, Signal/session keys, app-state/protocol data and may contain WhatsApp identifiers/contact metadata. It is sensitive and is the only protocol-state exception to the application’s zero-PII persistence rule.
+Owned by whatsmeow. Each configured WhatsApp connection maintains an isolated protocol SQLite database file located at `/data/whatsapp/<connection-id>.db`. The parent directory is restricted to mode `0700` and each database file is restricted to mode `0600`. It stores linked-device credentials, Signal/session keys, app-state/protocol data and may contain WhatsApp identifiers/contact metadata. It is sensitive and is the only protocol-state exception to the application’s zero-PII persistence rule.
 
 Requirements:
 
@@ -53,9 +53,12 @@ Requirements:
 - `UseRetryMessageStore = false`;
 - never expose/query it for product features;
 - never copy contact/LID data into `sync.db`;
-- protect it with restrictive filesystem permissions and encrypted storage where appropriate.
+- protect it with restrictive filesystem permissions (`0700` directory, `0600` file) and encrypted storage where appropriate;
+- connection deletion removes only its own isolated protocol database file and SQLite WAL/SHM sidecars.
 
-The daemon opens the database with the CGO-free SQLite driver, enables SQLite foreign keys, wraps the connection with whatsmeow `sqlstore`, and restricts the database file to mode `0600`. Both the whatsmeow client logger and sqlstore logger are no-op so protocol structs, identifiers, payloads, and arbitrary protocol errors cannot bypass the application safe-log boundary.
+The daemon opens each connection database with the CGO-free SQLite driver, enables SQLite foreign keys, wraps the connection with whatsmeow `sqlstore`, and restricts the database file to mode `0600`. Both the whatsmeow client logger and sqlstore logger are no-op so protocol structs, identifiers, payloads, and arbitrary protocol errors cannot bypass the application safe-log boundary.
+
+Active QR pairing across WhatsApp connections is globally serialized because companion device properties are configured package-globally in whatsmeow. Already-connected WhatsApp accounts continue operating while another connection pairs; simultaneous pairing attempts receive an explicit busy conflict response.
 
 ### `sync.db`
 

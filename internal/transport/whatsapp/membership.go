@@ -64,3 +64,57 @@ func (a *Adapter) RotateInviteLink(ctx context.Context, alias string) error {
 	_, err = a.client.GetGroupInviteLink(ctx, target, true)
 	return err
 }
+
+// MultiAdmin dispatches WhatsApp membership fulfillment operations to the adapter
+// owning the target endpoint alias without disclosing connection identity.
+type MultiAdmin struct {
+	getAdapters func() []verification.WhatsAppAdmin
+}
+
+func NewMultiAdmin(getAdapters func() []verification.WhatsAppAdmin) *MultiAdmin {
+	return &MultiAdmin{getAdapters: getAdapters}
+}
+
+func (m *MultiAdmin) find(alias string) (verification.WhatsAppAdmin, error) {
+	if m == nil || m.getAdapters == nil {
+		return nil, verification.ErrDestinationMissing
+	}
+	for _, a := range m.getAdapters() {
+		if hasEp, ok := a.(interface{ HasEndpoint(string) bool }); ok && hasEp.HasEndpoint(alias) {
+			return a, nil
+		}
+	}
+	return nil, verification.ErrDestinationMissing
+}
+
+func (m *MultiAdmin) AddParticipant(ctx context.Context, alias, phone string) error {
+	a, err := m.find(alias)
+	if err != nil {
+		return err
+	}
+	return a.AddParticipant(ctx, alias, phone)
+}
+
+func (m *MultiAdmin) InviteLink(ctx context.Context, alias string) (string, error) {
+	a, err := m.find(alias)
+	if err != nil {
+		return "", err
+	}
+	return a.InviteLink(ctx, alias)
+}
+
+func (m *MultiAdmin) IsMember(ctx context.Context, alias, phone string) (bool, error) {
+	a, err := m.find(alias)
+	if err != nil {
+		return false, err
+	}
+	return a.IsMember(ctx, alias, phone)
+}
+
+func (m *MultiAdmin) RotateInviteLink(ctx context.Context, alias string) error {
+	a, err := m.find(alias)
+	if err != nil {
+		return err
+	}
+	return a.RotateInviteLink(ctx, alias)
+}
