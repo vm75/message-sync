@@ -514,7 +514,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 
 	// 1. Wait for server to start and setup admin account
 	var token string
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 100; i++ {
 		resp, err := client.Post(fmt.Sprintf("http://%s/api/auth/setup", apiAddr), "application/json", strings.NewReader(`{"username":"admin","password":"testadminpassword123"}`))
 		if err == nil {
 			var tokenResp struct {

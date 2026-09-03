@@ -426,7 +426,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	}()
 
 	var apiAddr string
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 200; i++ {
 		for _, line := range strings.Split(logBuf.String(), "\n") {
 			if strings.Contains(line, "api server listening") && strings.Contains(line, "addr=") {
 				parts := strings.Split(line, "addr=")

@@ -72,7 +72,12 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			// DiscordGo cannot include Poll in webhook parameters, so native polls
 			// use the existing session REST client; all other messages remain on
 			// the managed webhook path below.
-			return transport.MessageRef{Endpoint: outgoing.Endpoint, RemoteMessageID: strings.TrimSpace(created.ID), IsTargetFromMe: true}, nil
+			return transport.MessageRef{
+				Endpoint:        outgoing.Endpoint,
+				RemoteMessageID: strings.TrimSpace(created.ID),
+				IsTargetFromMe:  true,
+				ChildScope:      outgoing.ChildScope,
+			}, nil
 		}
 	}
 	if webhook == nil {
@@ -168,6 +173,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		Endpoint:        outgoing.Endpoint,
 		RemoteMessageID: strings.TrimSpace(remoteID),
 		IsTargetFromMe:  true,
+		ChildScope:      outgoing.ChildScope,
 	}, nil
 }
 

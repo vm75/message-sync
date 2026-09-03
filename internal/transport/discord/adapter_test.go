@@ -2,9 +2,8 @@ package discord
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -36,56 +35,67 @@ func TestDiscordGatewayIntentsIncludeMessageReactions(t *testing.T) {
 	}
 }
 
-func TestLoadBotTokenFromEnvironment(t *testing.T) {
-	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
-	t.Setenv("DISCORD_BOT_TOKEN", "  environment-token  ")
+func TestDiscordTokenInjectionFromOptions(t *testing.T) {
+	ctx := context.Background()
+	logger := slog.Default()
 
-	token, err := LoadBotToken()
-	if err != nil {
-		t.Fatal(err)
+	// Missing token returns error
+	_, err := Open(ctx, Options{
+		ConnectionID: "conn-dc-1",
+		Token:        "",
+		Logger:       logger,
+	})
+	if err == nil {
+		t.Fatal("expected error when token is empty")
 	}
-	if token != "environment-token" {
-		t.Fatalf("token = %q", token)
+
+	// Token with spaces is rejected if empty after trim
+	_, err = Open(ctx, Options{
+		ConnectionID: "conn-dc-1",
+		Token:        "   ",
+		Logger:       logger,
+	})
+	if err == nil {
+		t.Fatal("expected error when token is whitespace")
 	}
 }
 
-func TestLoadBotTokenFromSecretFile(t *testing.T) {
-	t.Setenv("DISCORD_BOT_TOKEN", "")
-	path := filepath.Join(t.TempDir(), "discord-token")
-	if err := os.WriteFile(path, []byte("mounted-secret-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("DISCORD_BOT_TOKEN_FILE", path)
-
-	token, err := LoadBotToken()
+func TestDiscordAdapterEndpointOwnership(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if token != "mounted-secret-token" {
-		t.Fatalf("token = %q", token)
+	ad := &Adapter{
+		connectionID: "conn-dc-1",
+		hasher:       hasher,
+		targets:      make(map[transport.EndpointID]string),
 	}
-}
 
-func TestLoadBotTokenRejectsMissingAndAmbiguousSources(t *testing.T) {
-	t.Run("missing", func(t *testing.T) {
-		t.Setenv("DISCORD_BOT_TOKEN", "")
-		t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
-		if _, err := LoadBotToken(); err == nil {
-			t.Fatal("expected missing token error")
-		}
-	})
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"d1": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345671"},
+			"d2": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345672"},
+			"d3": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-2", RemoteID: "123456789012345673"},
+			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
+		},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+	}
 
-	t.Run("both", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "discord-token")
-		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("DISCORD_BOT_TOKEN", "environment-token")
-		t.Setenv("DISCORD_BOT_TOKEN_FILE", path)
-		if _, err := LoadBotToken(); err == nil {
-			t.Fatal("expected ambiguous token source error")
-		}
-	})
+	if err := ad.UpdateConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ad.mu.RLock()
+	defer ad.mu.RUnlock()
+	if len(ad.targets) != 2 {
+		t.Fatalf("expected exactly 2 targets for conn-dc-1, got: %d", len(ad.targets))
+	}
+	if ad.targets["d1"] != "123456789012345671" || ad.targets["d2"] != "123456789012345672" {
+		t.Fatalf("unexpected targets for conn-dc-1: %+v", ad.targets)
+	}
+	if _, ok := ad.targets["d3"]; ok {
+		t.Fatal("conn-dc-1 should not own d3 (owned by conn-dc-2)")
+	}
 }
 
 func TestDiscordGoLoggerDropsRawProtocolErrorText(t *testing.T) {

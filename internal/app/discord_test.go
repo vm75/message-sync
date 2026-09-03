@@ -116,9 +116,9 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	if gotDiscordOptions.Token != "test-discord-token" {
+	if gotDiscordOptions.Token != "discord-bot-token" {
 		cancel()
-		t.Fatalf("Discord token was not passed from environment to adapter")
+		t.Fatalf("Discord token was not passed from connection to adapter: got %q", gotDiscordOptions.Token)
 	}
 	if gotDiscordOptions.ChannelIDs["discord"] != "123456789012345678" || len(gotDiscordOptions.ChannelIDs) != 1 {
 		cancel()
@@ -275,8 +275,6 @@ func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(
 	seedTestConnections(t, dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
 	t.Setenv("IDENTITY_SECRET", "0123456789abcdef0123456789abcdef")
-	t.Setenv("DISCORD_BOT_TOKEN", "test-discovery-token")
-	t.Setenv("DISCORD_BOT_TOKEN_FILE", "")
 
 	cfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
@@ -318,9 +316,13 @@ func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(
 			cancel()
 			t.Fatalf("discovery-only Discord adapter received configured targets: %+v", opts.ChannelIDs)
 		}
-		if opts.Token != "test-discovery-token" {
+		if opts.Token != "discord-bot-token" {
 			cancel()
-			t.Fatal("discovery-only Discord adapter did not receive configured environment credential")
+			t.Fatalf("discovery-only Discord adapter received unexpected token: %q", opts.Token)
+		}
+		if opts.ConnectionID != "conn-dc-1" {
+			cancel()
+			t.Fatalf("discovery-only Discord adapter received unexpected connection ID: %q", opts.ConnectionID)
 		}
 	case <-time.After(time.Second):
 		cancel()

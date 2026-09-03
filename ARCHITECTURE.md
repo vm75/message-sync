@@ -295,7 +295,7 @@ canonical persistence, and media loading; later lifecycle events remain local.
 
 ### Discord gateway ingress boundary
 
-The Discord adapter uses a gateway bot for ingress and keeps Discord protocol identity outside the canonical model:
+The Discord adapter uses a gateway bot for ingress and keeps Discord protocol identity outside the canonical model. Discord connections are multi-instance safe: each connection adapter receives its decrypted token explicitly via `discord.Options.Token`, owns only the endpoint channels assigned to its connection ID, and manages its own gateway session, discovery, status, webhooks, and recovery streams:
 
 ```text
 Discord MESSAGE_CREATE
@@ -538,7 +538,7 @@ Avoid sender JIDs, group JIDs, names, content, captions and filenames.
 
 The WhatsApp adapter disables whatsmeow/sqlstore logging entirely. It emits only fixed connection/pairing state, configured endpoint aliases, normalized kinds, and safe error classifications through the application logger. Pairing QR output is a separate sensitive terminal UI and must not be copied into retained logs or support artifacts.
 
-The Discord adapter replaces DiscordGo's default logger with a fixed-field warning/error classifier because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and safe error classes. The bot token is read only from `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; managed webhook IDs/tokens are discovered or created at runtime and kept only in memory. None of those credentials are copied to `sync.db` or application logs. DiscordGo retry-on-rate-limit behavior is enabled for gateway REST operations and explicitly requested for webhook, reply, reaction, edit, and delete calls.
+The Discord adapter replaces DiscordGo's default logger with a fixed-field warning/error classifier because raw gateway/client errors may contain protocol identifiers or other sensitive values. Application-visible Discord logs use only fixed event names, safe endpoint aliases, message kinds/counts, and safe error classes. Bot tokens are injected dynamically from encrypted control-plane credentials; managed webhook IDs/tokens are discovered or created at runtime and kept only in memory. None of those credentials are copied to `sync.db` or application logs. DiscordGo retry-on-rate-limit behavior is enabled for gateway REST operations and explicitly requested for webhook, reply, reaction, edit, and delete calls.
 
 The Telegram adapter reads its bot credential only from `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`; ambiguous dual-source configuration is rejected and the token is never written to `sync.db`. The Bot API client's default raw update/error logging is not enabled: application-visible client errors pass through the fixed safe-log classifier, and ingress buffer/lifecycle logs contain only fixed event names, safe endpoint aliases, normalized kinds, and reasons. The long-poll client starts at the persisted generic `telegram` cursor plus one, advances its Bot API `getUpdates` offset in process, and applies bounded retry/backoff (including Telegram `retry_after` responses). The adapter rejects duplicate/older update IDs within the running process before normalization; Telegram's retained update window limits how far a restart can recover.
 

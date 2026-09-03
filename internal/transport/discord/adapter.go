@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 
@@ -18,6 +17,7 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
+	ConnectionID  string
 	Token         string
 	ChannelIDs    map[string]string
 	Hasher        *identity.Hasher
@@ -29,15 +29,16 @@ type Options struct {
 }
 
 type Adapter struct {
-	session    *discordgo.Session
-	api        discordAPI
-	adminAPI   discordAdminAPI
-	normalizer *Normalizer
-	hasher     *identity.Hasher
-	webhook    ChannelWebhook
-	targets    map[transport.EndpointID]string
-	events     chan transport.Incoming
-	logger     *slog.Logger
+	connectionID string
+	session      *discordgo.Session
+	api          discordAPI
+	adminAPI     discordAdminAPI
+	normalizer   *Normalizer
+	hasher       *identity.Hasher
+	webhook      ChannelWebhook
+	targets      map[transport.EndpointID]string
+	events       chan transport.Incoming
+	logger       *slog.Logger
 
 	mediaEnabled      bool
 	mediaMaxBytes     uint64
@@ -99,6 +100,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		webhook = newManagedWebhookClient(session)
 	}
 	adapter := &Adapter{
+		connectionID:      strings.TrimSpace(opts.ConnectionID),
 		session:           session,
 		api:               session,
 		adminAPI:          session,
@@ -181,6 +183,13 @@ func installSafeDiscordLogger(logger *slog.Logger) {
 
 func (a *Adapter) Name() string {
 	return "discord"
+}
+
+func (a *Adapter) ConnectionID() string {
+	if a == nil {
+		return ""
+	}
+	return a.connectionID
 }
 
 func (a *Adapter) Events() <-chan transport.Incoming {
@@ -267,6 +276,9 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	channelIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportDiscord {
+			if a.connectionID != "" && endpoint.ConnectionID != a.connectionID {
+				continue
+			}
 			channelIDs[alias] = endpoint.RemoteID
 		}
 	}
@@ -356,38 +368,6 @@ func (a *Adapter) emit(incoming transport.Incoming) {
 			)
 		}
 	}
-}
-
-// LoadBotToken reads the Discord bot credential only from environment or a
-// mounted secret file. The token is never returned through config APIs or
-// written to application persistence.
-func BotTokenConfigured() bool {
-	return strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN")) != "" ||
-		strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN_FILE")) != ""
-}
-
-func LoadBotToken() (string, error) {
-	token := strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN"))
-	secretFile := strings.TrimSpace(os.Getenv("DISCORD_BOT_TOKEN_FILE"))
-	if token != "" && secretFile != "" {
-		return "", errors.New("configure only one Discord bot token source")
-	}
-	if token != "" {
-		return token, nil
-	}
-	if secretFile == "" {
-		return "", errors.New("Discord bot token is not configured")
-	}
-
-	data, err := os.ReadFile(secretFile)
-	if err != nil {
-		return "", errors.New("read Discord bot token secret")
-	}
-	token = strings.TrimSpace(string(data))
-	if token == "" {
-		return "", errors.New("Discord bot token secret is empty")
-	}
-	return token, nil
 }
 
 func discordTargets(channelIDs map[string]string) map[transport.EndpointID]string {

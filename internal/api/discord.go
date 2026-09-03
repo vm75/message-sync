@@ -27,7 +27,7 @@ func (s *Server) handleDiscordStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleDiscordChannels(w http.ResponseWriter, r *http.Request) {
 	if s.discord == nil {
-		WriteError(w, http.StatusServiceUnavailable, "Discord bot is not configured; set DISCORD_BOT_TOKEN or DISCORD_BOT_TOKEN_FILE and restart message-sync")
+		WriteError(w, http.StatusServiceUnavailable, "Discord bot is not configured")
 		return
 	}
 

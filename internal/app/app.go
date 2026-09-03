@@ -152,25 +152,55 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}
 	defer wa.Close()
 
-	var dc discordTransport
-	if len(discordChannelIDs) > 0 || discord.BotTokenConfigured() {
-		token, err := discord.LoadBotToken()
-		if err != nil {
-			return err
+	var credentialCipher *controlstore.CredentialCipher
+	if len(secret) >= 32 {
+		credentialCipher, _ = controlstore.NewCredentialCipher([]byte(secret))
+	}
+
+	discordAdapters := make(map[string]discordTransport)
+	if controlStore != nil && credentialCipher != nil {
+		allConns, err := controlStore.ListConnections(ctx)
+		if err == nil {
+			for _, c := range allConns {
+				if c.Transport == "discord" && c.Enabled {
+					tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+					if err != nil {
+						safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
+						continue
+					}
+					connChannelIDs := make(map[string]string)
+					for alias, ep := range cfg.Endpoints {
+						if ep.Transport == config.TransportDiscord && ep.ConnectionID == c.ID {
+							connChannelIDs[alias] = ep.RemoteID
+						}
+					}
+					dcInst, err := openDiscord(ctx, discord.Options{
+						ConnectionID:  c.ID,
+						Token:         string(tokenBytes),
+						ChannelIDs:    connChannelIDs,
+						Hasher:        hasher,
+						UsernameMode:  cfg.Identity.UsernameMode,
+						Logger:        logger,
+						MediaEnabled:  cfg.Media.Enabled,
+						MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+					})
+					if err != nil {
+						safelog.Error(logger, "start Discord transport failed", "discord_start", err)
+						continue
+					}
+					discordAdapters[c.ID] = dcInst
+					defer dcInst.Close()
+				}
+			}
 		}
-		dc, err = openDiscord(ctx, discord.Options{
-			Token:         token,
-			ChannelIDs:    discordChannelIDs,
-			Hasher:        hasher,
-			UsernameMode:  cfg.Identity.UsernameMode,
-			Logger:        logger,
-			MediaEnabled:  cfg.Media.Enabled,
-			MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-		})
-		if err != nil {
-			return fmt.Errorf("start Discord transport: %w", err)
+	}
+
+	var dc discord.AdminService
+	for _, da := range discordAdapters {
+		if s, ok := da.(discord.AdminService); ok {
+			dc = s
+			break
 		}
-		defer dc.Close()
 	}
 
 	var tg telegramTransport
@@ -229,6 +259,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	registerActiveConnections := func(c *config.Config) {
 		registered := make(map[string]bool)
+		for connID, da := range discordAdapters {
+			if err := connMgr.Register(ctx, connID, config.TransportDiscord, da); err == nil {
+				registered[connID] = true
+			}
+		}
 		for _, ep := range c.Endpoints {
 			if registered[ep.ConnectionID] {
 				continue
@@ -237,12 +272,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			case config.TransportWhatsApp:
 				if wa != nil {
 					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportWhatsApp, wa); err == nil {
-						registered[ep.ConnectionID] = true
-					}
-				}
-			case config.TransportDiscord:
-				if dc != nil {
-					if err := connMgr.Register(ctx, ep.ConnectionID, config.TransportDiscord, dc); err == nil {
 						registered[ep.ConnectionID] = true
 					}
 				}
@@ -257,9 +286,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if wa != nil && !registered["conn-wa-1"] {
 			_ = connMgr.Register(ctx, "conn-wa-1", config.TransportWhatsApp, wa)
 		}
-		if dc != nil && !registered["conn-dc-1"] {
-			_ = connMgr.Register(ctx, "conn-dc-1", config.TransportDiscord, dc)
-		}
 		if tg != nil && !registered["conn-tg-1"] {
 			_ = connMgr.Register(ctx, "conn-tg-1", config.TransportTelegram, tg)
 		}
@@ -270,6 +296,54 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
 		if err != nil {
 			return fmt.Errorf("reload config: %w", err)
+		}
+		if controlStore != nil && credentialCipher != nil {
+			allConns, err := controlStore.ListConnections(updateCtx)
+			if err == nil {
+				enabledDiscord := make(map[string]controlstore.Connection)
+				for _, c := range allConns {
+					if c.Transport == "discord" && c.Enabled {
+						enabledDiscord[c.ID] = c
+					}
+				}
+				for connID := range discordAdapters {
+					if _, ok := enabledDiscord[connID]; !ok {
+						_ = connMgr.Stop(connID)
+						delete(discordAdapters, connID)
+					}
+				}
+				for connID, c := range enabledDiscord {
+					if _, exists := discordAdapters[connID]; !exists {
+						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+						if err != nil {
+							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
+							continue
+						}
+						connChannelIDs := make(map[string]string)
+						for alias, ep := range updatedCfg.Endpoints {
+							if ep.Transport == config.TransportDiscord && ep.ConnectionID == c.ID {
+								connChannelIDs[alias] = ep.RemoteID
+							}
+						}
+						dcInst, err := openDiscord(ctx, discord.Options{
+							ConnectionID:  c.ID,
+							Token:         string(tokenBytes),
+							ChannelIDs:    connChannelIDs,
+							Hasher:        hasher,
+							UsernameMode:  updatedCfg.Identity.UsernameMode,
+							Logger:        logger,
+							MediaEnabled:  updatedCfg.Media.Enabled,
+							MediaMaxBytes: uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+						})
+						if err != nil {
+							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
+							continue
+						}
+						discordAdapters[c.ID] = dcInst
+						_ = connMgr.Register(ctx, c.ID, config.TransportDiscord, dcInst)
+					}
+				}
+			}
 		}
 		registerActiveConnections(updatedCfg)
 		if err := connMgr.UpdateConfig(updatedCfg); err != nil {
