@@ -7,11 +7,11 @@ make fmt
 git diff --check
 GOCACHE=/tmp/message-sync-go-cache make test
 GOCACHE=/tmp/message-sync-go-cache make vet
-GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp
+GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./internal/connection ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp
 git diff --exit-code VERSION
 ```
 
-`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify cross-transport fan-out, destination isolation, ambiguity-safe retry, restart/replay state, and lifecycle ordering. The focused package tests cover bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, WhatsApp lifecycle markers, and privacy-safe API/logging.
+`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, WhatsApp lifecycle markers, and privacy-safe API/logging.
 
 For a runtime/container smoke test, use a fresh data directory and no provider credentials:
 

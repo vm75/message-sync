@@ -459,8 +459,15 @@ func TestHardening_DeliveryLanesFailureIsolationAndEndpointReassignment(t *testi
 	}
 
 	// Now copies for dc-comm are recorded in message_copies!
-	err = syncStore.DB().QueryRow(`SELECT COUNT(*) FROM message_copies WHERE endpoint_id='dc-comm'`).Scan(&copyCount)
-	if err != nil || copyCount != 2 {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		err = syncStore.DB().QueryRow(`SELECT COUNT(*) FROM message_copies WHERE endpoint_id='dc-comm'`).Scan(&copyCount)
+		if err == nil && copyCount == 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if copyCount != 2 {
 		t.Fatalf("expected 2 copies in ledger for dc-comm after reassignment, got %d (err: %v)", copyCount, err)
 	}
 }

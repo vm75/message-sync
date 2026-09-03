@@ -49,9 +49,9 @@ To bridge Discord channels, you will create a Discord server, register a Discord
 4. Enter an application name (e.g., `MessageSync-Bot`), accept the terms, and click **Create**.
 5. In the left navigation menu, click **Bot**.
 6. Under the **Build-A-Bot** section, locate the **Token** subsection and click **Reset Token** (confirm if prompted).
-7. Copy the generated token string immediately and keep it secure. This is your `DISCORD_BOT_TOKEN`.
+7. Copy the generated token string immediately and keep it secure. You will paste this token once into the Web UI when creating your Discord connection.
    > [!IMPORTANT]
-   > Treat this token like a password. Never commit it to git or share it in public channels.
+   > Treat this token like a password. You do not need to put it into environment files; it is pasted once in the Web UI and encrypted immediately with AES-256-GCM.
 
 ### Step 2.3: Enable Privileged Gateway Intents
 On the same **Bot** page, scroll down to the **Privileged Gateway Intents** section:
@@ -102,7 +102,7 @@ The Telegram adapter uses Telegram's Bot API with long polling. You will create 
    ```text
    1234567890:ABCdefGhIJKlmNoPQRsTUVwxyZ_1234567
    ```
-8. Copy this token string. This is your `TELEGRAM_BOT_TOKEN`.
+8. Copy this token string. You will paste this token once into the Web UI when creating your Telegram connection.
 
 ### Step 3.2: Disable Bot Privacy Mode (Mandatory)
 By default, Telegram bots operate in **Privacy Mode**, meaning they only receive messages that start with a slash `/` (commands) or that directly mention the bot. To synchronize ordinary chat messages, Privacy Mode must be disabled.
@@ -167,12 +167,6 @@ DATA_DIR=/data
 PORT=8080
 LOG_LEVEL=info
 
-# Discord Bot Token from Step 2.2
-DISCORD_BOT_TOKEN=your_discord_bot_token_here
-
-# Telegram Bot Token from Step 3.1
-TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
-
 # Host data directory
 MESSAGE_SYNC_DATA_DIR=./data
 ```
@@ -228,51 +222,48 @@ You should see logs indicating the HTTP API is listening on port 8080 and that D
 
 ---
 
-## 6. Pairing & Endpoint Configuration in the Web UI
+## 6. Connections, Endpoints & Sync Sets in the Web UI
 
 ### Step 6.1: Initial Admin Password Setup
 1. Open your browser and navigate to `http://localhost:8080`.
 2. You will be prompted to set up the admin password.
 3. Enter a strong password and complete setup. You will be logged into the management console.
 
-### Step 6.2: Link WhatsApp
-1. In the Web UI, go to the **WhatsApp** section.
-2. Click **Start Pairing** to display the pairing QR code.
-3. On your phone, open WhatsApp &rarr; **Settings** &rarr; **Linked Devices** &rarr; **Link a Device**.
-4. Scan the QR code displayed on screen.
-5. Once scanned, the status badge will update to **Connected**.
-6. Click **Refresh WhatsApp Groups**.
-7. Locate your test group (`Message Sync WhatsApp Test`), enter a friendly alias (e.g., `wa_test`), and click **Add Endpoint**.
+### Step 6.2: Create Platform Connections
+1. In the Web UI, navigate to the **Connections** view.
+2. **Add WhatsApp Connection**:
+   - Click **Add Connection**, select **WhatsApp**, and enter a label (e.g., `wa-primary`).
+   - Click **Pair** on the connection card to generate a QR code.
+   - On your phone, open WhatsApp &rarr; **Settings** &rarr; **Linked Devices** &rarr; **Link a Device**, and scan the QR code.
+   - The status updates to **Connected**. Each WhatsApp connection maintains an isolated protocol store (`/data/whatsapp-<connection-id>.db`).
+   - *(Optional Multi-Account)*: Click **Add Connection** to add a second WhatsApp account. Note that pairing operations are serialized to one flow at a time.
+3. **Add Discord Bot Connection**:
+   - Click **Add Connection**, select **Discord**, enter a label (e.g., `dc-primary`), and paste your bot token once.
+   - The token is encrypted immediately with AES-256-GCM using `IDENTITY_SECRET` and saved to `control.db`. It is never stored in `sync.db` or browser storage.
+   - The connection card displays Gateway status and Webhook readiness.
+   - *(Optional Multi-Bot)*: Add a second Discord connection with another bot token.
+4. **Add Telegram Bot Connection**:
+   - Click **Add Connection**, select **Telegram**, enter a label (e.g., `tg-primary`), and paste your Bot API token once.
+   - The token is encrypted immediately with AES-256-GCM. Long polling initializes with a connection-scoped recovery cursor (`telegram:<connection-id>`).
+   - *(Optional Multi-Bot)*: Add a second Telegram connection with another bot token.
 
-### Step 6.3: Configure Discord Endpoint
-1. Go to the **Discord** section in the Web UI.
-2. Verify the status:
-   - **Gateway Status**: `Connected`
-   - **Webhook Readiness**: `Ready`
-   - **History Readiness**: `Ready` (or `Missing Permission` if the bot lacks View Channel/Read Message History)
-3. Click **Discover Channels**.
-4. Find your `#sync-test` channel from the list, assign an alias (e.g., `dc_test`), and click **Add Endpoint**.
+### Step 6.3: Scoped Discovery & Endpoint Creation
+1. Navigate to the **Endpoints** view (or use **Discover** directly on any connection card).
+2. **WhatsApp Endpoint**: Click **Discover** on your WhatsApp connection, locate your test group, enter an alias (e.g., `wa_test`), and click **Add Endpoint**.
+3. **Discord Endpoint**: Click **Discover** on your Discord connection, select `#sync-test`, assign an alias (e.g., `dc_test`), and click **Add Endpoint**.
+4. **Telegram Endpoint**: Click **Discover** on your Telegram connection to view observed chats, select `Message Sync Test Group`, assign an alias (e.g., `tg_test`), and click **Add Endpoint**.
 
-### Step 6.4: Configure Telegram Endpoint
-1. Go to the **Telegram** section in the Web UI.
-2. Verify the status:
-   - **Long-Poll Status**: `Polling`
-   - **Bot Privacy Mode**: `Disabled (Can Read All Messages)`
-3. Click **Refresh Observed Chats**.
-4. Your `Message Sync Test Group` should appear in the observed chats table (if not, send another message in the Telegram group and refresh).
-5. Assign an alias (e.g., `tg_test`) and click **Add Endpoint**.
-
-### Step 6.5: Create the Unified Sync Set
-1. Navigate to the **Sync Sets** section in the Web UI.
-2. Click **Create Sync Set** (or edit an existing one).
+### Step 6.4: Create the Unified Sync Set
+1. Navigate to the **Sync Sets** view.
+2. Click **Create Sync Set**.
 3. Name the sync set (e.g., `test_sync_set`).
-4. Select all three endpoints:
+4. Select the configured endpoints:
    - `wa_test` (WhatsApp)
    - `dc_test` (Discord)
    - `tg_test` (Telegram)
 5. Save the sync set.
 
-All three platforms are now bridged!
+All platforms in the sync set are now synchronized! No server restart is required when adding or reconfiguring connections.
 
 ---
 
@@ -379,9 +370,42 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 - [ ] Restart/replay the service, edit a suppressed message to remove the prefix, and exercise delete/reaction.
   - **Verify**: the opaque suppression marker still prevents bridging and lifecycle events remain local.
 - [ ] Reply normally to a suppressed message.
-  - **Verify**: the reply may bridge, but its fallback contains no quoted local-only content. Manually typed `[contexts ...]` text never changes routing.
+### Scenario 9: Multi-Connection Mixed Topology & Isolation
+- [ ] Configure two WhatsApp connections (`wa-1`, `wa-2`), two Discord connections (`dc-1`, `dc-2`), and two Telegram connections (`tg-1`, `tg-2`).
+- [ ] Assign endpoints into two independent sync sets:
+  - `set-alpha`: `wa-1-ep`, `dc-1-ep`, `tg-1-ep`
+  - `set-beta`: `wa-2-ep`, `dc-2-ep`, `tg-2-ep`
+- [ ] **Verify**: Messages sent in `set-alpha` fan out only to endpoints in `set-alpha`. Neither `wa-2`, `dc-2`, nor `tg-2` receives messages from `set-alpha`.
+
+### Scenario 10: Connection-Scoped Discovery
+- [ ] Click **Discover** on `dc-1` and verify only guilds/channels accessible to Discord Bot 1 are listed.
+- [ ] Click **Discover** on `dc-2` and verify channels accessible to Bot 2 are listed.
+- [ ] Click **Discover** on `tg-1` vs `tg-2` and verify observed chats are tracked and presented independently per bot token.
+
+### Scenario 11: Cross-Connection Thread & Topic Lineage
+- [ ] Send a message in a Discord thread on connection `dc-1` routed to a Telegram endpoint on connection `tg-1`.
+- [ ] Reply from Telegram quoting the bridged message.
+- [ ] **Verify**: The reply returns accurately to the originating thread on `dc-1`, with child scopes preserved without creating child endpoint identities.
+- [ ] Repeat with Telegram forum topics on `tg-2` routed to Discord on `dc-2`.
+
+### Scenario 12: Connection Lifecycle, Reassignment & Deletion Safety
+- [ ] **Disable Connection**: Disable connection `dc-1` in the Web UI.
+  - **Verify**: Delivery to `dc-1` pauses with a transient lane failure; healthy lanes for other connections continue processing normally.
+- [ ] **Re-enable / Token Replacement**: Click **Edit** on `dc-1`, paste a valid token, and save.
+  - **Verify**: Gateway reconnects and pending deliveries resume.
+- [ ] **Endpoint Reassignment**: Reassign endpoint `dc-test` from `dc-1` to `dc-2`.
+  - **Verify**: Next message to `dc-test` is immediately dispatched through `dc-2` without duplicating canonical copies or changing endpoint alias.
+- [ ] **Deletion Protection**: Attempt to delete `dc-2` while `dc-test` is still assigned.
+  - **Verify**: The UI / API rejects deletion with `connection has active endpoints`.
+  - Delete or reassign `dc-test`, then delete `dc-2`. Deletion succeeds and cleans up credentials.
+
+### Scenario 13: Privacy & Secret Canaries
+- [ ] Query `sync.db`: Verify `SELECT * FROM message_copies` and `canonical_messages` contain zero bot tokens, participant phone numbers, push names, or message bodies.
+- [ ] Query `control.db`: Verify `transport_connections` stores only AES-256-GCM ciphertext and nonces; no plaintext token appears anywhere in database strings.
+- [ ] Check application logs: Verify zero tokens or raw protocol update dumps appear in stdout.
 
 ---
+
 
 ## 8. Troubleshooting & Common Pitfalls
 
@@ -407,7 +431,7 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 | Symptom | Cause | Solution |
 | :--- | :--- | :--- |
 | **QR code times out before scanning** | WhatsApp pairing codes expire after roughly 20-30 seconds. | Click **Start Pairing** again in the Web UI to generate a fresh QR code. |
-| **WhatsApp disconnects after restarting host** | Persistent volume `/data` was not retained across container runs. | Verify that your `compose.yml` mounts a persistent host volume to `/data` so `whatsapp.db` and `sync.db` are preserved. |
+| **WhatsApp disconnects after restarting host** | Persistent volume `/data` was not retained across container runs. | Verify that your `compose.yml` mounts a persistent host volume to `/data` so `whatsapp-<connection-id>.db` and `sync.db` are preserved. |
 
 ### Inspecting Logs Safely
 All logs produced by `message-sync` are strictly zero-PII/PHI:

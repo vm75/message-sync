@@ -55,8 +55,8 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 ## Architecture rules
 
 - The canonical router owns cross-endpoint synchronization semantics.
-- Transport adapters own platform protocol details.
-- WhatsApp, Discord, and Telegram use the same canonical router for end-to-end text/media, native representable polls, aggregate-only live-result companions, and reply/reaction/edit/delete lifecycle routing. Telegram Bot API ingress/outbound is registered through the same transport adapter registry and single canonical router loop; Telegram chat discovery is a bounded in-memory observation cache exposed only through authenticated administration, and only selected opaque chat IDs may become endpoint configuration. Provider-specific poll mapping remains at transport boundaries, and no poll text or raw voter identity may be persisted. Discord discovery/UI, parent-flattened thread/forum ingress, native polls/vote events, mention fallbacks, textual poll fallback rendering, and unsupported-format handling are implemented. Provider-specific unsupported behavior must stay at transport boundaries rather than leak into canonical routing.
+- WhatsApp, Discord, and Telegram use the same canonical router for end-to-end text/media, native representable polls, aggregate-only live-result companions, and reply/reaction/edit/delete lifecycle routing. Multiple independent accounts/bots may run concurrently per transport via dynamic connections.
+- Preserve the hierarchy: Connection authenticates; Endpoint addresses a configured parent conversation; ChildScope addresses Discord thread/Telegram topic context; Sync Set routes between endpoint aliases.
 - Never use a Discord, Telegram, or WhatsApp message ID as the global canonical ID.
 - `message_copies` must make fan-out retryable and idempotent.
 - Outbound create retries must distinguish definite pre-acceptance failure from ambiguous provider outcomes; never blindly retry an ambiguous create.
@@ -65,16 +65,16 @@ If a proposed feature cannot satisfy these rules, design it as an explicit optio
 - Download media only long enough to forward it. Do not add media persistence for convenience.
 - Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
 - WhatsApp bridge lifecycle echo suppression is bounded, content-free, and must not drop unmatched linked-device `FromSelf` mutations.
-- Configuration is stored in SQLite (`sync.db`). Secrets come from environment variables or secret mounts, never database tables.
-- Endpoint aliases are application-safe routing IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group/channel subject, and every validated configured endpoint must belong to exactly one sync set. Transport remote target IDs are operational addressing only and must never be logged.
+- Configuration is stored in SQLite (`sync.db`). Stored bot credentials are encrypted at rest with AES-256-GCM in `control.db` using a domain key derived from `IDENTITY_SECRET`; `sync.db` and logs contain no secrets or credentials.
+- Endpoint aliases are application-safe routing IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group/channel subject, reference their owning connection ID, and every validated configured endpoint must belong to exactly one sync set. Transport remote target IDs are operational addressing only and must never be logged.
 
 ## SQLite rules
 
-Use three databases:
+Databases:
 
-- `/data/whatsapp.db`: whatsmeow protocol/session store.
+- `/data/whatsapp-<connection-id>.db`: isolated per-connection whatsmeow protocol/session stores.
 - `/data/sync.db`: application routing state.
-- `/data/control.db`: sensitive control-plane accounts and membership state.
+- `/data/control.db`: sensitive control-plane accounts, sessions, encrypted connection credentials, audit logs, and membership state.
 
 For `sync.db`:
 

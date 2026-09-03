@@ -58,36 +58,21 @@ DATA_DIR=/data
 PORT=8080
 # Optional companion device name shown in WhatsApp Linked Devices (default: message-sync)
 WHATSAPP_DEVICE_NAME=
-# Required for Discord discovery or configured Discord endpoints. Use this OR DISCORD_BOT_TOKEN_FILE.
-DISCORD_BOT_TOKEN=
-# For a mounted secret instead, set its in-container path and leave DISCORD_BOT_TOKEN empty.
-DISCORD_BOT_TOKEN_FILE=
-
-# Telegram Bot API credential. Use this OR TELEGRAM_BOT_TOKEN_FILE, never both.
-TELEGRAM_BOT_TOKEN=
-# For a mounted secret instead, set its in-container path and leave TELEGRAM_BOT_TOKEN empty.
-TELEGRAM_BOT_TOKEN_FILE=
 ```
 
-### Discord setup
+### Dynamic connections
 
-Discord credentials are deployment-only. Set exactly one of `DISCORD_BOT_TOKEN` or `DISCORD_BOT_TOKEN_FILE`; the latter must point to a secret file you mount into the container. The Web UI never accepts bot or webhook credentials, and neither bot tokens nor managed-webhook IDs/tokens/URLs are stored in `sync.db` or retained logs.
+Connections are managed dynamically through the authenticated Web UI:
 
-In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In each bridged channel grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
+- **WhatsApp**: Add a connection and scan the QR code (**Linked Devices** → **Link a Device**). Multiple independent WhatsApp accounts are supported; each maintains its own isolated database (`/data/whatsapp-<connection-id>.db`).
+- **Discord**: Add a connection and paste the bot token once. The token is encrypted immediately with AES-256-GCM using a key derived from `IDENTITY_SECRET` and stored in `control.db`. In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In bridged channels grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
+- **Telegram**: Add a connection and paste the Bot API token from BotFather once. The token is encrypted immediately with AES-256-GCM and stored in `control.db`. Add the bot to target groups and disable **Bot Privacy Mode** in BotFather.
 
-The gateway bot handles Discord ingress, discovery, native reply markers, reactions, and connection lifecycle. For outbound bridged messages toward Discord (from WhatsApp or Telegram), `message-sync` finds or creates **one bridge-managed incoming webhook per configured channel** and reuses it across participants and restarts. The sender's transient display name becomes that message's Discord APP/webhook username; if no display name is available, the HMAC actor ID is used. These APP labels are presentation metadata rather than real Discord accounts, and no Discord account or webhook is created per bridged participant. Display names remain transient and are never persisted or logged.
+No container restart is required to add, update, enable, or disable connections. Plaintext credentials are never written to `sync.db`, returned by read APIs, or logged.
 
-### Telegram setup
+### Telegram discovery & topics
 
-Create the Telegram bot with BotFather and set exactly one of `TELEGRAM_BOT_TOKEN` or `TELEGRAM_BOT_TOKEN_FILE`; mounted-secret mode must point to an in-container secret path. The token never enters endpoint CRUD, `sync.db`, or retained logs.
-
-Add the bot to each intended Telegram group/supergroup. To receive ordinary group messages, disable **Bot Privacy Mode** through BotFather or grant the bot the administrator visibility required for your deployment. The bridge does not bypass Telegram platform visibility rules.
-
-The Telegram adapter uses Bot API **long polling**. It accepts only configured group/supergroup chats, drops private/unconfigured chats and bridge-bot echoes, HMAC-normalizes Telegram user IDs immediately, and keeps names/text/captions transient. The pinned Bot API client retries transient `getUpdates` failures with bounded backoff and honors `retry_after`; the adapter additionally rejects duplicate/older update IDs in-process and shuts polling down with the application context.
-
-Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. Send activity in the target group, then use the authenticated Web UI to refresh observed chats and assign a safe alias. Titles/usernames remain in a bounded in-memory cache only; only the selected opaque chat ID becomes endpoint `remote_id`.
-
-Telegram text/media plus replies, reactions, edits, and deletes use the same canonical/message-copy lifecycle as WhatsApp and Discord. WhatsApp/Discord senders are rendered in Telegram content with a transient display name or HMAC fallback; Telegram sender display identity can flow transiently to Discord's existing managed-webhook APP rendering. Forum topics flatten to the configured parent alias while preserving opaque topic scope for native replies and lifecycle targeting; basic-group to supergroup migration updates only endpoint addressing, and polls use deterministic text instead of a separate vote-state system. Contacts/locations and unsupported service-only payloads are ignored. Hosted Bot API uploads are conservatively limited to 10 MiB photos, 50 MiB general files, and Telegram's tighter sticker format caps; over-limit media fails deterministically.
+Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. Send activity in the target group, then use the authenticated Web UI under the specific connection to refresh observed chats and assign a safe endpoint alias. Forum topics flatten to the configured parent alias while preserving opaque topic scope for native replies and lifecycle targeting. Over-limit media fails deterministically.
 
 ### 2. Docker Compose / Podman Compose
 
@@ -128,8 +113,8 @@ services:
    ```
 2. Open `http://localhost:8080` in your browser.
 3. Complete initial admin password setup.
-4. Navigate to the WhatsApp pairing section, display the QR code, and scan it from WhatsApp (**Linked Devices** → **Link a Device**).
-5. Discover/configure Discord channels and transiently observed Telegram groups with safe aliases, then configure mixed WhatsApp/Discord/Telegram sync sets in the web console.
+4. Navigate to Connections to add WhatsApp (scan QR), Discord (paste bot token), and Telegram (paste bot token) connections.
+5. Discover and configure endpoints under each connection, then organize them into sync sets in the web console.
 
 ---
 
@@ -137,9 +122,9 @@ services:
 
 Mount a persistent volume to `/data`:
 
-- `/data/whatsapp.db`: Sensitive protocol session store managed by `whatsmeow` (reconnects without re-pairing).
+- `/data/whatsapp-<connection-id>.db`: Per-connection sensitive protocol stores managed by `whatsmeow` (reconnect without re-pairing).
 - `/data/sync.db`: Application routing state.
-- `/data/control.db`: Mode-0600 sensitive account, session, audit, and membership-verification state.
+- `/data/control.db`: Mode-0600 sensitive account, session, audit, connection, and membership-verification state.
 - `/data/membership-evidence/`: Mode-0700 directory for short-lived mode-0600 PDF/image evidence; terminal requests are pruned after 30 days.
 
 Optional membership integrations use deployment-only environment variables

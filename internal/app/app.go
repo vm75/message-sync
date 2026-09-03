@@ -30,9 +30,8 @@ import (
 )
 
 const (
-	WhatsAppDBName = "whatsapp.db"
-	SyncDBName     = "sync.db"
-	ControlDBName  = "control.db"
+	SyncDBName    = "sync.db"
+	ControlDBName = "control.db"
 )
 
 type whatsappTransport interface {

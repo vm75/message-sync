@@ -27,10 +27,10 @@ The upstream design remains useful as a product-behavior reference, especially f
 |---|---|---|---|
 | Primary architecture | Go daemon with transport adapters, canonical events, canonical IDs, message copies, routing store, and per-destination delivery lanes | Node.js application centered on bridge mappings and platform-specific handlers | Reworked. The canonical router prevents WhatsApp or Discord from becoming the global data model. |
 | Runtime | Single Go binary | Node.js application | Replaced for simpler deployment and lower runtime surface. |
-| Core persistence | Local SQLite: `sync.db`, `control.db`, plus protocol-owned `whatsapp.db` | Local files with optional Firestore-backed application state; uploaded files may use local storage or GCS | Reworked to remain self-contained and container-friendly. |
-| WhatsApp integration | `whatsmeow` linked-device client | Baileys linked-device client | Same product role, different library and state model. |
-| Discord integration | Gateway bot for ingress/discovery plus bridge-managed webhooks for sender presentation | Discord bot plus per-mapping webhook delivery | Generalized behind a transport adapter. |
-| Telegram integration | Bot API long polling using a bot account | MTProto user-session integration | Intentional difference. Bot API avoids a second user-account session and keeps deployment simpler, at the cost of some Telegram capabilities. |
+| Core persistence | Local SQLite: `sync.db`, `control.db`, plus isolated per-connection `whatsapp-<connection-id>.db` | Local files with optional Firestore-backed application state; uploaded files may use local storage or GCS | Reworked to remain self-contained and container-friendly. |
+| WhatsApp integration | `whatsmeow` linked-device client with dynamic multi-account connections | Baileys linked-device client | Same product role, different library and state model; supports multiple WhatsApp accounts per daemon. |
+| Discord integration | Dynamic multi-instance Gateway bots for ingress/discovery plus bridge-managed webhooks for sender presentation | Discord bot plus per-mapping webhook delivery | Generalized behind a transport adapter with dynamic connection lifecycle and encrypted credentials. |
+| Telegram integration | Dynamic multi-instance Bot API long polling with namespaced cursors | MTProto user-session integration | Intentional difference. Bot API avoids a second user-account session and keeps deployment simpler, at the cost of some Telegram capabilities. |
 | Routing model | Configured endpoint aliases belong to all-to-all mixed-transport sync sets | Bridge mappings connect WhatsApp group(s) to Discord destinations; direction and mapping ownership can be bridge-specific | Simplified and generalized. |
 | Multiple WhatsApp groups in one bridge | Multiple WhatsApp endpoint aliases can share a sync set with Discord/Telegram endpoints | Multi-group mappings are supported | Preserved through a more generic sync-set model. |
 | Directional / one-way routing | Not implemented; configured sync sets are symmetric | Mapping direction can be bidirectional or one-way | Not carried forward because current primary use case is seamless symmetric synchronization. |
@@ -68,7 +68,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Evidence uploads | Bounded PDF/image evidence under a private local `/data` directory with retention cleanup | Uploaded evidence can be stored locally or in GCS | Preserved without mandatory cloud object storage. |
 | AI-assisted review | Optional OpenRouter model; structured advisory output only; raw prompts/responses are not persisted; AI cannot approve membership | Gemini/Sightengine-style analysis and enrichment integrations are available | Replaced with an optional provider boundary that can use free models and fails safely to human review. |
 | LinkedIn / company enrichment | Only narrow host/domain/evidence signals needed for membership intake; no broad enrichment subsystem | Broader search/enrichment integrations are present | Deliberately narrowed for privacy and YAGNI. |
-| Dedicated WhatsApp numbers | One WhatsApp protocol session per daemon | Dedicated-line/multi-session and SIM-pool/provisioning workflows are present | Not carried forward. |
+| Dedicated WhatsApp numbers | Multiple WhatsApp linked-device accounts per daemon via dynamic connections with isolated protocol DBs | Dedicated-line/multi-session and SIM-pool/provisioning workflows are present | Multi-account WhatsApp is now supported natively via dynamic connections; dedicated hardware SIM pool management remains out of scope. |
 | SIM/eSIM provisioning | Not implemented | External number/SIM provisioning integration exists | Not carried forward because it adds operational and paid-service complexity. |
 | Cloud database requirement | None | Firestore can be used for application state | Removed. SQLite is sufficient for a single self-hosted instance. |
 | Cloud object storage requirement | None | GCS can be used for media/evidence | Removed from core deployment. |
@@ -164,7 +164,6 @@ The following upstream capabilities are intentionally absent from the current `m
 - Telegram MTProto user-account sessions and directly configured topic bridges;
 - historical ZIP/bootstrap import workflows;
 - cloud overflow storage for large message media;
-- multiple WhatsApp sessions/dedicated bridge numbers in one daemon;
 - automated SIM/eSIM/number-pool provisioning;
 - broad LinkedIn/company enrichment outside the narrow membership intake checks.
 
@@ -174,6 +173,7 @@ Their absence should not be interpreted as an implementation queue. New scope sh
 
 `message-sync` now has several capabilities whose architecture is materially broader than the original bridge model:
 
+- dynamic platform connections supporting multiple concurrent WhatsApp accounts, Discord bots, and Telegram bots without restart;
 - mixed WhatsApp/Discord/Telegram all-to-all sync sets;
 - a common canonical message and lifecycle model;
 - transport-neutral persistent copy mapping;

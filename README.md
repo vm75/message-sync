@@ -103,11 +103,12 @@ The authenticated management API uses per-user accounts and server-side sessions
 
 Admins create verification pipelines in the Web UI or through `/api/verification/pipelines`, selecting a configured endpoint alias and, for Discord, a role ID. The public pipeline link accepts a work email, transport identity, optional LinkedIn URL, and bounded PDF/image evidence. Optional email delivery uses `VERIFICATION_MAIL_API_KEY` and `VERIFICATION_MAIL_FROM`; optional OpenRouter review additionally requires `OPENROUTER_ALLOW_TRAINING=false`. Operators and admins review email-verified requests in the Membership view. Decisions are authoritative, AI is advisory, fulfillment retries are explicit/idempotent, and terminal control-plane records/evidence are retained for 30 days before bounded cleanup.
 
-- **Endpoint Management**: `GET`, `POST`, `PUT`, `DELETE` at `/api/endpoints`.
-- **Discord Administration**: `GET /api/discord/status` reports safe connection/webhook-readiness state; `GET /api/discord/channels` provides on-demand live discovery of guild text/announcement channels.
-- **Telegram Administration**: `GET /api/telegram/status` reports safe token-source/long-poll/endpoint-readiness and Bot Privacy Mode status; `GET /api/telegram/chats` returns the bounded in-memory list of observed groups/supergroups.
+- **Connection Management**: `GET`, `POST`, `PUT`, `DELETE` at `/api/connections` (supports paste-once encrypted credentials for Discord and Telegram, and multi-account pairing lifecycle for WhatsApp).
+- **Connection Status & Discovery**: `GET /api/connections/{id}/status` reports safe transport readiness state; `GET /api/connections/{id}/discovery` provides connection-scoped live Discord channel discovery, observed Telegram groups, or joined WhatsApp groups.
+- **WhatsApp Pairing Lifecycle**: `POST /api/connections/{id}/pair`, `POST /api/connections/{id}/pair/cancel`, and `POST /api/connections/{id}/logout` manage linked-device pairing per connection (serialized to one pairing flow at a time).
+- **Endpoint Management**: `GET`, `POST`, `PUT`, `DELETE` at `/api/endpoints`. Each endpoint specifies `connectionId` and `remoteId`. Compatible connection reassignment is supported; deleting a connection with active endpoints is rejected until reassigned.
+- **Sync-set API**: `GET`, `POST`, `PUT`, `DELETE` at `/api/sync-sets`. Sync sets route between endpoint aliases across transports.
 - **Delivery Health**: Authenticated `GET /api/delivery/status` reports each configured alias's safe lane state, bounded queue depth, content-free ledger counts, oldest active age in seconds, safe failure class, and transport readiness. The dashboard polls this view while public `/health` remains unchanged.
-- **Sync-set API**: Sync-set payloads use the `endpoints` field for endpoint aliases across WhatsApp, Discord, and Telegram. Generic `/api/groups` CRUD routes are not supported; use `/api/endpoints` for configuration and `/api/whatsapp/groups` for joined-group discovery.
 
 Transport credentials, tokens, and raw protocol update payloads are never returned by the API or persisted in `sync.db`.
 

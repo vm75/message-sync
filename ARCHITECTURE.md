@@ -84,7 +84,7 @@ transport credentials. It uses foreign keys, explicit role/status checks, opaque
 hashed bearer tokens, parameterized access APIs, and mode `0600` where the
 platform permits. It has no routing tables and is never queried by the
 canonical message router. The daemon closes it independently during shutdown;
-the existing `sync.db` and `whatsapp.db` boundaries remain unchanged.
+the existing `sync.db` and per-connection `whatsapp-<connection-id>.db` boundaries remain unchanged.
 
 #### Connections and Encrypted Credentials
 
@@ -95,7 +95,7 @@ the existing `sync.db` and `whatsapp.db` boundaries remain unchanged.
 - `enabled`: boolean toggle;
 - `encrypted_credential`, `credential_nonce`, `credential_key_version`: encrypted bot token payload.
 
-Credential encryption uses a domain-separated symmetric key derived from `IDENTITY_SECRET` using HMAC-SHA256 with the domain separator `"message-sync-credential-encryption-v1"`. Credential payloads (such as Discord and Telegram bot tokens) are encrypted using AES-256-GCM with unique 12-byte cryptographically secure random nonces per write. Plaintext credentials never touch SQLite storage or logs. Changing or losing `IDENTITY_SECRET` renders stored bot credentials permanently unreadable. WhatsApp connections enforce that no credential blob or nonce is present; WhatsApp session credentials remain strictly isolated in `whatsapp.db`.
+Credential encryption uses a domain-separated symmetric key derived from `IDENTITY_SECRET` using HMAC-SHA256 with the domain separator `"message-sync-credential-encryption-v1"`. Credential payloads (such as Discord and Telegram bot tokens) are encrypted using AES-256-GCM with unique 12-byte cryptographically secure random nonces per write. Plaintext credentials never touch SQLite storage or logs. Changing or losing `IDENTITY_SECRET` renders stored bot credentials permanently unreadable. WhatsApp connections enforce that no credential blob or nonce is present; WhatsApp session credentials remain strictly isolated in per-connection `whatsapp-<connection-id>.db`.
 
 Verification pipelines and membership requests remain in this control-plane
 boundary. Pipeline administration resolves the configured endpoint alias
@@ -268,7 +268,7 @@ The normalized event may temporarily carry message text/caption and push-name da
 
 Live messages and protocol HistorySync snapshots carry the same per-endpoint checkpoint stream, using the provider message timestamp as the ordered position. HistorySync snapshots are parsed in memory, filtered by the configured age/count bounds, sorted oldest-first (with the protocol order as a tie-breaker), and serialized with live WhatsApp ingress. They then enter the ordinary recovery coordinator and router, so a replay repairs only missing copies and advances the cursor only after payload-dependent work is safe to forget. WhatsApp does not provide a durable application-level sequence for every live message; messages sharing a timestamp remain idempotent by remote-copy ID.
 
-For first login, the application boots without blocking in an unpaired state and exposes the pairing lifecycle via the REST API (`/api/whatsapp/status`, `/api/whatsapp/pair`). Terminal QR rendering is gated and disabled by default. The companion device registration identifies as `message-sync` by default (configurable via `WHATSAPP_DEVICE_NAME`). When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Upon successful scanning, whatsmeow automatically persists linked-device state in `whatsapp.db` and the client transitions to connected. On restart, the stored device session connects directly.
+WhatsApp accounts boot dynamically through connection management without blocking and expose pairing lifecycle via connection-scoped REST APIs (`/api/connections/{id}/status`, `/api/connections/{id}/pair`). Terminal QR rendering is disabled. The companion device registration identifies as `message-sync` by default (configurable via `WHATSAPP_DEVICE_NAME`). When pairing is initiated, whatsmeow generates QR codes on a managed channel, refreshing expired codes dynamically. Pairing operations across accounts are serialized to one flow at a time. Upon successful scanning, whatsmeow automatically persists linked-device state in `/data/whatsapp-<connection-id>.db` and the client transitions to connected. On restart, stored device sessions reconnect directly without re-pairing.
 
 WhatsApp bridge-generated edit, revoke/delete, and reaction sends install a bounded in-memory lifecycle marker before the provider call. Matching `FromSelf` lifecycle ingress consumes one marker and stops at the WhatsApp adapter boundary; unmatched `FromSelf` mutations remain eligible for routing because linked-device user actions also use `FromSelf`. The fallback marker uses only endpoint, target remote message ID, operation kind, and reaction emoji, expires promptly, and is not persisted. Since WhatsApp does not expose a separate mutation event ID for every lifecycle echo, an ambiguous provider result is retained until expiry and is not represented as exactly-once delivery.
 
@@ -467,7 +467,7 @@ Deletes mark a canonical message tombstoned before/while propagation so offline 
 
 ## 13. Offline recovery
 
-Recovery is bounded and best effort. WhatsApp uses only the existing whatsmeow protocol HistorySync event; it does not scrape arbitrary chat history or query `whatsapp.db` for application data. HistorySync cannot reliably reconstruct offline delete or reaction transitions, so the adapter does not guess those mutations. Provider availability and completeness remain controlled by WhatsApp's protocol history behavior.
+Recovery is bounded and best effort. WhatsApp uses only the existing whatsmeow protocol HistorySync event; it does not scrape arbitrary chat history or query per-connection `whatsapp-<connection-id>.db` for application data. HistorySync cannot reliably reconstruct offline delete or reaction transitions, so the adapter does not guess those mutations. Provider availability and completeness remain controlled by WhatsApp's protocol history behavior.
 
 Config bounds:
 
@@ -482,7 +482,7 @@ Recovered events enter the same normalization/router path as live events. There 
 
 WhatsApp chat history on the sync account can optionally be cleared on a daily schedule via WhatsApp AppState `ClearChatAction` patches (`whatsapp_chat_cleanup_enabled`, `whatsapp_chat_retention_days`). This clears old messages on the sync account only for groups configured in sync-sets without modifying `sync.db` mappings or deleting messages for other group participants.
 
-`whatsapp.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
+Per-connection `whatsapp-<connection-id>.db` retention is controlled by whatsmeow/protocol requirements and monitored separately; it is not an application history store.
 
 ## 15. Transport abstraction and adapter registry
 
