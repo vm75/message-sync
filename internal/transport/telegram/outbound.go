@@ -85,6 +85,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 	if kind == "poll" {
 		if params, ok := telegramNativePoll(chatID, outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
+			params.Description = sanitizeTelegramMentions(outgoing.PollAttribution, outgoing.Mentions)
 			params.MessageThreadID = threadID
 			err = a.callWithRetry(ctx, func() error {
 				var callErr error

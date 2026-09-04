@@ -58,7 +58,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 	if outgoing.Kind == "poll" {
 		if poll, ok := discordNativePoll(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
-			message := &discordgo.MessageSend{Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+			message := &discordgo.MessageSend{Content: outgoing.PollAttribution, Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
 			if outgoing.ReplyTo != nil {
 				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: nativeChannelID}
 			}
@@ -94,7 +94,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	// Prefix with the origin group alias when the message comes from a different
 	// endpoint so Discord users see "g1/Alice" rather than a bare "Alice",
 	// matching the symmetry of the forwarded-text body format.
-	if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
+	if outgoing.RenderedText == "" && outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
 		username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
 	}
 

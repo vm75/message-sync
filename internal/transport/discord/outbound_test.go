@@ -461,8 +461,9 @@ func TestDiscordRepresentablePollUsesNativeMessage(t *testing.T) {
 	api := &fakeDiscordAPI{}
 	adapter := newOutboundTestAdapter(webhook, api)
 	ref, err := adapter.Send(context.Background(), transport.Outgoing{
-		Endpoint: "discord", Sender: transport.Sender{OpaqueID: "u_hash"}, SourceText: "Lunch?", Kind: "poll",
-		PollOptions: []string{"Pizza", "Salad"}, PollSelectableCount: 1,
+		Endpoint: "discord", OriginEndpoint: "wa-family", Sender: transport.Sender{OpaqueID: "u_hash"}, SourceText: "Lunch?", Kind: "poll",
+		PollAttribution: "*_wa-family:Travel/Alice_*:",
+		PollOptions:     []string{"Pizza", "Salad"}, PollSelectableCount: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -472,6 +473,9 @@ func TestDiscordRepresentablePollUsesNativeMessage(t *testing.T) {
 	}
 	if api.pollSends[0].Poll.Answers[0].Media.Text != "Pizza" || api.pollSends[0].Poll.AllowMultiselect {
 		t.Fatalf("unexpected native poll payload: %#v", api.pollSends[0].Poll)
+	}
+	if api.pollSends[0].Content != "*_wa-family:Travel/Alice_*:" {
+		t.Fatalf("native poll attribution = %q", api.pollSends[0].Content)
 	}
 }
 

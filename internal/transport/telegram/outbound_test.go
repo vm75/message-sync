@@ -538,7 +538,7 @@ func TestSendPollUsesDeterministicTextFallback(t *testing.T) {
 func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing.T) {
 	api := &fakeTelegramAPI{}
 	adapter := newOutboundTestAdapter(t, api)
-	ref, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1})
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1, PollAttribution: "*_family:Travel/Alice_*:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -547,5 +547,8 @@ func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing
 	}
 	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || !*api.polls[0].IsAnonymous {
 		t.Fatalf("unexpected Telegram poll semantics: %#v", api.polls[0])
+	}
+	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "*_family:Travel/Alice_*:" {
+		t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
 	}
 }

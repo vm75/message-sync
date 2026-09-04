@@ -846,8 +846,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 					SourceText: incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
-					RenderedText: friendlyRenderedText(r.getChildContextMode(), forwardedText),
-					ReplyTo:      replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
+					RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
+					PollAttribution: r.friendlyPollAttribution(r.getChildContextMode(), incoming, childScope),
+					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
 						_ = r.store.CompleteCreateStep(context.Background(), step, "", true, time.Now().UTC())
@@ -874,8 +875,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
-				RenderedText: friendlyRenderedText(r.getChildContextMode(), forwardedText),
-				MediaBytes:   mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
+				RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
+				PollAttribution: r.friendlyPollAttribution(r.getChildContextMode(), incoming, childScope),
+				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 				PollDurationHours: incoming.PollDurationHours,
 			})
@@ -939,6 +941,43 @@ func friendlyRenderedText(mode config.ChildContextDisplayMode, text string) stri
 		return text
 	}
 	return ""
+}
+
+func (r *Router) friendlyPollAttribution(mode config.ChildContextDisplayMode, incoming transport.Incoming, childScope *transport.ChildScope) string {
+	if mode != config.ChildContextDisplayFriendly {
+		return ""
+	}
+	username := incoming.Sender.OpaqueID
+	if r.getUsernameMode() == config.UsernameModePushName {
+		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
+		phone := incoming.Sender.PhoneNumber
+		if phone != "" && displayName != "" {
+			username = fmt.Sprintf("%s (%s)", phone, displayName)
+		} else if displayName != "" {
+			username = displayName
+		} else if phone != "" {
+			username = phone
+		}
+	}
+	if strings.TrimSpace(username) == "" {
+		return ""
+	}
+	prefix := string(incoming.Endpoint)
+	if childScope != nil {
+		label := normalizeDisplayName(childScope.Label)
+		if label == "" {
+			switch childScope.Kind {
+			case transport.ScopeKindDiscordThread:
+				label = "thread"
+			case transport.ScopeKindTelegramTopic:
+				label = "topic"
+			}
+		}
+		if label != "" {
+			prefix += ":" + escapePresentation(label)
+		}
+	}
+	return fmt.Sprintf("*_%s/%s_*:", prefix, username)
 }
 
 func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (string, error) {

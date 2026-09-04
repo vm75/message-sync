@@ -107,7 +107,11 @@ type Outgoing struct {
 	// RenderedText is the complete client-facing attribution/body rendering for
 	// optional friendly presentation. It is transient and must never be parsed
 	// for routing.
-	RenderedText        string
+	RenderedText string
+	// PollAttribution is the transient friendly attribution shown alongside a
+	// native poll. It is separate from RenderedText because poll providers keep
+	// the question/options as structured fields.
+	PollAttribution     string
 	Mentions            []Mention
 	ReplyTo             *MessageRef
 	ChildScope          *ChildScope
