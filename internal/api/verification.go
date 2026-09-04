@@ -391,6 +391,63 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 	_ = WriteJSON(w, 200, map[string]string{"status": result.State, "failureClass": result.FailureClass})
 }
 
+// ReconcileMembership performs one bounded, low-volume pass over approved
+// WhatsApp requests. It is intentionally called by the application loop;
+// there is no durable membership queue or worker pool.
+func (s *Server) ReconcileMembership(ctx context.Context) {
+	rows, err := s.controlDB.QueryContext(ctx, `SELECT id FROM membership_requests WHERE status='approved' AND fulfillment_state='action_pending' AND applicant_whatsapp_phone IS NOT NULL ORDER BY updated_at LIMIT 25`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			s.reconcileMembershipRequest(ctx, id)
+		}
+	}
+}
+
+func (s *Server) reconcileMembershipRequest(ctx context.Context, id string) {
+	var req verification.FulfillmentRequest
+	var email, label, status, fulfillmentState string
+	if err := s.controlDB.QueryRowContext(ctx, `SELECT p.target_transport,p.endpoint_alias,COALESCE(p.discord_role_id,''),COALESCE(m.applicant_whatsapp_phone,''),COALESCE(m.applicant_discord_user_id,''),m.status,m.fulfillment_state,m.applicant_work_email,p.label FROM membership_requests m JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE m.id=?`, id).Scan(&req.Transport, &req.EndpointAlias, &req.RoleID, &req.Phone, &req.DiscordUserID, &status, &fulfillmentState, &email, &label); err != nil || status != "approved" || fulfillmentState == "succeeded" {
+		return
+	}
+	if req.Transport == "whatsapp" {
+		phone := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
+		if _, claimErr := s.controlDB.ExecContext(ctx, `INSERT INTO membership_join_claims(endpoint_alias,applicant_phone,membership_request_id,claimed_at) VALUES(?,?,?,?) ON CONFLICT(membership_request_id) DO NOTHING`, req.EndpointAlias, phone, id, time.Now().UnixMilli()); claimErr != nil {
+			var owner string
+			if s.controlDB.QueryRowContext(ctx, `SELECT membership_request_id FROM membership_join_claims WHERE endpoint_alias=? AND applicant_phone=?`, req.EndpointAlias, phone).Scan(&owner) == nil && owner != id {
+				_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_requests SET fulfillment_failure_class='identity_claimed',updated_at=? WHERE id=? AND status='approved'`, time.Now().UnixMilli(), id)
+				return
+			}
+		}
+	}
+	var wa verification.WhatsAppAdmin
+	var dc verification.DiscordAdmin
+	var connID string
+	if s.db != nil {
+		_ = s.db.QueryRowContext(ctx, `SELECT connection_id FROM endpoints WHERE alias=?`, req.EndpointAlias).Scan(&connID)
+	}
+	if connID != "" && s.connections != nil {
+		if adapter, ok := s.connections.ConnectionAdapter(connID); ok {
+			wa, _ = adapter.(verification.WhatsAppAdmin)
+			dc, _ = adapter.(verification.DiscordAdmin)
+		}
+	}
+	result, _ := verification.Fulfill(ctx, req, wa, dc)
+	if result.State == "action_pending" && result.FailureClass == "invite_pending" && req.Transport == "whatsapp" {
+		if token, tokenErr := s.issueMembershipJoinToken(ctx, id); tokenErr == nil && s.mailer != nil {
+			_ = s.mailer.Send(ctx, email, label, "/api/verification/join/"+token)
+		}
+	}
+	if result.State == "succeeded" {
+		_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, time.Now().UnixMilli(), id)
+	}
+	_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_requests SET fulfillment_state=?,fulfillment_failure_class=?,updated_at=? WHERE id=? AND status='approved'`, result.State, result.FailureClass, time.Now().UnixMilli(), id)
+}
+
 func (s *Server) issueMembershipJoinToken(ctx context.Context, requestID string) (string, error) {
 	token, hash, err := newBearerToken()
 	if err != nil {

@@ -640,6 +640,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 
 	pruneTicker := time.NewTicker(24 * time.Hour)
 	defer pruneTicker.Stop()
+	membershipTicker := time.NewTicker(time.Minute)
+	defer membershipTicker.Stop()
 
 	for {
 		select {
@@ -662,6 +664,8 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					"sync_db_bytes", metrics.DatabaseSizeBytes,
 				)
 			}
+		case <-membershipTicker.C:
+			apiServer.ReconcileMembership(ctx)
 		case incoming, ok := <-connMgr.Events():
 			if !ok {
 				return errors.New("connection manager event stream closed")
