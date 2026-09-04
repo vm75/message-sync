@@ -8,7 +8,7 @@
   const table = tbody.closest('table');
   if (!table) return;
 
-  table.classList.add('delivery-health-table');
+  table.classList.add('delivery-health-table', 'delivery-polish-pending');
 
   const headerRow = table.tHead && table.tHead.rows ? table.tHead.rows[0] : null;
   if (headerRow) {
@@ -21,8 +21,9 @@
   }
 
   let applying = false;
-  let syncSetCache = [];
-  let syncSetCacheExpiresAt = 0;
+  let syncSetsReady = false;
+  let aliasToSet = new Map();
+  let latestEntries = [];
 
   function escapeHtml(value) {
     const div = document.createElement('div');
@@ -62,51 +63,35 @@
     return `Pending ${match[1]} · Retrying ${match[2]} · Replay ${match[3]} · Failed ${match[4]}`;
   }
 
-  async function getSyncSets() {
-    const now = Date.now();
-    if (now < syncSetCacheExpiresAt) return syncSetCache;
-    try {
-      const result = await window.API.getSyncSets();
-      syncSetCache = Array.isArray(result) ? result : [];
-      syncSetCacheExpiresAt = now + 5000;
-    } catch (_) {
-      syncSetCache = [];
-      syncSetCacheExpiresAt = now + 2000;
-    }
-    return syncSetCache;
-  }
-
   function naturalCompare(a, b) {
     return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
   }
 
-  async function polishRows() {
-    if (applying) return;
+  function extractRawEntries() {
+    return Array.from(tbody.rows)
+      .filter((row) => row.cells.length === 6)
+      .map((row, originalIndex) => {
+        const cells = row.cells;
+        return {
+          alias: cells[0].textContent.trim(),
+          transport: cells[1].textContent.trim(),
+          stateText: cells[2].textContent.trim(),
+          ledgerText: cells[4].textContent.trim(),
+          transportStatus: cells[5].textContent.trim(),
+          originalIndex,
+        };
+      });
+  }
 
-    const rawRows = Array.from(tbody.rows).filter((row) => row.cells.length === 6);
-    if (rawRows.length === 0) return;
+  function renderEntries(sourceEntries) {
+    if (!syncSetsReady || applying || sourceEntries.length === 0) return;
 
     applying = true;
     try {
-      const syncSets = await getSyncSets();
-      const aliasToSet = new Map();
-      syncSets.forEach((set) => {
-        const setID = set && set.id ? String(set.id) : '';
-        (Array.isArray(set && set.endpoints) ? set.endpoints : []).forEach((alias) => {
-          if (alias && !aliasToSet.has(String(alias))) aliasToSet.set(String(alias), setID);
-        });
-      });
-
-      const entries = rawRows.map((row, originalIndex) => {
-        const cells = row.cells;
-        const alias = cells[0].textContent.trim();
-        const transport = cells[1].textContent.trim();
-        const stateText = cells[2].textContent.trim();
-        const ledgerText = cells[4].textContent.trim();
-        const transportStatus = cells[5].textContent.trim();
-        const syncSet = aliasToSet.get(alias) || '';
-        return { row, alias, transport, stateText, ledgerText, transportStatus, syncSet, originalIndex };
-      });
+      const entries = sourceEntries.map((entry) => ({
+        ...entry,
+        syncSet: aliasToSet.get(entry.alias) || '',
+      }));
 
       entries.sort((a, b) => {
         if (!!a.syncSet !== !!b.syncSet) return a.syncSet ? -1 : 1;
@@ -124,12 +109,13 @@
       const groupIndex = new Map(groupOrder.map((key, index) => [key, index]));
 
       let previousGroup = null;
+      const fragment = document.createDocumentFragment();
       entries.forEach((entry) => {
         const groupKey = entry.syncSet || '__unassigned__';
         const index = groupIndex.get(groupKey) || 0;
         const healthy = entry.stateText.toLowerCase().startsWith('healthy');
         const healthLabel = healthy ? 'Healthy' : (entry.stateText || 'Unhealthy');
-        const row = entry.row;
+        const row = document.createElement('tr');
 
         row.className = index % 2 === 0 ? 'delivery-group-a' : 'delivery-group-b';
         if (groupKey !== previousGroup) row.classList.add('delivery-group-start');
@@ -145,19 +131,55 @@
             <span class="delivery-transport-state">${escapeHtml(friendlyStatus(entry.transportStatus))}</span>
           </td>
           <td class="delivery-column"><span class="delivery-summary">${deliverySummary(entry.ledgerText)}</span></td>`;
+        fragment.appendChild(row);
       });
 
-      tbody.replaceChildren(...entries.map((entry) => entry.row));
+      tbody.replaceChildren(fragment);
+      table.classList.remove('delivery-polish-pending');
     } finally {
       applying = false;
     }
   }
 
+  async function refreshSyncSets() {
+    try {
+      const result = await window.API.getSyncSets();
+      const nextMap = new Map();
+      (Array.isArray(result) ? result : []).forEach((set) => {
+        const setID = set && set.id ? String(set.id) : '';
+        (Array.isArray(set && set.endpoints) ? set.endpoints : []).forEach((alias) => {
+          if (alias && !nextMap.has(String(alias))) nextMap.set(String(alias), setID);
+        });
+      });
+      aliasToSet = nextMap;
+    } catch (_) {
+      aliasToSet = new Map();
+    } finally {
+      syncSetsReady = true;
+      renderEntries(latestEntries);
+      if (latestEntries.length === 0) table.classList.remove('delivery-polish-pending');
+    }
+  }
+
   const observer = new MutationObserver(() => {
     if (applying) return;
-    if (Array.from(tbody.rows).some((row) => row.cells.length === 6)) polishRows();
+    const rawEntries = extractRawEntries();
+    if (rawEntries.length === 0) return;
+
+    // app-base.js replaces the body every three seconds. Capture that legacy
+    // snapshot and immediately render the polished rows in the same microtask,
+    // before the browser paints the intermediate six-column table.
+    latestEntries = rawEntries;
+    table.classList.add('delivery-polish-pending');
+    renderEntries(latestEntries);
   });
   observer.observe(tbody, { childList: true });
 
-  polishRows();
+  window.addEventListener('hashchange', () => {
+    if (window.location.hash.replace(/^#/, '').split('?')[0] === 'dashboard') refreshSyncSets();
+  });
+  document.addEventListener('syncset:saved', refreshSyncSets);
+
+  latestEntries = extractRawEntries();
+  refreshSyncSets();
 })();
