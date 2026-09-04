@@ -387,7 +387,8 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 	if err := syncStore.UpsertChildScopeLabel(ctx, "c1g1", string(transport.ScopeKindDiscordThread), "thread-1", "Dinner * Plans"); err != nil {
 		t.Fatal(err)
 	}
-	r, err := New(cfg, syncStore, &fakeSender{})
+	fake := &fakeSender{}
+	r, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,6 +409,17 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 	unknownText, err := r.forwardedText(ctx, unknown)
 	if err != nil || unknownText != "*_c1g1:topic/u_abcdefghij_*: hello" {
 		t.Fatalf("friendly unknown child = %q, err=%v", unknownText, err)
+	}
+	if err := r.Handle(ctx, known); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	for _, sent := range fake.sent {
+		if sent.outgoing.RenderedText != knownText || strings.Contains(sent.outgoing.RenderedText, "[contexts") {
+			t.Fatalf("router did not propagate friendly rendered text: %#v", sent.outgoing)
+		}
 	}
 }
 

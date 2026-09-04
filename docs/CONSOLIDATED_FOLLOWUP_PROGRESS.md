@@ -28,7 +28,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Complete |
 | 7 | [#91](https://github.com/vm75/message-sync/issues/91) | Friendly contexts 2/4: learn Discord thread / Telegram topic names | Depends on #90 and #85. Persist names only in friendly mode. | Complete |
 | 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Complete |
-| 9 | [#93](https://github.com/vm75/message-sync/issues/93) | Friendly contexts 4/4: UI, docs, privacy disclosure, E2E tests | Finalize optional feature after #90-#92. | Pending |
+| 9 | [#93](https://github.com/vm75/message-sync/issues/93) | Friendly contexts 4/4: UI, docs, privacy disclosure, E2E tests | Finalize optional feature after #90-#92. | Complete |
 | 10 | [#86](https://github.com/vm75/message-sync/issues/86) | Discord/Telegram online setup help | Do after Telegram/friendly-context behavior is stable to avoid duplicated documentation churn. | Complete |
 | 11 | [#87](https://github.com/vm75/message-sync/issues/87) | WhatsApp one-shot Add Connection + QR pairing | Independent UX improvement; keep existing pairing backend/state machine. | Pending |
 | 12 | [#94](https://github.com/vm75/message-sync/issues/94) | Final cleanup and tracker removal | Must run last, after every preceding row is Complete/closed. | Pending |
@@ -160,6 +160,8 @@ Rules:
 
 - Added the global Opaque/Friendly child-context setting to the existing zero-dependency Settings UI, including local-storage disclosure, generic unknown-name behavior, no-backfill wording, and mode-disable deletion notice.
 - Kept config API responses free of child labels; runtime reload applies the existing router/config path without restart. Permanent README and architecture documentation describe the opt-in metadata exception and ID-based routing boundary.
+- Added router-to-adapter and real Discord/Telegram transport presentation regressions, with WhatsApp covered by its rendered-text send path; friendly labels remain transiently rendered and ID-routed.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` passed.
 - Extended static UI and cross-layer router/transport regression coverage; no child-scope management UI or registry was added.
 - Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` pass.
 
