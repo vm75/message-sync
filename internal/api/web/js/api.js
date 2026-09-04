@@ -220,7 +220,8 @@
       if (!id) {
         const conns = await this.listConnections().catch(() => []);
         const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
-        id = c ? c.id : 'conn-wa-1';
+        if (!c) throw new Error('No WhatsApp connection is configured.');
+        id = c.id;
       }
       return this.pairWhatsAppConnection(id);
     },
@@ -229,7 +230,8 @@
       if (!id) {
         const conns = await this.listConnections().catch(() => []);
         const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
-        id = c ? c.id : 'conn-wa-1';
+        if (!c) throw new Error('No WhatsApp connection is configured.');
+        id = c.id;
       }
       return this.cancelPairWhatsAppConnection(id);
     },
@@ -238,7 +240,8 @@
       if (!id) {
         const conns = await this.listConnections().catch(() => []);
         const c = Array.isArray(conns) ? conns.find(x => x.transport === 'whatsapp') : null;
-        id = c ? c.id : 'conn-wa-1';
+        if (!c) throw new Error('No WhatsApp connection is configured.');
+        id = c.id;
       }
       return this.logoutWhatsAppConnection(id);
     },

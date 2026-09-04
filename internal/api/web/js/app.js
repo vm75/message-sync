@@ -117,6 +117,7 @@
   const addConnTokenGroup     = document.getElementById('add-conn-token-group');
   const addConnHelpDiscord    = document.getElementById('add-conn-help-discord');
   const addConnHelpTelegram   = document.getElementById('add-conn-help-telegram');
+  const addConnWaHelp         = document.getElementById('add-conn-wa-help');
   const btnSubmitAddConn      = document.getElementById('btn-submit-add-conn');
 
   const modalReplaceToken     = document.getElementById('modal-replace-token');
@@ -942,7 +943,7 @@
   // WhatsApp Pairing (modal-based, connection-aware)
   // ══════════════════════════════════════════════════════════════
 
-  let activePairingConnId = 'conn-wa-1';
+  let activePairingConnId = '';
 
   function stopWaPolling() {
     if (waPollTimer) { clearInterval(waPollTimer); waPollTimer = null; }
@@ -953,7 +954,7 @@
     waPollTimer = setInterval(async () => {
       try {
         const data = await window.API.getConnectionStatus(connId);
-        if (connId === 'conn-wa-1') renderWaStatus(data);
+        renderWaStatus(data);
         if (data.status === 'connected' || (data.isConnected && data.isLoggedIn)) {
           stopWaPolling();
           stopQrCountdown();
@@ -1299,6 +1300,11 @@
     }
     if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
     if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
+    if (addConnWaHelp) addConnWaHelp.classList.toggle('hidden', transport !== 'whatsapp');
+    if (btnSubmitAddConn) {
+      const buttonText = btnSubmitAddConn.querySelector('.btn-text');
+      if (buttonText) buttonText.textContent = transport === 'whatsapp' ? 'Create & Pair' : 'Create Connection';
+    }
     if (addConnToken) {
       addConnToken.required = transport !== 'whatsapp';
       addConnToken.value = '';
@@ -1333,10 +1339,17 @@
       if (id) payload.id = id;
       if (addConnTransport !== 'whatsapp') payload.token = token;
 
-      await window.API.createConnection(payload);
+      const created = await window.API.createConnection(payload);
       showToast(`Connection '${label}' created!`, 'success');
-      closeModal(modalAddConnection);
       await loadConnections();
+      if (addConnTransport === 'whatsapp') {
+        const createdID = created && created.id ? created.id : id;
+        if (!createdID) throw new Error('created WhatsApp connection did not return an ID');
+        closeModal(modalAddConnection);
+        await openWaPairModal(createdID);
+      } else {
+        closeModal(modalAddConnection);
+      }
     } catch (err) {
       if (addConnAlert) {
         addConnAlert.textContent = err.message || 'Failed to create connection';

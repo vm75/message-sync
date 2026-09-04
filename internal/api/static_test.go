@@ -94,6 +94,9 @@ func TestStaticHandler(t *testing.T) {
 			"Disabling friendly names removes stored names",
 			`id="add-conn-help-discord"`,
 			`id="add-conn-help-telegram"`,
+			`id="add-conn-wa-help"`,
+			"Create &amp; Pair",
+			"Linked Devices",
 		} {
 			if !strings.Contains(html, expected) {
 				t.Fatalf("Admin HTML missing %q", expected)

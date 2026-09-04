@@ -965,6 +965,7 @@
             <input type="password" id="conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste bot token">
             <p class="form-hint">Token is encrypted immediately with a domain-separated AES key. It is never logged or exposed in read APIs.</p>
           </div>
+          <div id="add-conn-wa-help" class="form-hint">After creating a WhatsApp connection, pairing starts automatically. Scan the QR code from WhatsApp <strong>Linked Devices → Link a Device</strong>.</div>
 
           <div id="add-conn-help-discord" class="form-hint hidden">
             <strong>Discord setup</strong><br>
@@ -978,7 +979,7 @@
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-modal="modal-add-connection">Cancel</button>
           <button type="submit" id="btn-submit-add-conn" class="btn btn-primary">
-            <span class="btn-text">Create Connection</span>
+            <span class="btn-text">Create &amp; Pair</span>
             <div class="btn-spinner hidden"></div>
           </button>
         </div>
