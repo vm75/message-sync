@@ -6,33 +6,4 @@
 @import url('/css/mobile-fixes.css');
 @import url('/css/syncset-redesign.css');
 @import url('/css/workflow-fixes.css');
-
-/* Existing sync sets use the compact card for conversation membership, while
-   the preserved controller keeps the per-sync-set membership application form
-   in the editor panel. When a set is selected, expose that editor instead of
-   the placeholder. The conversation section is already mounted in the active
-   card, so keep only the shared membership configuration and one Save/Cancel
-   surface in the editor panel. */
-#view-sync-sets:has(.syncset-list-item.active) #syncset-editor-placeholder {
-  display: none !important;
-}
-
-/* The accordion redesign normally hides the legacy editor panel completely.
-   Re-enable it only while an existing sync set is selected so the shared
-   membership application controls and their Save/Cancel footer are usable. */
-#view-sync-sets:has(.syncset-list-item.active) .syncset-editor-panel {
-  display: block !important;
-}
-
-#view-sync-sets:has(.syncset-list-item.active) #syncset-editor-form.hidden {
-  display: flex !important;
-}
-
-#view-sync-sets:has(.syncset-list-item.active) #syncset-editor-form .syncset-members-section,
-#view-sync-sets:has(.syncset-list-item.active) #syncset-editor-form .syncset-editor-subtitle {
-  display: none !important;
-}
-
-#view-sync-sets:has(.syncset-list-item.active) .syncset-list-item.active .syncset-card-actions-main {
-  display: none !important;
-}
+@import url('/css/syncset-polish.css');
