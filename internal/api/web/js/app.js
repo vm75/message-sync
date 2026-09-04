@@ -267,14 +267,14 @@
             <label class="syncset-membership-label">Applicant instructions</label>
             <span class="syncset-membership-optional">Optional</span>
           </div>
-          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="instructions" placeholder="Tell applicants what to include in their request."></textarea>
+          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="instructions" aria-label="Applicant instructions" placeholder="Tell applicants what to include in their request."></textarea>
         </div>
         <div class="syncset-membership-field">
           <div class="syncset-membership-label-row">
             <label class="syncset-membership-label">Reviewer guidance</label>
             <span class="syncset-membership-optional">Optional</span>
           </div>
-          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="guidance" placeholder="Add private guidance for reviewers evaluating requests."></textarea>
+          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="guidance" aria-label="Reviewer guidance" placeholder="Add private guidance for reviewers evaluating requests."></textarea>
         </div>
         <label class="syncset-evidence-row">
           <input type="checkbox" data-membership-field="evidence">
@@ -288,7 +288,7 @@
             <label class="syncset-membership-label">Custom fields</label>
             <span class="syncset-membership-optional">Advanced · JSON</span>
           </div>
-          <textarea class="form-input syncset-membership-json" rows="4" data-membership-field="customFields" placeholder='[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120}]'></textarea>
+          <textarea class="form-input syncset-membership-json" rows="4" data-membership-field="customFields" aria-label="Custom fields JSON" placeholder='[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120}]'></textarea>
           <div class="syncset-membership-hint">Optional bounded JSON array of field definitions: key, label, type, required, and maxLength.</div>
         </div>
       </div>`;
@@ -406,17 +406,11 @@
         count.dataset.friendlyCount = 'true';
       }
 
-      if (!item.dataset.keyboardReady) {
-        item.tabIndex = 0;
-        item.setAttribute('role', 'button');
-        item.addEventListener('keydown', (event) => {
-          if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('.syncset-delete-btn')) {
-            event.preventDefault();
-            item.querySelector('.syncset-card-toggle')?.click();
-          }
-        });
-        item.dataset.keyboardReady = 'true';
-      }
+      // The accordion header is already a native button. Keeping the whole
+      // expanded card focusable would make Enter/Space inside form controls
+      // bubble into the accordion toggle.
+      item.removeAttribute('role');
+      item.removeAttribute('tabindex');
 
       const deleteButton = item.querySelector('.syncset-delete-btn');
       if (deleteButton) {
