@@ -114,7 +114,29 @@ func (s *Server) handleUpdatePipeline(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, 400, "invalid pipeline")
 		return
 	}
-	res, err := s.controlDB.ExecContext(r.Context(), `UPDATE verification_pipelines SET label=?,target_transport=?,endpoint_alias=?,discord_role_id=?,enabled=?,updated_at=? WHERE id=?`, in.Label, in.Transport, in.EndpointAlias, in.DiscordRoleID, in.Enabled, time.Now().UnixMilli(), r.PathValue("id"))
+	id := r.PathValue("id")
+	var currentTransport, currentEndpoint, currentRole string
+	err := s.controlDB.QueryRowContext(r.Context(), `SELECT target_transport,endpoint_alias,COALESCE(discord_role_id,'') FROM verification_pipelines WHERE id=?`, id).Scan(&currentTransport, &currentEndpoint, &currentRole)
+	if errors.Is(err, sql.ErrNoRows) {
+		WriteError(w, 404, "pipeline not found")
+		return
+	}
+	if err != nil {
+		WriteError(w, 500, "failed to update pipeline")
+		return
+	}
+	if currentTransport != in.Transport || currentEndpoint != in.EndpointAlias || currentRole != in.DiscordRoleID {
+		outstanding, guardErr := s.pipelineHasOutstandingMembershipRequests(r.Context(), id)
+		if guardErr != nil {
+			WriteError(w, 500, "membership state unavailable")
+			return
+		}
+		if outstanding {
+			WriteError(w, http.StatusConflict, "pipeline has outstanding membership requests")
+			return
+		}
+	}
+	res, err := s.controlDB.ExecContext(r.Context(), `UPDATE verification_pipelines SET label=?,target_transport=?,endpoint_alias=?,discord_role_id=?,enabled=?,updated_at=? WHERE id=?`, in.Label, in.Transport, in.EndpointAlias, in.DiscordRoleID, in.Enabled, time.Now().UnixMilli(), id)
 	if err != nil {
 		WriteError(w, 500, "failed to update pipeline")
 		return
@@ -127,7 +149,17 @@ func (s *Server) handleUpdatePipeline(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
 }
 func (s *Server) handleDeletePipeline(w http.ResponseWriter, r *http.Request) {
-	res, err := s.controlDB.ExecContext(r.Context(), `DELETE FROM verification_pipelines WHERE id=?`, r.PathValue("id"))
+	id := r.PathValue("id")
+	outstanding, guardErr := s.pipelineHasOutstandingMembershipRequests(r.Context(), id)
+	if guardErr != nil {
+		WriteError(w, 500, "membership state unavailable")
+		return
+	}
+	if outstanding {
+		WriteError(w, http.StatusConflict, "pipeline has outstanding membership requests")
+		return
+	}
+	res, err := s.controlDB.ExecContext(r.Context(), `DELETE FROM verification_pipelines WHERE id=?`, id)
 	if err != nil {
 		WriteError(w, 500, "failed to delete pipeline")
 		return
@@ -309,22 +341,124 @@ func (s *Server) handlePublicIntake(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, 202, map[string]string{"status": "received"})
 }
 
-func (s *Server) handleDeleteMembershipRequest(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	var ref string
-	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT evidence_reference FROM membership_requests WHERE id=?`, id).Scan(&ref); err != nil {
-		WriteError(w, 404, "request not found")
+func (s *Server) enqueueEvidenceCleanupTx(ctx context.Context, tx *sql.Tx, ref string, now int64) error {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO evidence_cleanup_queue(evidence_reference,created_at,next_attempt_at) VALUES(?,?,?) ON CONFLICT(evidence_reference) DO UPDATE SET next_attempt_at=MIN(evidence_cleanup_queue.next_attempt_at,excluded.next_attempt_at)`, ref, now, now)
+	return err
+}
+
+func (s *Server) cleanupMembershipEvidence(ctx context.Context, limit int) {
+	if s == nil || s.controlDB == nil || strings.TrimSpace(s.evidenceDir) == "" {
 		return
 	}
-	if ref != "" && s.evidenceDir != "" {
-		_ = os.Remove(filepath.Join(s.evidenceDir, ref))
+	if limit <= 0 {
+		limit = 25
 	}
-	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, time.Now().UnixMilli(), id)
-	if _, err := s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_requests WHERE id=?`, id); err != nil {
+	now := time.Now().UnixMilli()
+	rows, err := s.controlDB.QueryContext(ctx, `SELECT evidence_reference FROM evidence_cleanup_queue WHERE next_attempt_at<=? ORDER BY next_attempt_at,created_at LIMIT ?`, now, limit)
+	if err != nil {
+		return
+	}
+	refs := make([]string, 0, limit)
+	for rows.Next() {
+		var ref string
+		if rows.Scan(&ref) == nil {
+			refs = append(refs, ref)
+		}
+	}
+	rows.Close()
+	for _, ref := range refs {
+		if ref == "" || filepath.Base(ref) != ref {
+			_, _ = s.controlDB.ExecContext(ctx, `DELETE FROM evidence_cleanup_queue WHERE evidence_reference=?`, ref)
+			continue
+		}
+		err := os.Remove(filepath.Join(s.evidenceDir, ref))
+		if err == nil || os.IsNotExist(err) {
+			_, _ = s.controlDB.ExecContext(ctx, `DELETE FROM evidence_cleanup_queue WHERE evidence_reference=?`, ref)
+			continue
+		}
+		_, _ = s.controlDB.ExecContext(ctx, `UPDATE evidence_cleanup_queue SET next_attempt_at=? WHERE evidence_reference=?`, time.Now().Add(time.Hour).UnixMilli(), ref)
+	}
+}
+
+func (s *Server) handleDeleteMembershipRequest(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	tx, err := s.controlDB.BeginTx(r.Context(), nil)
+	if err != nil {
 		WriteError(w, 500, "failed to delete request")
 		return
 	}
+	defer tx.Rollback()
+	var ref string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(evidence_reference,'') FROM membership_requests WHERE id=?`, id).Scan(&ref); err != nil {
+		WriteError(w, 404, "request not found")
+		return
+	}
+	now := time.Now().UnixMilli()
+	if err := s.enqueueEvidenceCleanupTx(r.Context(), tx, ref, now); err != nil {
+		WriteError(w, 500, "failed to delete request")
+		return
+	}
+	_, _ = tx.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, now, id)
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM membership_requests WHERE id=?`, id); err != nil {
+		WriteError(w, 500, "failed to delete request")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		WriteError(w, 500, "failed to delete request")
+		return
+	}
+	s.cleanupMembershipEvidence(r.Context(), 25)
 	_ = WriteJSON(w, 200, map[string]string{"status": "ok"})
+}
+
+func membershipJoinURL(r *http.Request, token string) (string, error) {
+	if strings.TrimSpace(token) == "" {
+		return "", errors.New("join token is required")
+	}
+	base := strings.TrimSpace(os.Getenv("VERIFICATION_PUBLIC_BASE_URL"))
+	if base == "" {
+		if r == nil || strings.TrimSpace(r.Host) == "" {
+			return "", errors.New("public verification URL is unavailable")
+		}
+		scheme := "http"
+		forwardedProto := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])
+		if r.TLS != nil || strings.EqualFold(forwardedProto, "https") {
+			scheme = "https"
+		}
+		base = scheme + "://" + strings.TrimSpace(r.Host)
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", errors.New("public verification URL is invalid")
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/verification/join/" + url.PathEscape(token)
+	return u.String(), nil
+}
+
+func (s *Server) sendMembershipJoinInvite(r *http.Request, requestID, email, label string) string {
+	if s.mailer == nil {
+		return "invite_delivery_unavailable"
+	}
+	token, err := s.issueMembershipJoinToken(r.Context(), requestID)
+	if err != nil {
+		return "invite_token_unavailable"
+	}
+	joinURL, err := membershipJoinURL(r, token)
+	if err != nil {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND token_hash=? AND revoked_at IS NULL`, time.Now().UnixMilli(), requestID, tokenHash(token))
+		return "join_url_unavailable"
+	}
+	if err := s.mailer.Send(r.Context(), email, label, joinURL); err != nil {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND token_hash=? AND revoked_at IS NULL`, time.Now().UnixMilli(), requestID, tokenHash(token))
+		return "invite_delivery_failed"
+	}
+	return ""
 }
 
 func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.Request) {
@@ -376,12 +510,15 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 	}
 	result, fulfillErr := verification.Fulfill(r.Context(), req, wa, dc)
 	if result.State == "action_pending" && result.FailureClass == "invite_pending" && req.Transport == "whatsapp" {
-		if token, tokenErr := s.issueMembershipJoinToken(r.Context(), id); tokenErr == nil && s.mailer != nil {
-			_ = s.mailer.Send(r.Context(), email, label, "/api/verification/join/"+token)
+		if failureClass := s.sendMembershipJoinInvite(r, id, email, label); failureClass != "" {
+			result.State = "action_pending"
+			result.FailureClass = failureClass
 		}
 	}
 	if result.State == "succeeded" {
-		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, time.Now().UnixMilli(), id)
+		now := time.Now().UnixMilli()
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, now, id)
+		_, _ = s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_join_claims WHERE membership_request_id=?`, id)
 	}
 	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state=?,fulfillment_failure_class=?,updated_at=? WHERE id=?`, result.State, result.FailureClass, time.Now().UnixMilli(), id)
 	if fulfillErr != nil && result.State == "failed" {
@@ -395,7 +532,9 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 // WhatsApp requests. It is intentionally called by the application loop;
 // there is no durable membership queue or worker pool.
 func (s *Server) ReconcileMembership(ctx context.Context) {
-	rows, err := s.controlDB.QueryContext(ctx, `SELECT id FROM membership_requests WHERE status='approved' AND fulfillment_state='action_pending' AND applicant_whatsapp_phone IS NOT NULL ORDER BY updated_at LIMIT 25`)
+	s.cleanupMembershipEvidence(ctx, 25)
+	now := time.Now().UnixMilli()
+	rows, err := s.controlDB.QueryContext(ctx, `SELECT id FROM membership_requests m WHERE status='approved' AND fulfillment_state='action_pending' AND applicant_whatsapp_phone IS NOT NULL AND EXISTS (SELECT 1 FROM membership_join_tokens t WHERE t.membership_request_id=m.id AND t.expires_at>? AND t.revoked_at IS NULL AND t.consumed_at IS NULL) ORDER BY updated_at LIMIT 25`, now)
 	if err != nil {
 		return
 	}
@@ -410,8 +549,12 @@ func (s *Server) ReconcileMembership(ctx context.Context) {
 
 func (s *Server) reconcileMembershipRequest(ctx context.Context, id string) {
 	var req verification.FulfillmentRequest
-	var email, label, status, fulfillmentState string
-	if err := s.controlDB.QueryRowContext(ctx, `SELECT p.target_transport,p.endpoint_alias,COALESCE(p.discord_role_id,''),COALESCE(m.applicant_whatsapp_phone,''),COALESCE(m.applicant_discord_user_id,''),m.status,m.fulfillment_state,m.applicant_work_email,p.label FROM membership_requests m JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE m.id=?`, id).Scan(&req.Transport, &req.EndpointAlias, &req.RoleID, &req.Phone, &req.DiscordUserID, &status, &fulfillmentState, &email, &label); err != nil || status != "approved" || fulfillmentState == "succeeded" {
+	var status, fulfillmentState string
+	if err := s.controlDB.QueryRowContext(ctx, `SELECT p.target_transport,p.endpoint_alias,COALESCE(p.discord_role_id,''),COALESCE(m.applicant_whatsapp_phone,''),COALESCE(m.applicant_discord_user_id,''),m.status,m.fulfillment_state FROM membership_requests m JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE m.id=?`, id).Scan(&req.Transport, &req.EndpointAlias, &req.RoleID, &req.Phone, &req.DiscordUserID, &status, &fulfillmentState); err != nil || status != "approved" || fulfillmentState == "succeeded" {
+		return
+	}
+	var activeTokenCount int
+	if s.controlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM membership_join_tokens WHERE membership_request_id=? AND expires_at>? AND revoked_at IS NULL AND consumed_at IS NULL`, id, time.Now().UnixMilli()).Scan(&activeTokenCount) != nil || activeTokenCount == 0 {
 		return
 	}
 	if req.Transport == "whatsapp" {
@@ -437,13 +580,10 @@ func (s *Server) reconcileMembershipRequest(ctx context.Context, id string) {
 		}
 	}
 	result, _ := verification.Fulfill(ctx, req, wa, dc)
-	if result.State == "action_pending" && result.FailureClass == "invite_pending" && req.Transport == "whatsapp" {
-		if token, tokenErr := s.issueMembershipJoinToken(ctx, id); tokenErr == nil && s.mailer != nil {
-			_ = s.mailer.Send(ctx, email, label, "/api/verification/join/"+token)
-		}
-	}
 	if result.State == "succeeded" {
-		_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, time.Now().UnixMilli(), id)
+		now := time.Now().UnixMilli()
+		_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, now, id)
+		_, _ = s.controlDB.ExecContext(ctx, `DELETE FROM membership_join_claims WHERE membership_request_id=?`, id)
 	}
 	_, _ = s.controlDB.ExecContext(ctx, `UPDATE membership_requests SET fulfillment_state=?,fulfillment_failure_class=?,updated_at=? WHERE id=? AND status='approved'`, result.State, result.FailureClass, time.Now().UnixMilli(), id)
 }
@@ -586,27 +726,41 @@ func (s *Server) handleMembershipDecision(w http.ResponseWriter, r *http.Request
 	}
 	next := map[string]string{"approve": "approved", "reject": "rejected", "needs_review": "pending_admin"}[req.Action]
 	p, _ := principalFromContext(r.Context())
-	var evidenceReference string
-	_ = s.controlDB.QueryRowContext(r.Context(), `SELECT COALESCE(evidence_reference,'') FROM membership_requests WHERE id=?`, id).Scan(&evidenceReference)
-	res, err := s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET status=?,decided_by_user_id=?,decided_at=?,updated_at=? WHERE id=? AND status='pending_admin'`, next, p.ID, time.Now().UnixMilli(), time.Now().UnixMilli(), id)
+	now := time.Now().UnixMilli()
+	tx, err := s.controlDB.BeginTx(r.Context(), nil)
 	if err != nil {
 		WriteError(w, 500, "decision unavailable")
 		return
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	defer tx.Rollback()
+	var evidenceReference string
+	if err := tx.QueryRowContext(r.Context(), `SELECT COALESCE(evidence_reference,'') FROM membership_requests WHERE id=? AND status='pending_admin'`, id).Scan(&evidenceReference); err != nil {
 		WriteError(w, 409, "request state changed")
+		return
+	}
+	if next == "approved" || next == "rejected" {
+		if err := s.enqueueEvidenceCleanupTx(r.Context(), tx, evidenceReference, now); err != nil {
+			WriteError(w, 500, "decision unavailable")
+			return
+		}
+		_, err = tx.ExecContext(r.Context(), `UPDATE membership_requests SET status=?,decided_by_user_id=?,decided_at=?,updated_at=?,evidence_reference=NULL,evidence_metadata=NULL WHERE id=? AND status='pending_admin'`, next, p.ID, now, now, id)
+	} else {
+		_, err = tx.ExecContext(r.Context(), `UPDATE membership_requests SET status=?,decided_by_user_id=?,decided_at=?,updated_at=? WHERE id=? AND status='pending_admin'`, next, p.ID, now, now, id)
+	}
+	if err != nil {
+		WriteError(w, 500, "decision unavailable")
+		return
+	}
+	if next == "rejected" {
+		_, _ = tx.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, now, id)
+	}
+	if err := tx.Commit(); err != nil {
+		WriteError(w, 500, "decision unavailable")
 		return
 	}
 	s.audit(r, "membership_"+req.Action, id)
 	if next == "approved" || next == "rejected" {
-		if evidenceReference != "" && s.evidenceDir != "" {
-			_ = os.Remove(filepath.Join(s.evidenceDir, evidenceReference))
-		}
-		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET evidence_reference=NULL,evidence_metadata=NULL WHERE id=? AND status=?`, id, next)
-	}
-	if next == "rejected" {
-		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, time.Now().UnixMilli(), id)
+		s.cleanupMembershipEvidence(r.Context(), 25)
 	}
 	_ = WriteJSON(w, 200, map[string]string{"status": next})
 }
