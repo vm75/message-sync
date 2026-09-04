@@ -252,13 +252,22 @@ func TestSyncSetsCRUDAndValidation(t *testing.T) {
 			t.Fatalf("GET deleted sync set status = %d, want 404", recGet.Code)
 		}
 
-		// Verify all mixed-transport endpoints are now unassigned.
-		var d1Set, t1Set, g3Set *string
-		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'd1'`).Scan(&d1Set)
-		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 't1'`).Scan(&t1Set)
-		_ = db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g3'`).Scan(&g3Set)
-		if d1Set != nil || t1Set != nil || g3Set != nil {
-			t.Fatalf("expected endpoints to be unassigned after sync set delete, got d1=%v t1=%v g3=%v", d1Set, t1Set, g3Set)
+		// Verify all endpoints still belonging to set1 are deleted.
+		var deletedCount int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM endpoints WHERE alias IN ('d1', 't1', 'g3')`).Scan(&deletedCount); err != nil {
+			t.Fatalf("count deleted sync set endpoints: %v", err)
+		}
+		if deletedCount != 0 {
+			t.Fatalf("expected sync set endpoints to be deleted, found %d", deletedCount)
+		}
+
+		// g1 was removed from set1 by the PUT above, so deleting set1 must not delete it.
+		var g1Set *string
+		if err := db.QueryRow(`SELECT sync_set_id FROM endpoints WHERE alias = 'g1'`).Scan(&g1Set); err != nil {
+			t.Fatalf("query retained g1 endpoint: %v", err)
+		}
+		if g1Set != nil {
+			t.Fatalf("expected retained g1 endpoint to remain unassigned, got %v", *g1Set)
 		}
 
 		// DELETE non-existent
