@@ -40,12 +40,13 @@ func (f *fakeChannelWebhook) Delete(_ context.Context, channelID, messageID stri
 }
 
 type fakeDiscordAPI struct {
-	replySends []*discordgo.MessageSend
-	pollSends  []*discordgo.MessageSend
-	adds       []string
-	removes    []string
-	message    *discordgo.Message
-	channel    *discordgo.Channel
+	replySends   []*discordgo.MessageSend
+	pollSends    []*discordgo.MessageSend
+	pollChannels []string
+	adds         []string
+	removes      []string
+	message      *discordgo.Message
+	channel      *discordgo.Channel
 }
 
 func (f *fakeDiscordAPI) ChannelMessages(_ string, _ int, _, _, _ string, _ ...discordgo.RequestOption) ([]*discordgo.Message, error) {
@@ -60,10 +61,11 @@ func (f *fakeDiscordAPI) Channel(_ string, _ ...discordgo.RequestOption) (*disco
 	return f.channel, nil
 }
 
-func (f *fakeDiscordAPI) ChannelMessageSendComplex(_ string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
+func (f *fakeDiscordAPI) ChannelMessageSendComplex(channel string, data *discordgo.MessageSend, _ ...discordgo.RequestOption) (*discordgo.Message, error) {
 	f.replySends = append(f.replySends, data)
 	if data.Poll != nil {
 		f.pollSends = append(f.pollSends, data)
+		f.pollChannels = append(f.pollChannels, channel)
 	}
 	return &discordgo.Message{ID: "reply-marker"}, nil
 }
@@ -492,6 +494,40 @@ func TestDiscordRepresentablePollUsesNativeMessage(t *testing.T) {
 	}
 	if api.pollSends[0].Content != "*_wa-family:Travel/Alice_*:" {
 		t.Fatalf("native poll attribution = %q", api.pollSends[0].Content)
+	}
+}
+
+func TestDiscordNativePollPresentationKeepsSourceAttributionAndDestinationScopeOpaque(t *testing.T) {
+	tests := []struct {
+		name        string
+		pollAttr    string
+		childScope  *transport.ChildScope
+		wantChannel string
+		wantContent string
+	}{
+		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantChannel: testChannelID, wantContent: "*_family/Alice_*:"},
+		{name: "friendly thread", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-opaque"}, wantChannel: "thread-opaque", wantContent: "*_family:Plans/Alice_*:"},
+		{name: "opaque thread", childScope: &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-opaque"}, wantChannel: "thread-opaque"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeDiscordAPI{}
+			adapter := newOutboundTestAdapter(&fakeChannelWebhook{managed: make(map[string]string)}, api)
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint: "discord", SourceText: "Lunch?", Kind: "poll", ChildScope: tc.childScope,
+				PollAttribution: tc.pollAttr, PollOptions: []string{"Pizza", "Salad"}, PollSelectableCount: 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(api.pollSends) != 1 || api.pollChannels[0] != tc.wantChannel {
+				t.Fatalf("native poll placement = channels %v sends %d, want %q/1", api.pollChannels, len(api.pollSends), tc.wantChannel)
+			}
+			got := api.pollSends[0]
+			if got.Content != tc.wantContent || got.Poll.Question.Text != "Lunch?" || got.Poll.Answers[0].Media.Text != "Pizza" {
+				t.Fatalf("native poll presentation = %#v", got)
+			}
+		})
 	}
 }
 

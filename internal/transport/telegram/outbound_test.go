@@ -81,6 +81,9 @@ func (f *fakeTelegramAPI) SendMessage(_ context.Context, params *telegrambot.Sen
 func (f *fakeTelegramAPI) SendPoll(_ context.Context, params *telegrambot.SendPollParams) (*models.Message, error) {
 	f.methods = append(f.methods, "poll")
 	f.polls = append(f.polls, params)
+	if err := f.popMessageErr(); err != nil {
+		return nil, err
+	}
 	message := f.nextMessage()
 	message.Poll = &models.Poll{ID: "opaque-telegram-poll", Options: []models.PollOption{{Text: "one"}, {Text: "two"}}}
 	return message, nil
@@ -550,5 +553,54 @@ func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing
 	}
 	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "*_family:Travel/Alice_*:" {
 		t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
+	}
+}
+
+func TestTelegramNativePollPresentationKeepsSourceAttributionAndTopicOpaque(t *testing.T) {
+	tests := []struct {
+		name       string
+		pollAttr   string
+		childScope *transport.ChildScope
+		wantThread int
+		wantDesc   string
+	}{
+		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantDesc: "*_family/Alice_*:"},
+		{name: "friendly topic", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77, wantDesc: "*_family:Plans/Alice_*:"},
+		{name: "opaque topic", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeTelegramAPI{}
+			adapter := newOutboundTestAdapter(t, api)
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", ChildScope: tc.childScope,
+				PollAttribution: tc.pollAttr, PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(api.polls) != 1 || api.polls[0].MessageThreadID != tc.wantThread {
+				t.Fatalf("native Telegram poll placement = %#v, want thread %d", api.polls, tc.wantThread)
+			}
+			if api.polls[0].Question != "Lunch?" || api.polls[0].Description != tc.wantDesc || api.polls[0].Options[0].Text != "Idli" {
+				t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
+			}
+		})
+	}
+}
+
+func TestTelegramNativePollRetryReusesSingleRenderedAttribution(t *testing.T) {
+	api := &fakeTelegramAPI{messageErrs: []error{&telegrambot.TooManyRequestsError{Message: "rate limited", RetryAfter: 1}, nil}}
+	adapter := newOutboundTestAdapter(t, api)
+	adapter.retryWait = func(context.Context, time.Duration) error { return nil }
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollAttribution: "*_family:Plans/Alice_*:",
+		PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.polls) != 2 || api.polls[0].Description != api.polls[1].Description || api.polls[1].Description != "*_family:Plans/Alice_*:" {
+		t.Fatalf("poll retry attribution = %#v", api.polls)
 	}
 }
