@@ -18,6 +18,8 @@ type fakeTelegramAdminService struct {
 	status      telegram.AdminStatus
 	chats       []telegram.DiscoveredChat
 	discoverErr error
+	validateErr error
+	validate    func(string) error
 }
 
 func (f *fakeTelegramAdminService) AdminStatus(context.Context) telegram.AdminStatus {
@@ -26,6 +28,13 @@ func (f *fakeTelegramAdminService) AdminStatus(context.Context) telegram.AdminSt
 
 func (f *fakeTelegramAdminService) DiscoverChats(context.Context) ([]telegram.DiscoveredChat, error) {
 	return f.chats, f.discoverErr
+}
+
+func (f *fakeTelegramAdminService) ValidateTarget(_ context.Context, remoteID string) error {
+	if f.validate != nil {
+		return f.validate(remoteID)
+	}
+	return f.validateErr
 }
 
 func authenticatedTelegramRequest(t *testing.T, srv *Server, method, path string) *http.Request {

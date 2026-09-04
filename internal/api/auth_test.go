@@ -61,7 +61,7 @@ func setupTestServer(t *testing.T, db *sql.DB) *Server {
 		('conn-tg-1', 'telegram', 'tg', 1, X'0506', X'0708', ?, ?)`, now, now, now, now, now, now); err != nil {
 		t.Fatal(err)
 	}
-	return NewServer(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: db, ControlDB: cs.DB(), SessionTTL: time.Hour})
+	return NewServer(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), DB: db, ControlDB: cs.DB(), SessionTTL: time.Hour, Connections: testConnectionService{tg: &fakeTelegramAdminService{}}})
 }
 
 func request(t *testing.T, srv *Server, method, path string, body any, token string) *httptest.ResponseRecorder {

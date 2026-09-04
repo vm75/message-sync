@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,35 @@ import (
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
+
+func TestValidateTargetUsesProviderChatTypeAndRunningConnection(t *testing.T) {
+	tests := []struct {
+		name     string
+		chatType models.ChatType
+		wantErr  error
+	}{
+		{name: "group", chatType: models.ChatTypeGroup},
+		{name: "supergroup", chatType: models.ChatTypeSupergroup},
+		{name: "broadcast channel", chatType: models.ChatTypeChannel, wantErr: ErrUnsupportedTarget},
+		{name: "private", chatType: models.ChatTypePrivate, wantErr: ErrUnsupportedTarget},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adapter := &Adapter{client: &fakeBotClient{getChat: &models.ChatFullInfo{Type: tt.chatType}}, polling: true}
+			if err := adapter.ValidateTarget(context.Background(), "-1001234567890"); !errors.Is(err, tt.wantErr) {
+				if tt.wantErr == nil && err == nil {
+					return
+				}
+				t.Fatalf("ValidateTarget error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+
+	adapter := &Adapter{client: &fakeBotClient{getChat: &models.ChatFullInfo{Type: models.ChatTypeGroup}}}
+	if !errors.Is(adapter.ValidateTarget(context.Background(), "-1001234567890"), ErrTargetValidationUnavailable) {
+		t.Fatal("stopped Telegram connection accepted an unverified target")
+	}
+}
 
 func TestObservedChatDiscoveryIsBoundedAndGroupOnly(t *testing.T) {
 	adapter := &Adapter{

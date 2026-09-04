@@ -22,7 +22,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 |---:|---|---|---|---|
 | 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Complete |
 | 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Complete |
-| 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Pending |
+| 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Complete |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Complete |
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Complete |
 | 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Pending |
@@ -119,7 +119,10 @@ Rules:
 - The existing endpoint boundary accepts only negative Telegram group/supergroup chat IDs.
 - Discovery and ingress both reject private chats and broadcast channels by chat type; migration reuses the same validator.
 - Permanent README and architecture documentation already describe Telegram parent endpoints as groups/supergroups only.
-- Validation: existing configuration, API, discovery, normalizer, and migration tests pass under the full repository gate.
+- Added connection-scoped provider validation through the owning running bot's `getChat` call; only `group` and `supergroup` targets are accepted.
+- API create and update/reassignment fail closed when the connection is unavailable or the provider reports private/channel/unsupported chat types; discovery and ingress remain group-oriented.
+- Added adapter and API regressions for provider chat types, stopped connections, and broadcast-channel-shaped IDs.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` passed.
 
 ### #89 — Telegram reaction propagation
 

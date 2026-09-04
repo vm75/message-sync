@@ -552,6 +552,8 @@ The Telegram adapter receives its bot credential explicitly via `telegram.Option
 
 ## 19. Scope boundaries
 
+Telegram endpoint creation and reassignment call the owning running bot's `getChat` boundary and accept only `group` or `supergroup`; private chats and broadcast channels are rejected, and unavailable validation fails closed.
+
 `README.md` is authoritative for supported product behavior. This architecture document records implemented components, invariants, and known provider constraints rather than maintaining a feature backlog. New scope must be justified independently and documented here only after it changes an implemented architecture or invariant.
 
 Membership-specific email challenges and advisory evidence analysis are implemented only within the isolated control plane described above.

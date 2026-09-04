@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/vm75/message-sync/internal/safelog"
 )
@@ -15,6 +16,11 @@ import (
 const observedChatLimit = 128
 
 const VisibilityGuidance = "Send a group message so the chat can be observed. If ordinary group messages are not visible, disable Bot Privacy Mode or grant appropriate bot administrator visibility."
+
+var (
+	ErrTargetValidationUnavailable = errors.New("Telegram target validation is unavailable")
+	ErrUnsupportedTarget           = errors.New("Telegram target is not a supported group")
+)
 
 type EndpointReadiness struct {
 	Alias  string `json:"alias"`
@@ -41,6 +47,7 @@ type DiscoveredChat struct {
 type AdminService interface {
 	AdminStatus(context.Context) AdminStatus
 	DiscoverChats(context.Context) ([]DiscoveredChat, error)
+	ValidateTarget(context.Context, string) error
 }
 
 type observedChatEntry struct {
@@ -149,6 +156,42 @@ func (a *Adapter) DiscoverChats(_ context.Context) ([]DiscoveredChat, error) {
 		return chats[i].ChatID < chats[j].ChatID
 	})
 	return chats, nil
+}
+
+func (a *Adapter) ValidateTarget(ctx context.Context, remoteID string) error {
+	if a == nil {
+		return ErrTargetValidationUnavailable
+	}
+	remoteID = strings.TrimSpace(remoteID)
+	if _, err := strconv.ParseInt(remoteID, 10, 64); err != nil {
+		return ErrUnsupportedTarget
+	}
+	a.mu.RLock()
+	client := a.client
+	running := a.polling
+	a.mu.RUnlock()
+	if client == nil || !running {
+		return ErrTargetValidationUnavailable
+	}
+	getter, ok := client.(interface {
+		GetChat(context.Context, *telegrambot.GetChatParams) (*models.ChatFullInfo, error)
+	})
+	if !ok {
+		return ErrTargetValidationUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	chat, err := getter.GetChat(probeCtx, &telegrambot.GetChatParams{ChatID: remoteID})
+	if err != nil || chat == nil {
+		return ErrTargetValidationUnavailable
+	}
+	if chat.Type != models.ChatTypeGroup && chat.Type != models.ChatTypeSupergroup {
+		return ErrUnsupportedTarget
+	}
+	return nil
 }
 
 func (a *Adapter) observeUpdate(update *models.Update) {

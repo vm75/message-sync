@@ -47,6 +47,10 @@ type ConnectionService interface {
 	ConnectionAdapter(id string) (any, bool)
 }
 
+type telegramTargetValidator interface {
+	ValidateTelegramTarget(context.Context, string, string) error
+}
+
 type Options struct {
 	Addr       string
 	Logger     *slog.Logger

@@ -489,18 +489,24 @@ func TestHandleUpdateDropsBridgeBotWithoutLoggingProtocolData(t *testing.T) {
 }
 
 type fakeBotClient struct {
-	id       int64
-	me       *models.User
-	getMeErr error
-	started  chan struct{}
-	stopped  chan struct{}
-	once     sync.Once
+	id         int64
+	me         *models.User
+	getMeErr   error
+	getChat    *models.ChatFullInfo
+	getChatErr error
+	started    chan struct{}
+	stopped    chan struct{}
+	once       sync.Once
 }
 
 func (f *fakeBotClient) ID() int64 { return f.id }
 
 func (f *fakeBotClient) GetMe(context.Context) (*models.User, error) {
 	return f.me, f.getMeErr
+}
+
+func (f *fakeBotClient) GetChat(context.Context, *telegrambot.GetChatParams) (*models.ChatFullInfo, error) {
+	return f.getChat, f.getChatErr
 }
 
 func (f *fakeBotClient) Start(ctx context.Context) {

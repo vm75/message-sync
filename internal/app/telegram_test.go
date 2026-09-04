@@ -75,6 +75,8 @@ func (f *fakeTelegramTransport) AdminStatus(context.Context) telegram.AdminStatu
 	}
 }
 
+func (f *fakeTelegramTransport) ValidateTarget(context.Context, string) error { return nil }
+
 func (f *fakeTelegramTransport) DiscoverChats(context.Context) ([]telegram.DiscoveredChat, error) {
 	return []telegram.DiscoveredChat{}, nil
 }

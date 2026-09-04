@@ -59,6 +59,13 @@ func (s testConnectionService) ConnectionDiscovery(ctx context.Context, id strin
 	return nil, errors.New("connection unavailable")
 }
 
+func (s testConnectionService) ValidateTelegramTarget(ctx context.Context, id, remoteID string) error {
+	if id == "conn-tg-1" && s.tg != nil {
+		return s.tg.ValidateTarget(ctx, remoteID)
+	}
+	return errors.New("connection unavailable")
+}
+
 func (s testConnectionService) WhatsAppPair(ctx context.Context, id string) (WhatsAppPairResponse, error) {
 	if id == "conn-wa-1" && s.wa != nil {
 		return s.wa.Pair(ctx)

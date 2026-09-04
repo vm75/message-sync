@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -304,6 +305,25 @@ func TestTelegramEndpointCRUD(t *testing.T) {
 	srv.Handler().ServeHTTP(missingRec, missing)
 	if missingRec.Code != http.StatusNotFound {
 		t.Fatalf("GET deleted Telegram endpoint status = %d, want 404", missingRec.Code)
+	}
+}
+
+func TestTelegramEndpointRejectsProviderUnsupportedTarget(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	srv.connections = testConnectionService{tg: &fakeTelegramAdminService{validate: func(string) error {
+		return telegram.ErrUnsupportedTarget
+	}}}
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/endpoints", strings.NewReader(`{"alias":"tg-channel","transport":"telegram","connectionId":"conn-tg-1","remoteId":"-1001234567890"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("broadcast channel-shaped target status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
 

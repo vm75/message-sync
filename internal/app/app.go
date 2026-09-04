@@ -819,6 +819,21 @@ func (s *appConnectionService) ConnectionDiscovery(ctx context.Context, id strin
 	return nil, errors.New("discovery not supported for this transport")
 }
 
+func (s *appConnectionService) ValidateTelegramTarget(ctx context.Context, id, remoteID string) error {
+	if s == nil || s.connMgr == nil {
+		return telegram.ErrTargetValidationUnavailable
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return telegram.ErrTargetValidationUnavailable
+	}
+	tg, ok := adapter.(telegram.AdminService)
+	if !ok {
+		return telegram.ErrTargetValidationUnavailable
+	}
+	return tg.ValidateTarget(ctx, remoteID)
+}
+
 func (s *appConnectionService) WhatsAppPair(ctx context.Context, id string) (api.WhatsAppPairResponse, error) {
 	if s == nil || s.connMgr == nil {
 		return api.WhatsAppPairResponse{}, errors.New("connection manager unavailable")

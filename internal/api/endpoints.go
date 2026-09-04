@@ -8,6 +8,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/safelog"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 )
 
 type EndpointDTO struct {
@@ -140,6 +141,21 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if req.Transport == config.TransportTelegram {
+		validator, ok := s.connections.(telegramTargetValidator)
+		if !ok {
+			WriteError(w, http.StatusServiceUnavailable, "Telegram connection cannot validate targets")
+			return
+		}
+		if err := validator.ValidateTelegramTarget(r.Context(), req.ConnectionID, req.RemoteID); err != nil {
+			if errors.Is(err, telegram.ErrTargetValidationUnavailable) {
+				WriteError(w, http.StatusServiceUnavailable, "Telegram target validation is unavailable")
+			} else {
+				WriteError(w, http.StatusBadRequest, "Telegram target is not a supported group")
+			}
+			return
+		}
+	}
 
 	if s.controlDB != nil {
 		var connTransport string
@@ -251,7 +267,6 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
 	var existing string
 	var existingAlias, existingTransport, existingConnID, existingRemoteID string
 	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID)
@@ -273,6 +288,21 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	if err := config.ValidateConnectionID(targetConnID); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if req.Transport == config.TransportTelegram {
+		validator, ok := s.connections.(telegramTargetValidator)
+		if !ok {
+			WriteError(w, http.StatusServiceUnavailable, "Telegram connection cannot validate targets")
+			return
+		}
+		if err := validator.ValidateTelegramTarget(r.Context(), targetConnID, req.RemoteID); err != nil {
+			if errors.Is(err, telegram.ErrTargetValidationUnavailable) {
+				WriteError(w, http.StatusServiceUnavailable, "Telegram target validation is unavailable")
+			} else {
+				WriteError(w, http.StatusBadRequest, "Telegram target is not a supported group")
+			}
+			return
+		}
 	}
 
 	if s.controlDB != nil {
