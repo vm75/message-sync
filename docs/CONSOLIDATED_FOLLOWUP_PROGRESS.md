@@ -21,7 +21,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | Order | Issue | Area | Dependencies / rationale | Status |
 |---:|---|---|---|---|
 | 1 | [#84](https://github.com/vm75/message-sync/issues/84) | Remove singleton/backward-compatibility fallbacks | Establish one clean explicit connection model before additional work. | Complete |
-| 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Pending |
+| 2 | [#83](https://github.com/vm75/message-sync/issues/83) | Dynamic Discord/Telegram credential replacement | Build on #84's final connection lifecycle; replacement must affect only the target connection. | Complete |
 | 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Pending |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Complete |
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Complete |
@@ -110,7 +110,9 @@ Rules:
 - On replacement, construct the new adapter and use `ConnectionManager.Restart` for only the changed connection; unchanged connections are not restarted.
 - Preserve encrypted-at-rest storage and transient plaintext token handling.
 - Documented replacement behavior and isolation guarantees.
-- Focused validation passed; the full required gate is rerun before commit.
+- Runtime replacement failures now propagate through the API; encrypted credential updates are rolled back when the replacement cannot be constructed or swapped, leaving the old adapter active.
+- Added API regression coverage proving an invalid replacement returns 503 and preserves the previous encrypted credential.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` passed.
 
 ### #85 — Telegram groups/supergroups-only endpoint validation
 

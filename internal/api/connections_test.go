@@ -336,6 +336,33 @@ func TestConnections_CRUD_LifecycleAndAuditing(t *testing.T) {
 	}
 }
 
+func TestConnections_CredentialReplacementRollsBackWhenRuntimeSwapFails(t *testing.T) {
+	srv, _, controlDB, adminToken, _ := setupConnectionsTestEnv(t)
+	srv.onConfigChange = func(context.Context) error {
+		return errors.New("replacement adapter unavailable")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/connections/conn-dc-1", strings.NewReader(`{"token":"replacement-secret-token"}`))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("replacement failure status = %d, want 503: %s", rec.Code, rec.Body.String())
+	}
+
+	var encBlob, nonceBlob []byte
+	if err := controlDB.QueryRow(`SELECT encrypted_credential, credential_nonce FROM transport_connections WHERE id = 'conn-dc-1'`).Scan(&encBlob, &nonceBlob); err != nil {
+		t.Fatal(err)
+	}
+	decrypted, err := srv.credentialCipher.Decrypt(encBlob, nonceBlob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decrypted) != "discord-token-123" {
+		t.Fatalf("failed replacement changed stored credential to %q", decrypted)
+	}
+}
+
 func TestConnections_EndpointReassignmentAndDeletionRules(t *testing.T) {
 	srv, syncDB, controlDB, adminToken, _ := setupConnectionsTestEnv(t)
 

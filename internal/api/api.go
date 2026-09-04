@@ -211,12 +211,14 @@ func (s *Server) registerRoutes() {
 	s.mux.Handle("GET /", StaticHandler())
 }
 
-func (s *Server) notifyConfigChange(ctx context.Context) {
+func (s *Server) notifyConfigChange(ctx context.Context) error {
 	if s.onConfigChange != nil {
 		if err := s.onConfigChange(ctx); err != nil {
 			safelog.Error(s.logger, "notify config change failed", "config_reload_notification", err)
+			return err
 		}
 	}
+	return nil
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {

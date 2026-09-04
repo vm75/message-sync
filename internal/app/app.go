@@ -345,6 +345,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err != nil {
 			return fmt.Errorf("reload config: %w", err)
 		}
+		var reloadErr error
 		if controlStore != nil && credentialCipher != nil {
 			allConns, err := controlStore.ListConnections(updateCtx)
 			if err == nil {
@@ -425,6 +426,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
+							if exists && credentialChanged[connID] {
+								reloadErr = errors.Join(reloadErr, errors.New("decrypt Discord credential failed"))
+							}
 							continue
 						}
 						connChannelIDs := make(map[string]string)
@@ -445,6 +449,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						})
 						if err != nil {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
+							if exists && credentialChanged[connID] {
+								reloadErr = errors.Join(reloadErr, errors.New("start Discord transport failed"))
+							}
 							continue
 						}
 						var runtimeErr error
@@ -456,6 +463,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						if runtimeErr != nil {
 							safelog.Error(logger, "replace Discord transport failed", "discord_replace", runtimeErr)
 							_ = dcInst.Close()
+							reloadErr = errors.Join(reloadErr, errors.New("replace Discord transport failed"))
 							continue
 						}
 						discordAdapters[c.ID] = dcInst
@@ -475,6 +483,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
+							if exists && credentialChanged[connID] {
+								reloadErr = errors.Join(reloadErr, errors.New("decrypt Telegram credential failed"))
+							}
 							continue
 						}
 						connChatIDs := make(map[string]string)
@@ -513,6 +524,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						})
 						if err != nil {
 							safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
+							if exists && credentialChanged[connID] {
+								reloadErr = errors.Join(reloadErr, errors.New("start Telegram transport failed"))
+							}
 							continue
 						}
 						var runtimeErr error
@@ -524,6 +538,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						if runtimeErr != nil {
 							safelog.Error(logger, "replace Telegram transport failed", "telegram_replace", runtimeErr)
 							_ = tgInst.Close()
+							reloadErr = errors.Join(reloadErr, errors.New("replace Telegram transport failed"))
 							continue
 						}
 						telegramAdapters[c.ID] = tgInst
@@ -531,6 +546,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 				}
 			}
+		}
+		if reloadErr != nil {
+			return fmt.Errorf("reload transport connections: %w", reloadErr)
 		}
 		registerActiveConnections(updatedCfg)
 		if err := connMgr.UpdateConfig(updatedCfg); err != nil {

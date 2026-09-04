@@ -269,6 +269,12 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	conn.EncryptedCredential = encCred
 	conn.CredentialNonce = nonce
+	oldEncCred := append([]byte(nil), encCred...)
+	oldNonce := append([]byte(nil), nonce...)
+	oldKeyVersion := conn.CredentialKeyVersion
+	oldUpdatedAt := conn.UpdatedAt
+	oldLabel := conn.Label
+	oldEnabled := conn.Enabled
 	if createdBy.Valid {
 		conn.CreatedBy = &createdBy.String
 	}
@@ -291,7 +297,8 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	if req.Token != nil {
+	credentialReplaced := req.Token != nil
+	if credentialReplaced {
 		if conn.Transport == "whatsapp" {
 			WriteError(w, http.StatusBadRequest, "whatsapp connections must not store credentials")
 			return
@@ -314,7 +321,6 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 		conn.EncryptedCredential = newEnc
 		conn.CredentialNonce = newNonce
 		conn.CredentialKeyVersion = controlstore.CurrentKeyVersion
-		s.audit(r, "connection_credential_replaced", id)
 	}
 
 	conn.UpdatedAt = time.Now().UnixMilli()
@@ -338,7 +344,32 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	s.notifyConfigChange(r.Context())
+	if err := s.notifyConfigChange(r.Context()); err != nil {
+		var oldEncVal, oldNonceVal any
+		if len(oldEncCred) > 0 {
+			oldEncVal = oldEncCred
+		}
+		if len(oldNonce) > 0 {
+			oldNonceVal = oldNonce
+		}
+		_, rollbackErr := s.controlDB.ExecContext(r.Context(), `
+			UPDATE transport_connections
+			SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+			WHERE id = ?
+		`, oldLabel, oldEnabled, oldEncVal, oldNonceVal, oldKeyVersion, oldUpdatedAt, conn.ID)
+		if rollbackErr != nil {
+			safelog.Error(s.logger, "rollback connection update failed", "connection_update_rollback", rollbackErr)
+		}
+		if credentialReplaced {
+			WriteError(w, http.StatusServiceUnavailable, "replacement connection could not be started")
+		} else {
+			WriteError(w, http.StatusServiceUnavailable, "connection could not be reloaded")
+		}
+		return
+	}
+	if credentialReplaced {
+		s.audit(r, "connection_credential_replaced", id)
+	}
 
 	_ = WriteJSON(w, http.StatusOK, ConnectionDTO{
 		ID:        conn.ID,
