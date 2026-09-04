@@ -170,7 +170,9 @@ remote_scope_id, created_at)` with one row per canonical/endpoint pair.
 scope ID is opaque operational addressing. Optional friendly presentation labels
 are stored separately in `child_scope_labels`, keyed by endpoint, scope kind, and
 remote scope ID. The default opaque mode never writes labels; friendly labels are
-normalized presentation metadata only and never affect routing or canonical identity.
+normalized presentation metadata only and never affect routing or canonical
+identity. The router prefers a live source label, then this catalog, then the
+generic `thread`/`topic` label; it never parses the rendered header.
 
 ### REST API, Web UI & Authentication
 

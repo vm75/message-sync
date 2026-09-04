@@ -66,6 +66,7 @@ type Router struct {
 	lanes              *delivery.Manager
 	routes             map[transport.EndpointID][]transport.EndpointID
 	usernameMode       config.UsernameMode
+	childContextMode   config.ChildContextDisplayMode
 	aggTrigger         string
 	localPrefix        string
 	knownCopies        map[copyKey]string
@@ -139,6 +140,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		lanes:              lanes,
 		routes:             routes,
 		usernameMode:       cfg.Identity.UsernameMode,
+		childContextMode:   cfg.ChildContextDisplayMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
 		localPrefix:        cfg.LocalPrefix,
 		knownCopies:        make(map[copyKey]string),
@@ -179,6 +181,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	r.mu.Lock()
 	r.routes = routes
 	r.usernameMode = cfg.Identity.UsernameMode
+	r.childContextMode = cfg.ChildContextDisplayMode
 	r.aggTrigger = cfg.Polls.AggregationTrigger
 	r.localPrefix = cfg.LocalPrefix
 	r.mu.Unlock()
@@ -411,7 +414,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return nil // Cannot edit a deleted message
 		}
 
-		forwardedText, err := r.forwardedText(incoming)
+		forwardedText, err := r.forwardedText(ctx, incoming)
 		if err != nil {
 			return err
 		}
@@ -604,7 +607,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		r.mu.Unlock()
 	}
 
-	forwardedText, err := r.forwardedText(incoming)
+	forwardedText, err := r.forwardedText(ctx, incoming)
 	if err != nil {
 		return err
 	}
@@ -1232,7 +1235,7 @@ func (r *Router) getUsernameMode() config.UsernameMode {
 	return r.usernameMode
 }
 
-func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
+func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming) (string, error) {
 	username := incoming.Sender.OpaqueID
 	if r.getUsernameMode() == config.UsernameModePushName {
 		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
@@ -1248,10 +1251,39 @@ func (r *Router) forwardedText(incoming transport.Incoming) (string, error) {
 	if strings.TrimSpace(username) == "" {
 		return "", errors.New("incoming sender identity is required")
 	}
-	return fmt.Sprintf("*_%s/%s_*: %s", incoming.Endpoint, username, incoming.Text), nil
+	prefix := string(incoming.Endpoint)
+	if r.getChildContextMode() == config.ChildContextDisplayFriendly && incoming.ChildScope != nil {
+		label := normalizeDisplayName(incoming.ChildScope.Label)
+		if label == "" {
+			if stored, err := r.store.ChildScopeLabel(ctx, string(incoming.Endpoint), string(incoming.ChildScope.Kind), incoming.ChildScope.RemoteID); err == nil {
+				label = normalizeDisplayName(stored.DisplayName)
+			}
+		}
+		if label == "" {
+			switch incoming.ChildScope.Kind {
+			case transport.ScopeKindDiscordThread:
+				label = "thread"
+			case transport.ScopeKindTelegramTopic:
+				label = "topic"
+			}
+		}
+		if label != "" {
+			prefix += ":" + escapePresentation(label)
+		}
+	}
+	return fmt.Sprintf("*_%s/%s_*: %s", prefix, username, incoming.Text), nil
+}
+
+func (r *Router) getChildContextMode() config.ChildContextDisplayMode {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.childContextMode
 }
 
 func (r *Router) withChildContextHeaders(incoming transport.Incoming, destination transport.EndpointID, scopes []store.CanonicalScope, text string) string {
+	if r.getChildContextMode() == config.ChildContextDisplayFriendly {
+		return text
+	}
 	if r.scopeHasher == nil || len(scopes) == 0 {
 		return text
 	}
@@ -1288,6 +1320,14 @@ func (r *Router) withChildContextHeaders(incoming transport.Incoming, destinatio
 
 func normalizeDisplayName(value string) string {
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func escapePresentation(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	for _, char := range []string{"*", "_", "`", "[", "]", "(", ")"} {
+		value = strings.ReplaceAll(value, char, `\`+char)
+	}
+	return value
 }
 
 func newCanonicalID() (string, error) {

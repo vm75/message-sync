@@ -368,6 +368,49 @@ func TestHashAttributionNeverUsesPushName(t *testing.T) {
 	}
 }
 
+func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	cfg := testConfig(config.UsernameModeHash)
+	cfg.ChildContextDisplayMode = config.ChildContextDisplayFriendly
+	for alias, endpoint := range cfg.Endpoints {
+		endpoint.ConnectionID = "conn-1"
+		cfg.Endpoints[alias] = endpoint
+	}
+	if err := config.Save(ctx, syncStore.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := syncStore.UpsertChildScopeLabel(ctx, "c1g1", string(transport.ScopeKindDiscordThread), "thread-1", "Dinner * Plans"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := New(cfg, syncStore, &fakeSender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	root, err := r.forwardedText(ctx, testIncoming("c1g1", "root"))
+	if err != nil || root != "*_c1g1/u_abcdefghij_*: hello" {
+		t.Fatalf("friendly root = %q, err=%v", root, err)
+	}
+	known := testIncoming("c1g1", "known")
+	known.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-1"}
+	knownText, err := r.forwardedText(ctx, known)
+	if err != nil || knownText != "*_c1g1:Dinner \\* Plans/u_abcdefghij_*: hello" {
+		t.Fatalf("friendly persisted child = %q, err=%v", knownText, err)
+	}
+	unknown := testIncoming("c1g1", "unknown")
+	unknown.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1"}
+	unknownText, err := r.forwardedText(ctx, unknown)
+	if err != nil || unknownText != "*_c1g1:topic/u_abcdefghij_*: hello" {
+		t.Fatalf("friendly unknown child = %q, err=%v", unknownText, err)
+	}
+}
+
 func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 	ctx := context.Background()
 	r, _, fake := newTestRouter(t, config.UsernameModeHash)
