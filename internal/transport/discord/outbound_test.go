@@ -145,6 +145,22 @@ func TestWebhookUsesCentralFriendlyRendering(t *testing.T) {
 	}
 }
 
+func TestFriendlyRenderingDoesNotDuplicateCrossEndpointOriginInWebhookUsername(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord", OriginEndpoint: "wa-family", Sender: transport.Sender{DisplayName: "Alice"},
+		SourceText: "Dinner at 7?", RenderedText: "*_wa-family/Alice_*: Dinner at 7?", Kind: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := webhook.executed[0]
+	if got.Username != "Alice" || got.Content != "*_wa-family/Alice_*: Dinner at 7?" {
+		t.Fatalf("friendly Discord payload duplicated attribution: %#v", got)
+	}
+}
+
 func TestWebhookUsernameIncludesGroupPrefixForCrossEndpointMessages(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})

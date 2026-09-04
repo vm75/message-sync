@@ -847,7 +847,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					SourceText: incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
 					RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
-					PollAttribution: r.friendlyPollAttribution(r.getChildContextMode(), incoming, childScope),
+					PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
 					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
@@ -876,7 +876,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
 				RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
-				PollAttribution: r.friendlyPollAttribution(r.getChildContextMode(), incoming, childScope),
+				PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 				PollDurationHours: incoming.PollDurationHours,
@@ -943,7 +943,7 @@ func friendlyRenderedText(mode config.ChildContextDisplayMode, text string) stri
 	return ""
 }
 
-func (r *Router) friendlyPollAttribution(mode config.ChildContextDisplayMode, incoming transport.Incoming, childScope *transport.ChildScope) string {
+func (r *Router) friendlyPollAttribution(ctx context.Context, mode config.ChildContextDisplayMode, incoming transport.Incoming, childScope *transport.ChildScope) string {
 	if mode != config.ChildContextDisplayFriendly {
 		return ""
 	}
@@ -965,6 +965,11 @@ func (r *Router) friendlyPollAttribution(mode config.ChildContextDisplayMode, in
 	prefix := string(incoming.Endpoint)
 	if childScope != nil {
 		label := normalizeDisplayName(childScope.Label)
+		if label == "" {
+			if stored, err := r.store.ChildScopeLabel(ctx, string(incoming.Endpoint), string(childScope.Kind), childScope.RemoteID); err == nil {
+				label = normalizeDisplayName(stored.DisplayName)
+			}
+		}
 		if label == "" {
 			switch childScope.Kind {
 			case transport.ScopeKindDiscordThread:

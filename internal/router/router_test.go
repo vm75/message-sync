@@ -420,6 +420,9 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		if sent.outgoing.RenderedText != knownText || strings.Contains(sent.outgoing.RenderedText, "[contexts") {
 			t.Fatalf("router did not propagate friendly rendered text: %#v", sent.outgoing)
 		}
+		if sent.outgoing.PollAttribution != "*_c1g1:Dinner \\* Plans/u_abcdefghij_*:" {
+			t.Fatalf("router did not propagate structured poll attribution: %#v", sent.outgoing)
+		}
 	}
 }
 
