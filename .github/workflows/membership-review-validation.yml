@@ -1,0 +1,32 @@
+name: membership-review-validation
+
+on:
+  push:
+    branches:
+      - agent/membership-review-v2
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Formatting
+        run: |
+          test -z "$(gofmt -l ./cmd ./internal)"
+      - name: Tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Diff checks
+        run: |
+          git diff --check
+          git diff --exit-code main...HEAD -- VERSION
