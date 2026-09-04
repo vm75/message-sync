@@ -82,4 +82,12 @@
   }
 
   window.Router = new Router();
+
+  // Presentation-only dashboard enhancement. It installs a MutationObserver
+  // before app-base.js begins polling, so every delivery refresh is reformatted
+  // without changing the controller or delivery API semantics.
+  const deliveryHealthPresentation = document.createElement('script');
+  deliveryHealthPresentation.src = '/js/delivery-health-polish.js?v=1';
+  deliveryHealthPresentation.async = false;
+  document.body.appendChild(deliveryHealthPresentation);
 })();
