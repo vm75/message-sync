@@ -145,6 +145,11 @@ submitted phone when the provider exposes a phone JID, and approved through
 the provider request API. LID-only requests are not guessed or matched.
 The authenticated connection-scoped readiness endpoint exposes only whether
 the join-approval prerequisite is met and fixed failure classes.
+Approved invite delivery uses a high-entropy, 48-hour bearer token stored only
+as a hash in `control.db`; the token is bound to the approved request and
+revoked/consumed when fulfillment completes or the request is deleted. The
+raw invite is obtained only at that guarded endpoint and is neither persisted
+nor logged.
 
 The verification state machine is `pending_email` → `pending_admin` after a
 valid work-email challenge, then `approved`, `rejected`, or `pending_admin`

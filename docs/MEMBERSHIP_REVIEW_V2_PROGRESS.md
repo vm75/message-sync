@@ -63,12 +63,12 @@ Recommended dependency order:
 
 | Issue | Scope | Dependencies | Status | Commit / PR | Verification / notes |
 |---|---|---|---|---|---|
-| #95 | Per-sync-set membership application/review configuration and bounded custom-field schema | — | Pending | — | — |
-| #96 | Public dynamic form, strict submission validation, immutable request answer/definition snapshot, sync-set UI | #95 | Blocked | — | — |
-| #97 | Retain current OpenRouter Document AI, fix MIME propagation, purge evidence on final human decision | #96 | Blocked | — | — |
-| #98 | Remove WhatsApp direct add; add pending join-request/readiness admin primitives | — | Pending | — | May run in parallel; must integrate before #99 |
-| #99 | Secure approved invite + pending WhatsApp join matching/approval + idempotent low-volume reconciliation | #97, #98 | Blocked | — | — |
-| #100 | End-to-end hardening, privacy/stale-code audit, permanent docs, tracker deletion | #95-#99 | Blocked | — | Final cleanup only |
+| #95 | Per-sync-set membership application/review configuration and bounded custom-field schema | — | Complete | `bc4c434` + `f0cc723` | Fresh `control.db` schema; admin-only sync-set CRUD; bounded text/textarea/select/checkbox fields and select options; endpoint→sync-set resolution; deletion cleanup. `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` pass. |
+| #96 | Public dynamic form, strict submission validation, immutable request answer/definition snapshot, sync-set UI | #95 | Complete | `bc4c434` + `f0cc723` | Public metadata excludes reviewer/transport addressing; answers are strictly validated and snapshotted with the definition; reviewer API/UI reads snapshots; sync-set editor manages the shared definition. |
+| #97 | Retain current OpenRouter Document AI, fix MIME propagation, purge evidence on final human decision | #96 | Complete | `bc4c434` | Existing OpenRouter boundary retained; validated MIME reaches analyzer; approve/reject unlink evidence immediately while needs-review retains it. Focused evidence test and full suite pass. |
+| #98 | Remove WhatsApp direct add; add pending join-request/readiness admin primitives | — | Complete | `bc4c434` | Direct-add interface/provider call and per-member rotation removed; readiness, pending phone-JID listing, and targeted approval use pinned whatsmeow APIs; LID-only requests are not guessed. |
+| #99 | Secure approved invite + pending WhatsApp join matching/approval + idempotent low-volume reconciliation | #97, #98 | Complete | `f0cc723` + `5797117` | Hashed 48-hour join tokens, verified-email delivery path, readiness gate, endpoint-owned matching, ambiguity/claim protection, explicit retry plus fixed one-minute bounded reconciliation; no durable queue. Full suite/container checks pass. |
+| #100 | End-to-end hardening, privacy/stale-code audit, permanent docs, tracker deletion | #95-#99 | In progress | — | Final audit and issue closure/tracker deletion remain. |
 
 ## Per-issue completion protocol
 

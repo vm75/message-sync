@@ -273,7 +273,11 @@ func (s *Server) handlePutMembershipConfig(w http.ResponseWriter, r *http.Reques
 			WriteError(w, http.StatusInternalServerError, "membership configuration unavailable")
 			return
 		}
-		options, _ := json.Marshal(field.Options)
+		normalizedOptions := make([]string, 0, len(field.Options))
+		for _, option := range field.Options {
+			normalizedOptions = append(normalizedOptions, strings.TrimSpace(option))
+		}
+		options, _ := json.Marshal(normalizedOptions)
 		if _, err = tx.ExecContext(r.Context(), `INSERT INTO membership_custom_fields(id,sync_set_id,field_key,label,field_type,required,max_length,position,options_json) VALUES(?,?,?,?,?,?,?,?,?)`, fieldID, id, strings.TrimSpace(field.Key), strings.TrimSpace(field.Label), strings.TrimSpace(field.Type), field.Required, maxLength, position, string(options)); err != nil {
 			WriteError(w, http.StatusInternalServerError, "membership configuration unavailable")
 			return
