@@ -85,6 +85,7 @@ func TestStaticHandler(t *testing.T) {
 			`id="modal-discovery"`,
 			`id="modal-reassign-endpoint"`,
 			`id="modal-wa-pair"`,
+			`id="add-conn-pairing-view"`,
 			`id="add-endpoint-conn-select"`,
 			"Connections → discovered parent conversations → Endpoints → Sync Sets",
 			"child scopes",
@@ -156,6 +157,9 @@ func TestStaticHandler(t *testing.T) {
 			if strings.Contains(appJS, forbidden) {
 				t.Fatalf("Admin JS contains forbidden token storage %q", forbidden)
 			}
+		}
+		if strings.Contains(appJS, "closeModal(modalAddConnection);\n        await openWaPairModal(createdID)") {
+			t.Fatal("WhatsApp create flow still leaves Add Connection before pairing")
 		}
 	})
 

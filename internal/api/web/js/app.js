@@ -100,6 +100,8 @@
   const btnWaCancelPair = document.getElementById('btn-wa-cancel-pair');
   const btnWaRetryPair  = document.getElementById('btn-wa-retry-pair');
   const btnWaPairDiscover = document.getElementById('btn-wa-pair-discover');
+  const waPairBody = modalWaPair ? modalWaPair.querySelector('.modal-body') : null;
+  const waPairFooter = modalWaPair ? modalWaPair.querySelector('.modal-footer') : null;
 
   // ── DOM – Connections ───────────────────────────────────────
   const navConnections        = document.getElementById('nav-connections');
@@ -121,6 +123,8 @@
   const addConnHelpTelegram   = document.getElementById('add-conn-help-telegram');
   const addConnWaHelp         = document.getElementById('add-conn-wa-help');
   const btnSubmitAddConn      = document.getElementById('btn-submit-add-conn');
+  const addConnFormView       = document.getElementById('add-conn-form-view');
+  const addConnPairingView    = document.getElementById('add-conn-pairing-view');
 
   const modalReplaceToken     = document.getElementById('modal-replace-token');
   const formReplaceToken      = document.getElementById('form-replace-token');
@@ -341,6 +345,14 @@
 
   function closeModal(el) {
     if (!el) return;
+    if (el === modalAddConnection && pairingIsInline) {
+      stopQrCountdown();
+      stopWaPolling();
+      clearWaQRCode();
+      mountWaPairingView(false);
+      if (addConnFormView) addConnFormView.classList.remove('hidden');
+      if (addConnPairingView) addConnPairingView.classList.add('hidden');
+    }
     el.classList.add('hidden');
     document.body.style.overflow = '';
   }
@@ -946,6 +958,17 @@
   // ══════════════════════════════════════════════════════════════
 
   let activePairingConnId = '';
+  let pairingIsInline = false;
+
+  function mountWaPairingView(inline) {
+    pairingIsInline = inline;
+    const target = inline ? addConnPairingView : (modalWaPair && modalWaPair.querySelector('.modal-card'));
+    if (!target || !waPairBody || !waPairFooter) return;
+    target.appendChild(waPairBody);
+    target.appendChild(waPairFooter);
+    const closeButton = waPairFooter.querySelector('[data-modal]');
+    if (closeButton) closeButton.setAttribute('data-modal', inline ? 'modal-add-connection' : 'modal-wa-pair');
+  }
 
   function stopWaPolling() {
     if (waPollTimer) { clearInterval(waPollTimer); waPollTimer = null; }
@@ -997,7 +1020,7 @@
     waCountdownTimer = setInterval(tick, 1000);
   }
 
-  async function openWaPairModal(connId) {
+  async function requestWaPairing(connId, inline) {
     if (typeof connId !== 'string' || !connId) {
       if (!cachedConnections || cachedConnections.length === 0) {
         try { cachedConnections = await window.API.listConnections(); } catch (e) {}
@@ -1010,6 +1033,7 @@
       connId = waConn.id;
     }
     activePairingConnId = connId;
+    mountWaPairingView(inline);
 
     if (waPairStatus) { waPairStatus.className = 'alert alert-info'; waPairStatus.textContent = `Requesting QR code for ${connId}…`; }
     if (waQrSection) waQrSection.classList.add('hidden');
@@ -1017,7 +1041,12 @@
     if (btnWaRetryPair) btnWaRetryPair.classList.add('hidden');
     if (btnWaPairDiscover) btnWaPairDiscover.classList.add('hidden');
     clearWaQRCode();
-    openModal(modalWaPair);
+    if (inline) {
+      if (addConnFormView) addConnFormView.classList.add('hidden');
+      if (addConnPairingView) addConnPairingView.classList.remove('hidden');
+    } else {
+      openModal(modalWaPair);
+    }
     closeAllDropdowns();
 
     try {
@@ -1050,6 +1079,14 @@
     }
   }
 
+  async function openWaPairModal(connId) {
+    await requestWaPairing(connId, false);
+  }
+
+  async function retryWaPairing() {
+    await requestWaPairing(activePairingConnId, pairingIsInline);
+  }
+
   async function cancelWaPairing() {
     try {
       await window.API.cancelPairWhatsAppConnection(activePairingConnId);
@@ -1060,6 +1097,9 @@
       if (btnWaCancelPair) btnWaCancelPair.classList.add('hidden');
       if (btnWaRetryPair) btnWaRetryPair.classList.add('hidden');
       clearWaQRCode();
+      if (pairingIsInline) {
+        closeModal(modalAddConnection);
+      }
       refreshDashboardPlatformStatuses();
       if (window.Router.getRoute() === 'connections') loadConnections();
     } catch (err) { showToast(err.message || 'Failed to cancel pairing', 'danger'); }
@@ -1297,6 +1337,9 @@
   }
 
   function openAddConnectionModal() {
+    mountWaPairingView(true);
+    if (addConnFormView) addConnFormView.classList.remove('hidden');
+    if (addConnPairingView) addConnPairingView.classList.add('hidden');
     if (addConnAlert) addConnAlert.classList.add('hidden');
     if (addConnLabel) addConnLabel.value = '';
     if (addConnId) addConnId.value = '';
@@ -1363,8 +1406,7 @@
       if (addConnTransport === 'whatsapp') {
         const createdID = created && created.id ? created.id : id;
         if (!createdID) throw new Error('created WhatsApp connection did not return an ID');
-        closeModal(modalAddConnection);
-        await openWaPairModal(createdID);
+        await requestWaPairing(createdID, true);
       } else {
         closeModal(modalAddConnection);
       }
@@ -2598,9 +2640,9 @@
     if (btnWaPair)   btnWaPair.addEventListener('click', () => openWaPairModal());
     if (btnWaLogout) btnWaLogout.addEventListener('click', () => handleWaLogout());
     if (btnWaCancelPair) btnWaCancelPair.addEventListener('click', cancelWaPairing);
-    if (btnWaRetryPair) btnWaRetryPair.addEventListener('click', () => openWaPairModal(activePairingConnId));
+    if (btnWaRetryPair) btnWaRetryPair.addEventListener('click', retryWaPairing);
     if (btnWaPairDiscover) btnWaPairDiscover.addEventListener('click', () => {
-      closeModal(modalWaPair);
+      closeModal(pairingIsInline ? modalAddConnection : modalWaPair);
       if (activePairingConnId) openDiscovery(activePairingConnId);
     });
 
