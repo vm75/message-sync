@@ -2,3 +2,4 @@
 /* Theme tokens, including --bg-base, live in tailadmin.css. */
 @import url('/css/app-base.css');
 @import url('/css/tailadmin.css');
+@import url('/css/theme-controls.css');
