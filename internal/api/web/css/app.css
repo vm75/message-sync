@@ -1,3 +1,4 @@
 /* Message Sync UI entrypoint. Keep legacy structural styles isolated, then apply the TailAdmin-inspired presentation layer. */
+/* Theme tokens, including --bg-base, live in tailadmin.css. */
 @import url('/css/app-base.css');
 @import url('/css/tailadmin.css');
