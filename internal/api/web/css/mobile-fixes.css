@@ -1,0 +1,152 @@
+/* Mobile and responsive corrections for the TailAdmin-inspired UI. */
+
+/* Connection IDs are implementation details and should not be shown in cards. */
+.connection-id {
+  display: none !important;
+}
+
+/* Theme controls live inside existing layouts instead of floating above actions. */
+.theme-nav-item {
+  margin-top: 4px;
+}
+
+.theme-auth-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.theme-auth-button {
+  gap: 7px;
+}
+
+.theme-auth-button .theme-icon,
+.theme-nav-item .theme-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.theme-sun { display: none; }
+:root[data-theme="dark"] .theme-moon { display: none; }
+:root[data-theme="dark"] .theme-sun { display: block; }
+
+/* The add-connection form has an intermediate wrapper. Make it participate in
+   the modal flex layout so long Discord/Telegram help text scrolls while the
+   action footer remains reachable. */
+#modal-add-connection .modal-card,
+#form-add-connection,
+#add-conn-form-view {
+  min-height: 0;
+}
+
+#add-conn-form-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#modal-add-connection .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+#modal-add-connection .modal-footer {
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  /* Respect notches/status areas and use the dynamic viewport on mobile.
+     The padding is inside the 100dvh content box because the global reset uses
+     border-box sizing. */
+  .content-area {
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+
+  .view-body {
+    padding-top: max(20px, env(safe-area-inset-top));
+  }
+
+  /* Remove spacing reserved by the former floating theme button. */
+  .page-header {
+    padding-right: 0;
+  }
+
+  /* Authentication views used fixed 100vh inline styles, which can exceed the
+     visible mobile viewport when browser chrome is present. Override them with
+     dynamic viewport sizing and allow vertical scrolling rather than clipping. */
+  #view-loading,
+  #view-setup,
+  #view-login,
+  #view-invite,
+  #view-reset {
+    height: 100dvh !important;
+    min-height: 100dvh;
+    overflow-y: auto;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+  }
+
+  .auth-card {
+    margin-top: auto;
+    margin-bottom: auto;
+  }
+
+  /* Integrated theme control behaves like the rest of the bottom navigation. */
+  .theme-nav-item {
+    margin-top: 0;
+  }
+
+  /* Keep modal edges inside the actually visible viewport and safe areas. */
+  .modal-overlay {
+    align-items: flex-end;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-right: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    padding-left: 12px;
+  }
+
+  .modal-card {
+    width: 100%;
+    max-height: calc(100dvh - max(24px, env(safe-area-inset-top)) - max(24px, env(safe-area-inset-bottom)));
+  }
+
+  #modal-add-connection .modal-card {
+    height: auto;
+  }
+
+  #modal-add-connection .modal-header,
+  #modal-add-connection .modal-footer {
+    position: relative;
+    z-index: 1;
+  }
+
+  #modal-add-connection .modal-footer {
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 520px) {
+  .theme-auth-row {
+    margin-bottom: 10px;
+  }
+
+  #modal-add-connection .modal-body {
+    padding: 16px;
+  }
+
+  #modal-add-connection .modal-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  #modal-add-connection .modal-footer .btn {
+    width: 100%;
+  }
+}
