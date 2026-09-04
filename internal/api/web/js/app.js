@@ -295,6 +295,50 @@
     }
   }
 
+  /* app-base.js historically turns successful WhatsApp pairing into a
+     "Discover Groups" action. Conversation selection now belongs exclusively
+     to Sync Sets. Replace that button after the preserved controller binds its
+     listener, and use the modal's existing close button so the controller's
+     pairing cleanup still runs normally. */
+  function installWhatsAppPairCompletion() {
+    const legacy = document.getElementById('btn-wa-pair-discover');
+    const status = document.getElementById('wa-pair-status');
+    if (!legacy || !status) return;
+
+    const done = legacy.cloneNode(true);
+    done.textContent = 'Done';
+    done.classList.add('hidden');
+    legacy.replaceWith(done);
+
+    const refresh = () => {
+      const success = status.classList.contains('alert-success');
+      done.classList.toggle('hidden', !success);
+      if (!success) return;
+
+      const text = status.textContent.trim();
+      if (text === 'WhatsApp paired successfully!') {
+        status.textContent = 'WhatsApp paired successfully. Add groups from Sync Sets.';
+      } else if (text === 'WhatsApp is already linked and active.') {
+        status.textContent = 'WhatsApp is linked and active. Add groups from Sync Sets.';
+      }
+    };
+
+    done.addEventListener('click', () => {
+      const overlay = done.closest('.modal-overlay');
+      if (!overlay) return;
+      const closeButton = overlay.querySelector(`.btn-modal-close[data-modal="${overlay.id}"]`);
+      if (closeButton) {
+        closeButton.click();
+      } else {
+        overlay.classList.add('hidden');
+        document.body.style.overflow = '';
+      }
+    });
+
+    new MutationObserver(refresh).observe(status, { attributes: true, childList: true, characterData: true, subtree: true });
+    refresh();
+  }
+
   const initialTheme = storedTheme() || (media.matches ? 'dark' : 'light');
   root.dataset.theme = initialTheme;
   installThemeControls();
@@ -312,5 +356,6 @@
   const controller = document.createElement('script');
   controller.src = '/js/app-base.js?v=8';
   controller.async = false;
+  controller.addEventListener('load', installWhatsAppPairCompletion);
   document.body.appendChild(controller);
 })();
