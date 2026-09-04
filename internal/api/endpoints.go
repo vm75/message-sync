@@ -416,11 +416,11 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, err := tx.ExecContext(r.Context(), `UPDATE reactions SET source_endpoint_id = ? WHERE source_endpoint_id = ?`, newAlias, alias); err != nil {
-				safelog.Error(s.logger, "update reactions endpoint failed", "endpoint_update", err)
-				WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
-				return
-			}
+			safelog.Error(s.logger, "update reactions endpoint failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
+			return
 		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		safelog.Error(s.logger, "commit tx failed", "endpoint_update", err)
