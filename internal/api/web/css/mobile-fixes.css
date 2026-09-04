@@ -15,6 +15,13 @@ label[for="add-conn-id"],
   display: none !important;
 }
 
+/* Conversation/group aliases are managed from Sync Sets only. Connections are
+   responsible for authentication and transport lifecycle, so suppress the old
+   connection-level Discover -> Create Endpoint action. */
+#connections-container button[onclick*=".openDiscovery("] {
+  display: none !important;
+}
+
 /* Theme controls live inside existing layouts instead of floating above actions. */
 .theme-nav-item {
   margin-top: 4px;
