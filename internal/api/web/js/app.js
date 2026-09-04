@@ -1,7 +1,8 @@
 /**
  * Message Sync UI bootstrap.
- * Theme preference is presentation-only; the application controller remains
- * byte-for-byte preserved in /js/app-base.js and is loaded after this setup.
+ * Theme preference and UI wording/layout enhancements are presentation-only;
+ * the application controller remains preserved in /js/app-base.js and is
+ * loaded after this setup.
  *
  * Static smoke-test compatibility markers from the preserved controller:
  * listConnections getConnectionStatus getConnectionDiscovery createConnection
@@ -93,12 +94,226 @@
     });
   }
 
+  function replaceButtonText(button, text, className) {
+    if (!button) return;
+    const svg = button.querySelector('svg');
+    const spinner = button.querySelector('.btn-spinner');
+    button.replaceChildren();
+    if (svg) button.appendChild(svg);
+    const label = document.createElement('span');
+    if (className) label.className = className;
+    label.textContent = text;
+    button.appendChild(label);
+    if (spinner) button.appendChild(spinner);
+  }
+
+  function enhanceSyncSetStaticUI() {
+    const view = document.getElementById('view-sync-sets');
+    if (!view) return;
+
+    const headerText = view.querySelector('.page-header > div');
+    if (headerText && !headerText.querySelector('.syncset-page-subtitle')) {
+      const subtitle = document.createElement('p');
+      subtitle.className = 'syncset-page-subtitle';
+      subtitle.textContent = 'A sync set keeps selected conversations mirrored. Messages sent in one conversation are forwarded to the others in the same set.';
+      headerText.appendChild(subtitle);
+    }
+
+    const btnNew = document.getElementById('btn-new-sync-set');
+    replaceButtonText(btnNew, 'Create sync set', 'syncset-create-label');
+
+    const listTitle = view.querySelector('.syncset-list-title');
+    const countBadge = document.getElementById('syncset-count-badge');
+    if (listTitle && countBadge) {
+      listTitle.replaceChildren(document.createTextNode('Your sync sets'), countBadge);
+    }
+
+    const placeholder = document.getElementById('syncset-editor-placeholder');
+    if (placeholder) {
+      const oldCopy = placeholder.querySelector('p');
+      if (oldCopy) {
+        oldCopy.className = 'syncset-placeholder-copy';
+        oldCopy.textContent = 'Choose a sync set above to manage its conversations, or create a new one.';
+        if (!placeholder.querySelector('.syncset-placeholder-title')) {
+          const title = document.createElement('div');
+          title.className = 'syncset-placeholder-title';
+          title.textContent = 'Choose a sync set';
+          oldCopy.before(title);
+        }
+      }
+      if (btnNew && !placeholder.querySelector('.syncset-placeholder-action')) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'btn btn-primary syncset-placeholder-action';
+        action.textContent = 'Create sync set';
+        action.addEventListener('click', () => btnNew.click());
+        placeholder.appendChild(action);
+      }
+    }
+
+    const editorTitle = document.getElementById('syncset-editor-title');
+    if (editorTitle) {
+      const titleParent = editorTitle.parentElement;
+      const idDisplay = document.getElementById('syncset-editor-id-display');
+      if (idDisplay && idDisplay.parentElement) idDisplay.parentElement.classList.add('syncset-internal-id');
+      if (titleParent && !titleParent.querySelector('.syncset-editor-subtitle')) {
+        const subtitle = document.createElement('p');
+        subtitle.className = 'syncset-editor-subtitle';
+        subtitle.textContent = 'Choose which conversations should stay synchronized.';
+        editorTitle.insertAdjacentElement('afterend', subtitle);
+      }
+    }
+
+    const idField = document.getElementById('syncset-id-field');
+    if (idField) {
+      const label = idField.querySelector('label');
+      const hint = idField.querySelector('.form-hint');
+      const input = document.getElementById('input-syncset-id');
+      if (label) label.textContent = 'Sync set name';
+      if (hint) hint.textContent = 'Use a short unique name with letters, numbers, dashes, or underscores. The name cannot be changed after creation.';
+      if (input) input.placeholder = 'e.g. family-chat';
+    }
+
+    const editorBody = view.querySelector('.syncset-editor-body');
+    if (editorBody) {
+      const children = Array.from(editorBody.children);
+      const membersSection = children.find((child) => child !== idField && child.querySelector('#endpoint-chips'));
+      const addSection = children.find((child) => child.querySelector('.add-endpoint-form'));
+
+      if (membersSection) {
+        membersSection.classList.add('syncset-section', 'syncset-members-section');
+        const label = membersSection.querySelector(':scope > .section-label');
+        if (label) label.textContent = 'Synced conversations';
+        if (!membersSection.querySelector('.syncset-section-help')) {
+          const help = document.createElement('p');
+          help.className = 'syncset-section-help';
+          help.textContent = 'Every conversation below receives messages from the others in this sync set.';
+          label?.insertAdjacentElement('afterend', help);
+        }
+      }
+
+      if (addSection) {
+        addSection.classList.add('syncset-section', 'syncset-add-section');
+        const label = addSection.querySelector(':scope > .section-label');
+        if (label) label.textContent = 'Add a conversation';
+        if (!addSection.querySelector('.syncset-section-help')) {
+          const help = document.createElement('p');
+          help.className = 'syncset-section-help';
+          help.textContent = 'Pick a platform and connection, then choose the group or channel to include.';
+          label?.insertAdjacentElement('afterend', help);
+        }
+      }
+    }
+
+    const addForm = view.querySelector('.add-endpoint-form');
+    if (addForm) {
+      const transportLabel = addForm.querySelector(':scope > div:first-child .section-label');
+      const connectionLabel = document.querySelector('label[for="add-endpoint-conn-select"]');
+      const aliasLabel = document.querySelector('label[for="add-alias-input"]');
+      const aliasInput = document.getElementById('add-alias-input');
+      if (transportLabel) transportLabel.textContent = 'Choose platform';
+      if (connectionLabel) connectionLabel.textContent = 'Connection';
+      if (aliasLabel) aliasLabel.textContent = 'Conversation label';
+      if (aliasInput) aliasInput.placeholder = 'e.g. family-whatsapp';
+    }
+
+    const addButtonText = document.querySelector('#btn-add-endpoint .btn-text');
+    if (addButtonText) addButtonText.textContent = 'Add conversation';
+    const saveButtonText = document.querySelector('#btn-save-sync-set .btn-text');
+    if (saveButtonText) saveButtonText.textContent = 'Save changes';
+  }
+
+  function enhanceSyncSetListItems() {
+    const list = document.getElementById('syncset-list');
+    if (!list) return;
+
+    list.querySelectorAll('.syncset-list-item').forEach((item) => {
+      const count = item.querySelector('.syncset-item-count');
+      if (count && !count.dataset.friendlyCount) {
+        const match = count.textContent.trim().match(/^(\d+)\s+ep$/);
+        if (match) {
+          const n = Number(match[1]);
+          count.textContent = `${n} ${n === 1 ? 'conversation' : 'conversations'}`;
+        }
+        count.dataset.friendlyCount = 'true';
+      }
+
+      if (!item.dataset.keyboardReady) {
+        item.tabIndex = 0;
+        item.setAttribute('role', 'button');
+        item.addEventListener('keydown', (event) => {
+          if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('.syncset-delete-btn')) {
+            event.preventDefault();
+            item.click();
+          }
+        });
+        item.dataset.keyboardReady = 'true';
+      }
+
+      const deleteButton = item.querySelector('.syncset-delete-btn');
+      if (deleteButton) {
+        deleteButton.title = 'Delete sync set';
+        deleteButton.setAttribute('aria-label', 'Delete sync set');
+      }
+    });
+
+    const empty = list.querySelector('.syncset-empty-list');
+    if (empty) empty.innerHTML = 'No sync sets yet. Create one to start mirroring conversations.';
+  }
+
+  function enhanceEndpointRows() {
+    const chips = document.getElementById('endpoint-chips');
+    if (!chips) return;
+
+    const placeholder = chips.querySelector('.chips-placeholder');
+    if (placeholder) placeholder.textContent = 'No conversations in this sync set yet. Add one below.';
+
+    chips.querySelectorAll('.endpoint-chip').forEach((row) => {
+      row.classList.add('endpoint-row');
+      const move = row.querySelector('.chip-reassign');
+      const rename = row.querySelector('.chip-edit');
+      const remove = row.querySelector('.chip-remove');
+      if (move) move.setAttribute('aria-label', 'Move to another connection');
+      if (rename) rename.setAttribute('aria-label', 'Rename conversation label');
+      if (remove) remove.setAttribute('aria-label', 'Remove conversation from sync set');
+    });
+  }
+
+  function makeEditorTitleFriendly() {
+    const title = document.getElementById('syncset-editor-title');
+    if (!title) return;
+    const value = title.textContent.trim();
+    if (value === 'New Sync Set') title.textContent = 'Create sync set';
+    else if (value.startsWith('Edit: ')) title.textContent = value.slice(6);
+  }
+
+  function observeSyncSetUI() {
+    const list = document.getElementById('syncset-list');
+    const chips = document.getElementById('endpoint-chips');
+    const editorTitle = document.getElementById('syncset-editor-title');
+
+    if (list) {
+      new MutationObserver(enhanceSyncSetListItems).observe(list, { childList: true, subtree: true, characterData: true });
+      enhanceSyncSetListItems();
+    }
+    if (chips) {
+      new MutationObserver(enhanceEndpointRows).observe(chips, { childList: true, subtree: true });
+      enhanceEndpointRows();
+    }
+    if (editorTitle) {
+      new MutationObserver(makeEditorTitleFriendly).observe(editorTitle, { childList: true, characterData: true, subtree: true });
+      makeEditorTitleFriendly();
+    }
+  }
+
   const storedTheme = readStoredTheme();
   root.dataset.theme = storedTheme || (media.matches ? 'dark' : 'light');
 
   createNavThemeButton();
   createAuthThemeButtons();
   updateThemeButtons(root.dataset.theme);
+  enhanceSyncSetStaticUI();
+  observeSyncSetUI();
 
   media.addEventListener?.('change', function (event) {
     if (!readStoredTheme()) {
