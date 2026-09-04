@@ -38,4 +38,4 @@ jobs:
       - name: Diff checks
         run: |
           git diff --check
-          git diff --exit-code main...HEAD -- VERSION
+          git diff --exit-code origin/main...HEAD -- VERSION
