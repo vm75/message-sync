@@ -210,6 +210,187 @@
     if (saveText) saveText.textContent = 'Save changes';
   }
 
+  function membershipSourceFields() {
+    return {
+      instructions: document.getElementById('membership-applicant-instructions'),
+      guidance: document.getElementById('membership-reviewer-guidance'),
+      evidence: document.getElementById('membership-evidence-required'),
+      customFields: document.getElementById('membership-custom-fields'),
+    };
+  }
+
+  function syncMembershipProxyToSource(panel) {
+    if (!panel) return;
+    const source = membershipSourceFields();
+    const instructions = panel.querySelector('[data-membership-field="instructions"]');
+    const guidance = panel.querySelector('[data-membership-field="guidance"]');
+    const evidence = panel.querySelector('[data-membership-field="evidence"]');
+    const customFields = panel.querySelector('[data-membership-field="customFields"]');
+
+    if (source.instructions && instructions) source.instructions.value = instructions.value;
+    if (source.guidance && guidance) source.guidance.value = guidance.value;
+    if (source.evidence && evidence) source.evidence.checked = evidence.checked;
+    if (source.customFields && customFields) source.customFields.value = customFields.value;
+  }
+
+  function populateMembershipProxy(panel, cfg) {
+    if (!panel) return;
+    const instructions = panel.querySelector('[data-membership-field="instructions"]');
+    const guidance = panel.querySelector('[data-membership-field="guidance"]');
+    const evidence = panel.querySelector('[data-membership-field="evidence"]');
+    const customFields = panel.querySelector('[data-membership-field="customFields"]');
+
+    if (instructions) instructions.value = cfg?.applicantInstructions || '';
+    if (guidance) guidance.value = cfg?.reviewerGuidance || '';
+    if (evidence) evidence.checked = !!cfg?.evidenceRequired;
+    if (customFields) customFields.value = JSON.stringify(cfg?.customFields || [], null, 2);
+    syncMembershipProxyToSource(panel);
+  }
+
+  function buildMembershipPanel(item) {
+    const id = item.getAttribute('data-id') || '';
+    const panel = document.createElement('section');
+    panel.className = 'syncset-membership-panel';
+    panel.innerHTML = `
+      <div class="syncset-membership-header">
+        <span class="syncset-membership-icon" aria-hidden="true">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+        </span>
+        <div class="syncset-membership-heading">
+          <div class="syncset-membership-title">Membership application</div>
+          <div class="syncset-membership-subtitle">Optional intake and reviewer guidance shared by membership pipelines targeting this sync set.</div>
+        </div>
+      </div>
+      <div class="syncset-membership-body">
+        <div class="syncset-membership-field">
+          <div class="syncset-membership-label-row">
+            <label class="syncset-membership-label">Applicant instructions</label>
+            <span class="syncset-membership-optional">Optional</span>
+          </div>
+          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="instructions" placeholder="Tell applicants what to include in their request."></textarea>
+        </div>
+        <div class="syncset-membership-field">
+          <div class="syncset-membership-label-row">
+            <label class="syncset-membership-label">Reviewer guidance</label>
+            <span class="syncset-membership-optional">Optional</span>
+          </div>
+          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="guidance" placeholder="Add private guidance for reviewers evaluating requests."></textarea>
+        </div>
+        <label class="syncset-evidence-row">
+          <input type="checkbox" data-membership-field="evidence">
+          <span>
+            <span class="syncset-evidence-title">Require evidence upload</span>
+            <span class="syncset-evidence-help">Applicants must attach supporting evidence before their request can be reviewed.</span>
+          </span>
+        </label>
+        <div class="syncset-membership-field full">
+          <div class="syncset-membership-label-row">
+            <label class="syncset-membership-label">Custom fields</label>
+            <span class="syncset-membership-optional">Advanced · JSON</span>
+          </div>
+          <textarea class="form-input syncset-membership-json" rows="4" data-membership-field="customFields" placeholder='[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120}]'></textarea>
+          <div class="syncset-membership-hint">Optional bounded JSON array of field definitions: key, label, type, required, and maxLength.</div>
+        </div>
+      </div>`;
+
+    const source = membershipSourceFields();
+    populateMembershipProxy(panel, {
+      applicantInstructions: source.instructions?.value || '',
+      reviewerGuidance: source.guidance?.value || '',
+      evidenceRequired: !!source.evidence?.checked,
+      customFields: (() => {
+        try { return JSON.parse(source.customFields?.value || '[]'); } catch (_) { return []; }
+      })(),
+    });
+
+    panel.addEventListener('input', () => {
+      panel.dataset.dirty = 'true';
+      syncMembershipProxyToSource(panel);
+    });
+    panel.addEventListener('change', () => {
+      panel.dataset.dirty = 'true';
+      syncMembershipProxyToSource(panel);
+    });
+
+    if (id && window.API?.getMembershipConfig) {
+      window.API.getMembershipConfig(id).then((cfg) => {
+        if (!panel.isConnected || panel.dataset.dirty === 'true') return;
+        const activeItem = panel.closest('.syncset-list-item.active');
+        if (!activeItem || activeItem.getAttribute('data-id') !== id) return;
+        populateMembershipProxy(panel, cfg || {});
+      }).catch(() => {
+        // The preserved controller already surfaces membership-load failures.
+      });
+    }
+
+    return panel;
+  }
+
+  function enhanceActiveSyncSetCard() {
+    const item = document.querySelector('#syncset-list .syncset-list-item.active');
+    if (!item) return;
+    const body = item.querySelector('.syncset-card-body');
+    if (!body || body.hasAttribute('hidden')) return;
+
+    const conversations = body.querySelector('.syncset-conversations');
+    const controllerActions = body.querySelector('.syncset-card-actions');
+    if (controllerActions) controllerActions.classList.add('syncset-controller-actions');
+
+    if (conversations && !conversations.querySelector('.syncset-conversations-head')) {
+      const head = document.createElement('div');
+      head.className = 'syncset-conversations-head';
+      head.innerHTML = `
+        <div class="syncset-conversations-copy">
+          <div class="syncset-conversations-title">Synced conversations</div>
+          <div class="syncset-conversations-help">Messages from any conversation below are mirrored to the others in this sync set.</div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm syncset-polish-add">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add conversation
+        </button>`;
+      conversations.prepend(head);
+      head.querySelector('.syncset-polish-add')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        controllerActions?.querySelector('.syncset-add-btn')?.click();
+      });
+    }
+
+    if (!body.querySelector('.syncset-membership-panel')) {
+      const membership = buildMembershipPanel(item);
+      if (controllerActions) controllerActions.before(membership);
+      else body.appendChild(membership);
+    }
+
+    if (!body.querySelector('.syncset-polished-footer')) {
+      const footer = document.createElement('div');
+      footer.className = 'syncset-polished-footer';
+      footer.innerHTML = `
+        <button type="button" class="btn btn-ghost syncset-polished-delete">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          Delete sync set
+        </button>
+        <div class="syncset-polished-footer-main">
+          <button type="button" class="btn btn-ghost syncset-polished-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary syncset-polished-save">Save changes</button>
+        </div>`;
+      body.appendChild(footer);
+
+      footer.querySelector('.syncset-polished-delete')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        item.querySelector(':scope > .syncset-delete-btn')?.click();
+      });
+      footer.querySelector('.syncset-polished-cancel')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        controllerActions?.querySelector('.syncset-discard-btn')?.click();
+      });
+      footer.querySelector('.syncset-polished-save')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        syncMembershipProxyToSource(body.querySelector('.syncset-membership-panel'));
+        controllerActions?.querySelector('.syncset-save-btn')?.click();
+      });
+    }
+  }
+
   function enhanceSyncSetListItems() {
     const list = document.getElementById('syncset-list');
     if (!list) return;
@@ -231,7 +412,7 @@
         item.addEventListener('keydown', (event) => {
           if ((event.key === 'Enter' || event.key === ' ') && !event.target.closest('.syncset-delete-btn')) {
             event.preventDefault();
-            item.click();
+            item.querySelector('.syncset-card-toggle')?.click();
           }
         });
         item.dataset.keyboardReady = 'true';
@@ -247,6 +428,7 @@
     const empty = list.querySelector('.syncset-empty-list');
     const friendlyEmpty = 'No sync sets yet. Create one to start mirroring conversations.';
     if (empty && empty.textContent.trim() !== friendlyEmpty) empty.textContent = friendlyEmpty;
+    enhanceActiveSyncSetCard();
   }
 
   function enhanceEndpointRows() {
@@ -382,6 +564,7 @@
   controller.addEventListener('load', () => {
     installWhatsAppPairCompletion();
     installSyncSetDialogs();
+    enhanceActiveSyncSetCard();
   });
   document.body.appendChild(controller);
 })();
