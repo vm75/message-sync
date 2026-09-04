@@ -9,3 +9,44 @@
 @import url('/css/syncset-polish.css');
 @import url('/css/delivery-health-polish.css');
 @import url('/css/connections-polish.css');
+
+/* Connection header: icon spans both rows; name and badges form a compact
+   two-row stack to its right. This keeps long names independent of badges. */
+#connections-container .connection-card-top {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 14px;
+  row-gap: 8px;
+  align-items: start;
+}
+
+#connections-container .connection-header-left {
+  display: contents;
+}
+
+#connections-container .connection-header-left > .platform-card-icon {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: start;
+}
+
+#connections-container .connection-header-left > div:last-child {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  padding-top: 3px;
+}
+
+#connections-container .connection-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#connections-container .connection-badges {
+  grid-column: 2;
+  grid-row: 2;
+  margin-left: 0;
+  align-self: start;
+}
