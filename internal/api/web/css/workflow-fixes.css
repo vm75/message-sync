@@ -1,0 +1,34 @@
+/* Cross-flow UX corrections layered after the TailAdmin and Sync Set redesigns. */
+
+/* Save/Cancel are ordinary Sync Set page actions, not a floating/sticky bar. */
+#view-sync-sets .syncset-editor-footer {
+  position: static !important;
+  inset: auto !important;
+  z-index: auto !important;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-surface);
+  backdrop-filter: none;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (max-width: 768px) {
+  /* Extra sticky-footer clearance is no longer necessary. The app shell already
+     reserves space for the bottom navigation. */
+  #view-sync-sets .syncset-layout {
+    padding-bottom: 40px !important;
+  }
+
+  #view-sync-sets .syncset-editor-footer {
+    bottom: auto !important;
+  }
+}
+
+@media (max-width: 520px) {
+  #view-sync-sets .syncset-editor-footer {
+    gap: 10px;
+  }
+}
