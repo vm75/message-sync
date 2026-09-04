@@ -14,9 +14,9 @@
    two-row stack to its right. This keeps long names independent of badges. */
 #connections-container .connection-card-top {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   grid-template-rows: auto auto;
-  column-gap: 14px;
+  column-gap: 16px;
   row-gap: 8px;
   align-items: start;
 }
@@ -29,13 +29,21 @@
   grid-column: 1;
   grid-row: 1 / span 2;
   align-self: start;
+  width: 64px;
+  height: 64px;
+  border-radius: 14px;
+}
+
+#connections-container .connection-header-left > .platform-card-icon .icon {
+  width: 30px;
+  height: 30px;
 }
 
 #connections-container .connection-header-left > div:last-child {
   grid-column: 2;
   grid-row: 1;
   min-width: 0;
-  padding-top: 3px;
+  padding-top: 2px;
 }
 
 #connections-container .connection-title {
@@ -49,4 +57,22 @@
   grid-row: 2;
   margin-left: 0;
   align-self: start;
+}
+
+@media (max-width: 520px) {
+  #connections-container .connection-card-top {
+    grid-template-columns: 58px minmax(0, 1fr);
+    column-gap: 12px;
+  }
+
+  #connections-container .connection-header-left > .platform-card-icon {
+    width: 58px;
+    height: 58px;
+    border-radius: 13px;
+  }
+
+  #connections-container .connection-header-left > .platform-card-icon .icon {
+    width: 27px;
+    height: 27px;
+  }
 }
