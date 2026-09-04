@@ -417,6 +417,32 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	defer tx.Rollback()
 	previousChildContextMode := ChildContextDisplayOpaque
 	_ = tx.QueryRowContext(ctx, `SELECT child_context_display_mode FROM global_config WHERE id = 1`).Scan(&previousChildContextMode)
+	type savedChildScopeLabel struct {
+		endpointID, transport, remoteID, scopeKind, remoteScopeID, displayName string
+		updatedAt                                                              int64
+	}
+	var savedLabels []savedChildScopeLabel
+	rows, err := tx.QueryContext(ctx, `
+		SELECT l.endpoint_id, e.transport, e.remote_id, l.scope_kind, l.remote_scope_id, l.display_name, l.updated_at
+		FROM child_scope_labels l JOIN endpoints e ON e.alias = l.endpoint_id`)
+	if err != nil {
+		return fmt.Errorf("read child scope labels: %w", err)
+	}
+	for rows.Next() {
+		var label savedChildScopeLabel
+		if err := rows.Scan(&label.endpointID, &label.transport, &label.remoteID, &label.scopeKind, &label.remoteScopeID, &label.displayName, &label.updatedAt); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("read child scope label: %w", err)
+		}
+		savedLabels = append(savedLabels, label)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate child scope labels: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close child scope labels: %w", err)
+	}
 
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode)
@@ -469,6 +495,19 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 		syncSetID := endpointToSyncSet[alias]
 		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id) VALUES (?, ?, ?, ?, ?)`, alias, string(endpoint.Transport), endpoint.ConnectionID, endpoint.RemoteID, syncSetID); err != nil {
 			return fmt.Errorf("insert endpoint %q: %w", alias, err)
+		}
+	}
+	if cfg.ChildContextDisplayMode == ChildContextDisplayFriendly {
+		for _, label := range savedLabels {
+			endpoint, ok := cfg.Endpoints[label.endpointID]
+			if !ok || string(endpoint.Transport) != label.transport || endpoint.RemoteID != label.remoteID {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO child_scope_labels(endpoint_id, scope_kind, remote_scope_id, display_name, updated_at)
+				VALUES (?, ?, ?, ?, ?)`, label.endpointID, label.scopeKind, label.remoteScopeID, label.displayName, label.updatedAt); err != nil {
+				return fmt.Errorf("restore child scope label: %w", err)
+			}
 		}
 	}
 

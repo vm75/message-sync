@@ -41,6 +41,30 @@ func TestValidateAcceptsSimpleMesh(t *testing.T) {
 	}
 }
 
+func TestSavePreservesFriendlyLabelsForUnchangedEndpoints(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	cfg := validConfig()
+	cfg.ChildContextDisplayMode = ChildContextDisplayFriendly
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertChildScopeLabel(ctx, "a", "discord_thread", "thread-1", "Planning"); err != nil {
+		t.Fatal(err)
+	}
+	cfg.LocalPrefix = "!local"
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	label, err := st.ChildScopeLabel(ctx, "a", "discord_thread", "thread-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if label.DisplayName != "Planning" {
+		t.Fatalf("ordinary config save lost friendly label: %#v", label)
+	}
+}
+
 func TestValidateLocalPrefix(t *testing.T) {
 	for _, prefix := range []string{"", "!local ", "é"} {
 		if err := ValidateLocalPrefix(prefix); err != nil {
