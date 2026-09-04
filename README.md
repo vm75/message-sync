@@ -73,7 +73,7 @@ echo "PORT=8080" >> .env
 
 1. **WhatsApp Accounts**: Add a connection and scan the QR companion code (**Linked Devices** → **Link a Device**). Each connection owns an isolated SQLite session store (`/data/whatsapp-<connection-id>.db`).
 2. **Discord Bots**: Add a Discord bot connection by pasting its bot token once into the modal. The token is immediately encrypted with AES-256-GCM using a domain-separated key derived from `IDENTITY_SECRET` and saved to `control.db`. The token is never logged, never returned in APIs, and never stored in browser storage. Enable the privileged **Message Content** intent in the Discord Developer Portal and ensure the bot has **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
-3. **Telegram Bots**: Add a Telegram bot connection by pasting its bot token once into the modal (also encrypted with AES-256-GCM). Add the bot to your groups and disable **Bot Privacy Mode** in @BotFather so it can receive group messages. Long polling runs per connection.
+3. **Telegram Bots**: Add a Telegram bot connection by pasting its bot token once into the modal (also encrypted with AES-256-GCM). Add the bot to your groups, make it a group administrator (required by Telegram for per-user reaction updates), disable **anonymous reactions** in the group, and disable **Bot Privacy Mode** in @BotFather so it can receive group messages. Long polling runs per connection.
 
 Updating a Discord or Telegram connection token replaces only that connection’s running adapter. The previous adapter is stopped before the replacement begins handling ingress, and the plaintext token remains transient.
 

@@ -177,7 +177,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 
 	var replyTo *transport.MessageRef
 	var quotedText string
-	if reply := msg.ReplyToMessage; reply != nil && reply.ID > 0 && reply.Chat.ID == msg.Chat.ID {
+	if reply := msg.ReplyToMessage; reply != nil && reply.ID > 0 && reply.Chat.ID == msg.Chat.ID && !telegramTopicRootReply(msg, reply) {
 		replyTo = &transport.MessageRef{
 			Endpoint:        endpoint,
 			RemoteMessageID: strconv.Itoa(reply.ID),
@@ -226,6 +226,13 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		QuotedText: quotedText,
 		Timestamp:  timestamp,
 	}, true
+}
+
+// Telegram attaches a forum topic's root/service message as ReplyToMessage
+// on topic messages. It is not a user reply and has no message content to
+// quote on bridged transports.
+func telegramTopicRootReply(message, reply *models.Message) bool {
+	return message != nil && reply != nil && message.IsTopicMessage && message.MessageThreadID > 0 && reply.ID == message.MessageThreadID
 }
 
 func telegramPollRepresentable(poll *models.Poll) bool {

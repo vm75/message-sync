@@ -66,7 +66,7 @@ Connections are managed dynamically through the authenticated Web UI:
 
 - **WhatsApp**: Add a connection and scan the QR code (**Linked Devices** → **Link a Device**). Multiple independent WhatsApp accounts are supported; each maintains its own isolated database (`/data/whatsapp-<connection-id>.db`).
 - **Discord**: Add a connection and paste the bot token once. The token is encrypted immediately with AES-256-GCM using a key derived from `IDENTITY_SECRET` and stored in `control.db`. In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In bridged channels grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
-- **Telegram**: Add a connection and paste the Bot API token from BotFather once. The token is encrypted immediately with AES-256-GCM and stored in `control.db`. Add the bot to target groups and disable **Bot Privacy Mode** in BotFather.
+- **Telegram**: Add a connection and paste the Bot API token from BotFather once. The token is encrypted immediately with AES-256-GCM and stored in `control.db`. Add the bot to target groups, make it a group administrator (required for per-user reaction updates), disable **anonymous reactions** in the group, and disable **Bot Privacy Mode** in BotFather.
 
 No container restart is required to add, update, enable, or disable connections. Plaintext credentials are never written to `sync.db`, returned by read APIs, or logged.
 

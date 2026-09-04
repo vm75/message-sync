@@ -196,7 +196,7 @@ The daemon provides an embedded Web UI console alongside the local HTTP REST ser
 
 Auth middleware protects all other `/api/*` endpoints, including both endpoint-management API shapes, returning `401 Unauthorized` if a valid Bearer token or session cookie is missing or invalid. Endpoint request bodies are never logged, and validation/error responses never echo a transport remote target. Non-API client paths (such as `/setup`, `/login`, `/dashboard`) fall back cleanly to `index.html` for client-side routing. Session tokens and plaintext passwords are never written to application logs.
 
-The management and runtime routing models are transport-aware. Discord and Telegram endpoints can be configured and placed in mixed sync sets. The Discord gateway adapter and Telegram long-poll adapter start when endpoints for their respective transport exist or deployment-time token sources are configured, enabling discovery before the first endpoint is created. The application dispatches each destination alias through the adapter registered for that endpoint's configured transport. Outbound text/media plus reply/reaction/edit/delete lifecycle operations are implemented behind those adapter boundaries; the canonical router still addresses only endpoint aliases and remote message copies.
+The management and runtime routing models are transport-aware. Discord and Telegram endpoints can be configured and placed in mixed sync sets. The Discord gateway adapter and Telegram long-poll adapter start when endpoints for their respective transport exist or deployment-time token sources are configured, enabling discovery before the first endpoint is created. Telegram per-user reaction ingress requires the bot to be an administrator in the group or supergroup, as required by the Bot API, and the group must have anonymous reactions disabled; anonymous reaction-count updates are not mapped into the per-actor canonical reaction model. The application dispatches each destination alias through the adapter registered for that endpoint's configured transport. Outbound text/media plus reply/reaction/edit/delete lifecycle operations are implemented behind those adapter boundaries; the canonical router still addresses only endpoint aliases and remote message copies.
 
 ## 4. Canonical message model
 
@@ -437,7 +437,7 @@ Audio/stickers cannot carry normal captions, so attribution may be sent as a sma
 
 For an incoming reply, resolve the quoted remote message ID through `message_copies`. For each destination, look up the corresponding destination copy and create a native quote when enough transient/protocol metadata is available.
 
-Because raw participant JIDs/message bodies are intentionally not stored, native quote reconstruction may sometimes be impossible after restart. The fallback is textual provenance, e.g. `↪ c1g1/u_abcd1234` rather than weakening privacy.
+Because raw participant JIDs/message bodies are intentionally not stored, native quote reconstruction may sometimes be impossible after restart. The fallback is textual provenance, e.g. `↳ c1g1/u_abcd1234` rather than weakening privacy.
 
 ## 10. Reactions
 

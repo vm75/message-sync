@@ -307,6 +307,13 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)
 	case update.MessageReaction != nil:
 		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
+		if a.logger != nil {
+			reason := "accepted"
+			if !ok {
+				reason = "normalization_rejected"
+			}
+			a.logger.Info("Telegram reaction update received", "event", "telegram_reaction_update", "result", reason)
+		}
 	case update.Poll != nil:
 		if a.resolvePollEndpoint == nil {
 			return

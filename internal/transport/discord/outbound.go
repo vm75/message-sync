@@ -14,7 +14,7 @@ import (
 
 const (
 	maxWebhookUsernameRunes = 80
-	replyMarkerText         = "↪"
+	replyMarkerText         = "↳"
 )
 
 type discordAPI interface {
@@ -58,7 +58,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 	if outgoing.Kind == "poll" {
 		if poll, ok := discordNativePoll(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
-			message := &discordgo.MessageSend{Content: outgoing.PollAttribution, Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+			message := &discordgo.MessageSend{Content: discordPresentation(outgoing.PollAttribution), Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
 			if outgoing.ReplyTo != nil {
 				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: nativeChannelID}
 			}
@@ -112,6 +112,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
 	content = sanitizeOutgoingMentions(content, outgoing.Mentions)
+	content = discordPresentation(content)
 	if outgoing.Kind == "poll" {
 		var err error
 		content, err = discordPollText(content, outgoing.PollOptions, outgoing.PollSelectableCount)
@@ -143,7 +144,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			replyChannelID = outgoing.ReplyTo.ChildScope.RemoteID
 		}
 		if link := a.replyLink(replyChannelID, outgoing.ReplyTo.RemoteMessageID); link != "" {
-			content = fmt.Sprintf("[%s](%s)\n\n%s", discordReplyLinkLabel(outgoing.Endpoint, outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
+			content = fmt.Sprintf("\n[%s](%s)\n%s", discordReplyLinkLabel(outgoing.Endpoint, outgoing.OriginEndpoint, outgoing.QuotedText), link, content)
 		} else {
 			content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 		}
@@ -224,7 +225,7 @@ func discordMessageLink(guildID, channelID, messageID string) string {
 
 // discordReplyLinkLabel builds the clickable reply-link label shown in Discord.
 // It parses the structured forwarded-text header (*_ep/name_*: text) from
-// quotedText so the label reads "↪ reply to <sender>: <first line>".
+// quotedText so the label reads "↳ <sender>: <first line>".
 // The group prefix is omitted from <sender> when the quoted message came from
 // the same destination endpoint (i.e. another Discord user in the same channel).
 // Falls back to origin when quotedText is unstructured.
@@ -239,21 +240,19 @@ func discordReplyLinkLabel(destination, origin transport.EndpointID, quotedText 
 			if idx := strings.Index(inner, "_*: "); idx >= 0 {
 				senderPart := inner[:idx]
 				firstLine = inner[idx+4:]
-				// Strip group prefix when the quoted message belongs to the
-				// same Discord endpoint (no need to show "d1/Alice" in d1).
-				if slashIdx := strings.Index(senderPart, "/"); slashIdx >= 0 {
-					ep := senderPart[:slashIdx]
-					name := senderPart[slashIdx+1:]
-					if transport.EndpointID(ep) == destination {
-						senderLabel = name
-					} else {
-						senderLabel = senderPart
-					}
-				} else {
-					senderLabel = senderPart
-				}
+				senderLabel = discordReplySenderLabel(destination, senderPart)
 			} else {
 				// Malformed header: use line as-is for the body.
+				firstLine = line
+			}
+		} else if idx := strings.Index(line, ": "); idx > 0 {
+			// Telegram removes formatting markers from quoted text. Recover
+			// the plain endpoint/sender header when it is still present.
+			senderPart := line[:idx]
+			if strings.Contains(senderPart, "/") {
+				senderLabel = discordReplySenderLabel(destination, senderPart)
+				firstLine = line[idx+2:]
+			} else {
 				firstLine = line
 			}
 		} else {
@@ -273,7 +272,18 @@ func discordReplyLinkLabel(destination, origin transport.EndpointID, quotedText 
 	if len([]rune(firstLine)) > 400 {
 		firstLine = string([]rune(firstLine)[:400]) + "…"
 	}
-	return fmt.Sprintf("↪ reply to %s: %s", senderLabel, firstLine)
+	return fmt.Sprintf("↳ %s: %s", senderLabel, firstLine)
+}
+
+func discordReplySenderLabel(destination transport.EndpointID, senderPart string) string {
+	if slashIdx := strings.Index(senderPart, "/"); slashIdx >= 0 {
+		ep := senderPart[:slashIdx]
+		name := senderPart[slashIdx+1:]
+		if transport.EndpointID(ep) == destination {
+			return name
+		}
+	}
+	return senderPart
 }
 
 func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error {
@@ -371,17 +381,34 @@ func (a *Adapter) edit(ctx context.Context, ref transport.MessageRef, text strin
 		}
 		if stripAttribution {
 			text = sourceBodyFromForwarded(text)
+		} else {
+			text = discordPresentation(text)
 		}
 		return threaded.EditInThread(ctx, channelID, ref.ChildScope.RemoteID, messageID, text)
 	}
 
 	if stripAttribution {
 		text = sourceBodyFromForwarded(text)
+	} else {
+		text = discordPresentation(text)
 	}
 	if err := webhook.Edit(ctx, channelID, messageID, text); err != nil {
 		return err
 	}
 	return nil
+}
+
+// discordPresentation converts the transport-neutral WhatsApp attribution
+// wrapper into Discord's bold-italic markdown at the transport boundary.
+func discordPresentation(content string) string {
+	if !strings.HasPrefix(content, "*_") {
+		return content
+	}
+	marker := strings.Index(content, "_*:")
+	if marker < 3 {
+		return content
+	}
+	return "***" + content[2:marker] + "***" + content[marker+2:]
 }
 
 func (a *Adapter) Delete(ctx context.Context, ref transport.MessageRef) error {
@@ -487,9 +514,9 @@ func discordReplyFallback(origin transport.EndpointID, quotedText, content strin
 		label = "source"
 	}
 	if content == "" {
-		return fmt.Sprintf("> reply to %s: %s", label, quote)
+		return fmt.Sprintf("↳ %s: %s", label, quote)
 	}
-	return fmt.Sprintf("> reply to %s: %s\n\n%s", label, quote, content)
+	return fmt.Sprintf("\n↳ %s: %s\n%s", label, quote, content)
 }
 
 func sourceBodyFromForwarded(text string) string {

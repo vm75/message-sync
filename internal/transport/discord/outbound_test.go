@@ -142,7 +142,7 @@ func TestWebhookUsesCentralFriendlyRendering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := webhook.executed[0].Content; got != "*_family:Travel/Alice_*: Dinner at 7?" {
+	if got := webhook.executed[0].Content; got != "***family:Travel/Alice***: Dinner at 7?" {
 		t.Fatalf("Discord adapter discarded friendly rendering: %q", got)
 	}
 }
@@ -158,7 +158,7 @@ func TestFriendlyRenderingDoesNotDuplicateCrossEndpointOriginInWebhookUsername(t
 		t.Fatal(err)
 	}
 	got := webhook.executed[0]
-	if got.Username != "Alice" || got.Content != "*_wa-family/Alice_*: Dinner at 7?" {
+	if got.Username != "message-sync" || got.Content != "***wa-family/Alice***: Dinner at 7?" {
 		t.Fatalf("friendly Discord payload duplicated attribution: %#v", got)
 	}
 }
@@ -307,7 +307,7 @@ func TestDiscordReplyUsesSingleWebhookMessageWhenLinkUnavailable(t *testing.T) {
 		t.Fatal("single-message reply unexpectedly sent a separate native marker")
 	}
 	got := webhook.executed[len(webhook.executed)-1]
-	if got.Username != "Alice" || !strings.Contains(got.Content, "reply to source") || !strings.Contains(got.Content, "reply body") {
+	if got.Username != "Alice" || !strings.Contains(got.Content, "↳ source: message") || !strings.Contains(got.Content, "reply body") {
 		t.Fatalf("reply content lost webhook APP rendering: %#v", got)
 	}
 }
@@ -336,7 +336,8 @@ func TestDiscordReplyUsesTransientChannelLookupForClickableLink(t *testing.T) {
 		t.Fatalf("webhook messages = %d, want 1", len(webhook.executed))
 	}
 	content := webhook.executed[0].Content
-	if !strings.Contains(content, "[↪ reply to d1/vm: original message](https://discord.com/channels/guild/"+testChannelID+"/known-discord-copy)") {
+	wantLink := "[↳ d1/vm: original message](https://discord.com/channels/guild/" + testChannelID + "/known-discord-copy)"
+	if !strings.Contains(content, "\n"+wantLink+"\nreply body") {
 		t.Fatalf("clickable reply link missing: %q", content)
 	}
 	if !strings.Contains(content, "reply body") {
@@ -347,18 +348,22 @@ func TestDiscordReplyUsesTransientChannelLookupForClickableLink(t *testing.T) {
 func TestDiscordReplyLinkLabelUsesFirstQuotedLine(t *testing.T) {
 	// Quoted message from d1 posted to destination "discord": d1 != "discord" → show "d1/vm".
 	got := discordReplyLinkLabel("discord", "g1", "*_d1/vm_*: first line\nsecond line")
-	if got != "↪ reply to d1/vm: first line" {
+	if got != "↳ d1/vm: first line" {
 		t.Fatalf("reply link label (cross-endpoint) = %q", got)
 	}
 	// Quoted message from the same endpoint as destination: strip group prefix → show "vm".
 	got = discordReplyLinkLabel("d1", "g1", "*_d1/vm_*: first line\nsecond line")
-	if got != "↪ reply to vm: first line" {
+	if got != "↳ vm: first line" {
 		t.Fatalf("reply link label (same-endpoint) = %q", got)
 	}
 	// Unstructured quotedText: fall back to origin as sender label.
 	got = discordReplyLinkLabel("discord", "wa-one", "raw quoted text")
-	if got != "↪ reply to wa-one: raw quoted text" {
+	if got != "↳ wa-one: raw quoted text" {
 		t.Fatalf("reply link label (unstructured) = %q", got)
+	}
+	got = discordReplyLinkLabel("discord", "tg1", "wg2/Vijay Pune: m1")
+	if got != "↳ wg2/Vijay Pune: m1" {
+		t.Fatalf("reply link label (Telegram-stripped attribution) = %q", got)
 	}
 }
 
@@ -390,7 +395,7 @@ func TestDiscordReplyFallbackUsesAliasNotRemoteTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := webhook.executed[len(webhook.executed)-1]
-	if !strings.Contains(got.Content, "reply to wa-source") || !strings.Contains(got.Content, "quoted body") || !strings.Contains(got.Content, "new body") {
+	if !strings.Contains(got.Content, "↳ wa-source: quoted body") || !strings.Contains(got.Content, "new body") {
 		t.Fatalf("reply fallback = %q", got.Content)
 	}
 	if len(adapter.api.(*fakeDiscordAPI).replySends) != 0 {
@@ -492,7 +497,7 @@ func TestDiscordRepresentablePollUsesNativeMessage(t *testing.T) {
 	if api.pollSends[0].Poll.Answers[0].Media.Text != "Pizza" || api.pollSends[0].Poll.AllowMultiselect {
 		t.Fatalf("unexpected native poll payload: %#v", api.pollSends[0].Poll)
 	}
-	if api.pollSends[0].Content != "*_wa-family:Travel/Alice_*:" {
+	if api.pollSends[0].Content != "***wa-family:Travel/Alice***:" {
 		t.Fatalf("native poll attribution = %q", api.pollSends[0].Content)
 	}
 }
@@ -505,8 +510,8 @@ func TestDiscordNativePollPresentationKeepsSourceAttributionAndDestinationScopeO
 		wantChannel string
 		wantContent string
 	}{
-		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantChannel: testChannelID, wantContent: "*_family/Alice_*:"},
-		{name: "friendly thread", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-opaque"}, wantChannel: "thread-opaque", wantContent: "*_family:Plans/Alice_*:"},
+		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantChannel: testChannelID, wantContent: "***family/Alice***:"},
+		{name: "friendly thread", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-opaque"}, wantChannel: "thread-opaque", wantContent: "***family:Plans/Alice***:"},
 		{name: "opaque thread", childScope: &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-opaque"}, wantChannel: "thread-opaque"},
 	}
 	for _, tc := range tests {

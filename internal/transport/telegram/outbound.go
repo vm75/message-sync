@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -85,7 +86,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 	if kind == "poll" {
 		if params, ok := telegramNativePoll(chatID, outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
-			params.Description = sanitizeTelegramMentions(outgoing.PollAttribution, outgoing.Mentions)
+			params.Description, params.DescriptionParseMode = telegramPollDescription(outgoing.PollAttribution, outgoing.Mentions)
 			params.MessageThreadID = threadID
 			err = a.callWithRetry(ctx, func() error {
 				var callErr error
@@ -132,10 +133,12 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	if outgoing.ReplyFallback {
 		content = telegramReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
+	var parseMode models.ParseMode
 
 	switch kind {
 	case "text":
 		content = truncateTelegramText(content, telegramTextLimit)
+		content, parseMode = telegramPresentation(content)
 		if strings.TrimSpace(content) == "" {
 			return transport.MessageRef{}, errors.New("outgoing Telegram text is required")
 		}
@@ -145,6 +148,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 				ChatID:          chatID,
 				MessageThreadID: threadID,
 				Text:            content,
+				ParseMode:       parseMode,
 				ReplyParameters: reply,
 			})
 			return callErr
@@ -163,7 +167,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		if limit > 0 && uint64(len(outgoing.MediaBytes)) > limit {
 			return transport.MessageRef{}, errors.New("Telegram media exceeds configured or hosted Bot API size limit")
 		}
-		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, truncateTelegramText(content, telegramCaptionLimit), reply, threadID)
+		content = truncateTelegramText(content, telegramCaptionLimit)
+		content, parseMode = telegramPresentation(content)
+		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, content, parseMode, reply, threadID)
 		if err != nil {
 			return transport.MessageRef{}, err
 		}
@@ -209,7 +215,7 @@ func telegramNativePoll(chatID int64, question string, options []string, selecta
 
 func boolPtr(value bool) *bool { return &value }
 
-func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID int64, kind string, data []byte, caption string, reply *models.ReplyParameters, threadID int) (*models.Message, error) {
+func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID int64, kind string, data []byte, caption string, parseMode models.ParseMode, reply *models.ReplyParameters, threadID int) (*models.Message, error) {
 	var (
 		message *models.Message
 		err     error
@@ -227,6 +233,7 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 					Data:     bytes.NewReader(data),
 				},
 				Caption:         caption,
+				ParseMode:       parseMode,
 				ReplyParameters: reply,
 			})
 			return callErr
@@ -242,6 +249,7 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 					Data:     bytes.NewReader(data),
 				},
 				Caption:         caption,
+				ParseMode:       parseMode,
 				ReplyParameters: reply,
 			})
 			return callErr
@@ -258,6 +266,7 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 						Data:     bytes.NewReader(data),
 					},
 					Caption:         caption,
+					ParseMode:       parseMode,
 					ReplyParameters: reply,
 				})
 				return callErr
@@ -273,6 +282,7 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 						Data:     bytes.NewReader(data),
 					},
 					Caption:         caption,
+					ParseMode:       parseMode,
 					ReplyParameters: reply,
 				})
 				return callErr
@@ -289,6 +299,7 @@ func (a *Adapter) sendTelegramMedia(ctx context.Context, api telegramAPI, chatID
 					Data:     bytes.NewReader(data),
 				},
 				Caption:         caption,
+				ParseMode:       parseMode,
 				ReplyParameters: reply,
 			})
 			return callErr
@@ -463,11 +474,13 @@ func (a *Adapter) editTelegramText(ctx context.Context, api telegramAPI, chatID 
 
 func (a *Adapter) editTelegramTextRaw(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
 	content = truncateTelegramText(content, telegramTextLimit)
+	content, parseMode := telegramPresentation(content)
 	return a.callWithRetry(ctx, func() error {
 		_, err := api.EditMessageText(ctx, &telegrambot.EditMessageTextParams{
 			ChatID:    chatID,
 			MessageID: messageID,
 			Text:      content,
+			ParseMode: parseMode,
 		})
 		return err
 	})
@@ -483,11 +496,13 @@ func (a *Adapter) editTelegramCaption(ctx context.Context, api telegramAPI, chat
 
 func (a *Adapter) editTelegramCaptionRaw(ctx context.Context, api telegramAPI, chatID int64, messageID int, content string) error {
 	content = truncateTelegramText(content, telegramCaptionLimit)
+	content, parseMode := telegramPresentation(content)
 	return a.callWithRetry(ctx, func() error {
 		_, err := api.EditMessageCaption(ctx, &telegrambot.EditMessageCaptionParams{
 			ChatID:    chatID,
 			MessageID: messageID,
 			Caption:   content,
+			ParseMode: parseMode,
 		})
 		return err
 	})
@@ -654,6 +669,42 @@ func telegramOutgoingText(outgoing transport.Outgoing) string {
 	return label + ": " + source
 }
 
+// telegramPresentation translates the bridge's transport-neutral attribution
+// wrapper into Telegram HTML. The canonical router uses WhatsApp's *_..._*
+// notation because that is the notation understood by WhatsApp; Telegram
+// must receive an explicit parse mode or it displays those marker characters.
+func telegramPresentation(content string) (string, models.ParseMode) {
+	const aggregateHeading = "***Aggregated anonymised live results***"
+	if strings.HasPrefix(content, aggregateHeading) {
+		rest := strings.TrimPrefix(content, aggregateHeading)
+		return "<b><i>Aggregated anonymised live results</i></b>" + html.EscapeString(rest), models.ParseModeHTML
+	}
+	if !strings.HasPrefix(content, "*_") {
+		return content, ""
+	}
+	marker := strings.Index(content, "_*: ")
+	if marker < 0 {
+		return content, ""
+	}
+	header := content[2:marker]
+	if header == "" {
+		return content, ""
+	}
+	body := content[marker+4:]
+	return "<b><i>" + html.EscapeString(header) + "</i></b>: " + html.EscapeString(body), models.ParseModeHTML
+}
+
+func telegramPollDescription(content string, mentions []transport.Mention) (string, models.ParseMode) {
+	content = sanitizeTelegramMentions(content, mentions)
+	if strings.HasPrefix(content, "*_") && strings.HasSuffix(content, "_*:") {
+		header := content[2 : len(content)-3]
+		if header != "" {
+			return "<b><i>" + html.EscapeString(header) + "</i></b>:", models.ParseModeHTML
+		}
+	}
+	return content, ""
+}
+
 func telegramSenderLabel(sender transport.Sender) string {
 	label := sanitizeTelegramAttribution(sender.DisplayName)
 	if label == "" {
@@ -700,9 +751,9 @@ func telegramReplyFallback(origin transport.EndpointID, quotedText, content stri
 		label = "source"
 	}
 	if content == "" {
-		return fmt.Sprintf("reply to %s: %s", label, quote)
+		return fmt.Sprintf("↳ %s: %s", label, quote)
 	}
-	return fmt.Sprintf("reply to %s: %s\n\n%s", label, quote, content)
+	return fmt.Sprintf("↳ %s: %s\n\n%s", label, quote, content)
 }
 
 func telegramEditContent(text string) string {

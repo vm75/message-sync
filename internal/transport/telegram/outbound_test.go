@@ -21,24 +21,26 @@ type fakeTelegramAPI struct {
 	botID int64
 	next  int
 
-	methods        []string
-	texts          []string
-	polls          []*telegrambot.SendPollParams
-	caption        string
-	filename       string
-	media          []byte
-	replyID        int
-	reactions      []*telegrambot.SetMessageReactionParams
-	editText       *telegrambot.EditMessageTextParams
-	editCaption    *telegrambot.EditMessageCaptionParams
-	deleted        *telegrambot.DeleteMessageParams
-	getFile        *models.File
-	messageErrs    []error
-	deleteErr      error
-	getFileErr     error
-	reactionErr    error
-	editTextErr    error
-	editCaptionErr error
+	methods          []string
+	texts            []string
+	textParseMode    models.ParseMode
+	polls            []*telegrambot.SendPollParams
+	caption          string
+	captionParseMode models.ParseMode
+	filename         string
+	media            []byte
+	replyID          int
+	reactions        []*telegrambot.SetMessageReactionParams
+	editText         *telegrambot.EditMessageTextParams
+	editCaption      *telegrambot.EditMessageCaptionParams
+	deleted          *telegrambot.DeleteMessageParams
+	getFile          *models.File
+	messageErrs      []error
+	deleteErr        error
+	getFileErr       error
+	reactionErr      error
+	editTextErr      error
+	editCaptionErr   error
 }
 
 func (f *fakeTelegramAPI) Start(context.Context) {}
@@ -69,6 +71,7 @@ func (f *fakeTelegramAPI) popMessageErr() error {
 func (f *fakeTelegramAPI) SendMessage(_ context.Context, params *telegrambot.SendMessageParams) (*models.Message, error) {
 	f.methods = append(f.methods, "message")
 	f.texts = append(f.texts, params.Text)
+	f.textParseMode = params.ParseMode
 	if params.ReplyParameters != nil {
 		f.replyID = params.ReplyParameters.MessageID
 	}
@@ -98,10 +101,11 @@ func captureUpload(file models.InputFile) (string, []byte) {
 	return upload.Filename, data
 }
 
-func (f *fakeTelegramAPI) captureMedia(method string, file models.InputFile, caption string, reply *models.ReplyParameters) (*models.Message, error) {
+func (f *fakeTelegramAPI) captureMedia(method string, file models.InputFile, caption string, parseMode models.ParseMode, reply *models.ReplyParameters) (*models.Message, error) {
 	f.methods = append(f.methods, method)
 	f.filename, f.media = captureUpload(file)
 	f.caption = caption
+	f.captionParseMode = parseMode
 	if reply != nil {
 		f.replyID = reply.MessageID
 	}
@@ -109,22 +113,22 @@ func (f *fakeTelegramAPI) captureMedia(method string, file models.InputFile, cap
 }
 
 func (f *fakeTelegramAPI) SendPhoto(_ context.Context, params *telegrambot.SendPhotoParams) (*models.Message, error) {
-	return f.captureMedia("photo", params.Photo, params.Caption, params.ReplyParameters)
+	return f.captureMedia("photo", params.Photo, params.Caption, params.ParseMode, params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SendVideo(_ context.Context, params *telegrambot.SendVideoParams) (*models.Message, error) {
-	return f.captureMedia("video", params.Video, params.Caption, params.ReplyParameters)
+	return f.captureMedia("video", params.Video, params.Caption, params.ParseMode, params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SendAudio(_ context.Context, params *telegrambot.SendAudioParams) (*models.Message, error) {
-	return f.captureMedia("audio", params.Audio, params.Caption, params.ReplyParameters)
+	return f.captureMedia("audio", params.Audio, params.Caption, params.ParseMode, params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SendVoice(_ context.Context, params *telegrambot.SendVoiceParams) (*models.Message, error) {
-	return f.captureMedia("voice", params.Voice, params.Caption, params.ReplyParameters)
+	return f.captureMedia("voice", params.Voice, params.Caption, params.ParseMode, params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SendDocument(_ context.Context, params *telegrambot.SendDocumentParams) (*models.Message, error) {
-	return f.captureMedia("document", params.Document, params.Caption, params.ReplyParameters)
+	return f.captureMedia("document", params.Document, params.Caption, params.ParseMode, params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SendSticker(_ context.Context, params *telegrambot.SendStickerParams) (*models.Message, error) {
-	return f.captureMedia("sticker", params.Sticker, "", params.ReplyParameters)
+	return f.captureMedia("sticker", params.Sticker, "", "", params.ReplyParameters)
 }
 func (f *fakeTelegramAPI) SetMessageReaction(_ context.Context, params *telegrambot.SetMessageReactionParams) (bool, error) {
 	f.reactions = append(f.reactions, params)
@@ -224,7 +228,7 @@ func TestSendUsesCentralFriendlyRendering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.texts) != 1 || api.texts[0] != "*_family:Travel/Alice_*: Flights booked" {
+	if len(api.texts) != 1 || api.texts[0] != "<b><i>family:Travel/Alice</i></b>: Flights booked" || api.textParseMode != models.ParseModeHTML {
 		t.Fatalf("Telegram adapter discarded friendly rendering: %q", api.texts)
 	}
 }
@@ -260,7 +264,7 @@ func TestSendUsesNativeReplyAndPrivacySafeFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if api.replyID != 0 || len(api.texts) != 1 || !strings.Contains(api.texts[0], "reply to wa: quoted source body") || !strings.Contains(api.texts[0], "wa/u_hash: fallback reply") {
+	if api.replyID != 0 || len(api.texts) != 1 || !strings.Contains(api.texts[0], "↳ wa: quoted source body") || !strings.Contains(api.texts[0], "wa/u_hash: fallback reply") {
 		t.Fatalf("unexpected fallback send: reply=%d text=%q", api.replyID, api.texts)
 	}
 }
@@ -551,8 +555,11 @@ func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing
 	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || !*api.polls[0].IsAnonymous {
 		t.Fatalf("unexpected Telegram poll semantics: %#v", api.polls[0])
 	}
-	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "*_family:Travel/Alice_*:" {
+	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "<b><i>family:Travel/Alice</i></b>:" {
 		t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
+	}
+	if api.polls[0].DescriptionParseMode != models.ParseModeHTML {
+		t.Fatalf("native Telegram poll description parse mode = %q, want HTML", api.polls[0].DescriptionParseMode)
 	}
 }
 
@@ -563,9 +570,10 @@ func TestTelegramNativePollPresentationKeepsSourceAttributionAndTopicOpaque(t *t
 		childScope *transport.ChildScope
 		wantThread int
 		wantDesc   string
+		wantMode   models.ParseMode
 	}{
-		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantDesc: "*_family/Alice_*:"},
-		{name: "friendly topic", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77, wantDesc: "*_family:Plans/Alice_*:"},
+		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantDesc: "<b><i>family/Alice</i></b>:", wantMode: models.ParseModeHTML},
+		{name: "friendly topic", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77, wantDesc: "<b><i>family:Plans/Alice</i></b>:", wantMode: models.ParseModeHTML},
 		{name: "opaque topic", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77},
 	}
 	for _, tc := range tests {
@@ -582,7 +590,7 @@ func TestTelegramNativePollPresentationKeepsSourceAttributionAndTopicOpaque(t *t
 			if len(api.polls) != 1 || api.polls[0].MessageThreadID != tc.wantThread {
 				t.Fatalf("native Telegram poll placement = %#v, want thread %d", api.polls, tc.wantThread)
 			}
-			if api.polls[0].Question != "Lunch?" || api.polls[0].Description != tc.wantDesc || api.polls[0].Options[0].Text != "Idli" {
+			if api.polls[0].Question != "Lunch?" || api.polls[0].Description != tc.wantDesc || api.polls[0].DescriptionParseMode != tc.wantMode || api.polls[0].Options[0].Text != "Idli" {
 				t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
 			}
 		})
@@ -600,7 +608,15 @@ func TestTelegramNativePollRetryReusesSingleRenderedAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.polls) != 2 || api.polls[0].Description != api.polls[1].Description || api.polls[1].Description != "*_family:Plans/Alice_*:" {
+	if len(api.polls) != 2 || api.polls[0].Description != api.polls[1].Description || api.polls[1].Description != "<b><i>family:Plans/Alice</i></b>:" || api.polls[1].DescriptionParseMode != models.ParseModeHTML {
 		t.Fatalf("poll retry attribution = %#v", api.polls)
+	}
+}
+
+func TestTelegramPresentationConvertsCanonicalAggregateHeading(t *testing.T) {
+	got, mode := telegramPresentation("***Aggregated anonymised live results***\nQuestion & choice")
+	want := "<b><i>Aggregated anonymised live results</i></b>\nQuestion &amp; choice"
+	if got != want || mode != models.ParseModeHTML {
+		t.Fatalf("aggregate presentation = %q, %q; want %q, HTML", got, mode, want)
 	}
 }

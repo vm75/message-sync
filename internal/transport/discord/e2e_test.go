@@ -336,7 +336,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if got := messagesSnapshot[len(messagesSnapshot)-1].Username; got != "wa-one/Vidhya Private" {
 		t.Fatalf("reply lost sender-specific APP username: %q", got)
 	}
-	if got := messagesSnapshot[len(messagesSnapshot)-1].Content; !strings.Contains(got, "reply to wa-one") || !strings.Contains(got, "PRIVATE_REPLY_BODY") {
+	if got := messagesSnapshot[len(messagesSnapshot)-1].Content; !strings.Contains(got, "↳ wa-one:") || !strings.Contains(got, "PRIVATE_REPLY_BODY") {
 		t.Fatalf("reply fallback content = %q", got)
 	}
 

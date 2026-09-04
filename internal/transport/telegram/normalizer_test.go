@@ -273,6 +273,45 @@ func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
 	}
 }
 
+func TestNormalizeForumTopicIgnoresSyntheticRootReply(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	msg.IsTopicMessage = true
+	msg.MessageThreadID = 777
+	msg.ReplyToMessage = &models.Message{
+		ID:   777,
+		Chat: models.Chat{ID: testSupergroupID, Type: models.ChatTypeSupergroup},
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(msg, testBotUserID)
+	if !ok {
+		t.Fatal("forum-topic message was ignored")
+	}
+	if incoming.ReplyTo != nil || incoming.QuotedText != "" {
+		t.Fatalf("synthetic forum root reply was exposed: ReplyTo=%#v QuotedText=%q", incoming.ReplyTo, incoming.QuotedText)
+	}
+}
+
+func TestNormalizeForumTopicPreservesGenuineReply(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModePushName)
+	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	msg.IsTopicMessage = true
+	msg.MessageThreadID = 777
+	msg.ReplyToMessage = &models.Message{
+		ID:   776,
+		Chat: models.Chat{ID: testSupergroupID, Type: models.ChatTypeSupergroup},
+		Text: "quoted topic message",
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(msg, testBotUserID)
+	if !ok {
+		t.Fatal("forum-topic message was ignored")
+	}
+	if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "776" || incoming.QuotedText != "quoted topic message" {
+		t.Fatalf("genuine forum reply was not preserved: ReplyTo=%#v QuotedText=%q", incoming.ReplyTo, incoming.QuotedText)
+	}
+}
+
 func TestNormalizeTelegramPollUsesNativeCanonicalModel(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
