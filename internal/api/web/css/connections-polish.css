@@ -1,0 +1,37 @@
+/* Connections cards: keep identity on the first row and status badges on a dedicated second row. */
+#connections-container .connection-card-top {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+#connections-container .connection-header-left {
+  width: 100%;
+  min-width: 0;
+}
+
+#connections-container .connection-header-left > div:last-child {
+  min-width: 0;
+  flex: 1;
+}
+
+#connections-container .connection-badges {
+  margin-left: 54px;
+}
+
+/* The connection renderer emits class="whatsapp" while the original platform
+   tile styles target class="wa". Mirror the WhatsApp tile treatment so all
+   three transports use the same visual language. */
+#connections-container .platform-card-icon.whatsapp {
+  background: var(--wa-muted);
+}
+
+#connections-container .platform-card-icon.whatsapp .icon {
+  color: var(--wa-color);
+}
+
+@media (max-width: 520px) {
+  #connections-container .connection-badges {
+    margin-left: 0;
+  }
+}
