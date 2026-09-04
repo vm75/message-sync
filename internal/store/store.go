@@ -51,6 +51,14 @@ type CanonicalScope struct {
 	CreatedAt     time.Time
 }
 
+type ChildScopeLabel struct {
+	EndpointID    string
+	ScopeKind     string
+	RemoteScopeID string
+	DisplayName   string
+	UpdatedAt     time.Time
+}
+
 type Reaction struct {
 	CanonicalID      string
 	SourceEndpointID string
@@ -543,6 +551,74 @@ func (s *Store) CanonicalScopes(ctx context.Context, canonicalID string) ([]Cano
 		return nil, wrapDB("iterate canonical child scopes", err)
 	}
 	return scopes, nil
+}
+
+func normalizeChildScopeLabel(endpointID, scopeKind, remoteScopeID, displayName string) (ChildScopeLabel, bool, error) {
+	if err := validateEndpoint(endpointID); err != nil {
+		return ChildScopeLabel{}, false, err
+	}
+	if scopeKind != "discord_thread" && scopeKind != "telegram_topic" {
+		return ChildScopeLabel{}, false, errors.New("child scope kind is invalid")
+	}
+	remoteScopeID = strings.TrimSpace(remoteScopeID)
+	if remoteScopeID == "" || strings.ContainsAny(remoteScopeID, "\x00\r\n") {
+		return ChildScopeLabel{}, false, errors.New("child scope id is invalid")
+	}
+	displayName = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, displayName)), " ")
+	if displayName == "" {
+		return ChildScopeLabel{}, false, nil
+	}
+	runes := []rune(displayName)
+	if len(runes) > 80 {
+		displayName = string(runes[:80])
+	}
+	return ChildScopeLabel{EndpointID: endpointID, ScopeKind: scopeKind, RemoteScopeID: remoteScopeID, DisplayName: displayName, UpdatedAt: time.Now().UTC()}, true, nil
+}
+
+func (s *Store) UpsertChildScopeLabel(ctx context.Context, endpointID, scopeKind, remoteScopeID, displayName string) error {
+	label, ok, err := normalizeChildScopeLabel(endpointID, scopeKind, remoteScopeID, displayName)
+	if err != nil || !ok {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO child_scope_labels(endpoint_id, scope_kind, remote_scope_id, display_name, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(endpoint_id, scope_kind, remote_scope_id)
+		DO UPDATE SET display_name = excluded.display_name, updated_at = excluded.updated_at`,
+		label.EndpointID, label.ScopeKind, label.RemoteScopeID, label.DisplayName, unixMillis(label.UpdatedAt))
+	return wrapDB("upsert child scope label", err)
+}
+
+func (s *Store) ChildScopeLabel(ctx context.Context, endpointID, scopeKind, remoteScopeID string) (ChildScopeLabel, error) {
+	if _, _, err := normalizeChildScopeLabel(endpointID, scopeKind, remoteScopeID, "label"); err != nil {
+		return ChildScopeLabel{}, err
+	}
+	var label ChildScopeLabel
+	var updatedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT endpoint_id, scope_kind, remote_scope_id, display_name, updated_at FROM child_scope_labels WHERE endpoint_id=? AND scope_kind=? AND remote_scope_id=?`, endpointID, scopeKind, remoteScopeID).Scan(&label.EndpointID, &label.ScopeKind, &label.RemoteScopeID, &label.DisplayName, &updatedAt)
+	if err != nil {
+		return ChildScopeLabel{}, wrapDB("find child scope label", err)
+	}
+	label.UpdatedAt = fromUnixMillis(updatedAt)
+	return label, nil
+}
+
+func (s *Store) ClearChildScopeLabels(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM child_scope_labels`)
+	return wrapDB("clear child scope labels", err)
+}
+
+func (s *Store) ClearChildScopeLabelsForEndpoint(ctx context.Context, endpointID string) error {
+	if err := validateEndpoint(endpointID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM child_scope_labels WHERE endpoint_id=?`, endpointID)
+	return wrapDB("clear endpoint child scope labels", err)
 }
 
 func (s *Store) UpsertReaction(ctx context.Context, reaction Reaction) error {

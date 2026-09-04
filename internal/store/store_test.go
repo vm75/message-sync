@@ -126,6 +126,40 @@ func TestCanonicalScopesArePerEndpointAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestChildScopeLabelsAreEndpointScopedAndCascading(t *testing.T) {
+	store, _ := openTestStore(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`INSERT INTO sync_sets(id) VALUES ('mesh'); INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES ('e1','discord','dc-1','1','mesh'),('e2','telegram','tg-1','-1001','mesh')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertChildScopeLabel(ctx, "e1", "discord_thread", "same", "  Dinner\n Plans  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertChildScopeLabel(ctx, "e2", "telegram_topic", "same", "Travel"); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ChildScopeLabel(ctx, "e1", "discord_thread", "same")
+	if err != nil || got.DisplayName != "Dinner Plans" {
+		t.Fatalf("label = %+v, err=%v", got, err)
+	}
+	if _, err := store.ChildScopeLabel(ctx, "e1", "telegram_topic", "same"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("scope kinds collided: %v", err)
+	}
+	if err := store.UpsertChildScopeLabel(ctx, "e1", "discord_thread", "same", "Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.ChildScopeLabel(ctx, "e1", "discord_thread", "same")
+	if err != nil || got.DisplayName != "Renamed" {
+		t.Fatalf("updated label = %+v, err=%v", got, err)
+	}
+	if _, err := store.db.Exec(`DELETE FROM endpoints WHERE alias='e1'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ChildScopeLabel(ctx, "e1", "discord_thread", "same"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("endpoint deletion left label: %v", err)
+	}
+}
+
 func TestDeliveryLedgerSchemaIsContentFree(t *testing.T) {
 	store, _ := openTestStore(t)
 

@@ -253,8 +253,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var existing string
-	var existingAlias, existingTransport, existingConnID string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID)
+	var existingAlias, existingTransport, existingConnID, existingRemoteID string
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -349,6 +349,13 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		safelog.Error(s.logger, "update endpoint failed", "endpoint_update", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
 		return
+	}
+	if existingRemoteID != req.RemoteID {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM child_scope_labels WHERE endpoint_id = ?`, newAlias); err != nil {
+			safelog.Error(s.logger, "clear endpoint child scope labels failed", "endpoint_update", err)
+			WriteError(w, http.StatusInternalServerError, "failed to update endpoint")
+			return
+		}
 	}
 
 	if newAlias != alias {

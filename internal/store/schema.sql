@@ -29,6 +29,16 @@ CREATE TABLE IF NOT EXISTS canonical_scopes (
 );
 CREATE INDEX IF NOT EXISTS idx_canonical_scopes_canonical ON canonical_scopes(canonical_id);
 
+CREATE TABLE IF NOT EXISTS child_scope_labels (
+    endpoint_id TEXT NOT NULL REFERENCES endpoints(alias) ON DELETE CASCADE ON UPDATE CASCADE,
+    scope_kind TEXT NOT NULL CHECK (scope_kind IN ('discord_thread', 'telegram_topic')),
+    remote_scope_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (endpoint_id, scope_kind, remote_scope_id)
+);
+CREATE INDEX IF NOT EXISTS idx_child_scope_labels_endpoint ON child_scope_labels(endpoint_id);
+
 CREATE TABLE IF NOT EXISTS reactions (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     source_endpoint_id TEXT NOT NULL,
@@ -58,7 +68,8 @@ CREATE TABLE IF NOT EXISTS global_config (
     whatsapp_chat_cleanup_enabled BOOLEAN NOT NULL DEFAULT 0,
     whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30,
     local_message_prefix TEXT NOT NULL DEFAULT '',
-    whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync'
+    whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync',
+    child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly'))
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 

@@ -89,6 +89,9 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		if cfg.WhatsAppDeviceName != "message-sync" {
 			t.Errorf("default whatsappDeviceName = %q, want message-sync", cfg.WhatsAppDeviceName)
 		}
+		if cfg.ChildContextDisplayMode != config.ChildContextDisplayOpaque {
+			t.Errorf("default childContextDisplayMode = %q, want opaque", cfg.ChildContextDisplayMode)
+		}
 	}
 
 	// 2. PUT validation errors
@@ -103,6 +106,7 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		{"negative storage retention", `{"storage":{"messageRetentionDays":0}}`},
 		{"negative whatsapp cleanup retention", `{"whatsappCleanup":{"enabled":true,"retentionDays":0}}`},
 		{"invalid control char whatsapp device name", "{\"whatsappDeviceName\":\"bad\\nname\"}"},
+		{"invalid child context display mode", `{"childContextDisplayMode":"invalid"}`},
 	}
 
 	for _, tc := range invalidCases {
@@ -137,7 +141,8 @@ func TestConfigGetAndUpdate(t *testing.T) {
 				"enabled": true,
 				"retentionDays": 14
 			},
-			"whatsappDeviceName": "CustomSync"
+			"whatsappDeviceName": "CustomSync",
+			"childContextDisplayMode": "friendly"
 		}`
 		req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader([]byte(updateBody)))
 		req.Header.Set("Authorization", authHeader)
@@ -167,6 +172,9 @@ func TestConfigGetAndUpdate(t *testing.T) {
 		}
 		if updated.WhatsAppDeviceName != "CustomSync" {
 			t.Errorf("got whatsappDeviceName %q, want CustomSync", updated.WhatsAppDeviceName)
+		}
+		if updated.ChildContextDisplayMode != config.ChildContextDisplayFriendly {
+			t.Errorf("got childContextDisplayMode %q, want friendly", updated.ChildContextDisplayMode)
 		}
 		if configChanges != 1 {
 			t.Fatalf("expected 1 config change notification, got %d", configChanges)

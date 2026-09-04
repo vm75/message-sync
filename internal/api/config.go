@@ -9,26 +9,28 @@ import (
 )
 
 type GlobalConfigDTO struct {
-	UsernameMode       config.UsernameMode    `json:"usernameMode"`
-	Media              config.Media           `json:"media"`
-	Recovery           config.Recovery        `json:"recovery"`
-	Storage            config.Storage         `json:"storage"`
-	Polls              config.Polls           `json:"polls"`
-	WhatsAppCleanup    config.WhatsAppCleanup `json:"whatsappCleanup"`
-	LocalPrefix        string                 `json:"localPrefix"`
-	WhatsAppDeviceName string                 `json:"whatsappDeviceName"`
+	UsernameMode            config.UsernameMode            `json:"usernameMode"`
+	Media                   config.Media                   `json:"media"`
+	Recovery                config.Recovery                `json:"recovery"`
+	Storage                 config.Storage                 `json:"storage"`
+	Polls                   config.Polls                   `json:"polls"`
+	WhatsAppCleanup         config.WhatsAppCleanup         `json:"whatsappCleanup"`
+	LocalPrefix             string                         `json:"localPrefix"`
+	WhatsAppDeviceName      string                         `json:"whatsappDeviceName"`
+	ChildContextDisplayMode config.ChildContextDisplayMode `json:"childContextDisplayMode"`
 }
 
 type UpdateConfigRequest struct {
-	Identity           *config.Identity        `json:"identity,omitempty"`
-	UsernameMode       *config.UsernameMode    `json:"usernameMode,omitempty"`
-	Media              *config.Media           `json:"media,omitempty"`
-	Recovery           *config.Recovery        `json:"recovery,omitempty"`
-	Storage            *config.Storage         `json:"storage,omitempty"`
-	Polls              *config.Polls           `json:"polls,omitempty"`
-	WhatsAppCleanup    *config.WhatsAppCleanup `json:"whatsappCleanup,omitempty"`
-	LocalPrefix        *string                 `json:"localPrefix,omitempty"`
-	WhatsAppDeviceName *string                 `json:"whatsappDeviceName,omitempty"`
+	Identity                *config.Identity                `json:"identity,omitempty"`
+	UsernameMode            *config.UsernameMode            `json:"usernameMode,omitempty"`
+	Media                   *config.Media                   `json:"media,omitempty"`
+	Recovery                *config.Recovery                `json:"recovery,omitempty"`
+	Storage                 *config.Storage                 `json:"storage,omitempty"`
+	Polls                   *config.Polls                   `json:"polls,omitempty"`
+	WhatsAppCleanup         *config.WhatsAppCleanup         `json:"whatsappCleanup,omitempty"`
+	LocalPrefix             *string                         `json:"localPrefix,omitempty"`
+	WhatsAppDeviceName      *string                         `json:"whatsappDeviceName,omitempty"`
+	ChildContextDisplayMode *config.ChildContextDisplayMode `json:"childContextDisplayMode,omitempty"`
 }
 
 func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -45,14 +47,15 @@ func (s *Server) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dto := GlobalConfigDTO{
-		UsernameMode:       cfg.Identity.UsernameMode,
-		Media:              cfg.Media,
-		Recovery:           cfg.Recovery,
-		Storage:            cfg.Storage,
-		Polls:              cfg.Polls,
-		WhatsAppCleanup:    cfg.WhatsAppCleanup,
-		LocalPrefix:        cfg.LocalPrefix,
-		WhatsAppDeviceName: cfg.WhatsAppDeviceName,
+		UsernameMode:            cfg.Identity.UsernameMode,
+		Media:                   cfg.Media,
+		Recovery:                cfg.Recovery,
+		Storage:                 cfg.Storage,
+		Polls:                   cfg.Polls,
+		WhatsAppCleanup:         cfg.WhatsAppCleanup,
+		LocalPrefix:             cfg.LocalPrefix,
+		WhatsAppDeviceName:      cfg.WhatsAppDeviceName,
+		ChildContextDisplayMode: cfg.ChildContextDisplayMode,
 	}
 
 	_ = WriteJSON(w, http.StatusOK, dto)
@@ -158,10 +161,24 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	childContextMode := currentCfg.ChildContextDisplayMode
+	if req.ChildContextDisplayMode != nil {
+		childContextMode = *req.ChildContextDisplayMode
+	}
+	if !childContextMode.IsValid() {
+		WriteError(w, http.StatusBadRequest, "childContextDisplayMode must be opaque or friendly")
+		return
+	}
 
-	_, err = s.db.ExecContext(r.Context(), `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, "failed to update config")
+		return
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(r.Context(), `
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -174,10 +191,21 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			whatsapp_chat_cleanup_enabled = excluded.whatsapp_chat_cleanup_enabled,
 			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days,
 			local_message_prefix = excluded.local_message_prefix,
-			whatsapp_device_name = excluded.whatsapp_device_name
-	`, string(mode), media.Enabled, media.MaxSizeMB, recovery.Enabled, recovery.MaxAgeHours, recovery.MaxMessagesPerGroup, storage.MessageRetentionDays, polls.AggregationTrigger, whatsappCleanup.Enabled, whatsappCleanup.RetentionDays, localPrefix, whatsappDeviceName)
+			whatsapp_device_name = excluded.whatsapp_device_name,
+			child_context_display_mode = excluded.child_context_display_mode
+	`, string(mode), media.Enabled, media.MaxSizeMB, recovery.Enabled, recovery.MaxAgeHours, recovery.MaxMessagesPerGroup, storage.MessageRetentionDays, polls.AggregationTrigger, whatsappCleanup.Enabled, whatsappCleanup.RetentionDays, localPrefix, whatsappDeviceName, string(childContextMode))
 	if err != nil {
 		safelog.Error(s.logger, "save global_config failed", "config_save", err)
+		WriteError(w, http.StatusInternalServerError, "failed to update config")
+		return
+	}
+	if currentCfg.ChildContextDisplayMode == config.ChildContextDisplayFriendly && childContextMode == config.ChildContextDisplayOpaque {
+		if _, err := tx.ExecContext(r.Context(), `DELETE FROM child_scope_labels`); err != nil {
+			WriteError(w, http.StatusInternalServerError, "failed to clear child scope labels")
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		WriteError(w, http.StatusInternalServerError, "failed to update config")
 		return
 	}
@@ -185,14 +213,15 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	s.notifyConfigChange(r.Context())
 
 	dto := GlobalConfigDTO{
-		UsernameMode:       mode,
-		Media:              media,
-		Recovery:           recovery,
-		Storage:            storage,
-		Polls:              polls,
-		WhatsAppCleanup:    whatsappCleanup,
-		LocalPrefix:        localPrefix,
-		WhatsAppDeviceName: whatsappDeviceName,
+		UsernameMode:            mode,
+		Media:                   media,
+		Recovery:                recovery,
+		Storage:                 storage,
+		Polls:                   polls,
+		WhatsAppCleanup:         whatsappCleanup,
+		LocalPrefix:             localPrefix,
+		WhatsAppDeviceName:      whatsappDeviceName,
+		ChildContextDisplayMode: childContextMode,
 	}
 
 	_ = WriteJSON(w, http.StatusOK, dto)

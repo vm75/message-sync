@@ -25,6 +25,17 @@ const (
 	DefaultWhatsAppDeviceName  = "message-sync"
 )
 
+type ChildContextDisplayMode string
+
+const (
+	ChildContextDisplayOpaque   ChildContextDisplayMode = "opaque"
+	ChildContextDisplayFriendly ChildContextDisplayMode = "friendly"
+)
+
+func (m ChildContextDisplayMode) IsValid() bool {
+	return m == ChildContextDisplayOpaque || m == ChildContextDisplayFriendly
+}
+
 func ValidateWhatsAppDeviceName(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -147,16 +158,17 @@ func (m UsernameMode) IsValid() bool {
 }
 
 type Config struct {
-	Endpoints          map[string]Endpoint `json:"endpoints"`
-	SyncSets           []SyncSet           `json:"syncSets"`
-	Identity           Identity            `json:"identity"`
-	Media              Media               `json:"media"`
-	Recovery           Recovery            `json:"recovery"`
-	Storage            Storage             `json:"storage"`
-	Polls              Polls               `json:"polls"`
-	WhatsAppCleanup    WhatsAppCleanup     `json:"whatsappCleanup"`
-	LocalPrefix        string              `json:"localPrefix"`
-	WhatsAppDeviceName string              `json:"whatsappDeviceName"`
+	Endpoints               map[string]Endpoint     `json:"endpoints"`
+	SyncSets                []SyncSet               `json:"syncSets"`
+	Identity                Identity                `json:"identity"`
+	Media                   Media                   `json:"media"`
+	Recovery                Recovery                `json:"recovery"`
+	Storage                 Storage                 `json:"storage"`
+	Polls                   Polls                   `json:"polls"`
+	WhatsAppCleanup         WhatsAppCleanup         `json:"whatsappCleanup"`
+	LocalPrefix             string                  `json:"localPrefix"`
+	WhatsAppDeviceName      string                  `json:"whatsappDeviceName"`
+	ChildContextDisplayMode ChildContextDisplayMode `json:"childContextDisplayMode"`
 }
 
 type Endpoint struct {
@@ -221,12 +233,13 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		whatsappCleanupDays    int
 		localPrefix            string
 		whatsappDeviceName     string
+		childContextMode       string
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName, &childContextMode); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -243,6 +256,7 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		cfg.WhatsAppCleanup.RetentionDays = whatsappCleanupDays
 		cfg.LocalPrefix = localPrefix
 		cfg.WhatsAppDeviceName = whatsappDeviceName
+		cfg.ChildContextDisplayMode = ChildContextDisplayMode(childContextMode)
 	}
 
 	applyDefaults(cfg)
@@ -412,10 +426,12 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 		return fmt.Errorf("begin save config transaction: %w", err)
 	}
 	defer tx.Rollback()
+	previousChildContextMode := ChildContextDisplayOpaque
+	_ = tx.QueryRowContext(ctx, `SELECT child_context_display_mode FROM global_config WHERE id = 1`).Scan(&previousChildContextMode)
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -428,10 +444,16 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			whatsapp_chat_cleanup_enabled = excluded.whatsapp_chat_cleanup_enabled,
 			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days,
 			local_message_prefix = excluded.local_message_prefix,
-			whatsapp_device_name = excluded.whatsapp_device_name
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName)
+			whatsapp_device_name = excluded.whatsapp_device_name,
+			child_context_display_mode = excluded.child_context_display_mode
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName, string(cfg.ChildContextDisplayMode))
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
+	}
+	if previousChildContextMode == ChildContextDisplayFriendly && cfg.ChildContextDisplayMode == ChildContextDisplayOpaque {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM child_scope_labels`); err != nil {
+			return fmt.Errorf("clear child scope labels: %w", err)
+		}
 	}
 
 	endpointToSyncSet := make(map[string]string)
@@ -492,6 +514,9 @@ func applyDefaults(cfg *Config) {
 	if strings.TrimSpace(cfg.WhatsAppDeviceName) == "" {
 		cfg.WhatsAppDeviceName = DefaultWhatsAppDeviceName
 	}
+	if cfg.ChildContextDisplayMode == "" {
+		cfg.ChildContextDisplayMode = ChildContextDisplayOpaque
+	}
 }
 
 func (c Config) Validate() error {
@@ -503,6 +528,9 @@ func (c Config) Validate() error {
 	}
 	if !c.Identity.UsernameMode.IsValid() {
 		return errors.New("identity.usernameMode must be push_name or hash")
+	}
+	if c.ChildContextDisplayMode != "" && !c.ChildContextDisplayMode.IsValid() {
+		return errors.New("childContextDisplayMode must be opaque or friendly")
 	}
 	if err := ValidateLocalPrefix(c.LocalPrefix); err != nil {
 		return err
