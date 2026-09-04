@@ -106,6 +106,24 @@ func TestStaticHandler(t *testing.T) {
 			}
 		}
 
+		dashboardStart := strings.Index(html, `id="view-dashboard"`)
+		dashboardEnd := strings.Index(html, `id="view-connections"`)
+		if dashboardStart < 0 || dashboardEnd <= dashboardStart {
+			t.Fatal("dashboard view markers are missing")
+		}
+		dashboardHTML := html[dashboardStart:dashboardEnd]
+		for _, removed := range []string{
+			`id="btn-dash-refresh"`,
+			`id="btn-wa-pair"`,
+			`id="btn-wa-logout"`,
+			`Manage Connections`,
+			`Oldest active`,
+		} {
+			if strings.Contains(dashboardHTML, removed) {
+				t.Fatalf("dashboard still contains removed control or column %q", removed)
+			}
+		}
+
 		// Verify token forms are password type with autocomplete="new-password"
 		for _, expected := range []string{
 			`type="password" id="conn-bot-token" class="form-input" autocomplete="new-password"`,

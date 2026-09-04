@@ -724,8 +724,24 @@
     renderDashboardTelegram(statuses);
   }
 
+  function renderPlatformSummary(dot, text, desc, connections, statuses, isConnected, noun) {
+    const configured = connections.length;
+    const connected = connections.filter((connection) => {
+      const status = statuses && statuses[connection.id];
+      return connection.enabled && isConnected(status);
+    }).length;
+    const state = connected === configured && configured > 0 ? 'connected' : connected > 0 ? 'warning' : 'neutral';
+    setStatusCard(dot, text, desc, state, `${configured} configured · ${connected} connected`,
+      `${connected} of ${configured} ${noun} connected`);
+  }
+
   function renderDashboardWhatsApp(statuses) {
     const conns = (cachedConnections || []).filter(c => c.transport === 'whatsapp');
+    renderPlatformSummary(waStatusDot, waStatusText, waStatusDesc, conns, statuses,
+      st => st && (st.status === 'connected' || (st.isConnected && st.isLoggedIn)), 'accounts');
+    return;
+    /* Legacy detail states retained below for the connection workflow. */
+    /* istanbul ignore next */
     if (conns.length === 0) {
       setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'neutral', 'Not Configured', 'No WhatsApp accounts configured.');
       return;
@@ -770,6 +786,10 @@
 
   function renderDashboardDiscord(statuses) {
     const conns = (cachedConnections || []).filter(c => c.transport === 'discord');
+    renderPlatformSummary(discordDot, discordText, discordDesc, conns, statuses,
+      st => st && st.connected, 'bots');
+    return;
+    /* istanbul ignore next */
     if (conns.length === 0) {
       setStatusCard(discordDot, discordText, discordDesc, 'neutral', 'Not Configured', 'No Discord bots configured.');
       return;
@@ -820,6 +840,10 @@
 
   function renderDashboardTelegram(statuses) {
     const conns = (cachedConnections || []).filter(c => c.transport === 'telegram');
+    renderPlatformSummary(telegramDot, telegramText, telegramDesc, conns, statuses,
+      st => st && st.running, 'bots');
+    return;
+    /* istanbul ignore next */
     if (conns.length === 0) {
       setStatusCard(telegramDot, telegramText, telegramDesc, 'neutral', 'Not Configured', 'No Telegram bots configured.');
       return;
@@ -913,6 +937,16 @@
   // ── Delivery ─────────────────────────────────────────────────
   const deliveryStateLabel = { healthy: 'Healthy', queued: 'Queued', retrying: 'Retrying', awaiting_replay: 'Awaiting replay', failed: 'Failed', stopped: 'Stopped' };
 
+  function deliveryDisplayState(item) {
+    // Ready transports with no immediate queue/retry work are healthy even
+    // when the content-free ledger retains restart/replay history.
+    if ((item.transportStatus === 'ready' || item.transportStatus === 'connected') &&
+        item.queueDepth === 0 && item.retrying === 0) {
+      return 'healthy';
+    }
+    return item.laneState;
+  }
+
   async function loadDeliveryStatus() {
     if (!deliveryBody) return;
     try {
@@ -921,16 +955,16 @@
       deliveryBody.innerHTML = eps.map(item => {
         const ledger = `Q ${item.queued} · R ${item.retrying} · A ${item.awaitingReplay} · F ${item.failed}`;
         const queue  = `${item.queueDepth}/${item.queueCapacity}`;
-        const age    = item.oldestActiveAgeSeconds > 0 ? `${item.oldestActiveAgeSeconds}s` : '—';
-        const fail   = item.lastFailureClass ? ` · ${escapeHtml(item.lastFailureClass)}` : '';
-        const state  = deliveryStateLabel[item.laneState] || 'Unknown';
+        const displayState = deliveryDisplayState(item);
+        const fail   = displayState !== 'healthy' && item.lastFailureClass ? ` · ${escapeHtml(item.lastFailureClass)}` : '';
+        const state  = deliveryStateLabel[displayState] || 'Unknown';
         const tBadge = item.transport === 'discord' ? 'badge-discord' : item.transport === 'telegram' ? 'badge-telegram' : 'badge-wa';
         // Endpoint create payload uses: { transport: 'telegram' } | { transport: 'discord' } | { transport: 'whatsapp' }
         return `<tr>
           <td><span class="alias-badge">${escapeHtml(item.alias)}</span></td>
           <td><span class="badge ${tBadge}">${escapeHtml(item.transport)}</span></td>
           <td>${escapeHtml(state)}${fail}</td>
-          <td>${queue}</td><td>${ledger}</td><td>${age}</td>
+          <td>${queue}</td><td>${ledger}</td>
           <td>${escapeHtml(item.transportStatus || '—')}</td>
         </tr>`;
       }).join('');
@@ -1700,15 +1734,9 @@
     } catch (err) {
       showToast(err.message || 'Failed to load sync sets', 'danger');
     }
+    if (editingSyncSetId && !cachedSyncSets.some(s => s.id === editingSyncSetId)) editingSyncSetId = null;
     renderSyncSetList();
-    if (cachedSyncSets.length > 0) {
-      const targetId = (editingSyncSetId && cachedSyncSets.some(s => s.id === editingSyncSetId))
-        ? editingSyncSetId
-        : cachedSyncSets[0].id;
-      openSyncSetEditor(targetId);
-    } else {
-      showEditorPlaceholder();
-    }
+    showEditorPlaceholder();
   }
 
   function renderSyncSetList() {
@@ -1724,20 +1752,55 @@
       const count = Array.isArray(set.endpoints) ? set.endpoints.length : 0;
       const isActive = set.id === editingSyncSetId;
       return `<div class="syncset-list-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(set.id)}">
-        <span class="syncset-item-id">${escapeHtml(set.id)}</span>
-        <span class="syncset-item-count">${count} ep</span>
+        <button type="button" class="syncset-card-toggle" aria-expanded="${isActive}">
+          <span class="syncset-item-id">${escapeHtml(set.id)}</span>
+          <span class="syncset-item-count">${count} ep</span><span class="syncset-chevron" aria-hidden="true"></span>
+        </button>
         <button class="syncset-delete-btn" data-id="${escapeHtml(set.id)}" title="Delete">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
+        <div class="syncset-card-body" ${isActive ? '' : 'hidden'}>
+          <div class="syncset-conversations"></div>
+          <div class="syncset-card-actions">
+            <button type="button" class="btn btn-ghost btn-sm syncset-add-btn">Add conversation</button>
+            <span class="syncset-card-actions-main">
+              <button type="button" class="btn btn-ghost btn-sm syncset-discard-btn">Cancel</button>
+              <button type="button" class="btn btn-primary btn-sm syncset-save-btn">Save</button>
+            </span>
+          </div>
+        </div>
       </div>`;
     }).join('');
 
-    syncsetList.querySelectorAll('.syncset-list-item').forEach(item => {
-      item.addEventListener('click', e => {
-        if (e.target.closest('.syncset-delete-btn')) return;
-        openSyncSetEditor(item.getAttribute('data-id'));
+    // Reuse the controller's main-branch compact conversation rows, including
+    // their quick rename, reassign, and remove actions.
+    const activeBody = syncsetList.querySelector('.syncset-list-item.active .syncset-conversations');
+    if (activeBody && endpointChips) activeBody.appendChild(endpointChips);
+
+    syncsetList.querySelectorAll('.syncset-card-toggle').forEach(toggle => {
+      toggle.addEventListener('click', e => {
+        e.stopPropagation();
+        const id = toggle.closest('.syncset-list-item').getAttribute('data-id');
+        if (editingSyncSetId === id) {
+          editingSyncSetId = null;
+          renderSyncSetList();
+          showEditorPlaceholder();
+        } else {
+          openSyncSetEditor(id);
+        }
       });
     });
+    syncsetList.querySelectorAll('.syncset-add-btn').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation();
+      openSyncSetEditor(btn.closest('.syncset-list-item').getAttribute('data-id'));
+      document.dispatchEvent(new CustomEvent('syncset:add-conversation'));
+    }));
+    syncsetList.querySelectorAll('.syncset-save-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); btnSaveSyncSet?.click(); }));
+    syncsetList.querySelectorAll('.syncset-discard-btn').forEach(btn => btn.addEventListener('click', e => {
+      e.stopPropagation();
+      editingSyncSetId = null;
+      loadSyncSetsPage();
+    }));
     syncsetList.querySelectorAll('.syncset-delete-btn').forEach(btn => {
       btn.addEventListener('click', e => {
         e.stopPropagation();
@@ -1784,7 +1847,8 @@
 
     // Update list selection highlight
     renderSyncSetList();
-    showEditorForm();
+    if (set) showEditorPlaceholder();
+    else { showEditorForm(); document.dispatchEvent(new CustomEvent('syncset:create')); }
   }
 
   function handleDeleteSyncSet(id) {
@@ -2244,16 +2308,8 @@
       try {
         const syncSetId = editingSyncSetId || null;
 
-        // For existing sets, create or update/rename endpoint immediately
-        if (editingSyncSetId) {
-          if (existingByRemote) {
-            await window.API.updateEndpoint(existingByRemote.alias, { alias, transport: activeTransport, connectionId, remoteId, syncSetId });
-          } else {
-            await window.API.createEndpoint({ alias, transport: activeTransport, connectionId, remoteId, syncSetId });
-          }
-          const fresh = await window.API.getEndpoints();
-          cachedEndpoints = Array.isArray(fresh) ? fresh : cachedEndpoints;
-        }
+        // Existing-set additions stay local until Save, so Cancel can discard
+        // them without leaving an orphaned configured endpoint behind.
 
         editorEndpoints.push({ alias, transport: activeTransport, connectionId, remoteId });
         renderChips();
@@ -2263,6 +2319,7 @@
         if (addEndpointAlert) addEndpointAlert.classList.add('hidden');
         await loadRemoteOptions(activeTransport);
         showToast(`Endpoint '${alias}' added.`, 'success');
+        document.dispatchEvent(new CustomEvent('syncset:conversation-added'));
       } catch (err) {
         if (addEndpointAlert) { addEndpointAlert.textContent = err.message || 'Failed to add endpoint.'; addEndpointAlert.classList.remove('hidden'); }
       } finally {
@@ -2284,6 +2341,17 @@
       try {
         const aliases = editorEndpoints.map(e => e.alias);
         if (editingSyncSetId) {
+          for (const ep of editorEndpoints) {
+            const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
+            if (existingEp) {
+              await window.API.updateEndpoint(existingEp.alias, {
+                alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId,
+                remoteId: ep.remoteId, syncSetId: editingSyncSetId
+              });
+            } else {
+              await window.API.createEndpoint({ ...ep, syncSetId: editingSyncSetId });
+            }
+          }
           await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases });
           showToast(`Sync set '${editingSyncSetId}' saved.`, 'success');
         } else {
@@ -2306,6 +2374,7 @@
         await loadSyncSetsPage();
         // Re-open editor for the now-saved set
         openSyncSetEditor(editingSyncSetId);
+        document.dispatchEvent(new CustomEvent('syncset:saved'));
       } catch (err) {
         showToast(err.message || 'Failed to save sync set.', 'danger');
       } finally {

@@ -339,6 +339,29 @@
     refresh();
   }
 
+  function installSyncSetDialogs() {
+    const create = document.getElementById('modal-create-sync-set');
+    const add = document.getElementById('modal-add-conversation');
+    const editor = document.getElementById('syncset-editor-form');
+    if (!create || !add || !editor) return;
+
+    const idField = document.getElementById('syncset-id-field');
+    const addSection = editor.querySelector('.syncset-add-section') || editor.querySelector('.add-endpoint-form')?.parentElement;
+    if (idField) document.getElementById('create-sync-set-body').appendChild(idField);
+    if (addSection) document.getElementById('add-conversation-body').appendChild(addSection);
+    editor.classList.add('syncset-controller-host');
+
+    const show = (modal) => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
+    document.addEventListener('syncset:create', () => show(create));
+    document.addEventListener('syncset:add-conversation', () => show(add));
+    document.addEventListener('syncset:saved', () => {
+      create.classList.add('hidden');
+      document.body.style.overflow = '';
+    });
+    document.getElementById('modal-create-sync-set-save')?.addEventListener('click', () => document.getElementById('btn-save-sync-set')?.click());
+    document.getElementById('modal-add-conversation-submit')?.addEventListener('click', () => document.getElementById('btn-add-endpoint')?.click());
+  }
+
   const initialTheme = storedTheme() || (media.matches ? 'dark' : 'light');
   root.dataset.theme = initialTheme;
   installThemeControls();
@@ -356,6 +379,9 @@
   const controller = document.createElement('script');
   controller.src = '/js/app-base.js?v=8';
   controller.async = false;
-  controller.addEventListener('load', installWhatsAppPairCompletion);
+  controller.addEventListener('load', () => {
+    installWhatsAppPairCompletion();
+    installSyncSetDialogs();
+  });
   document.body.appendChild(controller);
 })();

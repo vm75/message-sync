@@ -989,6 +989,32 @@ func TestRouterUpdateConfig(t *testing.T) {
 	}
 }
 
+func TestDeliveryStatusTreatsTerminalFailuresAsHistory(t *testing.T) {
+	r, syncStore, _ := newTestRouter(t, config.UsernameModeHash)
+	defer r.Close()
+	now := time.Now().UTC().UnixMilli()
+	if _, err := syncStore.DB().Exec(`
+		INSERT INTO canonical_messages(canonical_id, created_at) VALUES ('canon-history', ?);
+		INSERT INTO delivery_operations(canonical_id, endpoint_id, operation_kind, operation_revision, state, failure_class, created_at, updated_at)
+		VALUES ('canon-history', 'c1g1', 'create', 1, 'failed', 'unsupported', ?, ?)
+	`, now, now, now); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := r.DeliveryStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range statuses {
+		if status.EndpointID == "c1g1" {
+			if status.LaneState != "healthy" || status.Failed != 1 || status.FailureClass != "unsupported" {
+				t.Fatalf("terminal failure affected live state: %#v", status)
+			}
+			return
+		}
+	}
+	t.Fatal("missing c1g1 delivery status")
+}
+
 func TestRouterPollCreationFanOut(t *testing.T) {
 	r, store, fake := newTestRouter(t, config.UsernameModePushName)
 	ctx := context.Background()
