@@ -9,6 +9,10 @@
   vertical-align: middle;
 }
 
+.delivery-health-table th {
+  white-space: nowrap;
+}
+
 .delivery-health-table th:first-child,
 .delivery-health-table td:first-child {
   padding-left: 18px;
@@ -136,7 +140,7 @@
   }
 
   .delivery-card .table-responsive {
-    overflow-x: visible;
+    overflow-x: hidden;
   }
 
   .delivery-health-table {
@@ -145,35 +149,53 @@
 
   .delivery-health-table th,
   .delivery-health-table td {
+    min-width: 0;
     padding-top: 10px;
     padding-bottom: 10px;
-    padding-left: 8px;
-    padding-right: 8px;
+    padding-left: 7px;
+    padding-right: 7px;
+    overflow: hidden;
     font-size: .72rem;
+    text-overflow: ellipsis;
   }
 
+  /* Four visible mobile columns must fit without competing fixed + percentage
+     widths. Keep the icon column fixed and let the text columns share the rest. */
   .delivery-health-table th:first-child,
   .delivery-health-table td:first-child {
-    width: 28%;
+    width: 26%;
     padding-left: 12px;
   }
 
   .delivery-health-table th:nth-child(2),
   .delivery-health-table td:nth-child(2) {
-    width: 27%;
+    width: 25%;
   }
 
   .delivery-health-table .delivery-platform-column {
-    width: 46px;
+    width: 44px;
   }
 
   .delivery-health-table th:nth-child(4),
   .delivery-health-table td:nth-child(4) {
-    width: 34%;
+    width: auto;
   }
 
   .delivery-health-table .delivery-column {
     display: none;
+  }
+
+  /* Platform is icon-only in the rows, so a short mobile header is clearer and
+     avoids the previous PLATFORM / STATUS collision around tablet-phone widths. */
+  .delivery-health-table th:nth-child(3) {
+    font-size: 0;
+    text-align: center;
+  }
+
+  .delivery-health-table th:nth-child(3)::after {
+    content: 'App';
+    font-size: .64rem;
+    letter-spacing: .02em;
   }
 
   .delivery-syncset-cell {
@@ -229,26 +251,42 @@
 @media (max-width: 430px) {
   .delivery-health-table th,
   .delivery-health-table td {
-    padding-left: 6px;
-    padding-right: 6px;
+    padding-left: 5px;
+    padding-right: 5px;
   }
 
   .delivery-health-table th:first-child,
   .delivery-health-table td:first-child {
-    padding-left: 10px;
+    width: 24%;
+    padding-left: 9px;
+  }
+
+  .delivery-health-table th:nth-child(2),
+  .delivery-health-table td:nth-child(2) {
+    width: 24%;
+  }
+
+  .delivery-health-table .delivery-platform-column {
+    width: 38px;
   }
 
   .delivery-health-table th {
-    font-size: .64rem;
-    letter-spacing: .02em;
+    font-size: .61rem;
+    letter-spacing: .015em;
   }
 
-  .delivery-health-table th:nth-child(3) {
+  /* Shorten the longest remaining heading at phone widths. */
+  .delivery-health-table th:first-child {
     font-size: 0;
   }
 
+  .delivery-health-table th:first-child::after {
+    content: 'Set';
+    font-size: .61rem;
+    letter-spacing: .015em;
+  }
+
   .delivery-health-table th:nth-child(3)::after {
-    content: 'App';
-    font-size: .64rem;
+    font-size: .61rem;
   }
 }
