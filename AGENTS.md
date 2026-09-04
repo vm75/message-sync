@@ -52,6 +52,12 @@ Allowed in `sync.db`:
 
 If a proposed feature cannot satisfy these rules, design it as an explicit optional PII subsystem rather than weakening the core.
 
+Membership application definitions and answers belong only to the explicit
+control plane and are shared per sync set through endpoint resolution. Final
+membership decisions remain human-authorized; membership code must never use
+WhatsApp direct participant addition, and terminal decisions must purge local
+evidence. Do not add automatic decisions or high-volume membership workers.
+
 ## Architecture rules
 
 - The canonical router owns cross-endpoint synchronization semantics.

@@ -175,6 +175,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/verification/pipelines/{id}", s.handleDeletePipeline)
 	s.mux.HandleFunc("GET /api/verification/{token}", s.handlePublicPipeline)
 	s.mux.HandleFunc("POST /api/verification/{token}", s.handlePublicIntake)
+	s.mux.HandleFunc("GET /api/verification/join/{token}", s.handleMembershipJoin)
 	s.mux.HandleFunc("DELETE /api/verification/requests/{id}", s.handleDeleteMembershipRequest)
 	s.mux.HandleFunc("POST /api/verification/requests/{id}/fulfill", s.handleFulfillMembershipRequest)
 	s.mux.HandleFunc("GET /api/verification/requests", s.handleListMembershipRequests)
@@ -210,6 +211,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/sync-sets/{id}", s.handleDeleteSyncSet)
 	s.mux.HandleFunc("GET /api/sync-sets/{id}/membership", s.handleGetMembershipConfig)
 	s.mux.HandleFunc("PUT /api/sync-sets/{id}/membership", s.handlePutMembershipConfig)
+	s.mux.HandleFunc("DELETE /api/sync-sets/{id}/membership", s.handleDeleteMembershipConfig)
 
 	s.mux.HandleFunc("GET /api/config", s.handleGetConfig)
 	s.mux.HandleFunc("PUT /api/config", s.handleUpdateConfig)

@@ -50,11 +50,18 @@ func Fulfill(ctx context.Context, req FulfillmentRequest, wa WhatsAppAdmin, dc D
 			return FulfillmentResult{State: "action_pending", FailureClass: "pending_requests_unavailable"}, err
 		}
 		wanted := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
+		match := ""
 		for _, candidate := range pending {
-			if candidate.Phone != wanted {
+			if strings.TrimPrefix(strings.TrimSpace(candidate.Phone), "+") != wanted {
 				continue
 			}
-			if err := wa.ApproveJoinRequest(ctx, req.EndpointAlias, candidate.Phone); err != nil {
+			if match != "" {
+				return FulfillmentResult{State: "action_pending", FailureClass: "identity_ambiguous"}, errors.New("multiple matching join requests")
+			}
+			match = candidate.Phone
+		}
+		if match != "" {
+			if err := wa.ApproveJoinRequest(ctx, req.EndpointAlias, match); err != nil {
 				if errors.Is(err, ErrPermissionDenied) {
 					return FulfillmentResult{State: "failed", FailureClass: "permission_denied"}, err
 				}

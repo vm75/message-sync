@@ -46,6 +46,7 @@ type PipelineView struct {
 type PublicMembershipConfig struct {
 	ApplicantInstructions string                  `json:"applicantInstructions"`
 	EvidenceRequired      bool                    `json:"evidenceRequired"`
+	EvidenceInstructions  string                  `json:"evidenceInstructions,omitempty"`
 	CustomFields          []MembershipCustomField `json:"customFields"`
 }
 
@@ -149,7 +150,7 @@ func (s *Server) pipelineByToken(r *http.Request) (PipelineView, bool) {
 		var definition MembershipConfig
 		definition, err = s.membershipConfig(r.Context(), p.SyncSetID)
 		p.definition = definition
-		p.Membership = PublicMembershipConfig{ApplicantInstructions: definition.ApplicantInstructions, EvidenceRequired: definition.EvidenceRequired, CustomFields: definition.CustomFields}
+		p.Membership = PublicMembershipConfig{ApplicantInstructions: definition.ApplicantInstructions, EvidenceRequired: definition.EvidenceRequired, EvidenceInstructions: definition.EvidenceInstructions, CustomFields: definition.CustomFields}
 	}
 	return p, err == nil && p.Enabled
 }
@@ -318,6 +319,7 @@ func (s *Server) handleDeleteMembershipRequest(w http.ResponseWriter, r *http.Re
 	if ref != "" && s.evidenceDir != "" {
 		_ = os.Remove(filepath.Join(s.evidenceDir, ref))
 	}
+	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, time.Now().UnixMilli(), id)
 	if _, err := s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_requests WHERE id=?`, id); err != nil {
 		WriteError(w, 500, "failed to delete request")
 		return
@@ -342,6 +344,18 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 		_ = WriteJSON(w, 200, map[string]string{"status": "succeeded"})
 		return
 	}
+	if req.Transport == "whatsapp" {
+		phone := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
+		_, claimErr := s.controlDB.ExecContext(r.Context(), `INSERT INTO membership_join_claims(endpoint_alias,applicant_phone,membership_request_id,claimed_at) VALUES(?,?,?,?) ON CONFLICT(membership_request_id) DO NOTHING`, req.EndpointAlias, phone, id, time.Now().UnixMilli())
+		if claimErr != nil {
+			var owner string
+			if lookupErr := s.controlDB.QueryRowContext(r.Context(), `SELECT membership_request_id FROM membership_join_claims WHERE endpoint_alias=? AND applicant_phone=?`, req.EndpointAlias, phone).Scan(&owner); lookupErr == nil && owner != id {
+				_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state='action_pending',fulfillment_failure_class='identity_claimed',updated_at=? WHERE id=?`, time.Now().UnixMilli(), id)
+				_ = WriteJSON(w, http.StatusConflict, map[string]string{"status": "action_pending", "failureClass": "identity_claimed"})
+				return
+			}
+		}
+	}
 	s.audit(r, "membership_fulfillment_retry", id)
 	var wa verification.WhatsAppAdmin
 	var dc verification.DiscordAdmin
@@ -361,10 +375,13 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 		}
 	}
 	result, fulfillErr := verification.Fulfill(r.Context(), req, wa, dc)
-	if result.State == "action_pending" && result.FailureClass == "invite_pending" && s.mailer != nil {
-		if link, linkErr := wa.InviteLink(r.Context(), req.EndpointAlias); linkErr == nil {
-			_ = s.mailer.Send(r.Context(), email, label, link)
+	if result.State == "action_pending" && result.FailureClass == "invite_pending" && req.Transport == "whatsapp" {
+		if token, tokenErr := s.issueMembershipJoinToken(r.Context(), id); tokenErr == nil && s.mailer != nil {
+			_ = s.mailer.Send(r.Context(), email, label, "/api/verification/join/"+token)
 		}
+	}
+	if result.State == "succeeded" {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET consumed_at=? WHERE membership_request_id=? AND consumed_at IS NULL`, time.Now().UnixMilli(), id)
 	}
 	_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET fulfillment_state=?,fulfillment_failure_class=?,updated_at=? WHERE id=?`, result.State, result.FailureClass, time.Now().UnixMilli(), id)
 	if fulfillErr != nil && result.State == "failed" {
@@ -372,6 +389,62 @@ func (s *Server) handleFulfillMembershipRequest(w http.ResponseWriter, r *http.R
 		return
 	}
 	_ = WriteJSON(w, 200, map[string]string{"status": result.State, "failureClass": result.FailureClass})
+}
+
+func (s *Server) issueMembershipJoinToken(ctx context.Context, requestID string) (string, error) {
+	token, hash, err := newBearerToken()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UnixMilli()
+	tx, err := s.controlDB.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL AND consumed_at IS NULL`, now, requestID); err != nil {
+		return "", err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO membership_join_tokens(token_hash,membership_request_id,expires_at,created_at) VALUES(?,?,?,?)`, hash, requestID, time.Now().Add(48*time.Hour).UnixMilli(), now); err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *Server) handleMembershipJoin(w http.ResponseWriter, r *http.Request) {
+	var alias string
+	var requestID string
+	if err := s.controlDB.QueryRowContext(r.Context(), `SELECT t.membership_request_id,p.endpoint_alias FROM membership_join_tokens t JOIN membership_requests m ON m.id=t.membership_request_id JOIN verification_pipelines p ON p.id=m.pipeline_id WHERE t.token_hash=? AND t.expires_at>? AND t.revoked_at IS NULL AND t.consumed_at IS NULL AND m.status='approved' AND p.target_transport='whatsapp'`, tokenHash(r.PathValue("token")), time.Now().UnixMilli()).Scan(&requestID, &alias); err != nil {
+		WriteError(w, http.StatusNotFound, "join link unavailable")
+		return
+	}
+	var connID string
+	if s.db == nil || s.db.QueryRowContext(r.Context(), `SELECT connection_id FROM endpoints WHERE alias=?`, alias).Scan(&connID) != nil || s.connections == nil {
+		WriteError(w, http.StatusServiceUnavailable, "join link unavailable")
+		return
+	}
+	adapter, ok := s.connections.ConnectionAdapter(connID)
+	wa, ok := adapter.(verification.WhatsAppAdmin)
+	if !ok {
+		WriteError(w, http.StatusServiceUnavailable, "join link unavailable")
+		return
+	}
+	required, err := wa.JoinApprovalRequired(r.Context(), alias)
+	if err != nil || !required {
+		WriteError(w, http.StatusConflict, "join approval must be enabled")
+		return
+	}
+	link, err := wa.InviteLink(r.Context(), alias)
+	if err != nil {
+		WriteError(w, http.StatusServiceUnavailable, "join link unavailable")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	_ = requestID
+	http.Redirect(w, r, link, http.StatusFound)
 }
 
 type MembershipRequestView struct {
@@ -474,6 +547,9 @@ func (s *Server) handleMembershipDecision(w http.ResponseWriter, r *http.Request
 			_ = os.Remove(filepath.Join(s.evidenceDir, evidenceReference))
 		}
 		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_requests SET evidence_reference=NULL,evidence_metadata=NULL WHERE id=? AND status=?`, id, next)
+	}
+	if next == "rejected" {
+		_, _ = s.controlDB.ExecContext(r.Context(), `UPDATE membership_join_tokens SET revoked_at=? WHERE membership_request_id=? AND revoked_at IS NULL`, time.Now().UnixMilli(), id)
 	}
 	_ = WriteJSON(w, 200, map[string]string{"status": next})
 }

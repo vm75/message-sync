@@ -2611,7 +2611,7 @@
       const items = Array.isArray(data) ? data : (data && data.requests ? data.requests : []);
       membershipTableBody.innerHTML = items.map(r => `
         <tr>
-          <td>${escapeHtml(r.id || '—')}</td>
+          <td><button class="btn btn-ghost btn-sm" onclick="App.membershipView('${escapeHtml(r.id)}')">${escapeHtml(r.id || '—')}</button></td>
           <td><span class="badge badge-neutral">${escapeHtml(r.status || '—')}</span></td>
           <td>${escapeHtml(r.verificationStatus || '—')}</td>
           <td>${escapeHtml(r.signals || '—')}</td>
@@ -2680,6 +2680,17 @@
     },
     async membershipDecide(id, action) {
       try { await window.API.decideMembership(id, action); await refreshMembership(); } catch (err) { showToast(err.message || 'Failed', 'danger'); }
+    },
+    async membershipView(id) {
+      if (!membershipDetail) return;
+      try {
+        const request = await window.API.getMembershipRequest(id);
+        const definition = JSON.parse(request.applicationDefinition || '{}');
+        const answers = JSON.parse(request.applicationAnswers || '{}');
+        const fields = Array.isArray(definition.customFields) ? definition.customFields : [];
+        const answerRows = fields.map(field => `<div><strong>${escapeHtml(field.label || field.key)}:</strong> ${escapeHtml(String(answers[field.key] ?? '—'))} <span class="text-muted">(${escapeHtml(field.type || 'text')})</span></div>`).join('');
+        membershipDetail.innerHTML = `<div><strong>${escapeHtml(request.workEmail || '')}</strong> · ${escapeHtml(request.status || '')}</div><div style="margin-top:8px;"><strong>Reviewer guidance:</strong> ${escapeHtml(definition.reviewerGuidance || '—')}</div><div style="margin-top:8px;"><strong>Answers:</strong>${answerRows || ' —'}</div>`;
+      } catch (err) { showToast(err.message || 'Failed to load request', 'danger'); }
     },
     async deletePipeline(id) {
       try { await window.API.deleteVerificationPipeline(id); await loadPipelines(); } catch (err) { showToast(err.message || 'Failed', 'danger'); }

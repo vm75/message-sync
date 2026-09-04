@@ -27,7 +27,7 @@ func TestMembershipConfigIsBoundedToSyncSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := `{"applicantInstructions":"Answer briefly","reviewerGuidance":"Check the evidence","evidenceRequired":true,"customFields":[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120,"position":0}]}`
+	body := `{"applicantInstructions":"Answer briefly","evidenceInstructions":"Upload proof","reviewerGuidance":"Check the evidence","evidenceRequired":true,"customFields":[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120,"position":0},{"key":"status","label":"Status","type":"select","options":["New","Existing"],"position":1}]}`
 	req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/community/membership", bytes.NewBufferString(body))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -46,7 +46,7 @@ func TestMembershipConfigIsBoundedToSyncSet(t *testing.T) {
 	if err := json.NewDecoder(got.Body).Decode(&out); err != nil {
 		t.Fatal(err)
 	}
-	if !out.EvidenceRequired || len(out.CustomFields) != 1 || out.CustomFields[0].Key != "company" {
+	if !out.EvidenceRequired || out.EvidenceInstructions != "Upload proof" || len(out.CustomFields) != 2 || out.CustomFields[1].Options[1] != "Existing" {
 		t.Fatalf("config=%+v", out)
 	}
 
@@ -60,12 +60,16 @@ func TestMembershipConfigIsBoundedToSyncSet(t *testing.T) {
 }
 
 func TestMembershipAnswersAreStrictAndSnapshotSafe(t *testing.T) {
-	cfg := MembershipConfig{CustomFields: []MembershipCustomField{{Key: "company", Label: "Company", Type: "text", Required: true, MaxLength: 8, Position: 0}}}
+	cfg := MembershipConfig{CustomFields: []MembershipCustomField{{Key: "company", Label: "Company", Type: "text", Required: true, MaxLength: 8, Position: 0}, {Key: "status", Label: "Status", Type: "select", Options: []string{"New", "Existing"}, MaxLength: 20, Position: 1}, {Key: "terms", Label: "Terms", Type: "checkbox", Required: true, Position: 2}}}
 	answers, err := validateMembershipAnswers(cfg, `{"company":"Acme"}`)
+	if err == nil {
+		t.Fatal("missing select/checkbox answers unexpectedly accepted")
+	}
+	answers, err = validateMembershipAnswers(cfg, `{"company":"Acme","status":"Existing","terms":true}`)
 	if err != nil || answers["company"] != "Acme" {
 		t.Fatalf("answers=%v err=%v", answers, err)
 	}
-	for _, raw := range []string{`{}`, `{"unknown":"x"}`, `{"company":"too-longer"}`} {
+	for _, raw := range []string{`{}`, `{"unknown":"x","status":"Existing","terms":true}`, `{"company":"too-longer","status":"Existing","terms":true}`, `{"company":"Acme","status":"Other","terms":true}`, `{"company":"Acme","status":"Existing","terms":"yes"}`} {
 		if _, err := validateMembershipAnswers(cfg, raw); err == nil {
 			t.Fatalf("answers %s unexpectedly accepted", raw)
 		}
@@ -150,5 +154,23 @@ func TestEvidenceMIMEReachesAnalyzerAndFinalDecisionPurgesIt(t *testing.T) {
 	}
 	if cleared.Valid {
 		t.Fatalf("evidence reference retained: %q", cleared.String)
+	}
+}
+
+func TestMembershipJoinTokenIsHashedAndBoundToRequest(t *testing.T) {
+	srv := NewServer(Options{})
+	if _, err := srv.controlDB.Exec(`INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,creator_user_id,created_at,updated_at) VALUES ('pipeline','token','Community','whatsapp','group','embedded-fixture',?,?); INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,created_at,updated_at) VALUES ('request','pipeline','approved','applicant@example.com','verified',?,?)`, time.Now().UnixMilli(), time.Now().UnixMilli(), time.Now().UnixMilli(), time.Now().UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := srv.issueMembershipJoinToken(context.Background(), "request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := srv.controlDB.QueryRow(`SELECT token_hash FROM membership_join_tokens WHERE membership_request_id='request'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored == plain || stored == "" || tokenHash(plain) != stored {
+		t.Fatalf("token storage is not hashed: %q", stored)
 	}
 }

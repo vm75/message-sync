@@ -39,6 +39,7 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 	defer tx.Rollback()
 	for _, q := range []string{
 		`DELETE FROM email_challenges WHERE rowid IN (SELECT rowid FROM email_challenges WHERE expires_at < ? LIMIT ?)`,
+		`DELETE FROM membership_join_tokens WHERE rowid IN (SELECT rowid FROM membership_join_tokens WHERE expires_at < ? OR revoked_at IS NOT NULL OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM user_invites WHERE rowid IN (SELECT rowid FROM user_invites WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM password_reset_tokens WHERE rowid IN (SELECT rowid FROM password_reset_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE expires_at < ? OR revoked_at IS NOT NULL LIMIT ?)`,

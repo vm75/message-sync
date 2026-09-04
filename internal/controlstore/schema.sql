@@ -91,6 +91,24 @@ CREATE TABLE IF NOT EXISTS email_challenges (
     verified_at INTEGER
 );
 
+CREATE TABLE IF NOT EXISTS membership_join_tokens (
+    token_hash TEXT PRIMARY KEY,
+    membership_request_id TEXT NOT NULL REFERENCES membership_requests(id) ON DELETE CASCADE,
+    expires_at INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER,
+    consumed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_membership_join_tokens_request ON membership_join_tokens(membership_request_id);
+
+CREATE TABLE IF NOT EXISTS membership_join_claims (
+    endpoint_alias TEXT NOT NULL,
+    applicant_phone TEXT NOT NULL,
+    membership_request_id TEXT PRIMARY KEY REFERENCES membership_requests(id) ON DELETE CASCADE,
+    claimed_at INTEGER NOT NULL,
+    UNIQUE (endpoint_alias, applicant_phone)
+);
+
 CREATE TABLE IF NOT EXISTS verification_assessments (
     id TEXT PRIMARY KEY,
     membership_request_id TEXT NOT NULL REFERENCES membership_requests(id) ON DELETE CASCADE,
@@ -128,8 +146,10 @@ CREATE INDEX IF NOT EXISTS idx_transport_connections_transport ON transport_conn
 CREATE TABLE IF NOT EXISTS membership_configs (
     sync_set_id TEXT PRIMARY KEY,
     applicant_instructions TEXT NOT NULL DEFAULT '' CHECK (length(applicant_instructions) <= 4000),
+    evidence_instructions TEXT NOT NULL DEFAULT '' CHECK (length(evidence_instructions) <= 2000),
     reviewer_guidance TEXT NOT NULL DEFAULT '' CHECK (length(reviewer_guidance) <= 4000),
     evidence_required BOOLEAN NOT NULL DEFAULT 0 CHECK (evidence_required IN (0, 1)),
+    updated_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -139,7 +159,8 @@ CREATE TABLE IF NOT EXISTS membership_custom_fields (
     sync_set_id TEXT NOT NULL REFERENCES membership_configs(sync_set_id) ON DELETE CASCADE,
     field_key TEXT NOT NULL CHECK (field_key GLOB '[A-Za-z][A-Za-z0-9_-]*' AND length(field_key) <= 32),
     label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 120),
-    field_type TEXT NOT NULL CHECK (field_type IN ('text', 'textarea', 'url')),
+    field_type TEXT NOT NULL CHECK (field_type IN ('text', 'textarea', 'select', 'checkbox')),
+    options_json TEXT NOT NULL DEFAULT '[]',
     required BOOLEAN NOT NULL DEFAULT 0 CHECK (required IN (0, 1)),
     max_length INTEGER NOT NULL DEFAULT 500 CHECK (max_length BETWEEN 1 AND 2000),
     position INTEGER NOT NULL DEFAULT 0 CHECK (position BETWEEN 0 AND 31),
