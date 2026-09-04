@@ -70,6 +70,18 @@ func (a *Adapter) ApproveJoinRequest(ctx context.Context, alias, phone string) e
 	_, err = a.client.UpdateGroupRequestParticipants(ctx, target, []types.JID{types.NewJID(phone, types.DefaultUserServer)}, whatsmeow.ParticipantChangeApprove)
 	return err
 }
+
+func groupParticipantMatchesPhone(participant types.GroupParticipant, phone string) bool {
+	phone = strings.TrimPrefix(strings.TrimSpace(phone), "+")
+	if phone == "" {
+		return false
+	}
+	if participant.PhoneNumber.Server == types.DefaultUserServer && participant.PhoneNumber.User == phone {
+		return true
+	}
+	return participant.JID.Server == types.DefaultUserServer && participant.JID.User == phone
+}
+
 func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, error) {
 	target, err := a.membershipTarget(alias)
 	if err != nil {
@@ -79,9 +91,8 @@ func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	phone = strings.TrimPrefix(strings.TrimSpace(phone), "+")
 	for _, p := range info.Participants {
-		if p.JID.User == phone {
+		if groupParticipantMatchesPhone(p, phone) {
 			return true, nil
 		}
 	}
