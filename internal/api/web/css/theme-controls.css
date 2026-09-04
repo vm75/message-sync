@@ -1,0 +1,92 @@
+/* Explicit theme overrides and persistent theme-toggle presentation. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-base: #f9fafb;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f9fafb;
+  --bg-overlay: #f2f4f7;
+  --bg-hover: #f2f4f7;
+  --bg-active: #eaf0ff;
+  --bg-card: #ffffff;
+  --primary-400: #6172f3;
+  --primary-500: #465fff;
+  --primary-600: #3641f5;
+  --primary-muted: rgba(70, 95, 255, .10);
+  --primary-ring: rgba(70, 95, 255, .18);
+  --text-primary: #101828;
+  --text-secondary: #475467;
+  --text-muted: #98a2b3;
+  --text-inverse: #ffffff;
+  --border: #eaecf0;
+  --border-subtle: #f2f4f7;
+  --border-strong: #d0d5dd;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .05);
+  --shadow: 0 4px 12px rgba(16, 24, 40, .08);
+  --shadow-lg: 0 12px 32px rgba(16, 24, 40, .12);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg-base: #101828;
+  --bg-surface: #1d2939;
+  --bg-elevated: #182230;
+  --bg-overlay: #25364a;
+  --bg-hover: #25364a;
+  --bg-active: #253b80;
+  --bg-card: #1d2939;
+  --primary-400: #8098f9;
+  --primary-500: #6172f3;
+  --primary-600: #465fff;
+  --primary-muted: rgba(97, 114, 243, .16);
+  --primary-ring: rgba(128, 152, 249, .24);
+  --text-primary: #f2f4f7;
+  --text-secondary: #d0d5dd;
+  --text-muted: #98a2b3;
+  --text-inverse: #101828;
+  --border: #344054;
+  --border-subtle: #29384d;
+  --border-strong: #475467;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .25);
+  --shadow: 0 6px 20px rgba(0, 0, 0, .25);
+  --shadow-lg: 0 18px 44px rgba(0, 0, 0, .34);
+}
+
+.theme-toggle {
+  position: fixed;
+  top: 18px;
+  right: 20px;
+  z-index: 850;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, transform .15s ease;
+}
+.theme-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.theme-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+.theme-icon { width: 18px; height: 18px; }
+.theme-sun { display: none; }
+:root[data-theme="dark"] .theme-moon { display: none; }
+:root[data-theme="dark"] .theme-sun { display: block; }
+
+@media (max-width: 768px) {
+  .theme-toggle { top: 12px; right: 12px; width: 38px; height: 38px; }
+  .page-header { padding-right: 44px; }
+}

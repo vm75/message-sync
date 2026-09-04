@@ -8,7 +8,7 @@
   <!-- Credentials: encrypted domain-key AES storage in control.db, paste-once UI inputs, zero browser retention -->
   <!-- Bot Privacy Mode | Send a group message | Transient Observed Chats | Configured Endpoints -->
   <title>Message Sync • Admin Console</title>
-  <link rel="stylesheet" href="/css/app.css?v=8">
+  <link rel="stylesheet" href="/css/app.css?v=9">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366f1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'></path><path d='M8 10h8'></path><path d='M8 14h4'></path></svg>">
 </head>
 <body>
@@ -224,10 +224,6 @@
             <div>
               <h1 class="page-title">Dashboard</h1>
             </div>
-            <button id="btn-dash-refresh" class="btn btn-ghost btn-sm">
-              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-              Refresh
-            </button>
           </div>
 
           <!-- Platform status cards -->
@@ -238,25 +234,6 @@
               <div class="platform-card-top">
                 <div class="platform-card-icon wa">
                   <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                </div>
-                <div class="platform-card-menu">
-                  <button class="platform-card-menu-btn" id="wa-menu-btn" title="WhatsApp actions" aria-haspopup="true" aria-expanded="false">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
-                  </button>
-                  <div class="platform-card-dropdown" id="wa-menu">
-                    <button class="dropdown-item" id="btn-wa-pair">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-                      Pair Device
-                    </button>
-                    <button class="dropdown-item" id="btn-wa-manage">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
-                      Manage Connections
-                    </button>
-                    <button class="dropdown-item danger" id="btn-wa-logout">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                      Log Out
-                    </button>
-                  </div>
                 </div>
               </div>
               <div>
@@ -275,21 +252,6 @@
                 <div class="platform-card-icon discord">
                   <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><path d="M7.5 7.5c3.5-1 5.5-1 9 0 1 2.5 1.5 6 1 8.5-2 1.5-4 1.5-5.5 1.5l-.5-.5c1-.5 1.5-1 1.5-1-1.5.5-3 .5-4.5 0 0 0 .5.5 1.5 1l-.5.5C8.5 17.5 6.5 17.5 4.5 16c-.5-2.5 0-6 1-8.5z"></path></svg>
                 </div>
-                <div class="platform-card-menu">
-                  <button class="platform-card-menu-btn" id="discord-menu-btn" title="Discord actions" aria-haspopup="true" aria-expanded="false">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
-                  </button>
-                  <div class="platform-card-dropdown" id="discord-menu">
-                    <button class="dropdown-item" id="btn-discord-refresh-status">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                      Refresh Status
-                    </button>
-                    <button class="dropdown-item" id="btn-discord-manage">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
-                      Manage Connections
-                    </button>
-                  </div>
-                </div>
               </div>
               <div>
                 <div class="platform-card-label">Discord Bot</div>
@@ -306,21 +268,6 @@
               <div class="platform-card-top">
                 <div class="platform-card-icon telegram">
                   <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path></svg>
-                </div>
-                <div class="platform-card-menu">
-                  <button class="platform-card-menu-btn" id="telegram-menu-btn" title="Telegram actions" aria-haspopup="true" aria-expanded="false">
-                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
-                  </button>
-                  <div class="platform-card-dropdown" id="telegram-menu">
-                    <button class="dropdown-item" id="btn-telegram-refresh-status">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path></svg>
-                      Refresh Status
-                    </button>
-                    <button class="dropdown-item" id="btn-telegram-manage">
-                      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
-                      Manage Connections
-                    </button>
-                  </div>
                 </div>
               </div>
               <div>
@@ -343,7 +290,7 @@
             </div>
             <div class="table-responsive">
               <table class="data-table">
-                <thead><tr><th>Endpoint</th><th>Transport</th><th>State</th><th>Queue</th><th>Ledger</th><th>Oldest active</th><th>Transport</th></tr></thead>
+                <thead><tr><th>Endpoint</th><th>Transport</th><th>State</th><th>Queue</th><th>Ledger</th><th>Transport</th></tr></thead>
                 <tbody id="delivery-health-body"></tbody>
               </table>
             </div>
@@ -378,8 +325,10 @@
 
           <div id="connections-alert" class="alert hidden" style="margin-bottom:16px;"></div>
 
+          <div id="connections-container"></div>
+
           <!-- Architecture & Scope guidance -->
-          <div class="card" style="padding:14px 18px;margin-bottom:20px;background:var(--bg-elevated);border:1px solid var(--border);">
+          <div class="card" style="padding:14px 18px;margin-top:20px;background:var(--bg-elevated);border:1px solid var(--border);">
             <div style="display:flex;align-items:flex-start;gap:12px;">
               <svg class="icon" style="width:18px;height:18px;color:var(--primary-400);flex-shrink:0;margin-top:2px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
               <div style="font-size:.78rem;color:var(--text-secondary);line-height:1.55;">
@@ -390,8 +339,6 @@
               </div>
             </div>
           </div>
-
-          <div id="connections-container"></div>
 
           <div id="connections-empty" class="empty-state hidden">
             <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"></circle><line x1="1.05" y1="12" x2="7" y2="12"></line><line x1="17.01" y1="12" x2="22.96" y2="12"></line></svg>
@@ -541,6 +488,23 @@
             </div>
           </div>
 
+        </div>
+      </div>
+
+      <!-- Sync set creation and conversation dialogs are populated from the
+           existing editor so the controller keeps one source of truth. -->
+      <div id="modal-create-sync-set" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="create-sync-set-title">
+        <div class="modal-card modal-card-sm">
+          <div class="modal-header"><h3 id="create-sync-set-title" class="modal-title">Create sync set</h3><button type="button" class="btn-modal-close" data-modal="modal-create-sync-set" aria-label="Close">×</button></div>
+          <div id="create-sync-set-body" class="modal-body"></div>
+          <div class="modal-footer"><button type="button" class="btn btn-ghost" data-modal="modal-create-sync-set">Discard</button><button type="button" id="modal-create-sync-set-save" class="btn btn-primary">Create sync set</button></div>
+        </div>
+      </div>
+      <div id="modal-add-conversation" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="add-conversation-title">
+        <div class="modal-card" style="max-width:680px;">
+          <div class="modal-header"><h3 id="add-conversation-title" class="modal-title">Add conversation</h3><button type="button" class="btn-modal-close" data-modal="modal-add-conversation" aria-label="Close">×</button></div>
+          <div id="add-conversation-body" class="modal-body"></div>
+          <div class="modal-footer"><button type="button" class="btn btn-ghost" data-modal="modal-add-conversation">Discard</button><button type="button" id="modal-add-conversation-submit" class="btn btn-primary">Add conversation</button></div>
         </div>
       </div>
 

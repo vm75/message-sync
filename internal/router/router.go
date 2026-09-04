@@ -227,8 +227,11 @@ func (r *Router) DeliveryStatus(ctx context.Context) ([]delivery.EndpointStatus,
 				status.LaneState = store.DeliveryRetrying
 			} else if summary.Queued > 0 {
 				status.LaneState = store.DeliveryQueued
-			} else if summary.Failed > 0 {
-				status.LaneState = store.DeliveryFailed
+			} else {
+				// Failed operations are terminal history, not active lane work.
+				// Keep the lane healthy when the transport has no pending work;
+				// the failure count remains available in the ledger summary.
+				status.LaneState = "healthy"
 			}
 		}
 		result = append(result, status)
