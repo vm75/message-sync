@@ -501,3 +501,104 @@ func sourceBodyFromForwarded(text string) string {
 	}
 	return text
 }
+
+func discordWebhookFile(kind string, data []byte) (*WebhookFile, error) {
+	file := &WebhookFile{Data: data}
+	switch kind {
+	case "image":
+		file.Name = "image.jpg"
+		file.ContentType = "image/jpeg"
+	case "video":
+		file.Name = "video.mp4"
+		file.ContentType = "video/mp4"
+	case "audio":
+		file.Name = "audio.ogg"
+		file.ContentType = "audio/ogg"
+	case "document":
+		file.Name = "document.bin"
+		file.ContentType = "application/octet-stream"
+	case "sticker":
+		file.Name = "sticker.webp"
+		file.ContentType = "image/webp"
+	default:
+		return nil, errors.New("unsupported Discord media kind")
+	}
+	return file, nil
+}
+
+func isDiscordMediaKind(kind string) bool {
+	switch kind {
+	case "image", "video", "audio", "document", "sticker":
+		return true
+	default:
+		return false
+	}
+}
+
+func sanitizeOutgoingMentions(content string, mentions []transport.Mention) string {
+	for _, mention := range mentions {
+		remoteID := strings.TrimSpace(mention.RemoteID)
+		if remoteID == "" {
+			continue
+		}
+		name := strings.Join(strings.Fields(mention.Name), " ")
+		if name == "" || name == remoteID {
+			name = "participant"
+		}
+		content = strings.ReplaceAll(content, "@"+remoteID, "@"+name)
+	}
+	return content
+}
+
+func discordPollText(question string, options []string, selectableCount int) (string, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return "", errors.New("outgoing Discord poll question is required")
+	}
+	if len(options) == 0 {
+		return "", errors.New("outgoing Discord poll options are required")
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Poll: ")
+	builder.WriteString(question)
+	for i, option := range options {
+		builder.WriteString("\n")
+		builder.WriteString(fmt.Sprintf("%d. %s", i+1, strings.TrimSpace(option)))
+	}
+	if selectableCount > 1 {
+		builder.WriteString(fmt.Sprintf("\nChoose up to %d options.", selectableCount))
+	} else {
+		builder.WriteString("\nChoose one option.")
+	}
+	return builder.String(), nil
+}
+
+func discordNativePoll(question string, options []string, selectableCount, durationHours int) (*discordgo.Poll, bool) {
+	question = strings.TrimSpace(question)
+	if question == "" || utf8.RuneCountInString(question) > 300 || len(options) == 0 || len(options) > 10 {
+		return nil, false
+	}
+	if selectableCount != 1 && selectableCount != len(options) {
+		return nil, false
+	}
+	if durationHours == 0 {
+		durationHours = 24
+	}
+	if durationHours < 1 || durationHours > 168 {
+		return nil, false
+	}
+	answers := make([]discordgo.PollAnswer, 0, len(options))
+	for _, option := range options {
+		option = strings.TrimSpace(option)
+		if option == "" || utf8.RuneCountInString(option) > 55 {
+			return nil, false
+		}
+		answers = append(answers, discordgo.PollAnswer{Media: &discordgo.PollMedia{Text: option}})
+	}
+	return &discordgo.Poll{
+		Question: discordgo.PollMedia{Text: question}, Answers: answers,
+		AllowMultiselect: selectableCount > 1, LayoutType: discordgo.PollLayoutTypeDefault,
+		Duration: durationHours,
+	}, true
+}
