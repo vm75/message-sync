@@ -22,8 +22,9 @@ var schemaSQL string
 type Store struct{ db *sql.DB }
 
 // PruneRetention removes only expired/terminal control-plane artifacts in a
-// bounded transaction. It returns evidence references for the caller to unlink
-// from the private evidence directory; routing state is never touched.
+// bounded transaction. Evidence references are queued durably before their
+// membership rows are deleted, and are also returned so the caller may attempt
+// immediate unlinking from the private evidence directory.
 func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Duration, batch int) ([]string, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("control database is required")
@@ -68,6 +69,11 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 		return nil, fmt.Errorf("iterate expired membership evidence: %w", err)
 	}
 	rows.Close()
+	for _, ref := range refs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO evidence_cleanup_queue(evidence_reference,created_at,next_attempt_at) VALUES(?,?,?) ON CONFLICT(evidence_reference) DO UPDATE SET next_attempt_at=MIN(evidence_cleanup_queue.next_attempt_at,excluded.next_attempt_at)`, ref, now.UnixMilli(), now.UnixMilli()); err != nil {
+			return nil, fmt.Errorf("queue membership evidence cleanup: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch); err != nil {
 		return nil, fmt.Errorf("prune membership requests: %w", err)
 	}
@@ -133,7 +139,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 }
 
 func (s *Store) DB() *sql.DB {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return nil
 	}
 	return s.db
