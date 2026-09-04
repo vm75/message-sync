@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,20 +29,21 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
-	ConnectionID        string
-	Token               string
-	ChatIDs             map[string]string
-	Hasher              *identity.Hasher
-	UsernameMode        config.UsernameMode
-	Logger              *slog.Logger
-	MediaEnabled        bool
-	MediaMaxBytes       uint64
-	InitialUpdateID     int64
-	clientFactory       botClientFactory
-	httpClient          *http.Client
-	retryWait           func(context.Context, time.Duration) error
-	MigrateEndpoint     func(context.Context, transport.EndpointID, string, string) error
-	ResolvePollEndpoint func(context.Context, string) (transport.EndpointID, bool)
+	ConnectionID           string
+	Token                  string
+	ChatIDs                map[string]string
+	Hasher                 *identity.Hasher
+	UsernameMode           config.UsernameMode
+	Logger                 *slog.Logger
+	MediaEnabled           bool
+	MediaMaxBytes          uint64
+	InitialUpdateID        int64
+	clientFactory          botClientFactory
+	httpClient             *http.Client
+	retryWait              func(context.Context, time.Duration) error
+	MigrateEndpoint        func(context.Context, transport.EndpointID, string, string) error
+	ResolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
+	ObserveChildScopeLabel transport.ChildScopeLabelObserver
 }
 
 type Adapter struct {
@@ -55,12 +57,13 @@ type Adapter struct {
 	token        string
 	httpClient   *http.Client
 
-	mediaEnabled        bool
-	mediaMaxBytes       uint64
-	retryWait           func(context.Context, time.Duration) error
-	migrateEndpoint     func(context.Context, transport.EndpointID, string, string) error
-	resolvePollEndpoint func(context.Context, string) (transport.EndpointID, bool)
-	messageKinds        map[messageKindKey]string
+	mediaEnabled           bool
+	mediaMaxBytes          uint64
+	retryWait              func(context.Context, time.Duration) error
+	migrateEndpoint        func(context.Context, transport.EndpointID, string, string) error
+	resolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
+	observeChildScopeLabel transport.ChildScopeLabelObserver
+	messageKinds           map[messageKindKey]string
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
@@ -106,22 +109,23 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
-		connectionID:        strings.TrimSpace(opts.ConnectionID),
-		normalizer:          normalizer,
-		hasher:              opts.Hasher,
-		events:              make(chan transport.Incoming, eventBufferSize),
-		logger:              opts.Logger,
-		token:               token,
-		httpClient:          httpClient,
-		mediaEnabled:        opts.MediaEnabled,
-		mediaMaxBytes:       opts.MediaMaxBytes,
-		retryWait:           opts.retryWait,
-		migrateEndpoint:     opts.MigrateEndpoint,
-		resolvePollEndpoint: opts.ResolvePollEndpoint,
-		messageKinds:        make(map[messageKindKey]string),
-		observed:            make(map[int64]observedChatEntry),
-		polling:             true,
-		pollCancel:          pollCancel,
+		connectionID:           strings.TrimSpace(opts.ConnectionID),
+		normalizer:             normalizer,
+		hasher:                 opts.Hasher,
+		events:                 make(chan transport.Incoming, eventBufferSize),
+		logger:                 opts.Logger,
+		token:                  token,
+		httpClient:             httpClient,
+		mediaEnabled:           opts.MediaEnabled,
+		mediaMaxBytes:          opts.MediaMaxBytes,
+		retryWait:              opts.retryWait,
+		migrateEndpoint:        opts.MigrateEndpoint,
+		resolvePollEndpoint:    opts.ResolvePollEndpoint,
+		observeChildScopeLabel: opts.ObserveChildScopeLabel,
+		messageKinds:           make(map[messageKindKey]string),
+		observed:               make(map[int64]observedChatEntry),
+		polling:                true,
+		pollCancel:             pollCancel,
 	}
 
 	factory := opts.clientFactory
@@ -284,6 +288,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	)
 	switch {
 	case update.Message != nil:
+		a.observeForumTopicLabel(ctx, normalizer, update.Message)
 		if a.handleTelegramMigration(ctx, normalizer, update.Message) {
 			a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
 			return
@@ -295,6 +300,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 			a.logIgnoredTelegramMessage(normalizer, update.Message, botUserID)
 		}
 	case update.EditedMessage != nil:
+		a.observeForumTopicLabel(ctx, normalizer, update.EditedMessage)
 		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)
 	case update.MessageReaction != nil:
 		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
@@ -325,6 +331,31 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		incoming.Checkpoint.EventTimestamp = incoming.Timestamp
 	}
 	a.emit(incoming)
+}
+
+func (a *Adapter) observeForumTopicLabel(ctx context.Context, normalizer *Normalizer, message *models.Message) {
+	if a == nil || normalizer == nil || message == nil || message.Chat.Type != "supergroup" || message.MessageThreadID <= 0 || a.observeChildScopeLabel == nil {
+		return
+	}
+	var label string
+	switch {
+	case message.ForumTopicCreated != nil:
+		label = message.ForumTopicCreated.Name
+	case message.ForumTopicEdited != nil:
+		label = message.ForumTopicEdited.Name
+	default:
+		return
+	}
+	if strings.TrimSpace(label) == "" {
+		return
+	}
+	endpoint, ok := normalizer.endpoint(message.Chat.ID)
+	if !ok {
+		return
+	}
+	a.observeChildScopeLabel(ctx, endpoint, transport.ChildScope{
+		Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(message.MessageThreadID), Label: label,
+	})
 }
 
 func telegramUpdateTimestamp(update *models.Update) time.Time {

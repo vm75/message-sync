@@ -167,7 +167,10 @@ The system maintains a strict 3-tier hierarchy:
 `canonical_scopes` stores `(canonical_id, endpoint_id, scope_kind,
 remote_scope_id, created_at)` with one row per canonical/endpoint pair.
 `scope_kind` is a fixed `discord_thread` or `telegram_topic` enum; the remote
-scope ID is opaque operational addressing and labels are never persisted.
+scope ID is opaque operational addressing. Optional friendly presentation labels
+are stored separately in `child_scope_labels`, keyed by endpoint, scope kind, and
+remote scope ID. The default opaque mode never writes labels; friendly labels are
+normalized presentation metadata only and never affect routing or canonical identity.
 
 ### REST API, Web UI & Authentication
 
@@ -358,7 +361,7 @@ The application registers Telegram in the existing transport adapter registry an
 
 #### Telegram forum topics, group migration, mentions, polls, and media handling
 
-Telegram forum topics deliberately flatten into the configured parent group/supergroup alias while preserving a message-level `telegram_topic` scope. `message_thread_id` and forum-topic names stay out of endpoint configuration; only the opaque topic ID is retained in canonical scope lineage. Ordinary cross-platform messages target the configured parent/general context, while mapped scoped replies and lifecycle operations set the explicit Bot API `MessageThreadID` when returning to a topic. No permanent topic mapping or discovery registry exists.
+Telegram forum topics deliberately flatten into the configured parent group/supergroup alias while preserving a message-level `telegram_topic` scope. `message_thread_id` and forum-topic names stay out of endpoint configuration; only the opaque topic ID is retained in canonical scope lineage. Ordinary cross-platform messages target the configured parent/general context, while mapped scoped replies and lifecycle operations set the explicit Bot API `MessageThreadID` when returning to a topic. In opt-in friendly display mode, supported topic create/edit service messages update the separate `child_scope_labels` presentation catalog; service messages themselves are never canonicalized or broadcast. No permanent routing topic registry exists.
 
 A basic-group to supergroup migration is handled as addressing maintenance: the adapter recognizes Telegram's migration service message, transactionally changes only the matching Telegram endpoint `remote_id`, preserves alias and `sync_set_id`, then replaces its in-memory chat mapping so subsequent messages from the supergroup continue routing under the same alias. Migration logs never include old/new chat IDs.
 

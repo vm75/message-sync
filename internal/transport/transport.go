@@ -56,6 +56,10 @@ type ChildScope struct {
 	Label    string
 }
 
+// ChildScopeLabelObserver receives transient provider metadata for optional
+// presentation persistence. It must never be used for routing or identity.
+type ChildScopeLabelObserver func(context.Context, EndpointID, ChildScope)
+
 type Sender struct {
 	DisplayName string // transient only; never persist
 	PhoneNumber string // transient only; never persist

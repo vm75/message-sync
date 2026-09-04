@@ -293,6 +293,64 @@ func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
 	}
 }
 
+func TestHandleUpdateObservesTelegramForumTopicLabelsWithoutRoutingServiceMessages(t *testing.T) {
+	normalizer := testNormalizer(t, config.UsernameModeHash)
+	type observedLabel struct {
+		endpoint transport.EndpointID
+		scope    transport.ChildScope
+	}
+	labels := make(chan observedLabel, 4)
+	adapter := &Adapter{
+		normalizer: normalizer,
+		events:     make(chan transport.Incoming, 4),
+		botUserID:  testBotUserID,
+		observeChildScopeLabel: func(_ context.Context, endpoint transport.EndpointID, scope transport.ChildScope) {
+			labels <- observedLabel{endpoint: endpoint, scope: scope}
+		},
+	}
+
+	created := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	created.Text = ""
+	created.MessageThreadID = 777
+	created.ForumTopicCreated = &models.ForumTopicCreated{Name: "  Project\n Alpha  "}
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 30, Message: created})
+	edited := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	edited.Text = ""
+	edited.MessageThreadID = 777
+	edited.ForumTopicEdited = &models.ForumTopicEdited{Name: "Renamed"}
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 31, Message: edited})
+	emptyEdit := testMessage(testSupergroupID, models.ChatTypeSupergroup)
+	emptyEdit.Text = ""
+	emptyEdit.MessageThreadID = 777
+	emptyEdit.ForumTopicEdited = &models.ForumTopicEdited{}
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 32, Message: emptyEdit})
+	unconfigured := testMessage(-1009999999999, models.ChatTypeSupergroup)
+	unconfigured.Text = ""
+	unconfigured.MessageThreadID = 777
+	unconfigured.ForumTopicCreated = &models.ForumTopicCreated{Name: "Not stored"}
+	adapter.handleUpdate(context.Background(), nil, &models.Update{ID: 33, Message: unconfigured})
+
+	for _, want := range []string{"super-telegram:  Project\n Alpha  ", "super-telegram:Renamed"} {
+		select {
+		case got := <-labels:
+			if string(got.endpoint)+":"+got.scope.Label != want || got.scope.RemoteID != "777" || got.scope.Kind != transport.ScopeKindTelegramTopic {
+				t.Fatalf("observed label = %#v, want %q", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("did not observe label %q", want)
+		}
+	}
+	if len(adapter.events) != 4 {
+		t.Fatalf("service messages should only emit checkpoints, got %d events", len(adapter.events))
+	}
+	for i := 0; i < 4; i++ {
+		incoming := <-adapter.events
+		if incoming.Kind != "other" {
+			t.Fatalf("service message was routed as %#v", incoming)
+		}
+	}
+}
+
 func TestPinnedBotClientLongPollReconnectUsesBackoff(t *testing.T) {
 	var (
 		mu           sync.Mutex

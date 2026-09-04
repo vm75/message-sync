@@ -25,8 +25,8 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | 3 | [#85](https://github.com/vm75/message-sync/issues/85) | Telegram groups/supergroups-only endpoint validation | Establish final Telegram parent-target boundary before adding topic-name learning. | Complete |
 | 4 | [#89](https://github.com/vm75/message-sync/issues/89) | Bug: Telegram reactions do not propagate | Correct lifecycle behavior before expanding presentation metadata. | Complete |
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Complete |
-| 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Pending |
-| 7 | [#91](https://github.com/vm75/message-sync/issues/91) | Friendly contexts 2/4: learn Discord thread / Telegram topic names | Depends on #90 and #85. Persist names only in friendly mode. | Pending |
+| 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Complete |
+| 7 | [#91](https://github.com/vm75/message-sync/issues/91) | Friendly contexts 2/4: learn Discord thread / Telegram topic names | Depends on #90 and #85. Persist names only in friendly mode. | Complete |
 | 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Pending |
 | 9 | [#93](https://github.com/vm75/message-sync/issues/93) | Friendly contexts 4/4: UI, docs, privacy disclosure, E2E tests | Finalize optional feature after #90-#92. | Pending |
 | 10 | [#86](https://github.com/vm75/message-sync/issues/86) | Discord/Telegram online setup help | Do after Telegram/friendly-context behavior is stable to avoid duplicated documentation churn. | Pending |
@@ -123,6 +123,19 @@ Rules:
 - Added adapter-level regression coverage for Telegram reaction add, removal, replacement, endpoint/message targeting, and recovery checkpoint emission.
 - Unsupported custom, paid, and multiple reactions remain safely rejected by the existing normalizer.
 - Validation: the full required repository gate passes.
+
+### #90 — Friendly context configuration and label catalog
+
+- Added default-opaque, opt-in-friendly configuration through persistence and the authenticated config API.
+- Added isolated normalized `child_scope_labels` storage with endpoint rename/delete handling and mode-disable cleanup; routing state remains separate.
+- Validation: store/API normalization, isolation, cascade, mode validation, and full repository checks pass.
+
+### #91 — Friendly context label learning
+
+- Added an app-owned, narrow child-scope label observer; Discord ingress/recovery supplies transient thread names and Telegram topic create/edit service messages supply configured-supergroup topic names.
+- Opaque mode performs no label writes; unknown/blank names, unsupported chats, and metadata failures do not create routing events or block normal message handling. Telegram service messages emit only safe checkpoints and are never broadcast.
+- Added regression coverage for Telegram create/rename/blank-edit/unconfigured behavior and documented the presentation-only privacy boundary.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` pass.
 
 ### #88 — Telegram destination source alias
 

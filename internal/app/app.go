@@ -127,6 +127,23 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		cfg = loadedCfg
 	}
 
+	observeChildScopeLabel := transport.ChildScopeLabelObserver(func(observeCtx context.Context, endpoint transport.EndpointID, scope transport.ChildScope) {
+		if strings.TrimSpace(scope.Label) == "" {
+			return
+		}
+		currentCfg, loadErr := config.LoadRaw(observeCtx, syncStore.DB())
+		if loadErr != nil {
+			safelog.Error(logger, "load child scope display mode failed", "child_scope_mode", loadErr)
+			return
+		}
+		if currentCfg.ChildContextDisplayMode != config.ChildContextDisplayFriendly {
+			return
+		}
+		if upsertErr := syncStore.UpsertChildScopeLabel(observeCtx, string(endpoint), string(scope.Kind), scope.RemoteID, scope.Label); upsertErr != nil {
+			safelog.Error(logger, "persist child scope label failed", "child_scope_label", upsertErr)
+		}
+	})
+
 	telegramChatIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		switch endpoint.Transport {
@@ -267,6 +284,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							}
 							return transport.EndpointID(endpoint), true
 						},
+						ObserveChildScopeLabel: observeChildScopeLabel,
 					})
 					if err != nil {
 						safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
@@ -491,6 +509,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 								}
 								return transport.EndpointID(endpoint), true
 							},
+							ObserveChildScopeLabel: observeChildScopeLabel,
 						})
 						if err != nil {
 							safelog.Error(logger, "start Telegram transport failed", "telegram_start", err)
@@ -628,6 +647,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		case incoming, ok := <-connMgr.Events():
 			if !ok {
 				return errors.New("connection manager event stream closed")
+			}
+			if incoming.ChildScope != nil {
+				observeChildScopeLabel(ctx, incoming.Endpoint, *incoming.ChildScope)
 			}
 			if _, err := recoveryCoordinator.Handle(ctx, incoming); err != nil {
 				safelog.Error(logger, "message routing failed", "route_message", err)
