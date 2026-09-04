@@ -90,4 +90,11 @@
   deliveryHealthPresentation.src = '/js/delivery-health-polish.js?v=1';
   deliveryHealthPresentation.async = false;
   document.body.appendChild(deliveryHealthPresentation);
+
+  // Client-only feature preference. Membership review is opt-in and hidden by
+  // default without changing any server-side membership behavior or config.
+  const membershipFeature = document.createElement('script');
+  membershipFeature.src = '/js/membership-feature.js?v=1';
+  membershipFeature.async = false;
+  document.body.appendChild(membershipFeature);
 })();
