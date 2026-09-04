@@ -4,6 +4,13 @@
   table-layout: auto;
 }
 
+/* app-base.js briefly writes its legacy six-column rows on each poll. Keep that
+   intermediate DOM invisible until delivery-health-polish.js rewrites it in the
+   same microtask, so the user only ever sees the stable grouped layout. */
+.delivery-health-table.delivery-polish-pending tbody {
+  visibility: hidden;
+}
+
 .delivery-health-table th,
 .delivery-health-table td {
   vertical-align: middle;
