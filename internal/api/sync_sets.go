@@ -319,8 +319,8 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
-		safelog.Error(s.logger, "unassign sync set endpoints failed", "sync_set_api", err)
+	if _, err := tx.ExecContext(r.Context(), `DELETE FROM endpoints WHERE sync_set_id = ?`, id); err != nil {
+		safelog.Error(s.logger, "delete sync set endpoints failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
