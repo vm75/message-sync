@@ -361,7 +361,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" || r.URL.Path == "/api/verification/email/verify" || r.URL.Path == "/api/verification/email/resend" || (strings.HasPrefix(r.URL.Path, "/api/verification/") && r.URL.Path != "/api/verification/requests" && !strings.HasPrefix(r.URL.Path, "/api/verification/pipelines") && !strings.HasPrefix(r.URL.Path, "/api/verification/requests/")) {
+		if r.URL.Path == "/api/auth/status" || r.URL.Path == "/api/auth/setup" || r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/invite/redeem" || r.URL.Path == "/api/auth/reset-password" || r.URL.Path == "/api/verification/email/verify" || r.URL.Path == "/api/verification/email/resend" || strings.HasPrefix(r.URL.Path, "/api/verification/join/") || (strings.HasPrefix(r.URL.Path, "/api/verification/") && r.URL.Path != "/api/verification/requests" && !strings.HasPrefix(r.URL.Path, "/api/verification/pipelines") && !strings.HasPrefix(r.URL.Path, "/api/verification/requests/")) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -383,6 +383,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 }
 
 func requiresAdmin(method, path string) bool {
+	if strings.HasPrefix(path, "/api/sync-sets/") && strings.HasSuffix(path, "/membership") {
+		return true
+	}
 	if path == "/api/users" || strings.HasPrefix(path, "/api/users/") || path == "/api/audit" || path == "/api/verification/pipelines" || strings.HasPrefix(path, "/api/verification/pipelines/") {
 		return true
 	}

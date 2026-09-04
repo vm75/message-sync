@@ -309,17 +309,17 @@ func TestMultiAdmin_MembershipVerificationRouting(t *testing.T) {
 		return []verification.WhatsAppAdmin{a1, a2}
 	})
 
-	errUnknown := multiAdmin.AddParticipant(context.Background(), "unknown-alias", "+1234567890")
+	_, errUnknown := multiAdmin.JoinApprovalRequired(context.Background(), "unknown-alias")
 	if errUnknown != verification.ErrDestinationMissing {
 		t.Fatalf("expected ErrDestinationMissing for unknown alias, got: %v", errUnknown)
 	}
 
-	errA := multiAdmin.AddParticipant(context.Background(), "team-a", "+1234567890")
+	_, errA := multiAdmin.JoinApprovalRequired(context.Background(), "team-a")
 	if errA == verification.ErrDestinationMissing {
 		t.Fatalf("team-a should have been routed to a1, got ErrDestinationMissing")
 	}
 
-	errB := multiAdmin.AddParticipant(context.Background(), "team-b", "+1234567890")
+	_, errB := multiAdmin.JoinApprovalRequired(context.Background(), "team-b")
 	if errB == verification.ErrDestinationMissing {
 		t.Fatalf("team-b should have been routed to a2, got ErrDestinationMissing")
 	}

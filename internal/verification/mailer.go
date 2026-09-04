@@ -32,7 +32,13 @@ func (m *ResendMailer) Send(ctx context.Context, recipient, label, challenge str
 	if m == nil || m.APIKey == "" || m.From == "" {
 		return errors.New("mailer unavailable")
 	}
-	payload := map[string]any{"from": m.From, "to": []string{recipient}, "subject": "Verify your membership application", "text": fmt.Sprintf("Your %s verification challenge is: %s", label, challenge)}
+	subject := "Verify your membership application"
+	text := fmt.Sprintf("Your %s verification challenge is: %s", label, challenge)
+	if strings.HasPrefix(challenge, "https://") || strings.HasPrefix(challenge, "http://") {
+		subject = "Your approved membership join link"
+		text = fmt.Sprintf("Your approved %s membership join link is: %s", label, challenge)
+	}
+	payload := map[string]any{"from": m.From, "to": []string{recipient}, "subject": subject, "text": text}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(body))
 	if err != nil {

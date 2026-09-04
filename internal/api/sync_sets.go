@@ -163,7 +163,6 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if sync_set id already exists
 	var existing string
 	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id = ?`, req.ID).Scan(&existing)
 	if err == nil {
@@ -175,7 +174,6 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate endpoints in request
 	if err := s.validateSyncSetEndpoints(r, req.ID, req.Endpoints, true); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -209,7 +207,6 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
-
 	s.notifyConfigChange(r.Context())
 
 	endpoints := req.Endpoints
@@ -245,7 +242,6 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if sync_set id exists
 	var existing string
 	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id = ?`, id).Scan(&existing)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -257,7 +253,6 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate endpoints
 	if err := s.validateSyncSetEndpoints(r, id, req.Endpoints, false); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
@@ -271,14 +266,12 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Clear current members
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
 		safelog.Error(s.logger, "clear old sync set memberships failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
 
-	// Assign new members
 	for _, alias := range req.Endpoints {
 		alias = strings.TrimSpace(alias)
 		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, id, alias); err != nil {
@@ -326,7 +319,6 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// Unassign endpoints
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
 		safelog.Error(s.logger, "unassign sync set endpoints failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
@@ -355,6 +347,14 @@ func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {
 		safelog.Error(s.logger, "commit delete sync set tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
+	}
+
+	if s.controlDB != nil {
+		if _, err := s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_configs WHERE sync_set_id=?`, id); err != nil {
+			safelog.Error(s.logger, "delete sync set membership config failed", "sync_set_api", err)
+			WriteError(w, http.StatusInternalServerError, "failed to delete membership configuration")
+			return
+		}
 	}
 
 	s.notifyConfigChange(r.Context())

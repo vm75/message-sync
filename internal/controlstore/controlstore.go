@@ -19,11 +19,15 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db          *sql.DB
+	evidenceDir string
+}
 
 // PruneRetention removes only expired/terminal control-plane artifacts in a
-// bounded transaction. It returns evidence references for the caller to unlink
-// from the private evidence directory; routing state is never touched.
+// bounded transaction. Evidence references are queued durably before their
+// membership rows are deleted, and are also returned so the caller may attempt
+// immediate unlinking from the private evidence directory.
 func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Duration, batch int) ([]string, error) {
 	if s == nil || s.db == nil {
 		return nil, errors.New("control database is required")
@@ -39,6 +43,7 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 	defer tx.Rollback()
 	for _, q := range []string{
 		`DELETE FROM email_challenges WHERE rowid IN (SELECT rowid FROM email_challenges WHERE expires_at < ? LIMIT ?)`,
+		`DELETE FROM membership_join_tokens WHERE rowid IN (SELECT rowid FROM membership_join_tokens WHERE expires_at < ? OR revoked_at IS NOT NULL OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM user_invites WHERE rowid IN (SELECT rowid FROM user_invites WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM password_reset_tokens WHERE rowid IN (SELECT rowid FROM password_reset_tokens WHERE expires_at < ? OR consumed_at IS NOT NULL LIMIT ?)`,
 		`DELETE FROM sessions WHERE rowid IN (SELECT rowid FROM sessions WHERE expires_at < ? OR revoked_at IS NOT NULL LIMIT ?)`,
@@ -47,7 +52,7 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 			return nil, fmt.Errorf("prune control artifacts: %w", err)
 		}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT evidence_reference FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch)
+	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(evidence_reference,'') FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch)
 	if err != nil {
 		return nil, fmt.Errorf("select expired membership evidence: %w", err)
 	}
@@ -67,13 +72,67 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 		return nil, fmt.Errorf("iterate expired membership evidence: %w", err)
 	}
 	rows.Close()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE status IN ('rejected','fulfilled','cancelled','expired') AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch); err != nil {
+	for _, ref := range refs {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO evidence_cleanup_queue(evidence_reference,created_at,next_attempt_at) VALUES(?,?,?) ON CONFLICT(evidence_reference) DO UPDATE SET next_attempt_at=MIN(evidence_cleanup_queue.next_attempt_at,excluded.next_attempt_at)`, ref, now.UnixMilli(), now.UnixMilli()); err != nil {
+			return nil, fmt.Errorf("queue membership evidence cleanup: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch); err != nil {
 		return nil, fmt.Errorf("prune membership requests: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit control retention: %w", err)
 	}
+
+	// Startup/daily retention is also the bounded recovery path for evidence
+	// bytes left behind by a crash between filesystem creation/deletion and the
+	// corresponding control.db transaction. A short age grace avoids racing an
+	// in-flight intake that has created its file but has not committed its row.
+	s.pruneOrphanEvidence(ctx, now, batch)
 	return refs, nil
+}
+
+func (s *Store) pruneOrphanEvidence(ctx context.Context, now time.Time, batch int) {
+	if s == nil || s.db == nil || strings.TrimSpace(s.evidenceDir) == "" {
+		return
+	}
+	if batch <= 0 {
+		batch = 100
+	}
+	entries, err := os.ReadDir(s.evidenceDir)
+	if err != nil {
+		return
+	}
+	graceCutoff := now.Add(-10 * time.Minute)
+	checked := 0
+	for _, entry := range entries {
+		if checked >= batch {
+			break
+		}
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() || info.ModTime().After(graceCutoff) {
+			continue
+		}
+		ref := entry.Name()
+		if ref == "" || filepath.Base(ref) != ref {
+			continue
+		}
+		checked++
+		var active int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM membership_requests WHERE evidence_reference=? AND status IN ('pending_email','pending_admin','pending')`, ref).Scan(&active); err != nil {
+			return
+		}
+		if active > 0 {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.evidenceDir, ref)); err != nil && !os.IsNotExist(err) {
+			continue
+		}
+		_, _ = s.db.ExecContext(ctx, `DELETE FROM evidence_cleanup_queue WHERE evidence_reference=?`, ref)
+	}
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -81,10 +140,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("control database path is required")
 	}
+	evidenceDir := ""
 	if path != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return nil, fmt.Errorf("create control database directory: %w", err)
 		}
+		evidenceDir = filepath.Join(filepath.Dir(path), "membership-evidence")
 	}
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -128,11 +189,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 			return nil, fmt.Errorf("secure control database permissions: %w", err)
 		}
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, evidenceDir: evidenceDir}, nil
 }
 
 func (s *Store) DB() *sql.DB {
-	if s == nil {
+	if s == nil || s.db == nil {
 		return nil
 	}
 	return s.db

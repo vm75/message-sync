@@ -269,7 +269,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 	var existing string
 	var existingAlias, existingTransport, existingConnID, existingRemoteID string
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID)
+	var existingSyncSet sql.NullString
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID, &existingSyncSet)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -289,6 +290,26 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
+	existingSyncSetID := ""
+	if existingSyncSet.Valid {
+		existingSyncSetID = strings.TrimSpace(existingSyncSet.String)
+	}
+	requestedSyncSetID := ""
+	if req.SyncSetID != nil {
+		requestedSyncSetID = strings.TrimSpace(*req.SyncSetID)
+	}
+	outstanding, guardErr := s.endpointHasOutstandingMembershipRequests(r.Context(), alias)
+	if guardErr != nil {
+		safelog.Error(s.logger, "check membership endpoint guard failed", "endpoint_update", guardErr)
+		WriteError(w, http.StatusInternalServerError, "membership state unavailable")
+		return
+	}
+	if outstanding && (newAlias != alias || string(req.Transport) != existingTransport || targetConnID != existingConnID || req.RemoteID != existingRemoteID || requestedSyncSetID != existingSyncSetID) {
+		WriteError(w, http.StatusConflict, "endpoint has outstanding membership requests")
+		return
+	}
+
 	if req.Transport == config.TransportTelegram {
 		validator, ok := s.connections.(telegramTargetValidator)
 		if !ok {
@@ -430,6 +451,17 @@ func (s *Server) handleDeleteEndpoint(w http.ResponseWriter, r *http.Request) {
 	alias := strings.TrimSpace(r.PathValue("alias"))
 	if alias == "" {
 		WriteError(w, http.StatusBadRequest, "endpoint alias is required")
+		return
+	}
+
+	outstanding, guardErr := s.endpointHasOutstandingMembershipRequests(r.Context(), alias)
+	if guardErr != nil {
+		safelog.Error(s.logger, "check membership endpoint guard failed", "endpoint_delete", guardErr)
+		WriteError(w, http.StatusInternalServerError, "membership state unavailable")
+		return
+	}
+	if outstanding {
+		WriteError(w, http.StatusConflict, "endpoint has outstanding membership requests")
 		return
 	}
 

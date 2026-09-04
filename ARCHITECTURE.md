@@ -101,7 +101,9 @@ Verification pipelines and membership requests remain in this control-plane
 boundary. Pipeline administration resolves the configured endpoint alias
 against `sync.db` at mutation time but does not copy its remote target into
 `control.db`. Public pipeline responses expose only a label and the fields
-needed to render intake. Evidence is written with a random filename below the
+needed to render intake. Applicant/reviewer instructions, evidence requirements,
+and bounded custom-field definitions are keyed by the endpoint's sync-set ID
+in `control.db`; they are not copied into `sync.db`. Evidence is written with a random filename below the
 dedicated private `/data/membership-evidence` path, mode `0600`, after bounded
 MIME/size checks; request deletion removes the file and control record.
 Work-email challenges are stored only as hashes with expiry and bounded
@@ -114,7 +116,16 @@ When `OPENROUTER_API_KEY` is configured with the explicit
 bounded asynchronous job. Only structured bounded results are stored in
 `control.db`; raw prompts/responses are discarded. PDFs remain human-review
 material, provider failures are unavailable/failed states, and no AI result
-can advance or decide membership.
+can advance or decide membership. The detected bounded evidence MIME is passed
+to the existing analyzer boundary without storing the bytes in `control.db`.
+Final human approve/reject decisions unlink local evidence immediately;
+`needs_review` retains it for the reviewer.
+
+Each membership request stores an immutable JSON snapshot of the sync-set form
+definition and the validated answers in `control.db`. Subsequent edits to the
+sync-set configuration therefore cannot reinterpret an existing application;
+unknown fields, missing required fields, unsupported types, and overlong
+answers are rejected at the public intake boundary.
 Control-plane retention runs at startup and on the daily maintenance tick in
 bounded batches. Expired or revoked sessions, consumed/expired invites and
 reset tokens, expired email challenges, and terminal membership requests older
@@ -124,10 +135,21 @@ directory; routing state in `sync.db` is never touched.
 
 Approved membership fulfillment is implemented outside canonical routing. It
 resolves endpoint aliases at action time, checks WhatsApp membership before
-adding a participant, assigns Discord roles through the existing bot session,
-and records only safe fulfillment state/classes in `control.db`. WhatsApp
-invite fallback is emailed only through the optional mailer and remains
-`action_pending` until membership and invite rotation are confirmed.
+issuing an invite, assigns Discord roles through the existing bot session, and
+records only safe fulfillment state/classes in `control.db`. WhatsApp never
+uses server-side participant addition. The target group must require approval
+for invite-link joins; otherwise fulfillment remains `action_pending` with an
+administrator-action class. Pending join requests are read through the
+WhatsApp administration boundary, matched only against the applicant's
+submitted phone when the provider exposes a phone JID, and approved through
+the provider request API. LID-only requests are not guessed or matched.
+The authenticated connection-scoped readiness endpoint exposes only whether
+the join-approval prerequisite is met and fixed failure classes.
+Approved invite delivery uses a high-entropy, 48-hour bearer token stored only
+as a hash in `control.db`; the token is bound to the approved request and
+revoked/consumed when fulfillment completes or the request is deleted. The
+raw invite is obtained only at that guarded endpoint and is neither persisted
+nor logged.
 
 The verification state machine is `pending_email` → `pending_admin` after a
 valid work-email challenge, then `approved`, `rejected`, or `pending_admin`

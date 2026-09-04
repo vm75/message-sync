@@ -1,0 +1,299 @@
+/* Dashboard delivery health: compact, sync-set-grouped operational summary. */
+.delivery-health-table {
+  width: 100%;
+  table-layout: auto;
+}
+
+/* app-base.js briefly writes its legacy six-column rows on each poll. Keep that
+   intermediate DOM invisible until delivery-health-polish.js rewrites it in the
+   same microtask, so the user only ever sees the stable grouped layout. */
+.delivery-health-table.delivery-polish-pending tbody {
+  visibility: hidden;
+}
+
+.delivery-health-table th,
+.delivery-health-table td {
+  vertical-align: middle;
+}
+
+.delivery-health-table th {
+  white-space: nowrap;
+}
+
+.delivery-health-table th:first-child,
+.delivery-health-table td:first-child {
+  padding-left: 18px;
+}
+
+.delivery-health-table th:last-child,
+.delivery-health-table td:last-child {
+  padding-right: 18px;
+}
+
+.delivery-health-table tbody tr.delivery-group-a > td {
+  background: var(--bg-surface);
+}
+
+.delivery-health-table tbody tr.delivery-group-b > td {
+  background: color-mix(in srgb, var(--bg-elevated) 68%, var(--bg-surface));
+}
+
+.delivery-health-table tbody tr.delivery-group-a:hover > td,
+.delivery-health-table tbody tr.delivery-group-b:hover > td {
+  background: var(--bg-hover);
+}
+
+.delivery-health-table tbody tr.delivery-group-start:not(:first-child) > td {
+  border-top-color: var(--border-strong);
+}
+
+.delivery-syncset-cell {
+  width: 18%;
+  min-width: 110px;
+}
+
+.delivery-syncset-label {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: .76rem;
+  font-weight: 650;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delivery-platform-column {
+  width: 74px;
+  text-align: center;
+}
+
+.delivery-platform-cell {
+  text-align: center;
+}
+
+.delivery-platform-icon {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.delivery-platform-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.delivery-platform-icon.wa {
+  color: var(--wa-color);
+}
+
+.delivery-platform-icon.discord {
+  color: var(--discord-color);
+}
+
+.delivery-platform-icon.telegram {
+  color: var(--telegram-color);
+}
+
+.delivery-status-cell {
+  min-width: 120px;
+  white-space: nowrap;
+}
+
+.delivery-health-dot {
+  width: 9px;
+  height: 9px;
+  display: inline-block;
+  margin-right: 9px;
+  border-radius: 999px;
+  vertical-align: 1px;
+}
+
+.delivery-health-dot.healthy {
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 16%, transparent);
+}
+
+.delivery-health-dot.unhealthy {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 16%, transparent);
+}
+
+.delivery-transport-state {
+  color: var(--text-primary);
+  font-size: .78rem;
+  font-weight: 550;
+}
+
+.delivery-column {
+  min-width: 300px;
+}
+
+.delivery-summary {
+  color: var(--text-secondary);
+  font-size: .74rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .delivery-card .settings-card-header {
+    padding: 11px 13px !important;
+  }
+
+  .delivery-card .table-responsive {
+    overflow-x: hidden;
+  }
+
+  .delivery-health-table {
+    table-layout: fixed;
+  }
+
+  .delivery-health-table th,
+  .delivery-health-table td {
+    min-width: 0;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 7px;
+    padding-right: 7px;
+    overflow: hidden;
+    font-size: .72rem;
+    text-overflow: ellipsis;
+  }
+
+  /* Four visible mobile columns must fit without competing fixed + percentage
+     widths. Keep the icon column fixed and let the text columns share the rest. */
+  .delivery-health-table th:first-child,
+  .delivery-health-table td:first-child {
+    width: 26%;
+    padding-left: 12px;
+  }
+
+  .delivery-health-table th:nth-child(2),
+  .delivery-health-table td:nth-child(2) {
+    width: 25%;
+  }
+
+  .delivery-health-table .delivery-platform-column {
+    width: 44px;
+  }
+
+  .delivery-health-table th:nth-child(4),
+  .delivery-health-table td:nth-child(4) {
+    width: auto;
+  }
+
+  .delivery-health-table .delivery-column {
+    display: none;
+  }
+
+  /* Platform is icon-only in the rows, so a short mobile header is clearer and
+     avoids the previous PLATFORM / STATUS collision around tablet-phone widths. */
+  .delivery-health-table th:nth-child(3) {
+    font-size: 0;
+    text-align: center;
+  }
+
+  .delivery-health-table th:nth-child(3)::after {
+    content: 'App';
+    font-size: .64rem;
+    letter-spacing: .02em;
+  }
+
+  .delivery-syncset-cell {
+    min-width: 0;
+  }
+
+  .delivery-syncset-label {
+    max-width: 100%;
+    font-size: .7rem;
+  }
+
+  .delivery-platform-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  .delivery-platform-icon svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .delivery-status-cell {
+    min-width: 0;
+  }
+
+  .delivery-health-dot {
+    width: 8px;
+    height: 8px;
+    margin-right: 6px;
+  }
+
+  .delivery-transport-state {
+    max-width: calc(100% - 18px);
+    display: inline-block;
+    overflow: hidden;
+    font-size: .7rem;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .delivery-health-table .alias-badge {
+    max-width: 100%;
+    display: inline-block;
+    overflow: hidden;
+    font-size: .68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 430px) {
+  .delivery-health-table th,
+  .delivery-health-table td {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  .delivery-health-table th:first-child,
+  .delivery-health-table td:first-child {
+    width: 24%;
+    padding-left: 9px;
+  }
+
+  .delivery-health-table th:nth-child(2),
+  .delivery-health-table td:nth-child(2) {
+    width: 24%;
+  }
+
+  .delivery-health-table .delivery-platform-column {
+    width: 38px;
+  }
+
+  .delivery-health-table th {
+    font-size: .61rem;
+    letter-spacing: .015em;
+  }
+
+  /* Shorten the longest remaining heading at phone widths. */
+  .delivery-health-table th:first-child {
+    font-size: 0;
+  }
+
+  .delivery-health-table th:first-child::after {
+    content: 'Set';
+    font-size: .61rem;
+    letter-spacing: .015em;
+  }
+
+  .delivery-health-table th:nth-child(3)::after {
+    font-size: .61rem;
+  }
+}
