@@ -9,7 +9,7 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](ARCHITECTURE.md#privacy-invariants)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](Containerfile)
 
-`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one transport-neutral canonical router. The authenticated Web UI provides Discord channel discovery plus transient Telegram observed-chat discovery without persisting human-readable remote names.
+`message-sync` is a simple server to sync messages between multiple messaging channels. End-to-end routing supports WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one transport-neutral canonical router. The authenticated Web UI provides Discord channel discovery plus transient Telegram observed-chat discovery without persisting human-readable remote names by default; the explicit friendly child-context option is the narrow exception for thread/topic labels.
 
 
 ## Features
@@ -38,7 +38,7 @@ Remote providers do not all offer deterministic client-assigned create IDs. When
 
 `message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord or Telegram user names/IDs, guild/channel/chat names, message bodies, media, source filenames, CDN/file URLs, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored.
+- **Zero PII/PHI by Default**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord or Telegram user names/IDs, guild/channel/chat names, message bodies, media, source filenames, CDN/file URLs, or contact cards. Configured transport endpoint IDs are stored only as the minimum operational addressing needed to reach an endpoint; human-readable remote names are not stored. The explicit friendly child-context option is a narrow exception that stores only bounded Discord thread/Telegram topic labels in its presentation catalog.
 - **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
 - **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
 - **Separation of State**: WhatsApp protocol state (`/data/whatsapp/<connection-id>.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated per connection (directory mode 0700, file mode 0600) and never accessed by application logic or exposed through the API.
