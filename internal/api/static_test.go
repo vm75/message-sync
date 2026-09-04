@@ -89,6 +89,9 @@ func TestStaticHandler(t *testing.T) {
 			"Connections → discovered parent conversations → Endpoints → Sync Sets",
 			"child scopes",
 			"admin-only",
+			`id="settings-child-context-mode"`,
+			"Friendly thread/topic names",
+			"Disabling friendly names removes stored names",
 		} {
 			if !strings.Contains(html, expected) {
 				t.Fatalf("Admin HTML missing %q", expected)

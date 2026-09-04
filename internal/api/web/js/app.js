@@ -179,6 +179,7 @@
   const formSettings                 = document.getElementById('form-settings');
   const settingsAlert                = document.getElementById('settings-alert');
   const settingsUsernameMode         = document.getElementById('settings-username-mode');
+  const settingsChildContextMode     = document.getElementById('settings-child-context-mode');
   const settingsMediaEnabled         = document.getElementById('settings-media-enabled');
   const settingsMediaMaxSize         = document.getElementById('settings-media-max-size');
   const settingsRecoveryEnabled      = document.getElementById('settings-recovery-enabled');
@@ -2276,6 +2277,7 @@
   function populateSettings(cfg) {
     if (!cfg) return;
     if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
+    if (settingsChildContextMode) settingsChildContextMode.value = cfg.childContextDisplayMode || 'opaque';
     if (settingsMediaEnabled)  settingsMediaEnabled.checked = cfg.media ? cfg.media.enabled : false;
     if (settingsMediaMaxSize)  settingsMediaMaxSize.value  = cfg.media ? cfg.media.maxSizeMB : 50;
     if (settingsRecoveryEnabled) settingsRecoveryEnabled.checked = cfg.recovery ? cfg.recovery.enabled : true;
@@ -2311,6 +2313,7 @@
 
       const payload = {
         usernameMode: settingsUsernameMode ? settingsUsernameMode.value : 'push_name',
+        childContextDisplayMode: settingsChildContextMode ? settingsChildContextMode.value : 'opaque',
         media: { enabled: settingsMediaEnabled ? settingsMediaEnabled.checked : false, maxSizeMB: mediaMaxSize },
         recovery: { enabled: settingsRecoveryEnabled ? settingsRecoveryEnabled.checked : true, maxAgeHours: recovMaxAge, maxMessagesPerGroup: recovMaxMsgs },
         storage: { messageRetentionDays: retentionDays },
