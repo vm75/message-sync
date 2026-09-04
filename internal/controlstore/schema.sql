@@ -109,6 +109,13 @@ CREATE TABLE IF NOT EXISTS membership_join_claims (
     UNIQUE (endpoint_alias, applicant_phone)
 );
 
+CREATE TABLE IF NOT EXISTS evidence_cleanup_queue (
+    evidence_reference TEXT PRIMARY KEY CHECK (length(evidence_reference) > 0),
+    created_at INTEGER NOT NULL,
+    next_attempt_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_cleanup_queue_next_attempt ON evidence_cleanup_queue(next_attempt_at);
+
 CREATE TABLE IF NOT EXISTS verification_assessments (
     id TEXT PRIMARY KEY,
     membership_request_id TEXT NOT NULL REFERENCES membership_requests(id) ON DELETE CASCADE,
