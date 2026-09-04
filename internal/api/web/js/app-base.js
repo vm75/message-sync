@@ -172,6 +172,10 @@
   const btnDeleteSyncSet    = document.getElementById('btn-delete-sync-set');
   const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
   const btnCancelEditor     = document.getElementById('btn-cancel-editor');
+  const membershipInstructions = document.getElementById('membership-applicant-instructions');
+  const membershipReviewerGuidance = document.getElementById('membership-reviewer-guidance');
+  const membershipEvidenceRequired = document.getElementById('membership-evidence-required');
+  const membershipCustomFields = document.getElementById('membership-custom-fields');
 
   // Add endpoint widgets
   const transportTabs       = document.querySelectorAll('.transport-tab');
@@ -1844,6 +1848,18 @@
 
     // Reset add-endpoint form
     resetAddEndpointForm();
+		if (membershipInstructions) membershipInstructions.value = '';
+		if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
+		if (membershipEvidenceRequired) membershipEvidenceRequired.checked = false;
+		if (membershipCustomFields) membershipCustomFields.value = '';
+		if (set) {
+			window.API.getMembershipConfig(set.id).then(cfg => {
+				if (membershipInstructions) membershipInstructions.value = cfg.applicantInstructions || '';
+				if (membershipReviewerGuidance) membershipReviewerGuidance.value = cfg.reviewerGuidance || '';
+				if (membershipEvidenceRequired) membershipEvidenceRequired.checked = !!cfg.evidenceRequired;
+				if (membershipCustomFields) membershipCustomFields.value = JSON.stringify(cfg.customFields || [], null, 2);
+			}).catch(err => showToast(err.message || 'Failed to load membership configuration', 'danger'));
+		}
 
     // Update list selection highlight
     renderSyncSetList();
@@ -2340,6 +2356,17 @@
       setButtonLoading(btnSaveSyncSet, true);
       try {
         const aliases = editorEndpoints.map(e => e.alias);
+			let customFields = [];
+			if (membershipCustomFields && membershipCustomFields.value.trim()) {
+				try { customFields = JSON.parse(membershipCustomFields.value); } catch (_) { throw new Error('Custom fields must be valid JSON.'); }
+				if (!Array.isArray(customFields)) throw new Error('Custom fields must be a JSON array.');
+			}
+			const membershipConfig = {
+				applicantInstructions: membershipInstructions ? membershipInstructions.value : '',
+				reviewerGuidance: membershipReviewerGuidance ? membershipReviewerGuidance.value : '',
+				evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
+				customFields
+			};
         if (editingSyncSetId) {
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
@@ -2353,6 +2380,7 @@
             }
           }
           await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases });
+			await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
           showToast(`Sync set '${editingSyncSetId}' saved.`, 'success');
         } else {
           // Create set first
@@ -2369,6 +2397,7 @@
           }
           // Update the sync set with endpoint aliases
           await window.API.updateSyncSet(id, { endpoints: aliases });
+			await window.API.updateMembershipConfig(id, membershipConfig);
           showToast(`Sync set '${id}' created.`, 'success');
         }
         await loadSyncSetsPage();

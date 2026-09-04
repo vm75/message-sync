@@ -75,6 +75,8 @@ CREATE TABLE IF NOT EXISTS membership_requests (
     decided_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
     decision_reason TEXT,
     decided_at INTEGER,
+    application_definition TEXT NOT NULL DEFAULT '{}',
+    application_answers TEXT NOT NULL DEFAULT '{}',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
@@ -119,3 +121,28 @@ CREATE TABLE IF NOT EXISTS transport_connections (
     )
 );
 CREATE INDEX IF NOT EXISTS idx_transport_connections_transport ON transport_connections(transport);
+
+-- Membership application configuration is keyed by the sync-set ID from
+-- sync.db. The databases are intentionally separate, so the API validates
+-- that the referenced sync set exists before writing this control-plane data.
+CREATE TABLE IF NOT EXISTS membership_configs (
+    sync_set_id TEXT PRIMARY KEY,
+    applicant_instructions TEXT NOT NULL DEFAULT '' CHECK (length(applicant_instructions) <= 4000),
+    reviewer_guidance TEXT NOT NULL DEFAULT '' CHECK (length(reviewer_guidance) <= 4000),
+    evidence_required BOOLEAN NOT NULL DEFAULT 0 CHECK (evidence_required IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS membership_custom_fields (
+    id TEXT PRIMARY KEY,
+    sync_set_id TEXT NOT NULL REFERENCES membership_configs(sync_set_id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL CHECK (field_key GLOB '[A-Za-z][A-Za-z0-9_-]*' AND length(field_key) <= 32),
+    label TEXT NOT NULL CHECK (length(label) BETWEEN 1 AND 120),
+    field_type TEXT NOT NULL CHECK (field_type IN ('text', 'textarea', 'url')),
+    required BOOLEAN NOT NULL DEFAULT 0 CHECK (required IN (0, 1)),
+    max_length INTEGER NOT NULL DEFAULT 500 CHECK (max_length BETWEEN 1 AND 2000),
+    position INTEGER NOT NULL DEFAULT 0 CHECK (position BETWEEN 0 AND 31),
+    UNIQUE (sync_set_id, field_key),
+    UNIQUE (sync_set_id, position)
+);

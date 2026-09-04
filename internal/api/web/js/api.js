@@ -360,6 +360,16 @@
       return this.request(`/api/sync-sets/${encodeURIComponent(id)}`, {
         method: 'DELETE'
       });
+    },
+
+    async getMembershipConfig(id) {
+      return this.request(`/api/sync-sets/${encodeURIComponent(id)}/membership`);
+    },
+
+    async updateMembershipConfig(id, body) {
+      return this.request(`/api/sync-sets/${encodeURIComponent(id)}/membership`, {
+        method: 'PUT', body
+      });
     }
   };
 

@@ -209,7 +209,6 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
-
 	s.notifyConfigChange(r.Context())
 
 	endpoints := req.Endpoints
@@ -292,6 +291,9 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		safelog.Error(s.logger, "commit tx failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
+	}
+	if s.controlDB != nil {
+		_, _ = s.controlDB.ExecContext(r.Context(), `DELETE FROM membership_configs WHERE sync_set_id=?`, id)
 	}
 
 	s.notifyConfigChange(r.Context())

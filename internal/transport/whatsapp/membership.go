@@ -20,7 +20,45 @@ func (a *Adapter) membershipTarget(alias string) (types.JID, error) {
 	}
 	return target, nil
 }
-func (a *Adapter) AddParticipant(ctx context.Context, alias, phone string) error {
+func (a *Adapter) InviteLink(ctx context.Context, alias string) (string, error) {
+	target, err := a.membershipTarget(alias)
+	if err != nil {
+		return "", verification.ErrDestinationMissing
+	}
+	return a.client.GetGroupInviteLink(ctx, target, false)
+}
+func (a *Adapter) JoinApprovalRequired(ctx context.Context, alias string) (bool, error) {
+	target, err := a.membershipTarget(alias)
+	if err != nil {
+		return false, verification.ErrDestinationMissing
+	}
+	info, err := a.client.GetGroupInfo(ctx, target)
+	if err != nil {
+		return false, err
+	}
+	return info.IsJoinApprovalRequired, nil
+}
+func (a *Adapter) PendingJoinRequests(ctx context.Context, alias string) ([]verification.PendingJoinRequest, error) {
+	target, err := a.membershipTarget(alias)
+	if err != nil {
+		return nil, verification.ErrDestinationMissing
+	}
+	requests, err := a.client.GetGroupRequestParticipants(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]verification.PendingJoinRequest, 0, len(requests))
+	for _, request := range requests {
+		// Only phone JIDs can be safely matched to the applicant's submitted
+		// phone. LID-only requests are intentionally left for manual review.
+		if request.JID.Server != types.DefaultUserServer {
+			continue
+		}
+		out = append(out, verification.PendingJoinRequest{Phone: request.JID.User, RequestedAt: request.RequestedAt})
+	}
+	return out, nil
+}
+func (a *Adapter) ApproveJoinRequest(ctx context.Context, alias, phone string) error {
 	target, err := a.membershipTarget(alias)
 	if err != nil {
 		return verification.ErrDestinationMissing
@@ -29,15 +67,8 @@ func (a *Adapter) AddParticipant(ctx context.Context, alias, phone string) error
 	if phone == "" {
 		return errors.New("invalid participant")
 	}
-	_, err = a.client.UpdateGroupParticipants(ctx, target, []types.JID{types.NewJID(phone, types.DefaultUserServer)}, whatsmeow.ParticipantChangeAdd)
+	_, err = a.client.UpdateGroupRequestParticipants(ctx, target, []types.JID{types.NewJID(phone, types.DefaultUserServer)}, whatsmeow.ParticipantChangeApprove)
 	return err
-}
-func (a *Adapter) InviteLink(ctx context.Context, alias string) (string, error) {
-	target, err := a.membershipTarget(alias)
-	if err != nil {
-		return "", verification.ErrDestinationMissing
-	}
-	return a.client.GetGroupInviteLink(ctx, target, false)
 }
 func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, error) {
 	target, err := a.membershipTarget(alias)
@@ -55,14 +86,6 @@ func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, erro
 		}
 	}
 	return false, nil
-}
-func (a *Adapter) RotateInviteLink(ctx context.Context, alias string) error {
-	target, err := a.membershipTarget(alias)
-	if err != nil {
-		return err
-	}
-	_, err = a.client.GetGroupInviteLink(ctx, target, true)
-	return err
 }
 
 // MultiAdmin dispatches WhatsApp membership fulfillment operations to the adapter
@@ -87,20 +110,33 @@ func (m *MultiAdmin) find(alias string) (verification.WhatsAppAdmin, error) {
 	return nil, verification.ErrDestinationMissing
 }
 
-func (m *MultiAdmin) AddParticipant(ctx context.Context, alias, phone string) error {
-	a, err := m.find(alias)
-	if err != nil {
-		return err
-	}
-	return a.AddParticipant(ctx, alias, phone)
-}
-
 func (m *MultiAdmin) InviteLink(ctx context.Context, alias string) (string, error) {
 	a, err := m.find(alias)
 	if err != nil {
 		return "", err
 	}
 	return a.InviteLink(ctx, alias)
+}
+func (m *MultiAdmin) JoinApprovalRequired(ctx context.Context, alias string) (bool, error) {
+	a, err := m.find(alias)
+	if err != nil {
+		return false, err
+	}
+	return a.JoinApprovalRequired(ctx, alias)
+}
+func (m *MultiAdmin) PendingJoinRequests(ctx context.Context, alias string) ([]verification.PendingJoinRequest, error) {
+	a, err := m.find(alias)
+	if err != nil {
+		return nil, err
+	}
+	return a.PendingJoinRequests(ctx, alias)
+}
+func (m *MultiAdmin) ApproveJoinRequest(ctx context.Context, alias, phone string) error {
+	a, err := m.find(alias)
+	if err != nil {
+		return err
+	}
+	return a.ApproveJoinRequest(ctx, alias, phone)
 }
 
 func (m *MultiAdmin) IsMember(ctx context.Context, alias, phone string) (bool, error) {
@@ -109,12 +145,4 @@ func (m *MultiAdmin) IsMember(ctx context.Context, alias, phone string) (bool, e
 		return false, err
 	}
 	return a.IsMember(ctx, alias, phone)
-}
-
-func (m *MultiAdmin) RotateInviteLink(ctx context.Context, alias string) error {
-	a, err := m.find(alias)
-	if err != nil {
-		return err
-	}
-	return a.RotateInviteLink(ctx, alias)
 }
