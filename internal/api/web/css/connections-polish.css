@@ -30,8 +30,122 @@
   color: var(--wa-color);
 }
 
+/* Keep the action bar visually quiet and consistent across cards. Using
+   margin-top:auto also aligns the action rows for cards with different amounts
+   of status copy on wider layouts. */
+#connections-container .connection-actions {
+  margin-top: auto;
+  padding-top: 14px;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--border);
+}
+
+#connections-container .connection-actions .btn {
+  min-height: 36px;
+  padding: 7px 11px;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* Add compact line icons without changing the preserved connection controller. */
+#connections-container .connection-actions button::before {
+  content: "";
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  background: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+
+#connections-container .connection-actions button[onclick*="toggleConnection"]::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2v10' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M18.36 6.64a9 9 0 1 1-12.72 0' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2v10' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3Cpath d='M18.36 6.64a9 9 0 1 1-12.72 0' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+
+#connections-container .connection-actions button[onclick*="pairWhatsApp"]::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+#connections-container .connection-actions button[onclick*="logoutWhatsApp"]::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 17l5-5-5-5M21 12H9' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 17l5-5-5-5M21 12H9' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+#connections-container .connection-actions button[onclick*="openReplaceTokenModal"]::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='7.5' cy='15.5' r='5.5' fill='none' stroke='black' stroke-width='2'/%3E%3Cpath d='M12 12l9-9M15 6l3 3M18 3l3 3' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='7.5' cy='15.5' r='5.5' fill='none' stroke='black' stroke-width='2'/%3E%3Cpath d='M12 12l9-9M15 6l3 3M18 3l3 3' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* Match the destructive treatment used by the Sync Set footer and keep Delete
+   visually separated from routine connection actions on desktop. */
+#connections-container .connection-actions button[onclick*="deleteConnection"] {
+  margin-left: auto;
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border)) !important;
+  background: var(--danger-muted) !important;
+  color: var(--danger) !important;
+}
+
+#connections-container .connection-actions button[onclick*="deleteConnection"]:hover {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border)) !important;
+  background: color-mix(in srgb, var(--danger-muted) 82%, var(--danger) 18%) !important;
+}
+
+#connections-container .connection-actions button[onclick*="deleteConnection"]::before {
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v5M14 11v5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+/* A WhatsApp connection exposes one session action at a time. Connected cards
+   show Logout; unpaired/pairing cards show Pair. */
+#connections-container .connection-card:has(.badge-wa):has(.connection-badges .badge-success)
+  button[onclick*="pairWhatsApp"] {
+  display: none !important;
+}
+
+#connections-container .connection-card:has(.badge-wa):not(:has(.connection-badges .badge-success))
+  button[onclick*="logoutWhatsApp"] {
+  display: none !important;
+}
+
+/* The preserved controller already knows when a connection is referenced by
+   endpoints and refuses deletion before making an API call. Present that failure
+   as an in-page alert instead of a transient toast. */
+body:has(#view-connections.active #connections-container button[onclick*="deleteConnection"]:focus:not([onclick$=", 0)"]))
+  #connections-alert {
+  display: block !important;
+  font-size: 0;
+  margin-bottom: 16px;
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+  background: var(--danger-muted);
+  color: var(--danger);
+}
+
+body:has(#view-connections.active #connections-container button[onclick*="deleteConnection"]:focus:not([onclick$=", 0)"]))
+  #connections-alert::before {
+  content: "This connection is still used by one or more endpoints. Delete or reassign those endpoints before deleting the connection.";
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+body:has(#view-connections.active #connections-container button[onclick*="deleteConnection"]:focus:not([onclick$=", 0)"]))
+  #toast-container .toast-danger {
+  display: none !important;
+}
+
 @media (max-width: 520px) {
   #connections-container .connection-badges {
+    margin-left: 0;
+  }
+
+  #connections-container .connection-actions button[onclick*="deleteConnection"] {
     margin-left: 0;
   }
 }
