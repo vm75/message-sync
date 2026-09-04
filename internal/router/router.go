@@ -777,6 +777,10 @@ func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonical
 }
 
 func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, destination transport.EndpointID, forwardedText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
+	senderLabel, err := r.senderLabel(ctx, incoming)
+	if err != nil {
+		return err
+	}
 	now := time.Now().UTC()
 	operation := store.DeliveryOperation{
 		CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "create", OperationRevision: 1,
@@ -847,7 +851,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			if step.State != "complete" {
 				if _, err := r.sender.Send(jobCtx, transport.Outgoing{
 					Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
-					SourceText: incoming.Text, AttributionOnly: true,
+					SenderLabel: senderLabel,
+					SourceText:  incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
 					RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
 					PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
@@ -876,7 +881,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		} else {
 			ref, err = r.sender.Send(jobCtx, transport.Outgoing{
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
-				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
+				SenderLabel: senderLabel,
+				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
 				RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
 				PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
@@ -1305,6 +1311,14 @@ func (r *Router) getUsernameMode() config.UsernameMode {
 }
 
 func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming) (string, error) {
+	label, err := r.senderLabel(ctx, incoming)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("*_%s_*: %s", label, incoming.Text), nil
+}
+
+func (r *Router) senderLabel(ctx context.Context, incoming transport.Incoming) (string, error) {
 	username := incoming.Sender.OpaqueID
 	if r.getUsernameMode() == config.UsernameModePushName {
 		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
@@ -1340,7 +1354,7 @@ func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming)
 			prefix += ":" + escapePresentation(label)
 		}
 	}
-	return fmt.Sprintf("*_%s/%s_*: %s", prefix, username, incoming.Text), nil
+	return prefix + "/" + username, nil
 }
 
 func (r *Router) getChildContextMode() config.ChildContextDisplayMode {

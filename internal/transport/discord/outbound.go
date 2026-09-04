@@ -92,10 +92,14 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		username = "message-sync"
 	}
 	if outgoing.RenderedText != "" {
-		// Friendly mode already carries the complete source/group/sender
-		// attribution in the body. Use the bridge identity for the webhook so
-		// the sender is not shown a second time by Discord's username surface.
-		username = "message-sync"
+		// Friendly mode carries the complete source/group/sender attribution in
+		// the body. Keep its source/sender portion on the webhook APP username
+		// too; this is presentation-only and remains transient.
+		if label := sanitizeWebhookUsername(outgoing.SenderLabel); label != "" {
+			username = label
+		} else if outgoing.OriginEndpoint != "" {
+			username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
+		}
 	} else if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
 		// Opaque mode keeps the existing webhook-username attribution.
 		username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
@@ -103,7 +107,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	content := outgoing.SourceText
 	if outgoing.RenderedText != "" {
-		content = outgoing.RenderedText
+		// The APP username carries the friendly sender label, so remove only
+		// that wrapper from the Discord body. Other transports still receive
+		// RenderedText unchanged.
+		content = sourceBodyFromForwarded(outgoing.RenderedText)
 	}
 	if content == "" && outgoing.Sender.DisplayName == "" && outgoing.Sender.OpaqueID == "" {
 		content = outgoing.Text

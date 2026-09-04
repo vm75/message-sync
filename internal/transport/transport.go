@@ -97,9 +97,13 @@ type Incoming struct {
 }
 
 type Outgoing struct {
-	Endpoint        EndpointID
-	OriginEndpoint  EndpointID
-	Sender          Sender // transient only; never persist
+	Endpoint       EndpointID
+	OriginEndpoint EndpointID
+	Sender         Sender // transient only; never persist
+	// SenderLabel is the complete transient source/sender attribution used by
+	// presentation-capable transports. It must never be persisted or parsed for
+	// routing.
+	SenderLabel     string
 	SourceText      string // transient un-attributed source text; never persist
 	AttributionOnly bool   // protocol compatibility companion; never canonical
 	ReplyFallback   bool   // source was a reply but no destination copy exists
