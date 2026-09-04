@@ -114,6 +114,17 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			return transport.MessageRef{}, pollErr
 		}
 		outgoing.SourceText = pollText
+		if outgoing.RenderedText != "" {
+			// Friendly mode renders the source attribution separately from the
+			// structured poll. When Telegram falls back to text, rebuild the
+			// rendered body from that structured attribution plus the full poll
+			// fallback so options/instructions cannot be lost.
+			if attribution := strings.TrimSpace(outgoing.PollAttribution); attribution != "" {
+				outgoing.RenderedText = attribution + " " + pollText
+			} else {
+				outgoing.RenderedText = pollText
+			}
+		}
 		kind = "text"
 	}
 
