@@ -6,7 +6,7 @@
   inset: auto !important;
   z-index: auto !important;
   flex-shrink: 0;
-  margin: 0;
+  margin: 0 0 24px;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -24,6 +24,7 @@
 
   #view-sync-sets .syncset-editor-footer {
     bottom: auto !important;
+    margin-bottom: max(24px, env(safe-area-inset-bottom));
   }
 }
 
