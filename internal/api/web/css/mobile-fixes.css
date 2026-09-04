@@ -1,7 +1,17 @@
 /* Mobile and responsive corrections for the TailAdmin-inspired UI. */
 
-/* Connection IDs are implementation details and should not be shown in cards. */
-.connection-id {
+/* Connection IDs are implementation details and should never be shown in the UI.
+   Keep the underlying values available to JS/API logic while hiding both the
+   rendered card ID and the optional add-connection ID field at every breakpoint. */
+.connection-id,
+.form-group:has(> #add-conn-id) {
+  display: none !important;
+}
+
+/* Fallback for browsers without :has() support. */
+#add-conn-id,
+label[for="add-conn-id"],
+#add-conn-id + .form-hint {
   display: none !important;
 }
 
