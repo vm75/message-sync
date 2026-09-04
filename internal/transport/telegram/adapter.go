@@ -98,6 +98,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if token == "" {
 		return nil, errors.New("Telegram bot token is required")
 	}
+	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
+		return nil, err
+	}
 	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID)
 	if err != nil {
 		return nil, err
@@ -203,15 +206,15 @@ func (a *Adapter) ConnectionID() string {
 }
 
 func (a *Adapter) checkpointStreamKey() string {
-	if a == nil || a.connectionID == "" {
-		return "telegram"
+	if a == nil {
+		return "telegram:"
 	}
 	return "telegram:" + a.connectionID
 }
 
 func (a *Adapter) pollProviderNamespace() string {
-	if a == nil || a.connectionID == "" {
-		return "telegram"
+	if a == nil {
+		return "telegram:"
 	}
 	return "telegram:" + a.connectionID
 }
@@ -247,7 +250,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	chatIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportTelegram {
-			if a.connectionID != "" && endpoint.ConnectionID != a.connectionID {
+			if endpoint.ConnectionID != a.connectionID {
 				continue
 			}
 			chatIDs[alias] = endpoint.RemoteID

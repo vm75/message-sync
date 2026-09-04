@@ -67,6 +67,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if token == "" {
 		return nil, errors.New("Discord bot token is required")
 	}
+	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
+		return nil, err
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -276,7 +279,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	channelIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportDiscord {
-			if a.connectionID != "" && endpoint.ConnectionID != a.connectionID {
+			if endpoint.ConnectionID != a.connectionID {
 				continue
 			}
 			channelIDs[alias] = endpoint.RemoteID

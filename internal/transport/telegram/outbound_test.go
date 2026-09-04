@@ -169,6 +169,7 @@ func newOutboundTestAdapter(t *testing.T, api *fakeTelegramAPI) *Adapter {
 		t.Fatal(err)
 	}
 	return &Adapter{
+		connectionID:  "conn-tg-test",
 		client:        api,
 		normalizer:    normalizer,
 		hasher:        hasher,
@@ -526,7 +527,7 @@ func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.polls) != 1 || ref.Provider != "telegram" || ref.ProviderReference != "opaque-telegram-poll" {
+	if len(api.polls) != 1 || ref.Provider != "telegram:conn-tg-test" || ref.ProviderReference != "opaque-telegram-poll" {
 		t.Fatalf("native Telegram poll = ref %#v polls=%d", ref, len(api.polls))
 	}
 	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || !*api.polls[0].IsAnonymous {

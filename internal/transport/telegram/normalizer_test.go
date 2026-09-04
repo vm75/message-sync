@@ -24,10 +24,10 @@ func testNormalizer(t *testing.T, mode config.UsernameMode) *Normalizer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{
+	normalizer, err := NewNormalizerWithConnection(map[string]string{
 		"team-telegram":  strconv.FormatInt(testGroupID, 10),
 		"super-telegram": strconv.FormatInt(testSupergroupID, 10),
-	}, hasher, mode)
+	}, hasher, mode, "conn-tg-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +291,7 @@ func TestNormalizeTelegramPollUsesNativeCanonicalModel(t *testing.T) {
 	if incoming.Kind != "poll" || len(incoming.PollOptions) != 2 || incoming.PollOptions[0] != "Idli" || incoming.PollSelectableCount != 2 {
 		t.Fatalf("Telegram native poll = %#v", incoming)
 	}
-	if incoming.PollProvider != "telegram" || incoming.PollProviderReference != msg.Poll.ID || strings.Contains(incoming.Text, msg.Poll.ID) {
+	if incoming.PollProvider != "telegram:conn-tg-test" || incoming.PollProviderReference != msg.Poll.ID || strings.Contains(incoming.Text, msg.Poll.ID) {
 		t.Fatalf("Telegram poll created native/shared poll state: %#v", incoming)
 	}
 }

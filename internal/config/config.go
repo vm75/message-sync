@@ -338,6 +338,9 @@ func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, connectionI
 		return err
 	}
 	connectionID = strings.TrimSpace(connectionID)
+	if err := ValidateConnectionID(connectionID); err != nil {
+		return err
+	}
 	oldRemoteID = strings.TrimSpace(oldRemoteID)
 	newRemoteID = strings.TrimSpace(newRemoteID)
 	if err := ValidateEndpointRemoteID(TransportTelegram, oldRemoteID); err != nil {
@@ -354,17 +357,10 @@ func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, connectionI
 	defer tx.Rollback()
 
 	var currentRemoteID string
-	if connectionID != "" {
-		err = tx.QueryRowContext(ctx,
-			`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ? AND connection_id = ?`,
-			alias, string(TransportTelegram), connectionID,
-		).Scan(&currentRemoteID)
-	} else {
-		err = tx.QueryRowContext(ctx,
-			`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ?`,
-			alias, string(TransportTelegram),
-		).Scan(&currentRemoteID)
-	}
+	err = tx.QueryRowContext(ctx,
+		`SELECT remote_id FROM endpoints WHERE alias = ? AND transport = ? AND connection_id = ?`,
+		alias, string(TransportTelegram), connectionID,
+	).Scan(&currentRemoteID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return errors.New("Telegram endpoint is not configured")
 	}
@@ -385,17 +381,10 @@ func MigrateTelegramEndpoint(ctx context.Context, db *sql.DB, alias, connectionI
 	}
 
 	var result sql.Result
-	if connectionID != "" {
-		result, err = tx.ExecContext(ctx,
-			`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND connection_id = ? AND remote_id = ?`,
-			newRemoteID, alias, string(TransportTelegram), connectionID, oldRemoteID,
-		)
-	} else {
-		result, err = tx.ExecContext(ctx,
-			`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND remote_id = ?`,
-			newRemoteID, alias, string(TransportTelegram), oldRemoteID,
-		)
-	}
+	result, err = tx.ExecContext(ctx,
+		`UPDATE endpoints SET remote_id = ? WHERE alias = ? AND transport = ? AND connection_id = ? AND remote_id = ?`,
+		newRemoteID, alias, string(TransportTelegram), connectionID, oldRemoteID,
+	)
 	if err != nil {
 		return errors.New("update Telegram endpoint addressing")
 	}

@@ -167,6 +167,7 @@ func TestAdapterUnauthenticatedStartupDoesNotBlock(t *testing.T) {
 	}
 
 	opts := Options{
+		ConnectionID: "conn-wa-test",
 		DatabasePath: dbPath,
 		GroupJIDs: map[string]string{
 			"g1": "123456789@g.us",
@@ -356,6 +357,7 @@ func TestAdapterLogout(t *testing.T) {
 	}
 
 	opts := Options{
+		ConnectionID: "conn-wa-test",
 		DatabasePath: dbPath,
 		GroupJIDs: map[string]string{
 			"g1": "123456789@g.us",

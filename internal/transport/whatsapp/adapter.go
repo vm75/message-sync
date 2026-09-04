@@ -154,6 +154,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if opts.Logger == nil {
 		return nil, errors.New("logger is required")
 	}
+	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
+		return nil, err
+	}
 	if opts.QROut == nil {
 		opts.QROut = io.Discard
 	}
@@ -1014,7 +1017,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	groupJIDs := make(map[string]string)
 	for alias, endpoint := range cfg.Endpoints {
 		if endpoint.Transport == config.TransportWhatsApp {
-			if a.connectionID != "" && endpoint.ConnectionID != "" && endpoint.ConnectionID != a.connectionID {
+			if endpoint.ConnectionID != a.connectionID {
 				continue
 			}
 			groupJIDs[alias] = endpoint.RemoteID

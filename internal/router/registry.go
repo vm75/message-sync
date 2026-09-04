@@ -35,8 +35,8 @@ func NewAdapterRegistry(cfg *config.Config, adapters map[string]OutboundAdapter)
 
 	copied := make(map[string]OutboundAdapter, len(adapters))
 	for connID, adapter := range adapters {
-		if connID == "" {
-			return nil, errors.New("connection ID is required")
+		if err := config.ValidateConnectionID(connID); err != nil {
+			return nil, err
 		}
 		if adapter == nil {
 			return nil, fmt.Errorf("connection adapter %q is unavailable", connID)
@@ -58,8 +58,8 @@ func (r *AdapterRegistry) RegisterAdapter(connectionID string, adapter OutboundA
 	if r == nil {
 		return errors.New("transport adapter registry is not initialized")
 	}
-	if connectionID == "" {
-		return errors.New("connection ID is required")
+	if err := config.ValidateConnectionID(connectionID); err != nil {
+		return err
 	}
 	if adapter == nil {
 		return errors.New("adapter is required")
@@ -92,8 +92,8 @@ func (r *AdapterRegistry) UpdateConfig(cfg *config.Config) error {
 		if !endpoint.Transport.IsValid() {
 			return errors.New("configured endpoint has unknown transport")
 		}
-		if endpoint.ConnectionID == "" {
-			return errors.New("configured endpoint has empty connection ID")
+		if err := config.ValidateConnectionID(endpoint.ConnectionID); err != nil {
+			return err
 		}
 		endpoints[transport.EndpointID(alias)] = endpoint.ConnectionID
 	}

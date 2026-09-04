@@ -357,6 +357,10 @@ func TestMigrateTelegramEndpointPreservesAliasAndSyncSetAcrossRestart(t *testing
 		_ = st.Close()
 		t.Fatal("expected error migrating endpoint with wrong connection ID")
 	}
+	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", "", oldRemoteID, newRemoteID); err == nil {
+		_ = st.Close()
+		t.Fatal("expected error migrating endpoint without a connection ID")
+	}
 
 	if err := MigrateTelegramEndpoint(ctx, st.DB(), "b", "conn-tg-1", oldRemoteID, newRemoteID); err != nil {
 		_ = st.Close()

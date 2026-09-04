@@ -209,10 +209,7 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 		PollOptions: pollOptions, PollSelectableCount: selectableCount,
 		PollProvider: func() string {
 			if providerReference != "" {
-				if n != nil && n.connectionID != "" {
-					return "telegram:" + n.connectionID
-				}
-				return "telegram"
+				return "telegram:" + n.connectionID
 			}
 			return ""
 		}(),

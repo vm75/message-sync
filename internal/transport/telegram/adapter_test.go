@@ -210,9 +210,10 @@ func TestAdapterUpdateConfigUsesOnlyTelegramEndpoints(t *testing.T) {
 func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	adapter := &Adapter{
-		normalizer: normalizer,
-		events:     make(chan transport.Incoming, 4),
-		botUserID:  testBotUserID,
+		connectionID: "conn-tg-test",
+		normalizer:   normalizer,
+		events:       make(chan transport.Incoming, 4),
+		botUserID:    testBotUserID,
 	}
 
 	update := &models.Update{ID: 10, Message: testMessage(testGroupID, models.ChatTypeGroup)}
@@ -254,9 +255,10 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
 	normalizer := testNormalizer(t, config.UsernameModeHash)
 	adapter := &Adapter{
-		normalizer: normalizer,
-		events:     make(chan transport.Incoming, 4),
-		botUserID:  testBotUserID,
+		connectionID: "conn-tg-test",
+		normalizer:   normalizer,
+		events:       make(chan transport.Incoming, 4),
+		botUserID:    testBotUserID,
 	}
 
 	tests := []struct {
@@ -283,7 +285,7 @@ func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
 				if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "101" {
 					t.Fatalf("reaction target = %#v, want remote 101", incoming.ReplyTo)
 				}
-				if incoming.Checkpoint.StreamKey != "telegram" || incoming.Checkpoint.Position != tt.start {
+				if incoming.Checkpoint.StreamKey != "telegram:conn-tg-test" || incoming.Checkpoint.Position != tt.start {
 					t.Fatalf("reaction checkpoint = %#v", incoming.Checkpoint)
 				}
 			default:
@@ -537,7 +539,8 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 	var logBuf bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
 	adapter, err := Open(ctx, Options{
-		Token: "12345:test-token",
+		ConnectionID: "conn-tg-test",
+		Token:        "12345:test-token",
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
@@ -631,7 +634,8 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logBuf, nil))
 	_, err = Open(context.Background(), Options{
-		Token: "12345:test-token",
+		ConnectionID: "conn-tg-test",
+		Token:        "12345:test-token",
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
