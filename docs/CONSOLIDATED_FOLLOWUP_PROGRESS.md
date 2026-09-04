@@ -30,7 +30,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Complete |
 | 9 | [#93](https://github.com/vm75/message-sync/issues/93) | Friendly contexts 4/4: UI, docs, privacy disclosure, E2E tests | Finalize optional feature after #90-#92. | Complete |
 | 10 | [#86](https://github.com/vm75/message-sync/issues/86) | Discord/Telegram online setup help | Do after Telegram/friendly-context behavior is stable to avoid duplicated documentation churn. | Complete |
-| 11 | [#87](https://github.com/vm75/message-sync/issues/87) | WhatsApp one-shot Add Connection + QR pairing | Independent UX improvement; keep existing pairing backend/state machine. | Pending |
+| 11 | [#87](https://github.com/vm75/message-sync/issues/87) | WhatsApp one-shot Add Connection + QR pairing | Independent UX improvement; keep existing pairing backend/state machine. | Complete |
 | 12 | [#94](https://github.com/vm75/message-sync/issues/94) | Final cleanup and tracker removal | Must run last, after every preceding row is Complete/closed. | Pending |
 
 ## Dependency graph
@@ -157,6 +157,13 @@ Rules:
 - Added provider-specific, dismissible Add Connection help with official Discord Developer Portal and Telegram BotFather/Bot API links.
 - Documented required Discord Message Content intent/permissions, Telegram group/supergroup discovery and Privacy Mode, forum-topic behavior, and unsupported broadcast channels.
 - Preserved write-only token handling, safe new-tab links, and unchanged WhatsApp/role-gated connection creation.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` pass.
+
+### #87 — WhatsApp one-shot create and pair flow
+
+- WhatsApp Add Connection now presents `Create & Pair`, automatically starts the existing connection-scoped pairing flow for the returned ID, and retains the normal Pair action for later retries.
+- Added retry, cancel, timeout, success, conflict, transient QR cleanup, and connection-scoped Discover Groups actions without changing the backend pairing state machine or one-active-pairing rule.
+- Discord and Telegram creation remain token-based and unchanged; QR values stay transient in the existing UI path.
 - Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` pass.
 
 ### #88 — Telegram destination source alias

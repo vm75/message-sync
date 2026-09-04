@@ -97,6 +97,8 @@ func TestStaticHandler(t *testing.T) {
 			`id="add-conn-wa-help"`,
 			"Create &amp; Pair",
 			"Linked Devices",
+			`id="btn-wa-retry-pair"`,
+			`id="btn-wa-pair-discover"`,
 		} {
 			if !strings.Contains(html, expected) {
 				t.Fatalf("Admin HTML missing %q", expected)

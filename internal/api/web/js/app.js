@@ -98,6 +98,8 @@
   const waQrCanvas      = document.getElementById('wa-qr-canvas');
   const waCountdownText = document.getElementById('wa-countdown-text');
   const btnWaCancelPair = document.getElementById('btn-wa-cancel-pair');
+  const btnWaRetryPair  = document.getElementById('btn-wa-retry-pair');
+  const btnWaPairDiscover = document.getElementById('btn-wa-pair-discover');
 
   // ── DOM – Connections ───────────────────────────────────────
   const navConnections        = document.getElementById('nav-connections');
@@ -949,6 +951,12 @@
     if (waPollTimer) { clearInterval(waPollTimer); waPollTimer = null; }
   }
 
+  function clearWaQRCode() {
+    if (!waQrCanvas) return;
+    const context = waQrCanvas.getContext('2d');
+    if (context) context.clearRect(0, 0, waQrCanvas.width, waQrCanvas.height);
+  }
+
   function startWaPolling(connId, ms = 3000) {
     stopWaPolling();
     waPollTimer = setInterval(async () => {
@@ -961,6 +969,8 @@
           if (waPairStatus) { waPairStatus.className = 'alert alert-success'; waPairStatus.textContent = 'WhatsApp paired successfully!'; }
           if (waQrSection) waQrSection.classList.add('hidden');
           if (btnWaCancelPair) btnWaCancelPair.classList.add('hidden');
+          if (btnWaPairDiscover) btnWaPairDiscover.classList.remove('hidden');
+          clearWaQRCode();
           if (window.Router.getRoute() === 'connections') loadConnections();
         }
       } catch (e) {}
@@ -980,6 +990,7 @@
       if (left <= 0) {
         stopQrCountdown();
         if (waPairStatus) { waPairStatus.className = 'alert alert-warning'; waPairStatus.textContent = 'QR code expired. Close and try again.'; }
+        if (btnWaRetryPair) btnWaRetryPair.classList.remove('hidden');
       }
     }
     tick();
@@ -1003,6 +1014,9 @@
     if (waPairStatus) { waPairStatus.className = 'alert alert-info'; waPairStatus.textContent = `Requesting QR code for ${connId}…`; }
     if (waQrSection) waQrSection.classList.add('hidden');
     if (btnWaCancelPair) btnWaCancelPair.classList.add('hidden');
+    if (btnWaRetryPair) btnWaRetryPair.classList.add('hidden');
+    if (btnWaPairDiscover) btnWaPairDiscover.classList.add('hidden');
+    clearWaQRCode();
     openModal(modalWaPair);
     closeAllDropdowns();
 
@@ -1010,6 +1024,7 @@
       const res = await window.API.pairWhatsAppConnection(connId);
       if (res.isLoggedIn || res.status === 'connected') {
         if (waPairStatus) { waPairStatus.className = 'alert alert-success'; waPairStatus.textContent = 'WhatsApp is already linked and active.'; }
+        if (btnWaPairDiscover) btnWaPairDiscover.classList.remove('hidden');
         refreshDashboardPlatformStatuses();
         if (window.Router.getRoute() === 'connections') loadConnections();
         return;
@@ -1030,6 +1045,7 @@
         } else {
           waPairStatus.textContent = err.message || 'Failed to request QR code.';
         }
+        if (btnWaRetryPair) btnWaRetryPair.classList.remove('hidden');
       }
     }
   }
@@ -1042,6 +1058,8 @@
       if (waPairStatus) { waPairStatus.className = 'alert alert-info'; waPairStatus.textContent = 'Pairing cancelled.'; }
       if (waQrSection) waQrSection.classList.add('hidden');
       if (btnWaCancelPair) btnWaCancelPair.classList.add('hidden');
+      if (btnWaRetryPair) btnWaRetryPair.classList.add('hidden');
+      clearWaQRCode();
       refreshDashboardPlatformStatuses();
       if (window.Router.getRoute() === 'connections') loadConnections();
     } catch (err) { showToast(err.message || 'Failed to cancel pairing', 'danger'); }
@@ -2580,6 +2598,11 @@
     if (btnWaPair)   btnWaPair.addEventListener('click', () => openWaPairModal());
     if (btnWaLogout) btnWaLogout.addEventListener('click', () => handleWaLogout());
     if (btnWaCancelPair) btnWaCancelPair.addEventListener('click', cancelWaPairing);
+    if (btnWaRetryPair) btnWaRetryPair.addEventListener('click', () => openWaPairModal(activePairingConnId));
+    if (btnWaPairDiscover) btnWaPairDiscover.addEventListener('click', () => {
+      closeModal(modalWaPair);
+      if (activePairingConnId) openDiscovery(activePairingConnId);
+    });
 
     const btnWaManage = document.getElementById('btn-wa-manage');
     if (btnWaManage) {
