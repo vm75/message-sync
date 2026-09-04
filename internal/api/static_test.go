@@ -92,6 +92,8 @@ func TestStaticHandler(t *testing.T) {
 			`id="settings-child-context-mode"`,
 			"Friendly thread/topic names",
 			"Disabling friendly names removes stored names",
+			`id="add-conn-help-discord"`,
+			`id="add-conn-help-telegram"`,
 		} {
 			if !strings.Contains(html, expected) {
 				t.Fatalf("Admin HTML missing %q", expected)
@@ -130,6 +132,10 @@ func TestStaticHandler(t *testing.T) {
 			"openReplaceTokenModal",
 			"activePairingConnId",
 			"connectionId",
+			"addConnHelpDiscord",
+			"addConnHelpTelegram",
+			"classList.toggle('hidden', transport !== 'discord')",
+			"classList.toggle('hidden', transport !== 'telegram')",
 		} {
 			if !strings.Contains(appJS, expected) {
 				t.Fatalf("Admin JS missing dynamic connection symbol %q", expected)

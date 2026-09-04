@@ -965,6 +965,15 @@
             <input type="password" id="conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste bot token">
             <p class="form-hint">Token is encrypted immediately with a domain-separated AES key. It is never logged or exposed in read APIs.</p>
           </div>
+
+          <div id="add-conn-help-discord" class="form-hint hidden">
+            <strong>Discord setup</strong><br>
+            In the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">official Discord Developer Portal</a>, create/select an application, open its Bot page, enable Message Content Intent, and copy/reset the bot token here. Install the bot in the target server with View Channel, Read Message History, Send Messages, Add Reactions, Manage Webhooks, and thread/poll access as needed. Then return here and use connection-scoped Discover to add channels.
+          </div>
+          <div id="add-conn-help-telegram" class="form-hint hidden">
+            <strong>Telegram setup</strong><br>
+            In Telegram, message the official <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>, run <code>/newbot</code>, and paste the token here. Add the bot to the intended groups/supergroups; disable Bot Privacy Mode with BotFather when ordinary group-message discovery requires it, then send a message and use Discover. Forum topics are automatic child scopes. Broadcast channels are not supported. See the <a href="https://core.telegram.org/bots/faq#what-messages-will-my-bot-get" target="_blank" rel="noopener noreferrer">official Bot API visibility guidance</a> for privacy behavior.
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-ghost" data-modal="modal-add-connection">Cancel</button>

@@ -115,6 +115,8 @@
   const addConnId             = document.getElementById('add-conn-id');
   const addConnToken          = document.getElementById('conn-bot-token');
   const addConnTokenGroup     = document.getElementById('add-conn-token-group');
+  const addConnHelpDiscord    = document.getElementById('add-conn-help-discord');
+  const addConnHelpTelegram   = document.getElementById('add-conn-help-telegram');
   const btnSubmitAddConn      = document.getElementById('btn-submit-add-conn');
 
   const modalReplaceToken     = document.getElementById('modal-replace-token');
@@ -1295,6 +1297,8 @@
     if (addConnTokenGroup) {
       addConnTokenGroup.classList.toggle('hidden', transport === 'whatsapp');
     }
+    if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
+    if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
     if (addConnToken) {
       addConnToken.required = transport !== 'whatsapp';
       addConnToken.value = '';
