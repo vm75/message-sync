@@ -126,7 +126,18 @@
     async createResetToken(id) { return this.request(`/api/users/${encodeURIComponent(id)}/reset-token`, { method: 'POST' }); },
     async getMembershipRequests(filters = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value)); return this.request('/api/verification/requests' + (query.toString() ? `?${query}` : '')); },
     async getMembershipRequest(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}`); },
-    async decideMembership(id, action) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: { action } }); },
+    async decideMembership(id, action) {
+      const decision = await this.request(`/api/verification/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: { action } });
+      if (action === 'approve' && decision && decision.status === 'approved') {
+        try {
+          await this.fulfillMembership(id);
+        } catch (_) {
+          // The human decision is authoritative. Fulfillment failure is retained
+          // on the request and can be retried without rolling approval back.
+        }
+      }
+      return decision;
+    },
     async fulfillMembership(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/fulfill`, { method: 'POST' }); },
     async getVerificationPipelines() {
       const pipelines = await this.request('/api/verification/pipelines');
