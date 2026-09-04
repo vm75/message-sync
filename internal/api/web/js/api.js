@@ -127,8 +127,17 @@
     async getMembershipRequests(filters = {}) { const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value)); return this.request('/api/verification/requests' + (query.toString() ? `?${query}` : '')); },
     async getMembershipRequest(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}`); },
     async decideMembership(id, action) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: { action } }); },
-    async getVerificationPipelines() { return this.request('/api/verification/pipelines'); },
-    async createVerificationPipeline(body) { return this.request('/api/verification/pipelines', { method: 'POST', body }); },
+    async fulfillMembership(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/fulfill`, { method: 'POST' }); },
+    async getVerificationPipelines() {
+      const pipelines = await this.request('/api/verification/pipelines');
+      return Array.isArray(pipelines) ? pipelines.map((pipeline) => ({ ...pipeline, endpoint: pipeline.endpointAlias })) : pipelines;
+    },
+    async createVerificationPipeline(body) {
+      const payload = { ...body };
+      if (payload.endpoint && !payload.endpointAlias) payload.endpointAlias = payload.endpoint;
+      delete payload.endpoint;
+      return this.request('/api/verification/pipelines', { method: 'POST', body: payload });
+    },
     async updateVerificationPipeline(id, body) { return this.request(`/api/verification/pipelines/${encodeURIComponent(id)}`, { method: 'PUT', body }); },
     async deleteVerificationPipeline(id) { return this.request(`/api/verification/pipelines/${encodeURIComponent(id)}`, { method: 'DELETE' }); },
 
