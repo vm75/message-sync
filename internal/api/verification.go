@@ -538,12 +538,18 @@ func (s *Server) ReconcileMembership(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
+	ids := make([]string, 0, 25)
 	for rows.Next() {
 		var id string
-		if rows.Scan(&id) == nil {
-			s.reconcileMembershipRequest(ctx, id)
+		if rows.Scan(&id) != nil {
+			rows.Close()
+			return
 		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	for _, id := range ids {
+		s.reconcileMembershipRequest(ctx, id)
 	}
 }
 
