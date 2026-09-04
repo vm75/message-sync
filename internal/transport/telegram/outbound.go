@@ -381,6 +381,14 @@ func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error 
 }
 
 func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	return a.edit(ctx, ref, text, true)
+}
+
+func (a *Adapter) EditRendered(ctx context.Context, ref transport.MessageRef, text string) error {
+	return a.edit(ctx, ref, text, false)
+}
+
+func (a *Adapter) edit(ctx context.Context, ref transport.MessageRef, text string, stripAttribution bool) error {
 	if a == nil {
 		return errors.New("Telegram transport is not initialized")
 	}
@@ -398,7 +406,10 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	if err != nil {
 		return errors.New("Telegram edit target is invalid")
 	}
-	content := telegramEditContent(text)
+	content := text
+	if stripAttribution {
+		content = telegramEditContent(text)
+	}
 	if strings.TrimSpace(content) == "" {
 		return errors.New("outgoing Telegram edit text is required")
 	}
@@ -604,6 +615,9 @@ func telegramMessageID(value string) (int, error) {
 }
 
 func telegramOutgoingText(outgoing transport.Outgoing) string {
+	if outgoing.RenderedText != "" {
+		return sanitizeTelegramMentions(outgoing.RenderedText, outgoing.Mentions)
+	}
 	label := telegramSenderLabel(outgoing.Sender)
 	if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
 		origin := sanitizeTelegramAttribution(string(outgoing.OriginEndpoint))

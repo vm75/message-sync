@@ -211,6 +211,21 @@ func TestSendUsesTransientSenderNamesAndHashFallback(t *testing.T) {
 	}
 }
 
+func TestSendUsesCentralFriendlyRendering(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", OriginEndpoint: "tg", Sender: transport.Sender{DisplayName: "Alice"},
+		SourceText: "Flights booked", RenderedText: "*_family:Travel/Alice_*: Flights booked", Kind: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.texts) != 1 || api.texts[0] != "*_family:Travel/Alice_*: Flights booked" {
+		t.Fatalf("Telegram adapter discarded friendly rendering: %q", api.texts)
+	}
+}
+
 func TestSendUsesNativeReplyAndPrivacySafeFallback(t *testing.T) {
 	api := &fakeTelegramAPI{}
 	adapter := newOutboundTestAdapter(t, api)

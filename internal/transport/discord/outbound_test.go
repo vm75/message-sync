@@ -130,6 +130,21 @@ func TestWebhookSenderRenderingUsesDistinctTransientNamesAndHashFallback(t *test
 	}
 }
 
+func TestWebhookUsesCentralFriendlyRendering(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord", OriginEndpoint: "discord", Sender: transport.Sender{DisplayName: "Alice"},
+		SourceText: "Dinner at 7?", Text: "Dinner at 7?", RenderedText: "*_family:Travel/Alice_*: Dinner at 7?", Kind: "text",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := webhook.executed[0].Content; got != "*_family:Travel/Alice_*: Dinner at 7?" {
+		t.Fatalf("Discord adapter discarded friendly rendering: %q", got)
+	}
+}
+
 func TestWebhookUsernameIncludesGroupPrefixForCrossEndpointMessages(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})

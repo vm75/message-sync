@@ -97,13 +97,17 @@ type Incoming struct {
 }
 
 type Outgoing struct {
-	Endpoint            EndpointID
-	OriginEndpoint      EndpointID
-	Sender              Sender // transient only; never persist
-	SourceText          string // transient un-attributed source text; never persist
-	AttributionOnly     bool   // protocol compatibility companion; never canonical
-	ReplyFallback       bool   // source was a reply but no destination copy exists
-	Text                string
+	Endpoint        EndpointID
+	OriginEndpoint  EndpointID
+	Sender          Sender // transient only; never persist
+	SourceText      string // transient un-attributed source text; never persist
+	AttributionOnly bool   // protocol compatibility companion; never canonical
+	ReplyFallback   bool   // source was a reply but no destination copy exists
+	Text            string
+	// RenderedText is the complete client-facing attribution/body rendering for
+	// optional friendly presentation. It is transient and must never be parsed
+	// for routing.
+	RenderedText        string
 	Mentions            []Mention
 	ReplyTo             *MessageRef
 	ChildScope          *ChildScope

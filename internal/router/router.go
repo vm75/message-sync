@@ -27,6 +27,10 @@ type sender interface {
 	Delete(context.Context, transport.MessageRef) error
 }
 
+type renderedEditor interface {
+	EditRendered(context.Context, transport.MessageRef, string) error
+}
+
 type copyKey struct {
 	endpoint transport.EndpointID
 	remoteID string
@@ -440,7 +444,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			op := store.DeliveryOperation{CanonicalID: targetCanonical, EndpointID: string(destination), OperationKind: "edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			if err := r.enqueueMutation(ctx, op, func() bool { return r.pendingEditCurrent(key, revision) }, func(jobCtx context.Context) error {
 				ref := r.destinationMessageRef(jobCtx, targetCanonical, destination, targetCopy)
-				return r.sender.Edit(jobCtx, ref, forwardedText)
+				return r.edit(jobCtx, ref, forwardedText)
 			}, func() {
 				r.mu.Lock()
 				if current, ok := r.pendingEdits[key]; ok && current.revision == revision {
@@ -721,6 +725,15 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	return nil
 }
 
+func (r *Router) edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	if r.getChildContextMode() == config.ChildContextDisplayFriendly {
+		if editor, ok := r.sender.(renderedEditor); ok {
+			return editor.EditRendered(ctx, ref, text)
+		}
+	}
+	return r.sender.Edit(ctx, ref, text)
+}
+
 func (r *Router) destinationMessageRef(ctx context.Context, canonicalID string, endpoint transport.EndpointID, copy store.MessageCopy) transport.MessageRef {
 	ref := transport.MessageRef{Endpoint: endpoint, RemoteMessageID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf}
 	ref.ChildScope = r.childScope(ctx, canonicalID, endpoint)
@@ -833,7 +846,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 					SourceText: incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
-					ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
+					RenderedText: friendlyRenderedText(r.getChildContextMode(), forwardedText),
+					ReplyTo:      replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
 						_ = r.store.CompleteCreateStep(context.Background(), step, "", true, time.Now().UTC())
@@ -860,7 +874,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: incoming.Sender,
 				SourceText: incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
-				MediaBytes: mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
+				RenderedText: friendlyRenderedText(r.getChildContextMode(), forwardedText),
+				MediaBytes:   mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 				PollDurationHours: incoming.PollDurationHours,
 			})
@@ -917,6 +932,13 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 		return fmt.Errorf("enqueue destination delivery: %w", err)
 	}
 	return nil
+}
+
+func friendlyRenderedText(mode config.ChildContextDisplayMode, text string) string {
+	if mode == config.ChildContextDisplayFriendly {
+		return text
+	}
+	return ""
 }
 
 func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (string, error) {
@@ -1091,7 +1113,7 @@ func (r *Router) flushPendingMutations(ctx context.Context, canonicalID string, 
 		if err == nil {
 			op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(destination), OperationKind: "edit", OperationRevision: edit.revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 			_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingEditCurrent(key, edit.revision) }, func(jobCtx context.Context) error {
-				return r.sender.Edit(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf}, edit.text)
+				return r.edit(jobCtx, transport.MessageRef{Endpoint: destination, RemoteMessageID: copy.RemoteMessageID, IsTargetFromMe: copy.FromSelf}, edit.text)
 			}, func() {
 				r.mu.Lock()
 				if current, ok := r.pendingEdits[key]; ok && current.revision == edit.revision {

@@ -99,6 +99,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	content := outgoing.SourceText
+	if outgoing.RenderedText != "" {
+		content = outgoing.RenderedText
+	}
 	if content == "" && outgoing.Sender.DisplayName == "" && outgoing.Sender.OpaqueID == "" {
 		content = outgoing.Text
 	}
@@ -334,6 +337,14 @@ func (a *Adapter) React(ctx context.Context, reaction transport.Reaction) error 
 }
 
 func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	return a.edit(ctx, ref, text, true)
+}
+
+func (a *Adapter) EditRendered(ctx context.Context, ref transport.MessageRef, text string) error {
+	return a.edit(ctx, ref, text, false)
+}
+
+func (a *Adapter) edit(ctx context.Context, ref transport.MessageRef, text string, stripAttribution bool) error {
 	if a == nil {
 		return errors.New("Discord transport is not initialized")
 	}
@@ -355,10 +366,16 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 		if !ok {
 			return errors.New("Discord child scope is unsupported by webhook lifecycle")
 		}
-		return threaded.EditInThread(ctx, channelID, ref.ChildScope.RemoteID, messageID, sourceBodyFromForwarded(text))
+		if stripAttribution {
+			text = sourceBodyFromForwarded(text)
+		}
+		return threaded.EditInThread(ctx, channelID, ref.ChildScope.RemoteID, messageID, text)
 	}
 
-	if err := webhook.Edit(ctx, channelID, messageID, sourceBodyFromForwarded(text)); err != nil {
+	if stripAttribution {
+		text = sourceBodyFromForwarded(text)
+	}
+	if err := webhook.Edit(ctx, channelID, messageID, text); err != nil {
 		return err
 	}
 	return nil

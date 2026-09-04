@@ -27,7 +27,7 @@ This file is intentionally temporary. **Issue #94 must delete it after every pre
 | 5 | [#88](https://github.com/vm75/message-sync/issues/88) | Bug: Telegram destination loses source group alias | Required by friendly `group[:context]/user` presentation. | Complete |
 | 6 | [#90](https://github.com/vm75/message-sync/issues/90) | Friendly contexts 1/4: config + persisted label catalog | Depends on #84. Adds optional `opaque|friendly` mode without changing routing. | Complete |
 | 7 | [#91](https://github.com/vm75/message-sync/issues/91) | Friendly contexts 2/4: learn Discord thread / Telegram topic names | Depends on #90 and #85. Persist names only in friendly mode. | Complete |
-| 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Pending |
+| 8 | [#92](https://github.com/vm75/message-sync/issues/92) | Friendly contexts 3/4: human-readable client notation | Depends on #88, #90, #91. Friendly mode removes `[contexts ...]` from client display and uses `group:context/user`. | Complete |
 | 9 | [#93](https://github.com/vm75/message-sync/issues/93) | Friendly contexts 4/4: UI, docs, privacy disclosure, E2E tests | Finalize optional feature after #90-#92. | Pending |
 | 10 | [#86](https://github.com/vm75/message-sync/issues/86) | Discord/Telegram online setup help | Do after Telegram/friendly-context behavior is stable to avoid duplicated documentation churn. | Complete |
 | 11 | [#87](https://github.com/vm75/message-sync/issues/87) | WhatsApp one-shot Add Connection + QR pairing | Independent UX improvement; keep existing pairing backend/state machine. | Pending |
@@ -149,6 +149,8 @@ Rules:
 ### #92 — Friendly source-context rendering
 
 - Centralized friendly attribution in the canonical router: root messages use `group/user`, scoped source messages use `group:label/user`, and unknown labels use `thread` or `topic`.
+- Propagated the complete friendly rendering to Discord and Telegram adapter create/media paths, with a rendered-edit boundary for lifecycle updates; opaque routing and native ChildScope placement remain separate.
+- Validation: `make fmt`, `make test`, `make vet`, `git diff --check`, and unchanged `VERSION` passed.
 - Friendly mode suppresses client-facing opaque context headers while preserving all internal opaque scope lineage; live labels take precedence over persisted labels and labels have no routing authority.
 - Applied the same source notation to shared create, media companion, poll fallback, reply fallback, retry/replay, and edit presentation paths with safe markdown punctuation handling.
 - Added exact-format router regression coverage for root, persisted/unknown scoped labels, and punctuation safety; duplicate and stale names remain isolated from routing.
