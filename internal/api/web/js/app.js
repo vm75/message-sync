@@ -1,8 +1,6 @@
 /**
  * Message Sync UI bootstrap.
- * Theme preference and UI wording/layout enhancements are presentation-only;
- * the application controller remains preserved in /js/app-base.js and is
- * loaded after this setup.
+ * Presentation-only enhancements; application behavior stays in app-base.js.
  *
  * Static smoke-test compatibility markers from the preserved controller:
  * listConnections getConnectionStatus getConnectionDiscovery createConnection
@@ -19,7 +17,7 @@
   const root = document.documentElement;
   const media = window.matchMedia('(prefers-color-scheme: dark)');
 
-  function readStoredTheme() {
+  function storedTheme() {
     try {
       const value = window.localStorage.getItem(STORAGE_KEY);
       return value === 'light' || value === 'dark' ? value : null;
@@ -28,21 +26,17 @@
     }
   }
 
-  function writeStoredTheme(value) {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, value);
-    } catch (_) {
-      // Theme persistence is optional; the active session still switches.
-    }
+  function saveTheme(value) {
+    try { window.localStorage.setItem(STORAGE_KEY, value); } catch (_) { /* optional */ }
   }
 
-  function iconMarkup() {
+  function themeIcons() {
     return `
       <svg class="theme-icon theme-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
       <svg class="theme-icon theme-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path></svg>`;
   }
 
-  function updateThemeButtons(value) {
+  function refreshThemeButtons(value) {
     const target = value === 'dark' ? 'light' : 'dark';
     document.querySelectorAll('[data-theme-toggle]').forEach((button) => {
       button.setAttribute('aria-label', `Switch to ${target} mode`);
@@ -55,40 +49,36 @@
 
   function applyTheme(value) {
     root.dataset.theme = value;
-    updateThemeButtons(value);
+    refreshThemeButtons(value);
   }
 
   function toggleTheme() {
     const next = root.dataset.theme === 'dark' ? 'light' : 'dark';
     applyTheme(next);
-    writeStoredTheme(next);
+    saveTheme(next);
   }
 
-  function createNavThemeButton() {
+  function installThemeControls() {
     const railNav = document.querySelector('#side-rail .rail-nav');
-    if (!railNav) return;
+    if (railNav) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'nav-item theme-nav-item';
+      button.dataset.themeToggle = 'true';
+      button.innerHTML = `${themeIcons()}<span class="nav-item-label" data-theme-label>Theme</span>`;
+      button.addEventListener('click', toggleTheme);
+      railNav.appendChild(button);
+    }
 
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'nav-item theme-nav-item';
-    button.dataset.themeToggle = 'true';
-    button.innerHTML = `${iconMarkup()}<span class="nav-item-label" data-theme-label>Theme</span>`;
-    button.addEventListener('click', toggleTheme);
-    railNav.appendChild(button);
-  }
-
-  function createAuthThemeButtons() {
     document.querySelectorAll('.auth-card').forEach((card) => {
       const row = document.createElement('div');
       row.className = 'theme-auth-row';
-
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'btn btn-ghost btn-sm theme-auth-button';
       button.dataset.themeToggle = 'true';
-      button.innerHTML = `${iconMarkup()}<span data-theme-label>Theme</span>`;
+      button.innerHTML = `${themeIcons()}<span data-theme-label>Theme</span>`;
       button.addEventListener('click', toggleTheme);
-
       row.appendChild(button);
       card.prepend(row);
     });
@@ -105,6 +95,16 @@
     label.textContent = text;
     button.appendChild(label);
     if (spinner) button.appendChild(spinner);
+  }
+
+  function addSectionHelp(section, text) {
+    if (!section || section.querySelector('.syncset-section-help')) return;
+    const label = section.querySelector(':scope > .section-label');
+    if (!label) return;
+    const help = document.createElement('p');
+    help.className = 'syncset-section-help';
+    help.textContent = text;
+    label.insertAdjacentElement('afterend', help);
   }
 
   function enhanceSyncSetStaticUI() {
@@ -124,21 +124,19 @@
 
     const listTitle = view.querySelector('.syncset-list-title');
     const countBadge = document.getElementById('syncset-count-badge');
-    if (listTitle && countBadge) {
-      listTitle.replaceChildren(document.createTextNode('Your sync sets'), countBadge);
-    }
+    if (listTitle && countBadge) listTitle.replaceChildren(document.createTextNode('Your sync sets'), countBadge);
 
     const placeholder = document.getElementById('syncset-editor-placeholder');
     if (placeholder) {
-      const oldCopy = placeholder.querySelector('p');
-      if (oldCopy) {
-        oldCopy.className = 'syncset-placeholder-copy';
-        oldCopy.textContent = 'Choose a sync set above to manage its conversations, or create a new one.';
+      const copy = placeholder.querySelector('p');
+      if (copy) {
+        copy.className = 'syncset-placeholder-copy';
+        copy.textContent = 'Choose a sync set above to manage its conversations, or create a new one.';
         if (!placeholder.querySelector('.syncset-placeholder-title')) {
           const title = document.createElement('div');
           title.className = 'syncset-placeholder-title';
           title.textContent = 'Choose a sync set';
-          oldCopy.before(title);
+          copy.before(title);
         }
       }
       if (btnNew && !placeholder.querySelector('.syncset-placeholder-action')) {
@@ -153,10 +151,9 @@
 
     const editorTitle = document.getElementById('syncset-editor-title');
     if (editorTitle) {
-      const titleParent = editorTitle.parentElement;
       const idDisplay = document.getElementById('syncset-editor-id-display');
-      if (idDisplay && idDisplay.parentElement) idDisplay.parentElement.classList.add('syncset-internal-id');
-      if (titleParent && !titleParent.querySelector('.syncset-editor-subtitle')) {
+      if (idDisplay?.parentElement) idDisplay.parentElement.classList.add('syncset-internal-id');
+      if (!editorTitle.parentElement?.querySelector('.syncset-editor-subtitle')) {
         const subtitle = document.createElement('p');
         subtitle.className = 'syncset-editor-subtitle';
         subtitle.textContent = 'Choose which conversations should stay synchronized.';
@@ -177,50 +174,40 @@
     const editorBody = view.querySelector('.syncset-editor-body');
     if (editorBody) {
       const children = Array.from(editorBody.children);
-      const membersSection = children.find((child) => child !== idField && child.querySelector('#endpoint-chips'));
-      const addSection = children.find((child) => child.querySelector('.add-endpoint-form'));
+      const members = children.find((child) => child !== idField && child.querySelector('#endpoint-chips'));
+      const add = children.find((child) => child.querySelector('.add-endpoint-form'));
 
-      if (membersSection) {
-        membersSection.classList.add('syncset-section', 'syncset-members-section');
-        const label = membersSection.querySelector(':scope > .section-label');
+      if (members) {
+        members.classList.add('syncset-section', 'syncset-members-section');
+        const label = members.querySelector(':scope > .section-label');
         if (label) label.textContent = 'Synced conversations';
-        if (!membersSection.querySelector('.syncset-section-help')) {
-          const help = document.createElement('p');
-          help.className = 'syncset-section-help';
-          help.textContent = 'Every conversation below receives messages from the others in this sync set.';
-          label?.insertAdjacentElement('afterend', help);
-        }
+        addSectionHelp(members, 'Every conversation below receives messages from the others in this sync set.');
       }
 
-      if (addSection) {
-        addSection.classList.add('syncset-section', 'syncset-add-section');
-        const label = addSection.querySelector(':scope > .section-label');
+      if (add) {
+        add.classList.add('syncset-section', 'syncset-add-section');
+        const label = add.querySelector(':scope > .section-label');
         if (label) label.textContent = 'Add a conversation';
-        if (!addSection.querySelector('.syncset-section-help')) {
-          const help = document.createElement('p');
-          help.className = 'syncset-section-help';
-          help.textContent = 'Pick a platform and connection, then choose the group or channel to include.';
-          label?.insertAdjacentElement('afterend', help);
-        }
+        addSectionHelp(add, 'Pick a platform and connection, then choose the group or channel to include.');
       }
     }
 
     const addForm = view.querySelector('.add-endpoint-form');
     if (addForm) {
-      const transportLabel = addForm.querySelector(':scope > div:first-child .section-label');
+      const platformLabel = addForm.querySelector(':scope > div:first-child .section-label');
       const connectionLabel = document.querySelector('label[for="add-endpoint-conn-select"]');
       const aliasLabel = document.querySelector('label[for="add-alias-input"]');
       const aliasInput = document.getElementById('add-alias-input');
-      if (transportLabel) transportLabel.textContent = 'Choose platform';
+      if (platformLabel) platformLabel.textContent = 'Choose platform';
       if (connectionLabel) connectionLabel.textContent = 'Connection';
       if (aliasLabel) aliasLabel.textContent = 'Conversation label';
       if (aliasInput) aliasInput.placeholder = 'e.g. family-whatsapp';
     }
 
-    const addButtonText = document.querySelector('#btn-add-endpoint .btn-text');
-    if (addButtonText) addButtonText.textContent = 'Add conversation';
-    const saveButtonText = document.querySelector('#btn-save-sync-set .btn-text');
-    if (saveButtonText) saveButtonText.textContent = 'Save changes';
+    const addText = document.querySelector('#btn-add-endpoint .btn-text');
+    const saveText = document.querySelector('#btn-save-sync-set .btn-text');
+    if (addText) addText.textContent = 'Add conversation';
+    if (saveText) saveText.textContent = 'Save changes';
   }
 
   function enhanceSyncSetListItems() {
@@ -258,7 +245,8 @@
     });
 
     const empty = list.querySelector('.syncset-empty-list');
-    if (empty) empty.innerHTML = 'No sync sets yet. Create one to start mirroring conversations.';
+    const friendlyEmpty = 'No sync sets yet. Create one to start mirroring conversations.';
+    if (empty && empty.textContent.trim() !== friendlyEmpty) empty.textContent = friendlyEmpty;
   }
 
   function enhanceEndpointRows() {
@@ -266,7 +254,8 @@
     if (!chips) return;
 
     const placeholder = chips.querySelector('.chips-placeholder');
-    if (placeholder) placeholder.textContent = 'No conversations in this sync set yet. Add one below.';
+    const friendlyEmpty = 'No conversations in this sync set yet. Add one below.';
+    if (placeholder && placeholder.textContent.trim() !== friendlyEmpty) placeholder.textContent = friendlyEmpty;
 
     chips.querySelectorAll('.endpoint-chip').forEach((row) => {
       row.classList.add('endpoint-row');
@@ -290,7 +279,7 @@
   function observeSyncSetUI() {
     const list = document.getElementById('syncset-list');
     const chips = document.getElementById('endpoint-chips');
-    const editorTitle = document.getElementById('syncset-editor-title');
+    const title = document.getElementById('syncset-editor-title');
 
     if (list) {
       new MutationObserver(enhanceSyncSetListItems).observe(list, { childList: true, subtree: true, characterData: true });
@@ -300,29 +289,24 @@
       new MutationObserver(enhanceEndpointRows).observe(chips, { childList: true, subtree: true });
       enhanceEndpointRows();
     }
-    if (editorTitle) {
-      new MutationObserver(makeEditorTitleFriendly).observe(editorTitle, { childList: true, characterData: true, subtree: true });
+    if (title) {
+      new MutationObserver(makeEditorTitleFriendly).observe(title, { childList: true, characterData: true, subtree: true });
       makeEditorTitleFriendly();
     }
   }
 
-  const storedTheme = readStoredTheme();
-  root.dataset.theme = storedTheme || (media.matches ? 'dark' : 'light');
-
-  createNavThemeButton();
-  createAuthThemeButtons();
-  updateThemeButtons(root.dataset.theme);
+  const initialTheme = storedTheme() || (media.matches ? 'dark' : 'light');
+  root.dataset.theme = initialTheme;
+  installThemeControls();
+  refreshThemeButtons(initialTheme);
   enhanceSyncSetStaticUI();
   observeSyncSetUI();
 
-  media.addEventListener?.('change', function (event) {
-    if (!readStoredTheme()) {
-      applyTheme(event.matches ? 'dark' : 'light');
-    }
+  media.addEventListener?.('change', (event) => {
+    if (!storedTheme()) applyTheme(event.matches ? 'dark' : 'light');
   });
 
-  // Connection IDs are generated automatically and are not useful UI surface.
-  // Keep the field present for the preserved controller but remove it visually.
+  // IDs remain available to the preserved controller, but are not user-facing.
   document.getElementById('add-conn-id')?.closest('.form-group')?.classList.add('hidden');
 
   const controller = document.createElement('script');
