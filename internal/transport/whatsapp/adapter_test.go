@@ -78,8 +78,8 @@ func TestDisablePlaintextPersistence(t *testing.T) {
 }
 
 func TestFormatWhatsAppTextUsesBoldItalicSyntaxForLiveResults(t *testing.T) {
-	input := "***Aggregated anonymised live results***\nQuestion\nOption — 1"
-	want := "*_Aggregated anonymised live results_*\nQuestion\nOption — 1"
+	input := "📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ Question\n\n**Options**\n○ *Option* — 1 votes"
+	want := "📊 *_LIVE POLL RESULTS ACROSS ALL GROUPS_*\n❓ Question\n\n*Options*\n○ _Option_ — 1 votes"
 	if got := formatWhatsAppText(input); got != want {
 		t.Fatalf("formatted text = %q, want %q", got, want)
 	}

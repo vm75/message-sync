@@ -1072,11 +1072,9 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 			break
 		}
 	}
-	if !strings.HasPrefix(resultText, "***Aggregated anonymised live results***\nWhat is your favorite pet?\n") {
-		t.Fatalf("unexpected live result heading/question: %q", resultText)
-	}
-	if !strings.Contains(resultText, "Dog — 0") || !strings.Contains(resultText, "Cat — 0") || !strings.Contains(resultText, "Parrot — 0") {
-		t.Fatalf("expected anonymised option results, got %q", resultText)
+	wantResult := "📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ What is your favorite pet?\n\n**Options**\n○ *Dog* — 0 votes\n○ *Cat* — 0 votes\n○ *Parrot* — 0 votes"
+	if resultText != wantResult {
+		t.Fatalf("unexpected exact live result layout: got %q, want %q", resultText, wantResult)
 	}
 
 	canonicalID, err := store.CanonicalForRemote(ctx, "c1g1", "poll-orig-1")
@@ -1222,14 +1220,11 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 		if !strings.Contains(s.outgoing.Text, "Lunch choice?") {
 			t.Fatalf("expected question in summary, got: %s", s.outgoing.Text)
 		}
-		if !strings.Contains(s.outgoing.Text, "Pizza: 2 vote(s) (66%)") {
-			t.Fatalf("expected Pizza 2 votes (66%%), got: %s", s.outgoing.Text)
+		if !strings.Contains(s.outgoing.Text, "○ *Pizza* — 2 votes") {
+			t.Fatalf("expected Pizza 2 votes, got: %s", s.outgoing.Text)
 		}
-		if !strings.Contains(s.outgoing.Text, "Sushi: 1 vote(s) (33%)") {
-			t.Fatalf("expected Sushi 1 vote (33%%), got: %s", s.outgoing.Text)
-		}
-		if !strings.Contains(s.outgoing.Text, "Total votes: 3") {
-			t.Fatalf("expected Total votes: 3, got: %s", s.outgoing.Text)
+		if !strings.Contains(s.outgoing.Text, "○ *Sushi* — 1 votes") {
+			t.Fatalf("expected Sushi 1 vote, got: %s", s.outgoing.Text)
 		}
 		// In c1g1, reply should be to poll-msg-1
 		if s.outgoing.Endpoint == "c1g1" {
@@ -1341,14 +1336,11 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	}
 
 	for _, s := range fake.sent {
-		if !strings.Contains(s.outgoing.Text, "Option 1: 1 vote(s) (100%)") {
-			t.Fatalf("expected Option 1 fallback label with 1 vote (100%%), got: %s", s.outgoing.Text)
+		if !strings.Contains(s.outgoing.Text, "○ *Option 1* — 1 votes") {
+			t.Fatalf("expected Option 1 fallback label with 1 vote, got: %s", s.outgoing.Text)
 		}
-		if !strings.Contains(s.outgoing.Text, "Option 2: 0 vote(s) (0%)") {
+		if !strings.Contains(s.outgoing.Text, "○ *Option 2* — 0 votes") {
 			t.Fatalf("expected Option 2 fallback label with 0 votes, got: %s", s.outgoing.Text)
-		}
-		if !strings.Contains(s.outgoing.Text, "Total votes: 1") {
-			t.Fatalf("expected Total votes: 1, got: %s", s.outgoing.Text)
 		}
 	}
 }

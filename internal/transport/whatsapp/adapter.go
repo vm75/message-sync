@@ -35,9 +35,9 @@ import (
 )
 
 const (
-	eventBufferSize              = 128
-	anonymisedLiveResultsHeading = "Aggregated anonymised live results"
-	defaultDeviceName            = "message-sync"
+	eventBufferSize        = 128
+	livePollResultsHeading = "LIVE POLL RESULTS ACROSS ALL GROUPS"
+	defaultDeviceName      = "message-sync"
 )
 
 var (
@@ -83,7 +83,22 @@ func RemoveProtocolDB(dataDir, connectionID string) error {
 }
 
 func formatWhatsAppText(text string) string {
-	return strings.ReplaceAll(text, "***"+anonymisedLiveResultsHeading+"***", "*_"+anonymisedLiveResultsHeading+"_*")
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		switch {
+		case line == "📊 ***"+livePollResultsHeading+"***":
+			lines[i] = "📊 *_" + livePollResultsHeading + "_*"
+		case line == "**Options**":
+			lines[i] = "*Options*"
+		case strings.HasPrefix(line, "○ *"):
+			const prefix = "○ *"
+			if marker := strings.Index(line[len(prefix):], "* — "); marker >= 0 {
+				marker += len(prefix)
+				lines[i] = "○ _" + line[len(prefix):marker] + "_" + line[marker+1:]
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 type Options struct {

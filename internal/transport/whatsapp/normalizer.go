@@ -99,6 +99,13 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 				pollOptions = append(pollOptions, opt.GetOptionName())
 			}
 			pollSelectableCount = int(poll.GetSelectableOptionsCount())
+			// WhatsApp encodes unlimited multi-select polls as zero. The
+			// canonical poll model uses the option count for that same
+			// representable semantics, allowing Discord and Telegram to create
+			// native multi-select polls instead of falling back to text.
+			if pollSelectableCount == 0 && len(pollOptions) > 0 {
+				pollSelectableCount = len(pollOptions)
+			}
 		}
 	} else if kind == "poll_vote" {
 		if pollUpdate := evt.Message.GetPollUpdateMessage(); pollUpdate != nil {
@@ -277,6 +284,11 @@ func getPollCreation(msg *waE2E.Message) *waE2E.PollCreationMessage {
 	}
 	if p := msg.GetPollCreationMessageV3(); p != nil {
 		return p
+	}
+	if future := msg.GetPollCreationMessageV4(); future != nil {
+		if nested := future.GetMessage(); nested != nil && nested != msg {
+			return getPollCreation(nested)
+		}
 	}
 	if p := msg.GetPollCreationMessageV5(); p != nil {
 		return p

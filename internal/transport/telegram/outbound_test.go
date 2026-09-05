@@ -613,9 +613,24 @@ func TestTelegramNativePollRetryReusesSingleRenderedAttribution(t *testing.T) {
 	}
 }
 
+func TestTelegramNativePollAcceptsWhatsAppUnlimitedSemantics(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", SourceText: "Choose any", Kind: "poll",
+		PollOptions: []string{"One", "Two"}, PollSelectableCount: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.polls) != 1 || !api.polls[0].AllowsMultipleAnswers {
+		t.Fatalf("WhatsApp unlimited poll did not use native Telegram poll: %#v", api.polls)
+	}
+}
+
 func TestTelegramPresentationConvertsCanonicalAggregateHeading(t *testing.T) {
-	got, mode := telegramPresentation("***Aggregated anonymised live results***\nQuestion & choice")
-	want := "<b><i>Aggregated anonymised live results</i></b>\nQuestion &amp; choice"
+	got, mode := telegramPresentation("📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ Question & choice\n\n**Options**\n○ *Option* — 0 votes")
+	want := "📊 <b><i>LIVE POLL RESULTS ACROSS ALL GROUPS</i></b>\n❓ Question &amp; choice\n\n<b>Options</b>\n○ <i>Option</i> — 0 votes"
 	if got != want || mode != models.ParseModeHTML {
 		t.Fatalf("aggregate presentation = %q, %q; want %q, HTML", got, mode, want)
 	}

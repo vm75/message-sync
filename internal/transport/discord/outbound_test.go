@@ -539,6 +539,21 @@ func TestDiscordNativePollPresentationKeepsSourceAttributionAndDestinationScopeO
 	}
 }
 
+func TestDiscordNativePollAcceptsWhatsAppUnlimitedSemantics(t *testing.T) {
+	api := &fakeDiscordAPI{}
+	adapter := newOutboundTestAdapter(&fakeChannelWebhook{managed: make(map[string]string)}, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "discord", SourceText: "Choose any", Kind: "poll",
+		PollOptions: []string{"One", "Two"}, PollSelectableCount: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.pollSends) != 1 || api.pollSends[0].Poll == nil || !api.pollSends[0].Poll.AllowMultiselect {
+		t.Fatalf("WhatsApp unlimited poll did not use native Discord poll: %#v", api.pollSends)
+	}
+}
+
 func TestDiscordOutboundMentionsNeverExposeWhatsAppRemoteIdentity(t *testing.T) {
 	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
@@ -563,6 +578,13 @@ func TestDiscordOutboundMentionsNeverExposeWhatsAppRemoteIdentity(t *testing.T) 
 	}
 	if !strings.Contains(got, "@participant") {
 		t.Fatalf("safe mention fallback missing: %q", got)
+	}
+}
+
+func TestDiscordPresentationKeepsLivePollMarkdown(t *testing.T) {
+	input := "📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ Question\n\n**Options**\n○ *Option* — 0 votes"
+	if got := discordPresentation(input); got != input {
+		t.Fatalf("live poll presentation changed Discord markdown: %q", got)
 	}
 }
 

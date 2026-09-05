@@ -270,6 +270,56 @@ func TestNormalizePollCreation(t *testing.T) {
 	}
 }
 
+func TestNormalizeV4PollCreation(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := "Choose meals"
+	incoming, ok := normalizer.NormalizeMessage(&events.Message{
+		Info: types.MessageInfo{MessageSource: types.MessageSource{
+			Chat: types.NewJID("123456789", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), IsGroup: true,
+		}, ID: "poll-v4"},
+		Message: &waE2E.Message{PollCreationMessageV4: &waE2E.FutureProofMessage{Message: &waE2E.Message{
+			PollCreationMessage: &waE2E.PollCreationMessage{Name: &question, Options: []*waE2E.PollCreationMessage_Option{
+				{OptionName: protoPtr("Breakfast")}, {OptionName: protoPtr("Dinner")},
+			}, SelectableOptionsCount: protoPtr(uint32(2))},
+		}}},
+	}, true, 100*1024*1024, nil, nil, nil)
+	if !ok || incoming.Kind != "poll" || incoming.Text != question || len(incoming.PollOptions) != 2 || incoming.PollSelectableCount != 2 {
+		t.Fatalf("V4 poll normalization = %#v, accepted=%v", incoming, ok)
+	}
+}
+
+func TestNormalizePollCreationZeroSelectableCountAsUnlimited(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := "Choose any"
+	incoming, ok := normalizer.NormalizeMessage(&events.Message{
+		Info: types.MessageInfo{MessageSource: types.MessageSource{
+			Chat: types.NewJID("123456789", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), IsGroup: true,
+		}, ID: "poll-unlimited"},
+		Message: &waE2E.Message{PollCreationMessage: &waE2E.PollCreationMessage{
+			Name:                   &question,
+			Options:                []*waE2E.PollCreationMessage_Option{{OptionName: protoPtr("One")}, {OptionName: protoPtr("Two")}},
+			SelectableOptionsCount: protoPtr(uint32(0)),
+		}},
+	}, true, 100*1024*1024, nil, nil, nil)
+	if !ok || incoming.Kind != "poll" || incoming.PollSelectableCount != len(incoming.PollOptions) {
+		t.Fatalf("unlimited poll normalization = %#v, accepted=%v", incoming, ok)
+	}
+}
+
 func TestNormalizePollVote(t *testing.T) {
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {

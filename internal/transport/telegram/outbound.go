@@ -674,10 +674,22 @@ func telegramOutgoingText(outgoing transport.Outgoing) string {
 // notation because that is the notation understood by WhatsApp; Telegram
 // must receive an explicit parse mode or it displays those marker characters.
 func telegramPresentation(content string) (string, models.ParseMode) {
-	const aggregateHeading = "***Aggregated anonymised live results***"
+	const aggregateHeading = "📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***"
 	if strings.HasPrefix(content, aggregateHeading) {
 		rest := strings.TrimPrefix(content, aggregateHeading)
-		return "<b><i>Aggregated anonymised live results</i></b>" + html.EscapeString(rest), models.ParseModeHTML
+		lines := strings.Split(rest, "\n")
+		for i, line := range lines {
+			switch {
+			case line == "**Options**":
+				lines[i] = "<b>Options</b>"
+			case strings.HasPrefix(line, "○ *") && strings.Contains(line, "* — "):
+				parts := strings.SplitN(line[len("○ *"):], "* — ", 2)
+				lines[i] = "○ <i>" + html.EscapeString(parts[0]) + "</i> — " + html.EscapeString(parts[1])
+			default:
+				lines[i] = html.EscapeString(line)
+			}
+		}
+		return "📊 <b><i>LIVE POLL RESULTS ACROSS ALL GROUPS</i></b>" + strings.Join(lines, "\n"), models.ParseModeHTML
 	}
 	if !strings.HasPrefix(content, "*_") {
 		return content, ""

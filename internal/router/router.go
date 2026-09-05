@@ -1004,22 +1004,19 @@ func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (str
 	r.mu.RUnlock()
 
 	var builder strings.Builder
-	builder.WriteString("***Aggregated anonymised live results***\n")
+	builder.WriteString("📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ ")
 	if hasPresentation && presentation.Question != "" {
 		builder.WriteString(presentation.Question)
-		builder.WriteString("\n")
 	}
-	if aggregate.Partial {
-		builder.WriteString("Partial/unavailable source\n")
-	}
+	builder.WriteString("\n\n**Options**")
 	for _, option := range aggregate.Options {
 		label := fmt.Sprintf("Option %d", option.Index+1)
 		if hasPresentation && option.Index < len(presentation.Options) && presentation.Options[option.Index] != "" {
 			label = presentation.Options[option.Index]
 		}
-		fmt.Fprintf(&builder, "%s — %d\n", label, aggregate.Counts[option.Index])
+		fmt.Fprintf(&builder, "\n○ *%s* — %d votes", label, aggregate.Counts[option.Index])
 	}
-	return strings.TrimSuffix(builder.String(), "\n"), nil
+	return builder.String(), nil
 }
 
 func (r *Router) readPollAggregate(ctx context.Context, canonicalID string) (pollAggregate, error) {
@@ -1214,41 +1211,10 @@ func (r *Router) pendingReactionCurrent(key mutationKey, actor string, revision 
 }
 
 func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.Incoming, canonicalID string, members []transport.EndpointID) error {
-	aggregate, err := r.readPollAggregate(ctx, canonicalID)
+	summaryText, err := r.renderPollResults(ctx, canonicalID)
 	if err != nil {
-		return fmt.Errorf("get poll aggregate: %w", err)
+		return fmt.Errorf("render aggregated poll results: %w", err)
 	}
-
-	r.mu.RLock()
-	meta, hasMeta := r.pollPresentation[canonicalID]
-	r.mu.RUnlock()
-
-	var totalVotes int
-	for _, cnt := range aggregate.Counts {
-		totalVotes += cnt
-	}
-
-	var sb strings.Builder
-	if hasMeta && meta.Question != "" {
-		sb.WriteString(fmt.Sprintf("📊 Aggregated Poll Results: %s\n\n", meta.Question))
-	} else {
-		sb.WriteString("📊 Aggregated Poll Results\n\n")
-	}
-
-	for i, option := range aggregate.Options {
-		label := fmt.Sprintf("Option %d", i+1)
-		if hasMeta && i < len(meta.Options) {
-			label = meta.Options[i]
-		}
-		cnt := aggregate.Counts[option.Index]
-		pct := 0
-		if totalVotes > 0 {
-			pct = (cnt * 100) / totalVotes
-		}
-		sb.WriteString(fmt.Sprintf("• %s: %d vote(s) (%d%%)\n", label, cnt, pct))
-	}
-	sb.WriteString(fmt.Sprintf("\nTotal votes: %d", totalVotes))
-	summaryText := sb.String()
 
 	for _, destination := range members {
 		var outgoingReplyTo *transport.MessageRef
