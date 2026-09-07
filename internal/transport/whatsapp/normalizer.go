@@ -182,7 +182,18 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 			if qm := contextInfo.GetQuotedMessage(); qm != nil {
 				_, qText, _, _ := normalizedPayload(qm)
 				quotedText = qText
+				for _, m := range extractedMentions {
+					if rawJID, err := types.ParseJID(m.RemoteID); err == nil && !rawJID.IsEmpty() {
+						quotedText = strings.ReplaceAll(quotedText, "@"+rawJID.User, "@"+m.RemoteID)
+					}
+				}
 			}
+		}
+	}
+
+	for _, m := range extractedMentions {
+		if rawJID, err := types.ParseJID(m.RemoteID); err == nil && !rawJID.IsEmpty() {
+			text = strings.ReplaceAll(text, "@"+rawJID.User, "@"+m.RemoteID)
 		}
 	}
 
@@ -220,12 +231,13 @@ func extractMentions(mentions []string, contactGetter ContactGetter, resolver JI
 		if err != nil {
 			continue
 		}
+		nonAD := jid.ToNonAD()
 		var name string
 		if contactGetter != nil {
-			info := contactGetter(jid)
+			info := contactGetter(nonAD)
 			if !info.Found && resolver != nil {
-				if alt, err := resolver(context.Background(), jid); err == nil && !alt.IsEmpty() {
-					info = contactGetter(alt)
+				if alt, err := resolver(context.Background(), nonAD); err == nil && !alt.IsEmpty() {
+					info = contactGetter(alt.ToNonAD())
 				}
 			}
 			if info.Found {
@@ -239,10 +251,10 @@ func extractMentions(mentions []string, contactGetter ContactGetter, resolver JI
 			}
 		}
 		if name == "" {
-			name = jid.User
+			name = nonAD.User
 		}
 		result = append(result, transport.Mention{
-			RemoteID: jid.User,
+			RemoteID: nonAD.String(),
 			Name:     name,
 		})
 	}

@@ -329,7 +329,7 @@ func TestNormalizePollVote_OpaqueIDConsistency(t *testing.T) {
 	}
 }
 
-func TestParticipantMatches_Bidirectional(t *testing.T) {
+func TestParticipantMatches_SeparatePhoneAndIdentity(t *testing.T) {
 	ctx := context.Background()
 	pnJID := types.NewJID("15551234567", types.DefaultUserServer)
 	lidJID := types.NewJID("100012345678901", types.HiddenUserServer)
@@ -350,55 +350,67 @@ func TestParticipantMatches_Bidirectional(t *testing.T) {
 		PhoneNumber: pnJID,
 	}
 
-	// Matches by phone with + and without +
-	if !ParticipantMatches(ctx, p, "+15551234567", nil) {
+	// 1. Phone matching via ParticipantMatchesPhone
+	if !ParticipantMatchesPhone(ctx, p, "+15551234567", nil) {
 		t.Fatal("expected match by +phone")
 	}
-	if !ParticipantMatches(ctx, p, "15551234567", nil) {
+	if !ParticipantMatchesPhone(ctx, p, "15551234567", nil) {
 		t.Fatal("expected match by phone")
 	}
 
-	// Matches by LID JID string
-	if !ParticipantMatches(ctx, p, lidJID.String(), nil) {
-		t.Fatal("expected match by LID JID string")
+	// 2. Identity matching via ParticipantMatchesIdentity (full JIDs)
+	if !ParticipantMatchesIdentity(ctx, p, lidJID, nil) {
+		t.Fatal("expected match by LID JID")
+	}
+	if !ParticipantMatchesIdentity(ctx, p, pnJID, nil) {
+		t.Fatal("expected match by PN JID")
 	}
 
-	// Matches by LID user string (from mention)
-	if !ParticipantMatches(ctx, p, "100012345678901", nil) {
-		t.Fatal("expected match by LID user string")
-	}
-
-	// Participant has ONLY LID, but resolver maps it to PN
+	// 3. Regression test: submitted phone digits exactly equal to LID numeric user value
+	// must NOT match unless a real PN mapping exists.
+	lidDigits := "100012345678901"
 	pLIDOnly := types.GroupParticipant{
-		JID: lidJID,
-		LID: lidJID,
+		JID: types.NewJID(lidDigits, types.HiddenUserServer),
+		LID: types.NewJID(lidDigits, types.HiddenUserServer),
 	}
-	if !ParticipantMatches(ctx, pLIDOnly, "15551234567", resolver) {
+	if ParticipantMatchesPhone(ctx, pLIDOnly, lidDigits, nil) {
+		t.Fatal("submitted phone digits matching LID user must not match without real PN mapping")
+	}
+	if ParticipantMatchesPhone(ctx, pLIDOnly, "+"+lidDigits, nil) {
+		t.Fatal("submitted +phone digits matching LID user must not match without real PN mapping")
+	}
+
+	// But if resolver maps submitted phone to participant's LID, it matches
+	pnForLIDDigits := types.NewJID(lidDigits, types.DefaultUserServer)
+	validResolver := func(ctx context.Context, jid types.JID) (types.JID, error) {
+		if jid.ToNonAD().String() == pnForLIDDigits.ToNonAD().String() {
+			return pLIDOnly.LID, nil
+		}
+		return types.EmptyJID, nil
+	}
+	if !ParticipantMatchesPhone(ctx, pLIDOnly, lidDigits, validResolver) {
+		t.Fatal("submitted phone mapped to LID via resolver should match")
+	}
+
+	// 4. Participant has ONLY LID, but resolver maps it to PN
+	if !ParticipantMatchesPhone(ctx, pLIDOnly, "15551234567", resolver) {
 		t.Fatal("expected resolver to map LID participant to target phone")
 	}
-	if !ParticipantMatches(ctx, pLIDOnly, "+15551234567", resolver) {
+	if !ParticipantMatchesPhone(ctx, pLIDOnly, "+15551234567", resolver) {
 		t.Fatal("expected resolver to map LID participant to target +phone")
 	}
 
-	// Participant has ONLY PN, but resolver maps target LID to PN
+	// 5. Participant has ONLY PN, but resolver maps target LID to PN
 	pPNOnly := types.GroupParticipant{
 		JID:         pnJID,
 		PhoneNumber: pnJID,
 	}
-	if !ParticipantMatches(ctx, pPNOnly, lidJID.String(), resolver) {
+	if !ParticipantMatchesIdentity(ctx, pPNOnly, lidJID, resolver) {
 		t.Fatal("expected resolver to map target LID to PN participant")
-	}
-	if !ParticipantMatches(ctx, pPNOnly, "100012345678901", resolver) {
-		t.Fatal("expected resolver to map target LID user to PN participant")
-	}
-
-	// Explicit phone with + must NOT match unmapped LID
-	if ParticipantMatches(ctx, types.GroupParticipant{JID: lidJID, LID: lidJID}, "+100012345678901", nil) {
-		t.Fatal("explicit +phone must not match unmapped LID")
 	}
 }
 
-func TestExtractMentions_LIDResolution(t *testing.T) {
+func TestExtractMentions_FullJIDPreservation(t *testing.T) {
 	pnJID := types.NewJID("15551234567", types.DefaultUserServer)
 	lidJID := types.NewJID("100012345678901", types.HiddenUserServer)
 
@@ -423,7 +435,67 @@ func TestExtractMentions_LIDResolution(t *testing.T) {
 	if len(mentions) != 1 {
 		t.Fatalf("expected 1 mention, got %d", len(mentions))
 	}
+	// Verify full JID is preserved rather than just user part
+	if mentions[0].RemoteID != pnJID.ToNonAD().String() {
+		t.Fatalf("expected mention RemoteID to preserve normalized full JID %s, got %s", pnJID.ToNonAD().String(), mentions[0].RemoteID)
+	}
 	if mentions[0].Name != "Alice" {
 		t.Fatalf("expected mention Name to be Alice via resolved LID contact info, got %s", mentions[0].Name)
+	}
+}
+
+func TestNormalizeMessage_MentionTextPreservation(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chatJID := types.NewJID("123456789", types.GroupServer)
+	senderJID := types.NewJID("15550000000", types.DefaultUserServer)
+	mentionedPN := types.NewJID("15551234567", types.DefaultUserServer)
+	body := "hello @15551234567 welcome"
+
+	mockContactGetter := func(jid types.JID) types.ContactInfo {
+		return types.ContactInfo{Found: true, PushName: "Bob"}
+	}
+
+	evt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    chatJID,
+				Sender:  senderJID,
+				IsGroup: true,
+			},
+			ID:        "msg-mention",
+			PushName:  "Alice",
+			Timestamp: time.Now(),
+		},
+		Message: &waE2E.Message{
+			ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+				Text: &body,
+				ContextInfo: &waE2E.ContextInfo{
+					MentionedJID: []string{mentionedPN.String()},
+				},
+			},
+		},
+	}
+
+	norm, ok := normalizer.NormalizeMessage(evt, true, 1024*1024, nil, nil, mockContactGetter, nil)
+	if !ok {
+		t.Fatal("normalization failed")
+	}
+	if len(norm.Mentions) != 1 {
+		t.Fatalf("expected 1 mention, got %d", len(norm.Mentions))
+	}
+	if norm.Mentions[0].RemoteID != mentionedPN.ToNonAD().String() {
+		t.Fatalf("expected mention RemoteID to be %s, got %s", mentionedPN.ToNonAD().String(), norm.Mentions[0].RemoteID)
+	}
+	expectedText := "hello @" + mentionedPN.ToNonAD().String() + " welcome"
+	if norm.Text != expectedText {
+		t.Fatalf("expected text %q, got %q", expectedText, norm.Text)
 	}
 }

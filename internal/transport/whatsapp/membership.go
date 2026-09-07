@@ -97,7 +97,7 @@ func (a *Adapter) ApproveJoinRequest(ctx context.Context, alias, participant str
 }
 
 func groupParticipantMatchesPhone(participant types.GroupParticipant, phone string) bool {
-	return ParticipantMatches(context.Background(), participant, phone, nil)
+	return ParticipantMatchesPhone(context.Background(), participant, phone, nil)
 }
 
 func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, error) {
@@ -110,11 +110,75 @@ func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, erro
 		return false, err
 	}
 	for _, p := range info.Participants {
-		if ParticipantMatches(ctx, p, phone, a.resolveAltJID) {
+		if ParticipantMatchesPhone(ctx, p, phone, a.resolveAltJID) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// MatchPendingJoinRequest finds the group pending join request that matches the applicant's
+// submitted phone number. It starts from the submitted PN and resolves PN -> LID to compare
+// against pending LID requests. Keeps ambiguity protection and does not guess when mappings
+// are unavailable.
+func (a *Adapter) MatchPendingJoinRequest(ctx context.Context, alias, phone string) (verification.PendingJoinRequest, bool, error) {
+	target, err := a.membershipTarget(alias)
+	if err != nil {
+		return verification.PendingJoinRequest{}, false, verification.ErrDestinationMissing
+	}
+	requests, err := a.client.GetGroupRequestParticipants(ctx, target)
+	if err != nil {
+		return verification.PendingJoinRequest{}, false, err
+	}
+	wanted := strings.TrimPrefix(strings.TrimSpace(phone), "+")
+	if wanted == "" {
+		return verification.PendingJoinRequest{}, false, nil
+	}
+
+	submittedPN := types.NewJID(wanted, types.DefaultUserServer)
+	var submittedLID types.JID
+	if a.client != nil && a.client.Store != nil {
+		if alt, err := a.client.Store.GetAltJID(ctx, submittedPN); err == nil && !alt.IsEmpty() {
+			altNonAD := alt.ToNonAD()
+			if altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer {
+				submittedLID = altNonAD
+			}
+		}
+	}
+
+	var matched verification.PendingJoinRequest
+	found := false
+	for _, req := range requests {
+		if req.JID.IsEmpty() {
+			continue
+		}
+		reqNonAD := req.JID.ToNonAD()
+		isMatch := false
+
+		if reqNonAD.Server == types.DefaultUserServer {
+			if reqNonAD.User == wanted {
+				isMatch = true
+			}
+		} else if reqNonAD.Server == types.HiddenUserServer || reqNonAD.Server == types.HostedLIDServer {
+			if !submittedLID.IsEmpty() && reqNonAD.String() == submittedLID.String() {
+				isMatch = true
+			}
+		}
+
+		if isMatch {
+			if found {
+				return verification.PendingJoinRequest{}, false, errors.New("multiple matching join requests")
+			}
+			matched = verification.PendingJoinRequest{
+				ID:          req.JID.String(),
+				Phone:       wanted,
+				RequestedAt: req.RequestedAt,
+			}
+			found = true
+		}
+	}
+
+	return matched, found, nil
 }
 
 // MultiAdmin dispatches WhatsApp membership fulfillment operations to the adapter
@@ -174,4 +238,17 @@ func (m *MultiAdmin) IsMember(ctx context.Context, alias, phone string) (bool, e
 		return false, err
 	}
 	return a.IsMember(ctx, alias, phone)
+}
+
+func (m *MultiAdmin) MatchPendingJoinRequest(ctx context.Context, alias, phone string) (verification.PendingJoinRequest, bool, error) {
+	a, err := m.find(alias)
+	if err != nil {
+		return verification.PendingJoinRequest{}, false, err
+	}
+	if matcher, ok := a.(interface {
+		MatchPendingJoinRequest(context.Context, string, string) (verification.PendingJoinRequest, bool, error)
+	}); ok {
+		return matcher.MatchPendingJoinRequest(ctx, alias, phone)
+	}
+	return verification.PendingJoinRequest{}, false, nil
 }

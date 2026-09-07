@@ -67,50 +67,79 @@ func CanonicalSenderIdentity(ctx context.Context, sender, senderAlt types.JID, r
 	return canonical, phone
 }
 
-// ParticipantMatches checks whether a WhatsApp group participant matches a target
-// string (which may be a phone number without '+', a user component, or a JID string).
-func ParticipantMatches(ctx context.Context, p types.GroupParticipant, target string, resolver JIDResolver) bool {
-	target = strings.TrimSpace(target)
-	if target == "" {
+// ParticipantMatchesPhone checks whether a WhatsApp group participant matches a
+// submitted phone number. A submitted phone number must only match a real PN identity:
+//   - PhoneNumber with @s.whatsapp.net
+//   - Primary JID with @s.whatsapp.net
+//   - A trusted PN resolved through whatsmeow's PN/LID mapping (or resolved LID matching participant's LID)
+//
+// An LID user component (the numeric .User part of @lid) is NEVER treated as a phone number.
+func ParticipantMatchesPhone(ctx context.Context, p types.GroupParticipant, phone string, resolver JIDResolver) bool {
+	cleanPhone := strings.TrimPrefix(strings.TrimSpace(phone), "+")
+	if cleanPhone == "" {
 		return false
 	}
-	cleanTarget := strings.TrimPrefix(target, "+")
 
-	// 1. Direct JID string match (full string match against any participant field)
-	fields := []types.JID{p.JID, p.LID, p.PhoneNumber}
-	for _, f := range fields {
-		if !f.IsEmpty() && (f.String() == target || f.ToNonAD().String() == target) {
-			return true
-		}
+	// 1. Direct match against genuine PN fields on the participant
+	if p.PhoneNumber.Server == types.DefaultUserServer && p.PhoneNumber.ToNonAD().User == cleanPhone {
+		return true
+	}
+	if p.JID.Server == types.DefaultUserServer && p.JID.ToNonAD().User == cleanPhone {
+		return true
 	}
 
-	// 2. Direct Phone match against genuine PN fields (p.PhoneNumber or p.JID if PN)
-	pnFields := []types.JID{p.PhoneNumber}
-	if p.JID.Server == types.DefaultUserServer {
-		pnFields = append(pnFields, p.JID)
+	// Never compare cleanPhone against p.LID.User or p.JID.User when they are LID servers.
+	if resolver == nil {
+		return false
 	}
-	for _, f := range pnFields {
-		if !f.IsEmpty() {
-			nonAD := f.ToNonAD()
-			if nonAD.User == cleanTarget || nonAD.User == target {
+
+	// 2. Resolve submitted phone number (as PN JID) to LID, and compare against participant's LID
+	submittedPN := types.NewJID(cleanPhone, types.DefaultUserServer)
+	if altLID, err := resolver(ctx, submittedPN); err == nil && !altLID.IsEmpty() {
+		altNonAD := altLID.ToNonAD()
+		if altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer {
+			if !p.LID.IsEmpty() && p.LID.ToNonAD().String() == altNonAD.String() {
+				return true
+			}
+			if !p.JID.IsEmpty() && (p.JID.Server == types.HiddenUserServer || p.JID.Server == types.HostedLIDServer) && p.JID.ToNonAD().String() == altNonAD.String() {
 				return true
 			}
 		}
 	}
 
-	// 3. Direct LID user match (only if target is not an explicit phone number starting with '+')
-	if !strings.HasPrefix(target, "+") {
-		lidFields := []types.JID{p.LID}
-		if p.JID.Server == types.HiddenUserServer || p.JID.Server == types.HostedLIDServer {
-			lidFields = append(lidFields, p.JID)
-		}
-		for _, f := range lidFields {
-			if !f.IsEmpty() {
-				nonAD := f.ToNonAD()
-				if target == nonAD.User {
-					return true
-				}
+	// 3. Resolve participant's LID to PN, and compare resolved PN against cleanPhone
+	lidFields := []types.JID{}
+	if !p.LID.IsEmpty() && (p.LID.Server == types.HiddenUserServer || p.LID.Server == types.HostedLIDServer) {
+		lidFields = append(lidFields, p.LID.ToNonAD())
+	}
+	if !p.JID.IsEmpty() && (p.JID.Server == types.HiddenUserServer || p.JID.Server == types.HostedLIDServer) {
+		lidFields = append(lidFields, p.JID.ToNonAD())
+	}
+	for _, lid := range lidFields {
+		if altPN, err := resolver(ctx, lid); err == nil && !altPN.IsEmpty() {
+			altNonAD := altPN.ToNonAD()
+			if altNonAD.Server == types.DefaultUserServer && altNonAD.User == cleanPhone {
+				return true
 			}
+		}
+	}
+
+	return false
+}
+
+// ParticipantMatchesIdentity checks whether a WhatsApp group participant matches a
+// provider identity JID (PN or LID), using explicit PN/LID-aware resolution.
+func ParticipantMatchesIdentity(ctx context.Context, p types.GroupParticipant, target types.JID, resolver JIDResolver) bool {
+	if target.IsEmpty() {
+		return false
+	}
+	targetNonAD := target.ToNonAD()
+	fields := []types.JID{p.JID, p.LID, p.PhoneNumber}
+
+	// 1. Direct match on normalized JID
+	for _, f := range fields {
+		if !f.IsEmpty() && f.ToNonAD().String() == targetNonAD.String() {
+			return true
 		}
 	}
 
@@ -118,62 +147,43 @@ func ParticipantMatches(ctx context.Context, p types.GroupParticipant, target st
 		return false
 	}
 
-	// 4. Resolve target to alternate JID
-	var targetJID types.JID
-	if strings.Contains(target, "@") {
-		targetJID, _ = types.ParseJID(target)
-	} else if strings.HasPrefix(target, "+") || p.PhoneNumber.User == cleanTarget {
-		targetJID = types.NewJID(cleanTarget, types.DefaultUserServer)
-	} else {
-		targetJID = types.NewJID(cleanTarget, types.DefaultUserServer)
-	}
-
-	if !targetJID.IsEmpty() {
-		if alt, err := resolver(ctx, targetJID); err == nil && !alt.IsEmpty() {
-			altNonAD := alt.ToNonAD()
-			for _, f := range fields {
-				if !f.IsEmpty() {
-					nonAD := f.ToNonAD()
-					if nonAD.String() == altNonAD.String() || (nonAD.Server == altNonAD.Server && nonAD.User == altNonAD.User) {
-						return true
-					}
-				}
-			}
-		}
-		if !strings.Contains(target, "@") {
-			lidTarget := types.NewJID(cleanTarget, types.HiddenUserServer)
-			if alt, err := resolver(ctx, lidTarget); err == nil && !alt.IsEmpty() {
-				altNonAD := alt.ToNonAD()
-				for _, f := range fields {
-					if !f.IsEmpty() {
-						nonAD := f.ToNonAD()
-						if nonAD.String() == altNonAD.String() || (nonAD.Server == altNonAD.Server && nonAD.User == altNonAD.User) {
-							return true
-						}
-					}
-				}
+	// 2. Resolve target to alternate JID and compare with participant fields
+	if alt, err := resolver(ctx, targetNonAD); err == nil && !alt.IsEmpty() {
+		altNonAD := alt.ToNonAD()
+		for _, f := range fields {
+			if !f.IsEmpty() && f.ToNonAD().String() == altNonAD.String() {
+				return true
 			}
 		}
 	}
 
-	// 5. Resolve participant JIDs to compare with target
+	// 3. Resolve participant fields and compare with target
 	for _, f := range fields {
-		if f.IsEmpty() {
-			continue
-		}
-		if alt, err := resolver(ctx, f); err == nil && !alt.IsEmpty() {
-			altNonAD := alt.ToNonAD()
-			if altNonAD.String() == target {
-				return true
-			}
-			if altNonAD.Server == types.DefaultUserServer && (altNonAD.User == cleanTarget || altNonAD.User == target) {
-				return true
-			}
-			if (altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer) && !strings.HasPrefix(target, "+") && altNonAD.User == target {
-				return true
+		if !f.IsEmpty() {
+			if alt, err := resolver(ctx, f.ToNonAD()); err == nil && !alt.IsEmpty() {
+				if alt.ToNonAD().String() == targetNonAD.String() {
+					return true
+				}
 			}
 		}
 	}
 
 	return false
+}
+
+// ParticipantMatches is a convenience helper that matches a participant against a
+// target string, delegating to ParticipantMatchesIdentity when target is a full JID
+// or ParticipantMatchesPhone when target is a phone number.
+func ParticipantMatches(ctx context.Context, p types.GroupParticipant, target string, resolver JIDResolver) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	if strings.Contains(target, "@") {
+		if jid, err := types.ParseJID(target); err == nil && !jid.IsEmpty() {
+			return ParticipantMatchesIdentity(ctx, p, jid, resolver)
+		}
+		return false
+	}
+	return ParticipantMatchesPhone(ctx, p, target, resolver)
 }

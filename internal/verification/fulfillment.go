@@ -46,24 +46,42 @@ func Fulfill(ctx context.Context, req FulfillmentRequest, wa WhatsAppAdmin, dc D
 		if !required {
 			return FulfillmentResult{State: "action_pending", FailureClass: "join_approval_required"}, errors.New("group join approval is required")
 		}
-		pending, err := wa.PendingJoinRequests(ctx, req.EndpointAlias)
-		if err != nil {
-			return FulfillmentResult{State: "action_pending", FailureClass: "pending_requests_unavailable"}, err
-		}
-		wanted := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
 		matchTarget := ""
-		for _, candidate := range pending {
-			if strings.TrimPrefix(strings.TrimSpace(candidate.Phone), "+") != wanted {
-				continue
+		if matcher, ok := wa.(interface {
+			MatchPendingJoinRequest(context.Context, string, string) (PendingJoinRequest, bool, error)
+		}); ok {
+			candidate, found, err := matcher.MatchPendingJoinRequest(ctx, req.EndpointAlias, req.Phone)
+			if err != nil {
+				if strings.Contains(err.Error(), "multiple matching join requests") {
+					return FulfillmentResult{State: "action_pending", FailureClass: "identity_ambiguous"}, err
+				}
+				return FulfillmentResult{State: "action_pending", FailureClass: "pending_requests_unavailable"}, err
 			}
-			if matchTarget != "" {
-				return FulfillmentResult{State: "action_pending", FailureClass: "identity_ambiguous"}, errors.New("multiple matching join requests")
+			if found {
+				matchTarget = candidate.ID
+				if matchTarget == "" {
+					matchTarget = candidate.Phone
+				}
 			}
-			target := candidate.ID
-			if target == "" {
-				target = candidate.Phone
+		} else {
+			pending, err := wa.PendingJoinRequests(ctx, req.EndpointAlias)
+			if err != nil {
+				return FulfillmentResult{State: "action_pending", FailureClass: "pending_requests_unavailable"}, err
 			}
-			matchTarget = target
+			wanted := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
+			for _, candidate := range pending {
+				if strings.TrimPrefix(strings.TrimSpace(candidate.Phone), "+") != wanted {
+					continue
+				}
+				if matchTarget != "" {
+					return FulfillmentResult{State: "action_pending", FailureClass: "identity_ambiguous"}, errors.New("multiple matching join requests")
+				}
+				target := candidate.ID
+				if target == "" {
+					target = candidate.Phone
+				}
+				matchTarget = target
+			}
 		}
 		if matchTarget != "" {
 			if err := wa.ApproveJoinRequest(ctx, req.EndpointAlias, matchTarget); err != nil {

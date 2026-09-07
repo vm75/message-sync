@@ -1,7 +1,8 @@
 package verification
 
-import "context"
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -70,5 +71,37 @@ func TestFulfillWhatsAppApprovesWithCandidateID(t *testing.T) {
 	}
 	if f.approvedID != "123456789012345@lid" {
 		t.Fatalf("approved ID = %q, want %q", f.approvedID, "123456789012345@lid")
+	}
+}
+
+type fakeWAMatcher struct {
+	fakeWALID
+	ambiguous bool
+}
+
+func (f *fakeWAMatcher) MatchPendingJoinRequest(_ context.Context, _ string, _ string) (PendingJoinRequest, bool, error) {
+	if f.ambiguous {
+		return PendingJoinRequest{}, false, errors.New("multiple matching join requests")
+	}
+	return PendingJoinRequest{ID: "123456789012345@lid", Phone: "15551234567", RequestedAt: time.Unix(0, 0)}, true, nil
+}
+
+func TestFulfillWhatsAppWithMatcher(t *testing.T) {
+	f := &fakeWAMatcher{fakeWALID: fakeWALID{fakeWA: fakeWA{required: true}}}
+	req := FulfillmentRequest{Transport: "whatsapp", EndpointAlias: "group", Phone: "+15551234567"}
+	got, err := Fulfill(context.Background(), req, f, nil)
+	if err != nil || got.State != "succeeded" {
+		t.Fatalf("unexpected result: %+v err: %v", got, err)
+	}
+	if f.approvedID != "123456789012345@lid" {
+		t.Fatalf("approved ID = %q, want %q", f.approvedID, "123456789012345@lid")
+	}
+
+	// Ambiguity test
+	f.ambiguous = true
+	f.member = false
+	got, err = Fulfill(context.Background(), req, f, nil)
+	if got.State != "action_pending" || got.FailureClass != "identity_ambiguous" || err == nil {
+		t.Fatalf("expected identity_ambiguous, got %+v, err: %v", got, err)
 	}
 }

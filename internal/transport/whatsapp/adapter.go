@@ -335,12 +335,25 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	if len(outgoing.Mentions) > 0 {
 		groupInfo, _ := a.client.GetGroupInfo(ctx, target)
-		isParticipant := func(user string) bool {
+		isParticipant := func(remoteID string) bool {
 			if groupInfo == nil {
 				return false
 			}
+			remoteID = strings.TrimSpace(remoteID)
+			if remoteID == "" {
+				return false
+			}
+			var targetJID types.JID
+			if strings.Contains(remoteID, "@") {
+				targetJID, _ = types.ParseJID(remoteID)
+			} else {
+				targetJID = types.NewJID(remoteID, types.DefaultUserServer)
+			}
 			for _, p := range groupInfo.Participants {
-				if ParticipantMatches(ctx, p, user, a.resolveAltJID) {
+				if !targetJID.IsEmpty() && ParticipantMatchesIdentity(ctx, p, targetJID, a.resolveAltJID) {
+					return true
+				}
+				if !strings.Contains(remoteID, "@") && ParticipantMatchesPhone(ctx, p, remoteID, a.resolveAltJID) {
 					return true
 				}
 			}
@@ -367,6 +380,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 			}
 			outgoing.Text = strings.ReplaceAll(outgoing.Text, "@"+m.RemoteID, replacement)
 			outgoing.QuotedText = strings.ReplaceAll(outgoing.QuotedText, "@"+m.RemoteID, replacement)
+			if rawJID, err := types.ParseJID(m.RemoteID); err == nil && !rawJID.IsEmpty() {
+				outgoing.Text = strings.ReplaceAll(outgoing.Text, "@"+rawJID.User, replacement)
+				outgoing.QuotedText = strings.ReplaceAll(outgoing.QuotedText, "@"+rawJID.User, replacement)
+			}
 		}
 	}
 
