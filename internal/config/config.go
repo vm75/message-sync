@@ -20,7 +20,8 @@ var (
 )
 
 const (
-	MaxLocalPrefixBytes        = 64
+	MaxLocalPrefixBytes        = 256
+	MaxAggregationTriggerBytes = 256
 	MaxWhatsAppDeviceNameBytes = 64
 	DefaultWhatsAppDeviceName  = "message-sync"
 )
@@ -59,6 +60,16 @@ func ValidateLocalPrefix(prefix string) error {
 	}
 	if len([]byte(prefix)) > MaxLocalPrefixBytes {
 		return fmt.Errorf("local message prefix must be at most %d UTF-8 bytes", MaxLocalPrefixBytes)
+	}
+	return nil
+}
+
+func ValidateAggregationTrigger(trigger string) error {
+	if strings.ContainsAny(trigger, "\x00\r\n") {
+		return errors.New("poll aggregation trigger contains invalid control characters")
+	}
+	if len([]byte(trigger)) > MaxAggregationTriggerBytes {
+		return fmt.Errorf("poll aggregation trigger must be at most %d UTF-8 bytes", MaxAggregationTriggerBytes)
 	}
 	return nil
 }
@@ -533,9 +544,11 @@ func applyDefaults(cfg *Config) {
 	if cfg.Storage.MessageRetentionDays == 0 {
 		cfg.Storage.MessageRetentionDays = 90
 	}
+	cfg.Polls.AggregationTrigger = strings.Join(strings.Fields(cfg.Polls.AggregationTrigger), " ")
 	if cfg.Polls.AggregationTrigger == "" {
 		cfg.Polls.AggregationTrigger = "aggregate-response"
 	}
+	cfg.LocalPrefix = strings.Join(strings.Fields(cfg.LocalPrefix), " ")
 	if cfg.WhatsAppCleanup.RetentionDays == 0 {
 		cfg.WhatsAppCleanup.RetentionDays = 30
 	}
@@ -561,6 +574,9 @@ func (c Config) Validate() error {
 		return errors.New("childContextDisplayMode must be opaque or friendly")
 	}
 	if err := ValidateLocalPrefix(c.LocalPrefix); err != nil {
+		return err
+	}
+	if err := ValidateAggregationTrigger(c.Polls.AggregationTrigger); err != nil {
 		return err
 	}
 	if err := ValidateWhatsAppDeviceName(c.WhatsAppDeviceName); err != nil {

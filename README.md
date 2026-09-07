@@ -9,15 +9,22 @@
 
 ## Capabilities
 
-- Bidirectional text and transient media forwarding across mixed-transport sync sets.
-- Best-effort native replies and reactions, plus edit and delete propagation.
-- Native polls where destination semantics are representable, deterministic text fallback otherwise, aggregate-only live-result companions, and an on-demand aggregate summary via the `aggregate-response` reply trigger.
-- Discord thread/forum and Telegram topic lineage without making child conversations configurable endpoints.
-- Independent ordered delivery lanes, bounded retry and recovery, restart-safe pending work, and ambiguity-safe create handling.
-- Dynamic WhatsApp, Discord, and Telegram connections managed through an authenticated embedded Web UI.
-- Optional source-local message prefix and WhatsApp chat cleanup.
-- Multi-user administration and human-authorized membership intake/review in a separate sensitive control plane.
-- Static non-root container suitable for Docker, rootful Podman, and rootless Podman.
+- **Multi-Transport Synchronization**: Seamless bidirectional synchronization across WhatsApp groups and communities (including community subgroups and hosted LIDs), Discord channels (including thread/forum-post lineage and webhook sender attribution), and Telegram groups/supergroups (including forum topic lineage and group-to-supergroup migration handling).
+- **Comprehensive Message Lifecycle**:
+  - Text forwarding with bold-italic provenance attribution (`*_<alias>/<username>_*: <text>`).
+  - Transient in-memory media forwarding (images, videos, audio/voice notes, documents, and stickers) within configurable size limits and zero on-disk retention.
+  - Best-effort native replies across transports with deterministic fallback attribution and clickable quote links on Discord.
+  - Native emoji reaction propagation (add, change, remove) normalized across platforms with actor identity mapping.
+  - Message edit and deletion/revocation propagation with canonical tombstones to prevent replay resurrection.
+- **Native & Aggregate Polls**: Native polls across WhatsApp, Discord, and Telegram where destination semantics are representable; deterministic text fallback otherwise. Includes aggregate-only live-result companion messages and on-demand aggregate summaries via configurable reply triggers (supports multiple triggers, e.g. `aggregate-response`, `/poll-results`).
+- **Source-Local Message Suppression**: Configurable prefix filtering (supports multiple prefixes, e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before canonicalization, transmission, or media loading; edits, reactions, and deletes for suppressed messages also remain local.
+- **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints; supports privacy-first `opaque` (default) and presentation-only `friendly` label modes.
+- **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
+- **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration, and live runtime configuration reload without process restarts.
+- **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
+- **Membership Intake & Verification Pipeline**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
+- **Automated WhatsApp Chat Cleanup**: Scheduled AppState background cleanup to prune old messages on the sync account according to configurable retention rules.
+- **Hardened Container Deployment**: Static non-root container (UID 1000) with read-only root filesystem, dropped Linux capabilities, and `/tmp` tmpfs, fully compatible with Docker, rootful Podman, and rootless Podman.
 
 Provider APIs impose some limits: recovery cannot reconstruct every offline lifecycle event, Telegram cannot provide complete live results for arbitrary human-created polls, and a provider create with an ambiguous outcome requires replay or operator reconciliation instead of a blind retry. See [Architecture](ARCHITECTURE.md) for the precise boundaries.
 
@@ -84,7 +91,9 @@ See the [manual testing guide](docs/TESTING_GUIDE.md) for detailed provider setu
 
 ## Configuration
 
-Deployment settings come from the environment; routing and feature settings are stored in `sync.db` and edited through the authenticated UI/API.
+Deployment settings come from the environment; routing and feature settings are configured through the authenticated Web UI or REST API.
+
+### Environment variables
 
 | Variable | Required | Default | Purpose |
 |---|---:|---|---|
@@ -103,6 +112,24 @@ Deployment settings come from the environment; routing and feature settings are 
 | `MESSAGE_SYNC_DATA_DIR` | no | `./data` | Host-side `/data` bind source used by `compose.yml`; it is not read by the service. |
 
 Discord and Telegram tokens are configured dynamically, encrypted with AES-256-GCM in `control.db`, and never belong in `.env`.
+
+### Runtime settings
+
+Global routing and feature settings are configured in the Web UI Settings tab or via `PUT /api/config`, taking effect immediately without restarting the service:
+
+| Setting | Default | Description |
+|---|---|---|
+| `username_mode` | `push_name` | Attribution display mode: `push_name` (transient provider name) or `hash` (anonymized HMAC actor ID). |
+| `media.max_size_mb` | `16` | Maximum allowed in-memory size (MB) for forwarded media (images, videos, audio, documents). |
+| `recovery.max_age_hours` | `72` | Bounded lookback window in hours for offline message recovery. |
+| `recovery.max_messages_per_group` | `1000` | Maximum messages recovered per conversation after downtime. |
+| `storage.message_retention_days` | `90` | Retention duration in days for content-free routing metadata and message copies. |
+| `polls.aggregation_trigger` | `aggregate-response` | Space-separated triggers to request an on-demand poll aggregate summary (e.g. `aggregate-response /poll-results #agg`). |
+| `local_prefix` | `""` (disabled) | Space-separated prefix strings to suppress messages from syncing (e.g. `!local #local // [local]`). |
+| `whatsapp_cleanup.enabled` | `false` | Enables scheduled AppState chat pruning for old messages on the WhatsApp sync account. |
+| `whatsapp_cleanup.retention_days` | `30` | Minimum message age in days before WhatsApp AppState chat cleanup prunes messages. |
+| `whatsapp_device_name` | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
+| `child_scope_mode` | `opaque` | Child-conversation presentation mode: `opaque` (privacy default) or `friendly` (presentation thread/topic labels). |
 
 The current SQLite schemas initialize fresh databases and do not provide an upgrade migration path for older development databases. Back up `/data` before upgrades and consult release notes before reusing existing state.
 

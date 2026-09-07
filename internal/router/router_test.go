@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -142,6 +143,65 @@ func TestLocalPrefixSuppressesBeforeCanonicalizationAndMedia(t *testing.T) {
 	for _, message := range fake.sent {
 		if message.outgoing.QuotedText != "" || strings.Contains(message.outgoing.Text, "SECRET LOCAL CONTENT") {
 			t.Fatal("local-only quoted content leaked into bridged reply")
+		}
+	}
+}
+
+func TestMultipleLocalPrefixesSuppression(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sync.db")
+	syncStore, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	fake := &fakeSender{}
+	cfg := testConfig(config.UsernameModeHash)
+	cfg.LocalPrefix = "!local #local [local] //"
+	r, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	testCases := []struct {
+		text       string
+		suppressed bool
+	}{
+		{"!local message", true},
+		{"#local message", true},
+		{"[local] message", true},
+		{"// message", true},
+		{"normal message", false},
+		{"local without prefix", false},
+	}
+
+	for i, tc := range testCases {
+		fake.mu.Lock()
+		fake.sent = nil
+		fake.mu.Unlock()
+
+		remoteID := fmt.Sprintf("msg-%d", i)
+		incoming := testIncoming("c1g1", remoteID)
+		incoming.Text = tc.text
+
+		if err := r.Handle(context.Background(), incoming); err != nil {
+			t.Fatal(err)
+		}
+
+		suppressed, err := syncStore.IsSuppressedLocalMessage(context.Background(), "c1g1", remoteID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if suppressed != tc.suppressed {
+			t.Fatalf("for text %q: got suppressed=%v, want %v", tc.text, suppressed, tc.suppressed)
+		}
+		if tc.suppressed {
+			fake.mu.Lock()
+			sentCount := len(fake.sent)
+			fake.mu.Unlock()
+			if sentCount != 0 {
+				t.Fatalf("for suppressed text %q: got %d sends, want 0", tc.text, sentCount)
+			}
 		}
 	}
 }
@@ -1368,6 +1428,82 @@ func TestRouterTelegramPollSnapshotUsesCanonicalAggregate(t *testing.T) {
 	}
 	if counts[0] != 4 || counts[1] != 2 {
 		t.Fatalf("snapshot counts = %#v", counts)
+	}
+}
+
+func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+		Polls:    config.Polls{AggregationTrigger: "aggregate-response /poll-results #agg"},
+	}
+	path := filepath.Join(t.TempDir(), "sync.db")
+	syncStore, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+	fake := &fakeSender{}
+	ctx := context.Background()
+
+	r, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	pollInc := transport.Incoming{
+		Endpoint: "c1g1",
+		RemoteID: "poll-multi-trig",
+		Sender: transport.Sender{
+			DisplayName: "Alice",
+			PhoneNumber: "15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:                "poll",
+		Text:                "Multi trigger poll?",
+		PollOptions:         []string{"Option 1", "Option 2"},
+		PollSelectableCount: 1,
+		Timestamp:           time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r.Handle(ctx, pollInc); err != nil {
+		t.Fatalf("Handle poll creation error: %v", err)
+	}
+
+	// Test each configured trigger
+	triggers := []string{"aggregate-response", "/poll-results", "#agg"}
+	for _, tr := range triggers {
+		fake.mu.Lock()
+		fake.sent = nil
+		fake.mu.Unlock()
+
+		aggTrigger := transport.Incoming{
+			Endpoint: "c1g1",
+			RemoteID: "agg-trig-" + tr,
+			Sender: transport.Sender{
+				DisplayName: "Bob",
+				PhoneNumber: "15559876543",
+				OpaqueID:    "u_cdefghijkl",
+			},
+			Kind:      "text",
+			Text:      tr,
+			ReplyTo:   &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-multi-trig"},
+			Timestamp: time.Unix(1_700_000_040, 0).UTC(),
+		}
+		if err := r.Handle(ctx, aggTrigger); err != nil {
+			t.Fatalf("Handle aggregation error for trigger %q: %v", tr, err)
+		}
+
+		fake.mu.Lock()
+		sentCount := len(fake.sent)
+		fake.mu.Unlock()
+		if sentCount != 2 {
+			t.Fatalf("expected 2 summary messages for trigger %q, got %d", tr, sentCount)
+		}
 	}
 }
 

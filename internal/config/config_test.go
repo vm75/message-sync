@@ -66,7 +66,7 @@ func TestSavePreservesFriendlyLabelsForUnchangedEndpoints(t *testing.T) {
 }
 
 func TestValidateLocalPrefix(t *testing.T) {
-	for _, prefix := range []string{"", "!local ", "é"} {
+	for _, prefix := range []string{"", "!local ", "é", "!local #local // [local]"} {
 		if err := ValidateLocalPrefix(prefix); err != nil {
 			t.Fatalf("ValidateLocalPrefix(%q) error = %v", prefix, err)
 		}
@@ -74,6 +74,19 @@ func TestValidateLocalPrefix(t *testing.T) {
 	for _, prefix := range []string{"   ", "bad\n", strings.Repeat("x", MaxLocalPrefixBytes+1)} {
 		if err := ValidateLocalPrefix(prefix); err == nil {
 			t.Fatalf("ValidateLocalPrefix(%q) accepted invalid prefix", prefix)
+		}
+	}
+}
+
+func TestValidateAggregationTrigger(t *testing.T) {
+	for _, trigger := range []string{"", "aggregate-response", "aggregate-response /poll-results #agg"} {
+		if err := ValidateAggregationTrigger(trigger); err != nil {
+			t.Fatalf("ValidateAggregationTrigger(%q) error = %v", trigger, err)
+		}
+	}
+	for _, trigger := range []string{"bad\ntrigger", "bad\x00trigger", strings.Repeat("x", MaxAggregationTriggerBytes+1)} {
+		if err := ValidateAggregationTrigger(trigger); err == nil {
+			t.Fatalf("ValidateAggregationTrigger(%q) accepted invalid trigger", trigger)
 		}
 	}
 }

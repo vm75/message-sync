@@ -129,8 +129,13 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	if req.Polls != nil {
 		polls = *req.Polls
 	}
+	polls.AggregationTrigger = strings.Join(strings.Fields(polls.AggregationTrigger), " ")
 	if polls.AggregationTrigger == "" {
 		polls.AggregationTrigger = "aggregate-response"
+	}
+	if err := config.ValidateAggregationTrigger(polls.AggregationTrigger); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	whatsappCleanup := currentCfg.WhatsAppCleanup
@@ -143,7 +148,7 @@ func (s *Server) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	localPrefix := currentCfg.LocalPrefix
 	if req.LocalPrefix != nil {
-		localPrefix = *req.LocalPrefix
+		localPrefix = strings.Join(strings.Fields(*req.LocalPrefix), " ")
 	}
 	if err := config.ValidateLocalPrefix(localPrefix); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())

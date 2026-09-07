@@ -647,8 +647,12 @@
               </div>
               <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-polls-aggregation-trigger" class="form-label">Aggregation Trigger</label>
-                  <input type="text" id="settings-polls-aggregation-trigger" class="form-input" required>
+                  <label for="settings-polls-aggregation-trigger-input" class="form-label">Aggregation Trigger</label>
+                  <input type="hidden" id="settings-polls-aggregation-trigger" name="polls-aggregation-trigger">
+                  <div class="chips-input-container form-input" id="settings-polls-aggregation-trigger-chips" tabindex="-1">
+                    <input type="text" id="settings-polls-aggregation-trigger-input" class="chips-input-text" placeholder="Add trigger...">
+                  </div>
+                  <div class="form-hint">Reply to a poll with any of these triggers to request an aggregated summary. Use Space, Enter, or Tab to add values.</div>
                 </div>
               </div>
             </div>
@@ -656,13 +660,19 @@
             <!-- Local messages -->
             <div class="settings-card">
               <div class="settings-card-header">
-                <div class="settings-card-meta"><div class="settings-card-title">Source-local Messages</div></div>
+                <div class="settings-card-icon accent"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></div>
+                <div class="settings-card-meta">
+                  <div class="settings-card-title">Source-local Messages</div>
+                </div>
               </div>
               <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-local-prefix" class="form-label">Local-only Prefix</label>
-                  <input type="text" id="settings-local-prefix" class="form-input" maxlength="64" placeholder="Leave empty to disable">
-                  <div class="form-hint">New messages beginning with this exact, case-sensitive prefix stay in their source conversation.</div>
+                  <label for="settings-local-prefix-input" class="form-label">Local-only Prefix</label>
+                  <input type="hidden" id="settings-local-prefix" name="local-prefix">
+                  <div class="chips-input-container form-input" id="settings-local-prefix-chips" tabindex="-1">
+                    <input type="text" id="settings-local-prefix-input" class="chips-input-text" placeholder="Add prefix...">
+                  </div>
+                  <div class="form-hint">New messages beginning with any of these exact, case-sensitive prefixes stay in their source conversation. Leave empty to disable. Use Space, Enter, or Tab to add values.</div>
                 </div>
               </div>
             </div>

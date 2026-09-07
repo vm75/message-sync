@@ -283,7 +283,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	r.mu.RLock()
 	localPrefix := r.localPrefix
 	r.mu.RUnlock()
-	if incoming.Kind != "edit" && incoming.Kind != "delete" && incoming.Kind != "revoke" && incoming.Kind != "reaction" && localPrefix != "" && strings.HasPrefix(incoming.Text, localPrefix) {
+	if incoming.Kind != "edit" && incoming.Kind != "delete" && incoming.Kind != "revoke" && incoming.Kind != "reaction" && matchLocalPrefix(incoming.Text, localPrefix) {
 		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
 			return fmt.Errorf("suppress local message: %w", err)
 		}
@@ -344,12 +344,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		return nil
 	}
 
-	triggerPhrase := r.aggTrigger
-	if triggerPhrase == "" {
-		triggerPhrase = "aggregate-response"
-	}
+	r.mu.RLock()
+	aggTrigger := r.aggTrigger
+	r.mu.RUnlock()
 
-	if strings.TrimSpace(incoming.Text) == triggerPhrase && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+	if matchAggregationTrigger(incoming.Text, aggTrigger) && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
 		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
 		if err == nil && targetCanonical != "" {
 			isPoll, err := r.store.IsPoll(ctx, targetCanonical)
@@ -1385,4 +1384,28 @@ func newCanonicalID() (string, error) {
 		return "", err
 	}
 	return "c_" + hex.EncodeToString(randomBytes[:]), nil
+}
+
+func matchLocalPrefix(text string, localPrefixConfig string) bool {
+	prefixes := strings.Fields(localPrefixConfig)
+	for _, prefix := range prefixes {
+		if prefix != "" && strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchAggregationTrigger(text string, aggTriggerConfig string) bool {
+	triggers := strings.Fields(aggTriggerConfig)
+	if len(triggers) == 0 {
+		triggers = []string{"aggregate-response"}
+	}
+	trimmed := strings.TrimSpace(text)
+	for _, trigger := range triggers {
+		if trimmed == trigger {
+			return true
+		}
+	}
+	return false
 }

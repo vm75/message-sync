@@ -92,13 +92,16 @@ podman compose -f compose.yml config
 - Add or update tests for changed invariants and failure paths.
 - Run `make fmt`, `make test`, and `make vet`; run container checks only when container/runtime files changed.
 - Review the diff for unrelated edits and privacy-boundary regressions.
-- Update only documentation whose user behavior, workflow, architecture, or deployment truth changed.
+- Keep all documentation strictly in sync with implementation changes across the repository.
 
 ## Documentation maintenance
 
-- Setup, configuration, capabilities, or basic usage: `README.md`.
-- Components, dependency direction, data flow, schema, privacy, or failure semantics: `ARCHITECTURE.md`.
-- Image names, tags, environment, volumes, ports, platforms, or publishing: `DOCKERHUB.md`.
-- Test commands or manual scenarios: `TESTING.md` or `docs/TESTING_GUIDE.md`.
-- Material comparison changes: `docs/FEATURE_COMPARISON.md`.
-- Agent workflow, repository map, or mandatory constraints: `AGENTS.md`.
+AI agents MUST keep all repository documentation in sync with the implementation for any changes to the project. When introducing, modifying, or deprecating features, settings, API endpoints, schema fields, UI capabilities, or container behaviors, update the corresponding documentation files as part of the same change set. Never leave documentation stale or out of sync.
+
+- `README.md`: Setup, configuration (environment variables and runtime settings), core capabilities, key features, and user-facing workflows.
+- `DOCKERHUB.md`: Public container overview, key features, image names, tags, environment variables, volume layouts, compose usage, and security hardening.
+- `ARCHITECTURE.md`: Components, dependency direction, data flow, schema definitions, privacy boundaries, lifecycle flow, failure/retry semantics, and REST API surface.
+- `AGENTS.md`: Agent workflow, repository map, definition of done, and mandatory constraints.
+- `CHANGELOG.md`: Release notes, notable changes, and version history.
+- `TESTING.md` / `docs/TESTING_GUIDE.md`: Automated test commands, test coverage, manual provider testing steps, and troubleshooting.
+- `docs/FEATURE_COMPARISON.md`: Capability or architectural comparisons with upstream or alternative designs.

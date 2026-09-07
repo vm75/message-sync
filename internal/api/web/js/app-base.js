@@ -2449,6 +2449,173 @@
     }
   }
 
+  function setupChipsInput({ containerId, hiddenInputId, textInputId, placeholderEmpty, placeholderFilled }) {
+    const container   = document.getElementById(containerId);
+    const hiddenInput = document.getElementById(hiddenInputId);
+    const textInput   = document.getElementById(textInputId);
+    if (!container || !textInput) return null;
+
+    let values = [];
+
+    function syncHidden() {
+      if (hiddenInput) {
+        hiddenInput.value = values.join(' ');
+      }
+      updatePlaceholder();
+    }
+
+    function updatePlaceholder() {
+      if (!textInput) return;
+      if (values.length === 0) {
+        textInput.placeholder = placeholderEmpty || '';
+      } else {
+        textInput.placeholder = placeholderFilled || '';
+      }
+    }
+
+    function render() {
+      const existing = container.querySelectorAll('.chip-item');
+      existing.forEach(el => el.remove());
+
+      values.forEach((val, idx) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip-item';
+
+        const label = document.createElement('span');
+        label.className = 'chip-label';
+        label.textContent = val;
+        chip.appendChild(label);
+
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'chip-remove-btn';
+        delBtn.setAttribute('aria-label', 'Remove ' + val);
+        delBtn.innerHTML = '&times;';
+        delBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          removeAt(idx);
+          textInput.focus();
+        });
+        chip.appendChild(delBtn);
+
+        container.insertBefore(chip, textInput);
+      });
+
+      syncHidden();
+    }
+
+    function addValues(raw) {
+      if (!raw) return;
+      const tokens = (Array.isArray(raw) ? raw : String(raw).split(/\s+/))
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+      let changed = false;
+      tokens.forEach(tok => {
+        if (!values.includes(tok)) {
+          values.push(tok);
+          changed = true;
+        }
+      });
+      if (changed) {
+        render();
+      }
+    }
+
+    function removeAt(idx) {
+      if (idx >= 0 && idx < values.length) {
+        values.splice(idx, 1);
+        render();
+      }
+    }
+
+    function commitPending() {
+      if (!textInput) return;
+      const val = textInput.value.trim();
+      if (val) {
+        addValues(val);
+        textInput.value = '';
+      }
+    }
+
+    function setValues(raw) {
+      values = [];
+      if (raw) {
+        addValues(raw);
+      } else {
+        render();
+      }
+    }
+
+    function getValue() {
+      commitPending();
+      return values.join(' ');
+    }
+
+    container.addEventListener('click', e => {
+      if (e.target !== textInput && !e.target.closest('.chip-remove-btn')) {
+        textInput.focus();
+      }
+    });
+
+    textInput.addEventListener('keydown', e => {
+      if (e.key === ' ' || e.code === 'Space') {
+        e.preventDefault();
+        commitPending();
+      } else if (e.key === 'Enter') {
+        if (textInput.value.trim().length > 0) {
+          e.preventDefault();
+          commitPending();
+        }
+      } else if (e.key === 'Tab') {
+        if (textInput.value.trim().length > 0) {
+          e.preventDefault();
+          commitPending();
+        }
+      } else if (e.key === 'Backspace' && textInput.value === '') {
+        if (values.length > 0) {
+          removeAt(values.length - 1);
+        }
+      }
+    });
+
+    textInput.addEventListener('blur', () => {
+      commitPending();
+    });
+
+    textInput.addEventListener('paste', e => {
+      const pasteText = (e.clipboardData || window.clipboardData).getData('text');
+      if (pasteText && (/\s/).test(pasteText)) {
+        e.preventDefault();
+        addValues(pasteText);
+        textInput.value = '';
+      }
+    });
+
+    return {
+      setValues,
+      getValues: () => [...values],
+      getValue,
+      commitPending,
+      addValues
+    };
+  }
+
+  const chipsPollsAggTrigger = setupChipsInput({
+    containerId: 'settings-polls-aggregation-trigger-chips',
+    hiddenInputId: 'settings-polls-aggregation-trigger',
+    textInputId: 'settings-polls-aggregation-trigger-input',
+    placeholderEmpty: 'Type a trigger and press Space...',
+    placeholderFilled: 'Add trigger...'
+  });
+
+  const chipsLocalPrefix = setupChipsInput({
+    containerId: 'settings-local-prefix-chips',
+    hiddenInputId: 'settings-local-prefix',
+    textInputId: 'settings-local-prefix-input',
+    placeholderEmpty: 'Leave empty to disable or add prefix...',
+    placeholderFilled: 'Add prefix...'
+  });
+
   function populateSettings(cfg) {
     if (!cfg) return;
     if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
@@ -2459,8 +2626,16 @@
     if (settingsRecoveryMaxAge)  settingsRecoveryMaxAge.value   = cfg.recovery ? cfg.recovery.maxAgeHours : 72;
     if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value  = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
     if (settingsRetentionDays)   settingsRetentionDays.value    = cfg.storage ? cfg.storage.messageRetentionDays : 14;
-    if (settingsPollsAggTrigger) settingsPollsAggTrigger.value  = cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response';
-    if (settingsLocalPrefix) settingsLocalPrefix.value = cfg.localPrefix || '';
+    if (chipsPollsAggTrigger) {
+      chipsPollsAggTrigger.setValues(cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response');
+    } else if (settingsPollsAggTrigger) {
+      settingsPollsAggTrigger.value = cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response';
+    }
+    if (chipsLocalPrefix) {
+      chipsLocalPrefix.setValues(cfg.localPrefix || '');
+    } else if (settingsLocalPrefix) {
+      settingsLocalPrefix.value = cfg.localPrefix || '';
+    }
     if (settingsWaCleanupEnabled) settingsWaCleanupEnabled.checked = cfg.whatsappCleanup ? cfg.whatsappCleanup.enabled : false;
     if (settingsWaCleanupRetention) settingsWaCleanupRetention.value = cfg.whatsappCleanup ? cfg.whatsappCleanup.retentionDays : 30;
     if (settingsWaDeviceName) settingsWaDeviceName.value = cfg.whatsappDeviceName || 'message-sync';
@@ -2476,8 +2651,8 @@
       const recovMaxMsgs   = parseInt(settingsRecoveryMaxMsgs ? settingsRecoveryMaxMsgs.value : 1000, 10);
       const retentionDays  = parseInt(settingsRetentionDays ? settingsRetentionDays.value : 14, 10);
       const waRetention    = parseInt(settingsWaCleanupRetention ? settingsWaCleanupRetention.value : 30, 10);
-      const aggTrigger     = settingsPollsAggTrigger ? settingsPollsAggTrigger.value.trim() : '';
-      const localPrefix    = settingsLocalPrefix ? settingsLocalPrefix.value : '';
+      const aggTrigger     = chipsPollsAggTrigger ? chipsPollsAggTrigger.getValue() : (settingsPollsAggTrigger ? settingsPollsAggTrigger.value.trim() : '');
+      const localPrefix    = chipsLocalPrefix ? chipsLocalPrefix.getValue() : (settingsLocalPrefix ? settingsLocalPrefix.value : '');
       const waDeviceName   = settingsWaDeviceName ? settingsWaDeviceName.value.trim() : '';
 
       if (isNaN(mediaMaxSize) || mediaMaxSize < 1)  { settingsAlert.textContent = 'Media max size must be ≥1 MB.'; settingsAlert.classList.remove('hidden'); return; }

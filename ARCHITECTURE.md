@@ -132,7 +132,7 @@ Message media is loaded into memory only after an event is accepted for routing,
 8. A successful provider result records the opaque remote copy ID. Replies and later lifecycle mutations resolve through the same canonical/copy mapping.
 9. Recovery advances a provider checkpoint only when the router reports that payload-dependent delivery is safe to forget.
 
-Local-prefix suppression occurs before canonicalization and media download. Its restart-safe marker contains only endpoint and opaque message ID; edits, reactions, and deletes for the suppressed message remain local.
+Local-prefix suppression occurs before canonicalization and media download using configured prefix strings (e.g. `!local`, `#local`, `//`, `[local]`). Its restart-safe marker contains only endpoint and opaque message ID; edits, reactions, and deletes for the suppressed message remain local.
 
 ## Semantics owned by the router
 
@@ -156,7 +156,7 @@ WhatsApp bridge lifecycle echoes use bounded, expiring, one-shot in-memory marke
 
 Poll questions and option labels remain transient. The store retains canonical option positions, opaque hashes or provider references where required, aggregate counts, and bridge-owned result-companion IDs—never voters or labels.
 
-Representable polls use native WhatsApp, Discord, and Telegram structures. Unsupported option counts, lengths, answer modes, durations, or media combinations use deterministic text. Each endpoint receives one editable aggregate-only live-results companion. Replying with the configured trigger (default `aggregate-response`) to any poll copy produces an immediate on-demand aggregate summary and suppresses the trigger message. Telegram Bot API can provide absolute snapshots for bot-created polls but not complete ongoing results for arbitrary human-created source polls; those contributions remain explicitly partial rather than introducing MTProto identity storage.
+Representable polls use native WhatsApp, Discord, and Telegram structures. Unsupported option counts, lengths, answer modes, durations, or media combinations use deterministic text. Each endpoint receives one editable aggregate-only live-results companion. Replying with any configured aggregation trigger phrase (default `aggregate-response`, supporting multiple space-separated triggers) to any poll copy produces an immediate on-demand aggregate summary and suppresses the trigger message. Telegram Bot API can provide absolute snapshots for bot-created polls but not complete ongoing results for arbitrary human-created source polls; those contributions remain explicitly partial rather than introducing MTProto identity storage.
 
 ## Failure, retry, and recovery
 

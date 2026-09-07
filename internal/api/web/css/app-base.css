@@ -1027,6 +1027,80 @@ code, .font-mono {
 .btn-toggle-password:hover { color: var(--text-primary); }
 .btn-toggle-password .icon { width: 14px; height: 14px; }
 
+/* Inline Chips Input */
+.chips-input-container.form-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  height: auto;
+  padding: 5px 8px;
+  cursor: text;
+}
+.chips-input-container.form-input:focus-within {
+  border-color: var(--primary-500, var(--border-focus));
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+.chips-input-container .chip-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--bg-overlay);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px 2px 8px;
+  font-size: .75rem;
+  font-family: 'Roboto Mono', ui-monospace, monospace;
+  font-weight: 500;
+  line-height: 1.4;
+  user-select: none;
+  animation: chipFadeIn 0.15s ease-out;
+}
+@keyframes chipFadeIn {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+.chips-input-container .chip-item .chip-remove-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  margin-left: 2px;
+  font-size: 0.95rem;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color var(--dur), background var(--dur);
+}
+.chips-input-container .chip-item .chip-remove-btn:hover {
+  color: var(--danger, #f87171);
+  background: var(--danger-muted, rgba(239, 68, 68, 0.15));
+}
+.chips-input-container .chips-input-text {
+  flex: 1 1 100px;
+  min-width: 80px;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  font-size: .82rem;
+  font-family: inherit;
+  padding: 2px 4px;
+  margin: 0;
+  height: auto;
+  min-height: 26px;
+}
+.chips-input-container .chips-input-text::placeholder {
+  color: var(--text-muted);
+  font-family: inherit;
+}
+
 /* Toggle / Switch */
 .toggle-control {
   display: flex;

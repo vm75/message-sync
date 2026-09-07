@@ -8,12 +8,27 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
+`message-sync` is a self-hosted, privacy-first service that synchronizes configured WhatsApp groups, Discord channels, and Telegram groups or supergroups. Multiple accounts and bots participate in alias-based sync sets while a transport-neutral canonical router owns message identity, fan-out, and lifecycle behavior without storing PII/PHI.
+
 The release workflow publishes the same multi-architecture `message-sync` image to:
 
 - Docker Hub: [`docker.io/vm75/message-sync`](https://hub.docker.com/r/vm75/message-sync)
 - GitHub Container Registry: `ghcr.io/vm75/message-sync`
 
-Use the [README](README.md) for product setup and provider requirements. This page is limited to image behavior, runtime configuration, and publishing.
+## Key features
+
+- **Multi-Transport Synchronization**: Seamless bidirectional sync across WhatsApp (groups and community subgroups), Discord (channels and threads/forums), and Telegram (groups, supergroups, and topics).
+- **Full Message Lifecycle**: Synchronizes text with provenance attribution, transient in-memory media (images, video, audio/voice notes, documents, stickers), native replies with fallback attribution, emoji reactions, edits, and deletions/revocations.
+- **Polls & Live Aggregation**: Native polls across supported platforms, aggregate-only live-result companions, and on-demand aggregate summaries via configurable reply triggers (e.g. `aggregate-response`, `/poll-results`).
+- **Source-Local Message Suppression**: Configurable message prefix filtering (e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before transmission or media loading.
+- **Zero-PII Privacy Architecture**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`.
+- **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
+- **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
+- **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
+- **Membership Intake Pipeline**: Sync-set bound public intake forms, automated email verification challenges, private evidence handling (mode 0600 with automatic purge), optional advisory AI image analysis (zero-training), and human review with automated fulfillment.
+- **Security & Hardening**: Static non-root container (UID 1000), read-only root filesystem, dropped capabilities, no extra privileges required, and fully compatible with Docker, rootful Podman, and rootless Podman.
+
+See the [README](https://github.com/vm75/message-sync#readme) for detailed product setup and provider requirements. This page is limited to image behavior, runtime configuration, and container deployment.
 
 ## Tags and platforms
 
@@ -83,8 +98,14 @@ The image entry point is `/usr/local/bin/message-sync`; its default command is `
 | `API_ADDR` | no | derived from `PORT` | Complete HTTP listen address. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 | `WHATSAPP_DEVICE_NAME` | no | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
+| `VERIFICATION_MAIL_API_KEY` | no | none | Enables Resend-compatible membership email delivery with `VERIFICATION_MAIL_FROM`. |
+| `VERIFICATION_MAIL_FROM` | no | none | Sender used by optional membership email delivery. |
+| `VERIFICATION_PUBLIC_BASE_URL` | no | request origin | External base URL used in membership links behind a proxy. |
+| `OPENROUTER_API_KEY` | no | none | Enables advisory image evidence analysis only when training is explicitly disabled. |
+| `OPENROUTER_ALLOW_TRAINING` | no | unset | Must equal `false` for OpenRouter analysis to run. |
+| `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
 
-Optional membership mail and advisory-analysis variables are documented in the [README configuration table](README.md#configuration). Discord and Telegram bot tokens are pasted into the authenticated Web UI and encrypted in `control.db`; do not place them in image environment variables.
+Discord and Telegram bot tokens are pasted into the authenticated Web UI and encrypted in `control.db`; do not place them in container environment variables.
 
 The service exposes HTTP on the configured port and requires one persistent writable mount at `/data`. That mount contains:
 
