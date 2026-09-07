@@ -8,136 +8,111 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a privacy-first server for transport-neutral message synchronization across WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups through one canonical router.
+The release workflow publishes the same multi-architecture `message-sync` image to:
 
----
+- Docker Hub: [`docker.io/vm75/message-sync`](https://hub.docker.com/r/vm75/message-sync)
+- GitHub Container Registry: `ghcr.io/vm75/message-sync`
 
-## Features
+Use the [README](README.md) for product setup and provider requirements. This page is limited to image behavior, runtime configuration, and publishing.
 
-- **Mixed-Transport Synchronization**: Connect WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups in the same alias-based sync sets.
-- **Telegram Bot API Transport**: Long-poll ingress, transient observed-chat discovery, text/transient media, replies/reactions/edits/deletes, safe sender attribution, forum-topic flattening, native representable polls with opaque result correlation, deterministic unsupported-poll/format fallbacks, and group-to-supergroup migration all use the shared canonical/message-copy model.
-- **Rich Media Support**: Forwards text, images, videos, audio/voice notes, documents, and stickers.
-- **Native WhatsApp Polls**: Syncs polls and aggregates votes across all connected groups.
-- **Reactions & Replies**: Preserves clickable native reply structures and message reactions across groups.
-- **Message Edits & Deletions**: Automatically propagates edits and deleted/revoked messages.
-- **Automated Chat Cleanup**: Optional daily message clearing for connected groups on the sync account to keep device storage lean.
-- **Source-local Messages**: Configure one optional global prefix in the authenticated Web UI to keep matching new messages local to their source conversation. Suppression is restart-safe and content-free.
-- **Embedded Web UI**: Zero-dependency management console for WhatsApp pairing, Discord status/channel discovery, transient Telegram observed-chat discovery, endpoint aliases, and mixed sync sets.
-- **Hardened Security**: Runs as a static, non-root binary in read-only containers.
+## Tags and platforms
 
----
+- The exact value in [`VERSION`](VERSION) is the immutable release tag.
+- `latest` points to the release most recently published by the workflow.
+- Release images target `linux/amd64` and `linux/arm64`.
 
-## Privacy Model
+Development builds use the `development` version string and are not published by the release workflow.
 
-`message-sync` is built with a strict privacy-first architecture. It guarantees that no personal data is ever logged or persisted to the application database.
+## Quick start
 
-- **Zero PII/PHI**: The application database (`sync.db`) never stores participant phone numbers/JIDs, Discord or Telegram user IDs/names, guild/channel/chat names, message bodies, captions, media, source filenames, CDN/file URLs, or contact cards. Configured transport target IDs are the narrow operational addressing exception.
-- **Transient Media**: Media files are only downloaded into memory long enough to forward them to the peer groups, and are never retained on disk.
-- **Anonymized Identity**: User identity is represented purely by stable, HMAC-derived hashes or configured group aliases (e.g. `c1g1`).
-- **Separation of State**: The WhatsApp protocol state (`whatsapp.db`), which naturally requires some contact metadata for the connection to work, is strictly isolated and never accessed by the application logic or exposed through the API.
-- **Transport Credentials**: Discord bot/webhook credentials and Telegram bot credentials come only from environment variables or mounted secrets. They are never stored in `sync.db` or written to application logs.
-
----
-
-## Quick Start
-
-### 1. Prepare Environment
-
-Generate a 32-byte secret for anonymized identity derivation:
+Create a private environment file and data directory:
 
 ```sh
 mkdir -p data
-openssl rand -hex 32 > .identity_secret
+printf 'IDENTITY_SECRET=%s\nDATA_DIR=/data\nPORT=8080\nLOG_LEVEL=info\n' "$(openssl rand -hex 32)" > .env
+chmod 600 .env
 ```
 
-Create a `.env` file:
+Run the current published release:
 
-```env
-IDENTITY_SECRET=your-generated-32-byte-hex-secret
-DATA_DIR=/data
-PORT=8080
-# Optional companion device name shown in WhatsApp Linked Devices (default: message-sync)
-WHATSAPP_DEVICE_NAME=
+```sh
+docker pull docker.io/vm75/message-sync:latest
+docker run -d \
+  --name message-sync \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+  --env-file .env \
+  -p 8080:8080 \
+  -v "$PWD/data:/data" \
+  docker.io/vm75/message-sync:latest
 ```
 
-### Dynamic connections
+On SELinux systems, add `:Z` to the `/data` bind mount. The image already runs as the non-root `message-sync` user (UID/GID 1000); ensure the mounted directory is writable by that user in your container runtime's user namespace.
 
-Connections are managed dynamically through the authenticated Web UI:
+Open `http://localhost:8080`, create the first administrator, then add connections, endpoints, and sync sets in the Web UI.
 
-- **WhatsApp**: Add a connection and scan the QR code (**Linked Devices** → **Link a Device**). Multiple independent WhatsApp accounts are supported; each maintains its own isolated database (`/data/whatsapp-<connection-id>.db`).
-- **Discord**: Add a connection and paste the bot token once. The token is encrypted immediately with AES-256-GCM using a key derived from `IDENTITY_SECRET` and stored in `control.db`. In the Discord Developer Portal, enable the **Guild Messages** gateway intent and privileged **Message Content** intent. In bridged channels grant the bot **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks**.
-- **Telegram**: Add a connection and paste the Bot API token from BotFather once. The token is encrypted immediately with AES-256-GCM and stored in `control.db`. Add the bot to target groups, make it a group administrator (required for per-user reaction updates), disable **anonymous reactions** in the group, and disable **Bot Privacy Mode** in BotFather.
+## Compose
 
-No container restart is required to add, update, enable, or disable connections. Plaintext credentials are never written to `sync.db`, returned by read APIs, or logged.
-
-### Telegram discovery & topics
-
-Telegram discovery is observation-based because the Bot API cannot enumerate every group a bot belongs to. Send activity in the target group, then use the authenticated Web UI under the specific connection to refresh observed chats and assign a safe endpoint alias. Forum topics flatten to the configured parent alias while preserving opaque topic scope for native replies and lifecycle targeting. Over-limit media fails deterministically.
-
-### 2. Docker Compose / Podman Compose
-
-Create a `compose.yml` file:
+The repository's [`compose.yml`](compose.yml) builds `message-sync:dev` locally. To use the published image, remove its `build` block and set:
 
 ```yaml
 services:
   message-sync:
-    container_name: message-sync
     image: docker.io/vm75/message-sync:latest
-    read_only: true
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
-    env_file:
-      - .env
-    environment:
-      - DATA_DIR=${DATA_DIR:-/data}
-      - IDENTITY_SECRET=${IDENTITY_SECRET}
-      - PORT=${PORT:-8080}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
-    ports:
-      - "${PORT:-8080}:${PORT:-8080}"
-    volumes:
-      - ${MESSAGE_SYNC_DATA_DIR:-./data}:/data:Z,U
-    restart: unless-stopped
-    stop_grace_period: 20s
 ```
 
-### 3. Setup and Pairing
+Keep the repository's read-only root filesystem, dropped capabilities, `/tmp` tmpfs, environment, port, and `/data` volume settings. Then run:
 
-1. Start the container:
-   ```sh
-   docker compose up -d
-   ```
-2. Open `http://localhost:8080` in your browser.
-3. Complete initial admin password setup.
-4. Navigate to Connections to add WhatsApp (scan QR), Discord (paste bot token), and Telegram (paste bot token) connections.
-5. Discover and configure endpoints under each connection, then organize them into sync sets in the web console.
+```sh
+docker compose up -d
+```
 
----
+Podman users can use `podman compose up -d` with the same file.
 
-## Volumes & Persistence
+## Runtime interface
 
-Mount a persistent volume to `/data`:
+The image entry point is `/usr/local/bin/message-sync`; its default command is `run`.
 
-- `/data/whatsapp-<connection-id>.db`: Per-connection sensitive protocol stores managed by `whatsmeow` (reconnect without re-pairing).
-- `/data/sync.db`: Application routing state.
-- `/data/control.db`: Mode-0600 sensitive account, session, audit, connection, and membership-verification state.
-- `/data/membership-evidence/`: Mode-0700 directory for short-lived mode-0600 PDF/image evidence; terminal requests are pruned after 30 days.
+| Variable | Required | Default | Purpose |
+|---|---:|---|---|
+| `IDENTITY_SECRET` | yes | none | Identity-HMAC and credential-encryption root secret; minimum 32 bytes. |
+| `DATA_DIR` | no | `/data` | Persistent state and private evidence directory. |
+| `PORT` | no | `8080` | HTTP listen port when `API_ADDR` is unset. |
+| `API_ADDR` | no | derived from `PORT` | Complete HTTP listen address. |
+| `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
+| `WHATSAPP_DEVICE_NAME` | no | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
 
-Optional membership integrations use deployment-only environment variables
-`VERIFICATION_MAIL_API_KEY` and `VERIFICATION_MAIL_FROM` for Resend-compatible
-email delivery, and `OPENROUTER_API_KEY` with
-`OPENROUTER_ALLOW_TRAINING=false` for advisory image analysis. The daemon and
-core routing work when these variables are absent; no paid service is required.
+Optional membership mail and advisory-analysis variables are documented in the [README configuration table](README.md#configuration). Discord and Telegram bot tokens are pasted into the authenticated Web UI and encrypted in `control.db`; do not place them in image environment variables.
 
----
+The service exposes HTTP on the configured port and requires one persistent writable mount at `/data`. That mount contains:
 
-## Links & Documentation
+- `sync.db` — PII-free routing/configuration state;
+- `control.db` — sensitive accounts, sessions, encrypted credentials, audit, and membership state;
+- `whatsapp/<connection-id>.db` — isolated sensitive whatsmeow protocol state;
+- `membership-evidence/` — short-lived private membership evidence when that feature is used.
 
-- **GitHub Repository**: [github.com/vm75/message-sync](https://github.com/vm75/message-sync)
-- **Architecture & Invariants**: [ARCHITECTURE.md](https://github.com/vm75/message-sync/blob/main/ARCHITECTURE.md)
-- **Testing Guide**: [docs/TESTING_GUIDE.md](https://github.com/vm75/message-sync/blob/main/docs/TESTING_GUIDE.md)
-- **GHCR Image Mirror**: `ghcr.io/vm75/message-sync:latest`
+Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the current code initializes fresh schemas and does not provide an upgrade migration path for older development databases.
+
+## Hardening
+
+The final image contains the compiled binary on Alpine and runs as UID/GID 1000. It needs no privileged mode, host networking, host PID namespace, or added Linux capabilities. `/data` is the only persistent writable location; use a read-only root filesystem and the bounded `/tmp` tmpfs shown above.
+
+## Version and configuration checks
+
+```sh
+docker run --rm docker.io/vm75/message-sync:latest version
+docker run --rm \
+  --env-file .env \
+  -v "$PWD/data:/data" \
+  docker.io/vm75/message-sync:latest validate-config
+```
+
+`validate-config` requires an existing `sync.db` with a complete valid configuration (at least two endpoints in one or more sync sets).
+
+## Publishing
+
+`.github/workflows/release-images.yml` runs only when `VERSION` changes on `main`. It validates the version, builds both supported platforms once, and publishes the version and `latest` tags to Docker Hub and GHCR.
+
+The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. GHCR authentication uses the workflow `GITHUB_TOKEN` with `contents: read` and `packages: write`; package visibility is managed in repository/package settings. No registry credentials belong in the repository.

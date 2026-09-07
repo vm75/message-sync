@@ -15,9 +15,10 @@ For the local automated gate, including the fake three-transport integration har
 3. [Telegram Setup (Step-by-Step)](#3-telegram-setup-step-by-step)
 4. [WhatsApp Preparation](#4-whatsapp-preparation)
 5. [Starting message-sync](#5-starting-message-sync)
-6. [Pairing & Endpoint Configuration in the Web UI](#6-pairing--endpoint-configuration-in-the-web-ui)
+6. [Connections, Endpoints & Sync Sets in the Web UI](#6-connections-endpoints--sync-sets-in-the-web-ui)
 7. [Testing Checklist & Verification Scenarios](#7-testing-checklist--verification-scenarios)
-8. [Troubleshooting & Common Pitfalls](#8-troubleshooting--common-pitfalls)
+8. [Membership Verification Testing](#8-membership-verification-testing)
+9. [Troubleshooting & Common Pitfalls](#9-troubleshooting--common-pitfalls)
 
 ---
 
@@ -202,7 +203,13 @@ services:
     stop_grace_period: 20s
 ```
 
-*(If building from local source, replace `image: docker.io/vm75/message-sync:latest` with `build: .`)*
+If building from local source, replace the `image` line with:
+
+```yaml
+    build:
+      context: .
+      dockerfile: Containerfile
+```
 
 ### Step 5.3: Launch the Container
 
@@ -218,16 +225,16 @@ Check the startup logs:
 docker compose logs -f
 ```
 
-You should see logs indicating the HTTP API is listening on port 8080 and that Discord and Telegram adapters have initialized.
+You should see logs indicating that the HTTP API is listening on port 8080. Provider adapters start after their connections are configured and enabled.
 
 ---
 
 ## 6. Connections, Endpoints & Sync Sets in the Web UI
 
-### Step 6.1: Initial Admin Password Setup
+### Step 6.1: Initial Admin Account Setup
 1. Open your browser and navigate to `http://localhost:8080`.
-2. You will be prompted to set up the admin password.
-3. Enter a strong password and complete setup. You will be logged into the management console.
+2. You will be prompted to create the first administrator username and password.
+3. Enter the account details and complete setup. You will be logged into the management console.
 
 ### Step 6.2: Create Platform Connections
 1. In the Web UI, navigate to the **Connections** view.
@@ -235,7 +242,7 @@ You should see logs indicating the HTTP API is listening on port 8080 and that D
    - Click **Add Connection**, select **WhatsApp**, and enter a label (e.g., `wa-primary`).
    - Click **Pair** on the connection card to generate a QR code.
    - On your phone, open WhatsApp &rarr; **Settings** &rarr; **Linked Devices** &rarr; **Link a Device**, and scan the QR code.
-   - The status updates to **Connected**. Each WhatsApp connection maintains an isolated protocol store (`/data/whatsapp-<connection-id>.db`).
+   - The status updates to **Connected**. Each WhatsApp connection maintains an isolated protocol store (`/data/whatsapp/<connection-id>.db`).
    - *(Optional Multi-Account)*: Click **Add Connection** to add a second WhatsApp account. Note that pairing operations are serialized to one flow at a time.
 3. **Add Discord Bot Connection**:
    - Click **Add Connection**, select **Discord**, enter a label (e.g., `dc-primary`), and paste your bot token once.
@@ -285,7 +292,7 @@ GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./intern
 
 The integration harness uses fake WhatsApp, Discord, and Telegram adapters to verify all-to-all fan-out, slow-destination isolation, transient retry, and ordered create/edit/reaction/delete delivery. The package tests additionally cover queue saturation, restart/replay state, checkpoint gaps and duplicates, provider reconnect/history behavior, configuration reload, managed-webhook replacement, and privacy canaries.
 
-Use a fresh `sync.db` for local verification. The current product has no database migration or backward-compatibility path. Never use or inspect `whatsapp.db` as application data; it is protocol state owned by whatsmeow.
+Use a fresh `sync.db` for local verification. The current product has no database migration or backward-compatibility path. Never use or inspect `/data/whatsapp/<connection-id>.db` as application data; it is protocol state owned by whatsmeow.
 
 When validating recovery, keep the provider bounds in mind: Telegram can only replay updates retained by Bot API, Discord recovery is bounded channel history and cannot reconstruct every offline delete or reaction, and WhatsApp recovery depends on bounded protocol HistorySync and does not promise offline lifecycle reconstruction. Recovered events must produce the same user-visible behavior as live events.
 
@@ -350,17 +357,13 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 
 ### Scenario 7: Polls & Vote Aggregation
 - [ ] **Create Poll in WhatsApp**: Create a poll with question `Lunch preference?` and options `Pizza`, `Sushi`, `Tacos`.
-  - **Verify Discord**: Rendered as deterministic formatted text:
-    ```text
-    Poll: Lunch preference?
-    1. Pizza
-    2. Sushi
-    3. Tacos
-    (Select one option)
-    ```
-  - **Verify Telegram**: Rendered with identical deterministic text formatting.
-- [ ] **Vote Aggregation**: Vote in WhatsApp, then reply `aggregate-response` to the poll message in WhatsApp.
-  - **Verify All**: An aggregated vote summary is formatted and distributed across WhatsApp, Discord, and Telegram quoting the local poll copy.
+  - **Verify Discord**: A native Discord poll appears with the same question, options, and single-answer semantics.
+  - **Verify Telegram**: A native Telegram poll appears with the same question, options, and single-answer semantics.
+  - **Verify All**: Each endpoint has one bridge-owned live-results companion containing aggregate option counts only, with no voter identity.
+- [ ] **Vote Aggregation**: Vote in the poll, then reply with the exact text `aggregate-response` to a poll copy.
+  - **Verify All**: The trigger message is suppressed and the aggregate-only companion is updated through normal delivery lanes.
+- [ ] **Unsupported representation**: Create a poll whose option count or semantics exceed a destination's native limits.
+  - **Verify**: Only that destination receives the deterministic text fallback; representable destinations retain native polls.
 
 ### Scenario 8: Source-local Messages
 
@@ -406,8 +409,112 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 
 ---
 
+## 8. Membership Verification Testing
 
-## 8. Troubleshooting & Common Pitfalls
+The current membership workflow supports public applications with a work email, a WhatsApp phone number or Discord user ID, an optional LinkedIn URL, bounded custom fields, and optional PDF/image evidence. Deterministic checks and optional OpenRouter analysis are advisory; only an authenticated human reviewer can approve or reject an application.
+
+Use a dedicated test sync set, an email address you control, test transport identities, and synthetic or thoroughly redacted evidence. Do not upload a real immigration notice, A-number, home address, passport number, Social Security number, or unrelated personal data during routine testing.
+
+### Current verification limits
+
+- There is no document lookup, document ownership check, or case-status validation.
+- A LinkedIn URL is checked only for HTTPS and a `linkedin.com` host. The service does not prove account control, identity, or employment history, and it has no LinkedIn OAuth/OIDC integration.
+- OpenRouter receives image evidence as an inline image. For PDF evidence, the current analyzer sends only its generic review instruction, so PDFs are human-review evidence rather than meaningful automated input.
+- Although `AnalysisInput` has deterministic email-domain and LinkedIn fields, public intake currently passes only evidence type and bytes to the analyzer. Do not expect the OpenRouter result to incorporate those deterministic signals.
+- A valid-looking document or URL is never an automatic membership decision.
+
+### Optional integrations
+
+For a complete deployed email-challenge flow, configure both mail variables through the deployment's secret mechanism:
+
+```env
+VERIFICATION_MAIL_API_KEY=
+VERIFICATION_MAIL_FROM=
+VERIFICATION_PUBLIC_BASE_URL=https://your-test-host.example
+```
+
+Without a configured mailer, intake still creates a request and a hashed challenge, but the challenge is not delivered; a normal external test cannot advance the request from `pending_email` to `pending_admin`.
+
+To exercise advisory image analysis, provide an OpenRouter key through the deployment's secret mechanism and set:
+
+```env
+OPENROUTER_ALLOW_TRAINING=false
+OPENROUTER_MODEL=openrouter/free
+```
+
+The analyzer is disabled unless `OPENROUTER_ALLOW_TRAINING` is exactly `false`. The default router does not guarantee repeatable image-model selection; use an explicitly chosen model only after verifying that it supports image input and the required privacy posture. Provider failures, malformed output, rate limits, and timeouts must remain safe `failed` or `unavailable` advisory states.
+
+### Configure the test application
+
+1. In **Settings**, enable the browser-local **Membership review** preference so the Membership navigation and sync-set application controls are visible.
+2. Create a dedicated sync set with a configured WhatsApp or Discord endpoint.
+3. Open that sync set's **Membership Application** controls, require evidence, and configure bounded instructions. For example:
+
+   - Applicant instructions: `Provide your work email, LinkedIn profile, and the requested synthetic supporting document.`
+   - Evidence instructions: `Upload a redacted synthetic image. Do not include identifiers or personal details that are not needed for this test.`
+   - Reviewer guidance: `Treat automated checks as advisory and make the final decision manually.`
+
+4. Add custom fields in the Web UI or through `PUT /api/sync-sets/{id}/membership`. This request shape matches the current API:
+
+```json
+{
+  "applicantInstructions": "Provide the requested test details.",
+  "evidenceInstructions": "Upload synthetic or redacted evidence only.",
+  "reviewerGuidance": "Automated results are advisory.",
+  "evidenceRequired": true,
+  "customFields": [
+    {
+      "key": "full_name",
+      "label": "Full name",
+      "type": "text",
+      "required": true,
+      "maxLength": 120,
+      "position": 0
+    },
+    {
+      "key": "eligibility_document",
+      "label": "Supporting document",
+      "type": "select",
+      "required": true,
+      "maxLength": 0,
+      "position": 1,
+      "options": [
+        "Synthetic I-797 Receipt Notice",
+        "Synthetic I-797C Receipt Notice"
+      ]
+    }
+  ]
+}
+```
+
+5. Under **Membership**, create and enable a verification pipeline for that endpoint, then open its public application link in a private browser window.
+
+### Exercise the workflow
+
+1. Submit a work email, the transport identity required by the pipeline, a valid `https://www.linkedin.com/...` URL, all required custom answers, and a synthetic PNG/JPEG under 5 MiB.
+2. Confirm that intake returns the generic received state without exposing the request record or endpoint addressing.
+3. Complete the emailed challenge and verify that the request moves from `pending_email` to `pending_admin`.
+4. Open the request in **Membership** and verify the deterministic result, OpenRouter state/confidence/detail when configured, custom answer snapshot, and protected evidence download.
+5. Select **Needs review** and verify that evidence remains available and the request stays pending human action.
+6. Make a final **Approve** or **Reject** decision and verify that the evidence reference is cleared and the local evidence file is purged or durably queued for cleanup. The decision must remain human-authorized even when advisory checks report high confidence.
+7. For approved WhatsApp requests, verify that fulfillment uses the configured join-approval/invite flow and never directly adds a participant. For Discord, verify only the configured role-assignment boundary.
+
+### Negative and privacy cases
+
+- [ ] Personal/free email domains produce a lower deterministic advisory result; they are not automatically rejected.
+- [ ] Non-HTTPS or non-LinkedIn URLs are rejected, while an accepted LinkedIn URL is still displayed only as a syntactic check.
+- [ ] Missing required answers, unknown answers, invalid select values, unchecked required checkboxes, and overlong values are rejected.
+- [ ] Missing required evidence, files over 5 MiB, and non-PDF/non-image content are rejected.
+- [ ] A synthetic image exercises advisory analysis; a PDF remains available to the human reviewer without claiming meaningful automated document analysis.
+- [ ] OpenRouter unavailable, rate-limited, timed out, or malformed responses do not block human review or approve a request.
+- [ ] Stale concurrent review decisions return a conflict instead of overwriting the first decision.
+- [ ] Applicant PII, answers, and evidence remain in `control.db` or the private evidence directory only; `sync.db`, router state, delivery health, and application logs remain free of them.
+- [ ] Final approve/reject removes local evidence, while **Needs review** retains it.
+
+---
+
+
+## 9. Troubleshooting & Common Pitfalls
 
 ### Discord Issues
 
@@ -431,7 +538,7 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 | Symptom | Cause | Solution |
 | :--- | :--- | :--- |
 | **QR code times out before scanning** | WhatsApp pairing codes expire after roughly 20-30 seconds. | Click **Start Pairing** again in the Web UI to generate a fresh QR code. |
-| **WhatsApp disconnects after restarting host** | Persistent volume `/data` was not retained across container runs. | Verify that your `compose.yml` mounts a persistent host volume to `/data` so `whatsapp-<connection-id>.db` and `sync.db` are preserved. |
+| **WhatsApp disconnects after restarting host** | Persistent volume `/data` was not retained across container runs. | Verify that your `compose.yml` mounts a persistent host volume to `/data` so `whatsapp/<connection-id>.db` and `sync.db` are preserved. |
 
 ### Inspecting Logs Safely
 All logs produced by `message-sync` are strictly zero-PII/PHI:

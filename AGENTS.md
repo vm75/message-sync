@@ -1,177 +1,104 @@
-# AGENTS.md
+# message-sync agent guide
 
-## Purpose
+## Project overview
 
-`message-sync` is a privacy-first message synchronization service written in Go. WhatsApp groups, configured Discord channels, and configured Telegram groups/supergroups synchronize through the same canonical transport boundary; Discord and Telegram must remain transport adapters rather than becoming the application’s central identity.
+`message-sync` is a privacy-first Go service that synchronizes configured WhatsApp, Discord, and Telegram conversations. A transport-neutral canonical router owns synchronization semantics; transport packages authenticate accounts, normalize provider events, and perform provider operations without becoming the application's identity model.
 
-Use **KISS** and **YAGNI** aggressively. Prefer standard-library Go, explicit data flow, small packages, and simple SQLite transactions. Do not port legacy functionality merely because it existed before.
+Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packages, and simple SQLite transactions; do not restore legacy behavior unless the current product needs it.
 
-## Read order
+## Repository map
 
-Keep context lean. Read only what the current task requires:
+- `cmd/message-sync/` — CLI entry point (`run`, `validate-config`, and `version`).
+- `internal/app/` — process wiring and the single ordered ingress worker.
+- `internal/api/` — authenticated HTTP API and embedded Web UI.
+- `internal/config/` — SQLite-backed routing configuration and validation.
+- `internal/router/`, `internal/delivery/`, `internal/recovery/` — canonical routing, destination lanes, retries, and checkpoints.
+- `internal/transport/{whatsapp,discord,telegram}/` — provider adapters.
+- `internal/store/` — PII-free routing database (`sync.db`).
+- `internal/controlstore/` — sensitive control-plane database (`control.db`).
+- `internal/identity/`, `internal/safelog/` — HMAC identities and safe error logging.
+- `internal/integration/` — mixed-transport reliability and privacy tests.
+- `ref/` — ignored upstream reference material; never treat it as current architecture.
 
-1. `README.md` for product scope and commands.
-2. `ARCHITECTURE.md` for invariants and data flow.
-3. The package(s) being changed and their tests.
-4. `docs/FEATURE_COMPARISON.md` only when comparing implemented capabilities or architectural trade-offs.
+## Context and documentation routing
 
-External implementations may be consulted for a specific protocol behavior. Do not copy foreign architecture wholesale.
+Start with targeted search and read only what the task needs:
 
-## Non-negotiable privacy invariants
+1. [`README.md`](README.md) for current scope, setup, and user-facing behavior.
+2. [`ARCHITECTURE.md`](ARCHITECTURE.md) for boundaries, data flow, and invariants.
+3. The package being changed and its tests.
+4. [`docs/FEATURE_COMPARISON.md`](docs/FEATURE_COMPARISON.md) only for capability or architectural comparisons.
 
-Application persistence (`sync.db`) and application logs must contain **no PII/PHI**.
+Use [`TESTING.md`](TESTING.md) for the full reliability gate, [`docs/TESTING_GUIDE.md`](docs/TESTING_GUIDE.md) for manual provider testing, and [`DOCKERHUB.md`](DOCKERHUB.md) for published-image usage.
 
-The explicit control-plane database (`control.db`) is a separate sensitive
-boundary for multi-user accounts and membership verification. It may contain
-the minimum PII required by those features; keep it out of `sync.db`, logs,
-router state, and transport protocol stores. Restrict its file permissions to
-0600 where supported.
-
-Never persist or log:
-
-- participant phone numbers;
-- participant WhatsApp JIDs/LIDs;
-- push names, contact names, profile names, or designations;
-- message bodies, quoted text, captions, polls, contact cards, or location payloads;
-- media bytes, thumbnails, filenames that may contain personal information, or external media URLs;
-- raw WhatsApp/whatsmeow, Discord gateway/API, or Telegram Bot API update/message/user/chat objects;
-- Discord user IDs, usernames/display names, guild/channel names, bot tokens, webhook tokens/URLs;
-- Telegram user IDs, usernames/display names, chat titles/usernames/invite links, bot tokens, raw API errors, and file URLs;
-- `IDENTITY_SECRET` or any credential/key material.
-
-Allowed in `sync.db`:
-
-- random canonical message IDs;
-- configured endpoint aliases and their transport-specific operational remote target IDs;
-- opaque remote message IDs;
-- HMAC-derived actor IDs;
-- emoji values needed for reaction state;
-- non-content timestamps and recovery cursors.
-
-`whatsapp.db` is a separate sensitive protocol-state exception owned by whatsmeow. Do not query it for application features. Keep whatsmeow decrypted-event and retry plaintext persistence disabled. Never expose `whatsapp.db` through an API or admin UI.
-
-If a proposed feature cannot satisfy these rules, design it as an explicit optional PII subsystem rather than weakening the core.
-
-Membership application definitions and answers belong only to the explicit
-control plane and are shared per sync set through endpoint resolution. Final
-membership decisions remain human-authorized; membership code must never use
-WhatsApp direct participant addition, and terminal decisions must purge local
-evidence. Do not add automatic decisions or high-volume membership workers.
-
-## Architecture rules
-
-- The canonical router owns cross-endpoint synchronization semantics.
-- WhatsApp, Discord, and Telegram use the same canonical router for end-to-end text/media, native representable polls, aggregate-only live-result companions, and reply/reaction/edit/delete lifecycle routing. Multiple independent accounts/bots may run concurrently per transport via dynamic connections.
-- Preserve the hierarchy: Connection authenticates; Endpoint addresses a configured parent conversation; ChildScope addresses Discord thread/Telegram topic context; Sync Set routes between endpoint aliases.
-- Never use a Discord, Telegram, or WhatsApp message ID as the global canonical ID.
-- `message_copies` must make fan-out retryable and idempotent.
-- Outbound create retries must distinguish definite pre-acceptance failure from ambiguous provider outcomes; never blindly retry an ambiguous create.
-- Recovery checkpoints may advance only after payload-dependent delivery is safe to forget; recording delivery intent alone is insufficient.
-- Process ingress deterministically; start with one router worker.
-- Download media only long enough to forward it. Do not add media persistence for convenience.
-- Native replies/reactions are best effort when destination metadata cannot be reconstructed without forbidden identity storage; use a textual attribution fallback.
-- WhatsApp bridge lifecycle echo suppression is bounded, content-free, and must not drop unmatched linked-device `FromSelf` mutations.
-- Configuration is stored in SQLite (`sync.db`). Stored bot credentials are encrypted at rest with AES-256-GCM in `control.db` using a domain key derived from `IDENTITY_SECRET`; `sync.db` and logs contain no secrets or credentials.
-- Endpoint aliases are application-safe routing IDs: they must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, must not encode a JID/phone/name/group/channel subject, reference their owning connection ID, and every validated configured endpoint must belong to exactly one sync set. Transport remote target IDs are operational addressing only and must never be logged.
-
-## SQLite rules
-
-Databases:
-
-- `/data/whatsapp-<connection-id>.db`: isolated per-connection whatsmeow protocol/session stores.
-- `/data/sync.db`: application routing state.
-- `/data/control.db`: sensitive control-plane accounts, sessions, encrypted connection credentials, audit logs, and membership state.
-
-For `sync.db`:
-
-- enable foreign keys;
-- use committed migrations;
-- use transactions for canonical message + copy updates;
-- use uniqueness constraints to make duplicate delivery harmless;
-- enforce retention in batches;
-- do not store raw transport identity to simplify rare features.
-
-## Go style
-
-- Keep packages small and responsibility-oriented.
-- Prefer interfaces only at real boundaries.
-- Pass `context.Context` through blocking/network/database operations.
-- Wrap errors with useful operation context but never sensitive values.
-- Use `log/slog` with explicit safe fields; never log complete protocol structs.
-- Route arbitrary errors through the safe logging helper so raw error text cannot enter application logs.
-- Make ownership/lifetime of large media buffers obvious.
-- Validate inputs at config and transport boundaries.
-- Prefer table-driven tests when they improve clarity.
-
-## Testing
-
-Every feature must add tests for its invariants. As implementation lands, cover at least:
-
-- SQLite config validation and persistence;
-- HMAC stability and non-disclosure;
-- SQLite migrations and uniqueness constraints;
-- canonical lookup in both directions;
-- duplicate/loop prevention;
-- partial fan-out followed by restart/retry;
-- reply mapping and fallback behavior;
-- reaction add/remove and actor separation;
-- edit/delete propagation;
-- media size limits and absence of persistent media;
-- offline recovery bounds;
-- PII-safe logging where feasible.
-
-Run before completing changes:
+## Working commands
 
 ```sh
+make run
 make fmt
 make test
 make vet
+make build
 ```
 
 For container/runtime changes also run:
 
 ```sh
 podman build -f Containerfile -t message-sync:dev .
-podman compose config
+podman compose -f compose.yml config
 ```
 
-## Rootless/container rules
+## Privacy and trust boundaries
 
-The runtime container must:
+- `sync.db` and application logs must contain no PII/PHI, credentials, message content, raw provider objects, external media URLs, or arbitrary provider error text (including phone numbers, WhatsApp JIDs/LIDs, Discord/Telegram user IDs or usernames, group/channel/guild names, message bodies, or auth tokens).
+- Allowed routing state is limited to safe aliases, operational endpoint targets, random canonical IDs, opaque remote message IDs, HMAC actor IDs, emoji/reaction and aggregate poll state, non-content timestamps, and recovery cursors.
+- `/data/whatsapp/<connection-id>.db` is isolated sensitive protocol state owned by whatsmeow. Never query it for application features or expose it through the API; keep decrypted-event and retry plaintext persistence disabled.
+- `control.db` is the explicit sensitive boundary for accounts, sessions, encrypted bot credentials, audits, and membership verification. Keep it separate from routing state and mode `0600` where supported.
+- Membership evidence is short-lived private control-plane data. Human decisions are final, terminal decisions purge local evidence, and WhatsApp fulfillment must never add participants directly.
+- Download message media only long enough to forward it. Do not persist media for convenience.
+- Use `log/slog` with explicit safe fields and route arbitrary errors through `internal/safelog`.
+- Never log endpoint remote target IDs, bot/webhook tokens, `IDENTITY_SECRET`, or provider structs.
 
-- run as a non-root user;
-- work with Docker, rootful Podman, and rootless Podman;
-- use `/data` as its only persistent writable location;
-- use a read-only root filesystem in Compose;
-- require no privileged mode, host networking, host PID namespace, or extra Linux capabilities;
-- use `Containerfile`, `.containerignore`, and `compose.yml`;
-- avoid runtime-specific behavior unless isolated and documented.
+## Architecture invariants
 
-## Version/release rules
+- Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out.
+- Endpoint aliases must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, be safe to display, reference their owning connection, and belong to exactly one validated sync set.
+- Provider message IDs are never global canonical IDs. `message_copies` owns bidirectional lookup and idempotent fan-out.
+- Keep ingress deterministic with one canonical router worker. All three transports use the same router for creates, replies, reactions, polls, edits, deletes, and recovery.
+- Outbound creates distinguish definite pre-acceptance failures from ambiguous provider outcomes. Never blindly retry an ambiguous create.
+- Advance recovery checkpoints only when payload-dependent delivery is safe to forget; durable delivery intent alone is insufficient.
+- Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
+- WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
+- Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
 
-`.github/workflows/release-images.yml` must trigger only when `VERSION` changes on `main`. Normal development builds identify as `development`. Release builds inject `VERSION` with linker flags.
+## SQLite and Go conventions
 
-Do not add image-publishing triggers for ordinary pushes, pull requests, tags, schedules, or manual dispatch unless the project owner explicitly changes this policy.
+- Enable foreign keys, use committed schemas, transactions for related canonical/copy updates, uniqueness for duplicate safety, and bounded retention.
+- The current schemas initialize fresh databases; there is no upgrade migration path. Do not claim compatibility with older development databases.
+- Pass `context.Context` through blocking, network, and database operations.
+- Prefer concrete types until an interface represents a real boundary.
+- Validate inputs at configuration and transport edges. Wrap errors with operation context but never sensitive values.
+- Make ownership and lifetime of large media buffers clear. Prefer table-driven tests where they improve readability.
 
-## Scope discipline
+## Release and container constraints
 
-`README.md` defines current product scope. Keep scope changes aligned with KISS/YAGNI and the privacy invariants above.
+- The runtime image is non-root, writes persistently only to `/data`, and works with Docker, rootful Podman, and rootless Podman without privileged mode, host namespaces, or extra capabilities.
+- Compose keeps the root filesystem read-only and drops all capabilities.
+- `VERSION` is the release source. Development builds report `development`; release builds inject `VERSION` with linker flags.
+- `.github/workflows/release-images.yml` publishes only when `VERSION` changes on `main`. Do not add other publishing triggers without explicit owner direction.
 
-For a scope change:
+## Definition of done
 
-1. state whether it changes the privacy model;
-2. keep optional integrations behind narrow interfaces;
-3. avoid adding cloud/web dependencies unless the current use case requires them;
-4. extend the canonical transport model instead of special-casing a platform.
+- Add or update tests for changed invariants and failure paths.
+- Run `make fmt`, `make test`, and `make vet`; run container checks only when container/runtime files changed.
+- Review the diff for unrelated edits and privacy-boundary regressions.
+- Update only documentation whose user behavior, workflow, architecture, or deployment truth changed.
 
 ## Documentation maintenance
 
-At the end of every feature add/delete/modify:
-
-- update `README.md` for user-visible behavior/configuration/deployment changes;
-- update `DOCKERHUB.md` when deployment examples, container features, or configuration options change;
-- update `ARCHITECTURE.md` for data flow/schema/privacy/component changes;
-- update `AGENTS.md` when contributor guidance or invariants change;
-- update `docs/FEATURE_COMPARISON.md` when an implemented capability materially changes the comparison or architectural trade-off.
-
-Keep context and docs lean; avoid duplicating large authoritative sections.
+- Setup, configuration, capabilities, or basic usage: `README.md`.
+- Components, dependency direction, data flow, schema, privacy, or failure semantics: `ARCHITECTURE.md`.
+- Image names, tags, environment, volumes, ports, platforms, or publishing: `DOCKERHUB.md`.
+- Test commands or manual scenarios: `TESTING.md` or `docs/TESTING_GUIDE.md`.
+- Material comparison changes: `docs/FEATURE_COMPARISON.md`.
+- Agent workflow, repository map, or mandatory constraints: `AGENTS.md`.

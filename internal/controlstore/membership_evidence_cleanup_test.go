@@ -36,14 +36,13 @@ func TestPruneRetentionRemovesOrphanEvidenceAndKeepsActiveEvidence(t *testing.T)
 
 	now := time.Now().UTC()
 	nowMS := now.UnixMilli()
-	if _, err := store.db.Exec(`
-		INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at)
-		VALUES ('admin','admin','hash','admin',1,?,?);
-		INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,enabled,creator_user_id,created_at,updated_at)
-		VALUES ('pipeline','token','Community','whatsapp','group-a',1,'admin',?,?);
-		INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,fulfillment_state,evidence_reference,created_at,updated_at)
-		VALUES ('request','pipeline','pending_admin','applicant@example.com','verified','not_started',?,?,?)
-	`, nowMS, nowMS, nowMS, nowMS, activeRef, nowMS, nowMS); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES ('admin','admin','hash','admin',1,?,?)`, nowMS, nowMS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,enabled,creator_user_id,created_at,updated_at) VALUES ('pipeline','token','Community','whatsapp','group-a',1,'admin',?,?)`, nowMS, nowMS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,fulfillment_state,evidence_reference,created_at,updated_at) VALUES ('request','pipeline','pending_admin','applicant@example.com','verified','not_started',?,?,?)`, activeRef, nowMS, nowMS); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,14 +69,13 @@ func TestPruneRetentionPrunesSucceededApprovedRequests(t *testing.T) {
 	now := time.Now().UTC()
 	old := now.Add(-31 * 24 * time.Hour).UnixMilli()
 	nowMS := now.UnixMilli()
-	if _, err := store.db.Exec(`
-		INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at)
-		VALUES ('admin','admin','hash','admin',1,?,?);
-		INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,enabled,creator_user_id,created_at,updated_at)
-		VALUES ('pipeline','token','Community','whatsapp','group-a',1,'admin',?,?);
-		INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,fulfillment_state,created_at,updated_at)
-		VALUES ('request','pipeline','approved','applicant@example.com','verified','succeeded',?,?)
-	`, nowMS, nowMS, nowMS, nowMS, old, old); err != nil {
+	if _, err := store.db.Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES ('admin','admin','hash','admin',1,?,?)`, nowMS, nowMS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO verification_pipelines(id,public_token,label,target_transport,endpoint_alias,enabled,creator_user_id,created_at,updated_at) VALUES ('pipeline','token','Community','whatsapp','group-a',1,'admin',?,?)`, nowMS, nowMS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO membership_requests(id,pipeline_id,status,applicant_work_email,verification_state,fulfillment_state,created_at,updated_at) VALUES ('request','pipeline','approved','applicant@example.com','verified','succeeded',?,?)`, old, old); err != nil {
 		t.Fatal(err)
 	}
 
