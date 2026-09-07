@@ -19,6 +19,7 @@ type WhatsAppAdmin interface {
 	ApproveJoinRequest(context.Context, string, string) error
 }
 type PendingJoinRequest struct {
+	ID          string
 	Phone       string
 	RequestedAt time.Time
 }
@@ -50,18 +51,22 @@ func Fulfill(ctx context.Context, req FulfillmentRequest, wa WhatsAppAdmin, dc D
 			return FulfillmentResult{State: "action_pending", FailureClass: "pending_requests_unavailable"}, err
 		}
 		wanted := strings.TrimPrefix(strings.TrimSpace(req.Phone), "+")
-		match := ""
+		matchTarget := ""
 		for _, candidate := range pending {
 			if strings.TrimPrefix(strings.TrimSpace(candidate.Phone), "+") != wanted {
 				continue
 			}
-			if match != "" {
+			if matchTarget != "" {
 				return FulfillmentResult{State: "action_pending", FailureClass: "identity_ambiguous"}, errors.New("multiple matching join requests")
 			}
-			match = candidate.Phone
+			target := candidate.ID
+			if target == "" {
+				target = candidate.Phone
+			}
+			matchTarget = target
 		}
-		if match != "" {
-			if err := wa.ApproveJoinRequest(ctx, req.EndpointAlias, match); err != nil {
+		if matchTarget != "" {
+			if err := wa.ApproveJoinRequest(ctx, req.EndpointAlias, matchTarget); err != nil {
 				if errors.Is(err, ErrPermissionDenied) {
 					return FulfillmentResult{State: "failed", FailureClass: "permission_denied"}, err
 				}

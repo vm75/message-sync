@@ -45,3 +45,30 @@ func TestFulfillWhatsAppRequiresApprovalAndUsesInvite(t *testing.T) {
 		t.Fatalf("join reconciliation result=%+v err=%v approved=%d", got, err, f.approved)
 	}
 }
+
+type fakeWALID struct {
+	fakeWA
+	approvedID string
+}
+
+func (f *fakeWALID) PendingJoinRequests(context.Context, string) ([]PendingJoinRequest, error) {
+	return []PendingJoinRequest{{ID: "123456789012345@lid", Phone: "15551234567", RequestedAt: time.Unix(0, 0)}}, nil
+}
+
+func (f *fakeWALID) ApproveJoinRequest(_ context.Context, _ string, target string) error {
+	f.approvedID = target
+	f.member = true
+	return nil
+}
+
+func TestFulfillWhatsAppApprovesWithCandidateID(t *testing.T) {
+	f := &fakeWALID{fakeWA: fakeWA{required: true}}
+	req := FulfillmentRequest{Transport: "whatsapp", EndpointAlias: "group", Phone: "+15551234567"}
+	got, err := Fulfill(context.Background(), req, f, nil)
+	if err != nil || got.State != "succeeded" {
+		t.Fatalf("unexpected result: %+v err: %v", got, err)
+	}
+	if f.approvedID != "123456789012345@lid" {
+		t.Fatalf("approved ID = %q, want %q", f.approvedID, "123456789012345@lid")
+	}
+}

@@ -246,10 +246,23 @@ func (a *Adapter) HasEndpoint(alias string) bool {
 	return ok
 }
 
+func (a *Adapter) resolveAltJID(ctx context.Context, jid types.JID) (types.JID, error) {
+	if a == nil || a.client == nil || a.client.Store == nil {
+		return types.EmptyJID, nil
+	}
+	return a.client.Store.GetAltJID(ctx, jid)
+}
+
 func (a *Adapter) getContactInfo(jid types.JID) types.ContactInfo {
 	if a.client != nil && a.client.Store != nil && a.client.Store.Contacts != nil {
-		if info, err := a.client.Store.Contacts.GetContact(context.Background(), jid); err == nil {
+		ctx := context.Background()
+		if info, err := a.client.Store.Contacts.GetContact(ctx, jid); err == nil && info.Found {
 			return info
+		}
+		if alt, err := a.client.Store.GetAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+			if info, err := a.client.Store.Contacts.GetContact(ctx, alt); err == nil && info.Found {
+				return info
+			}
 		}
 	}
 	return types.ContactInfo{}
@@ -327,7 +340,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 				return false
 			}
 			for _, p := range groupInfo.Participants {
-				if p.JID.User == user {
+				if ParticipantMatches(ctx, p, user, a.resolveAltJID) {
 					return true
 				}
 			}
@@ -1091,7 +1104,7 @@ func (a *Adapter) handleEvent(raw any) {
 		if !evt.Info.MessageSource.Sender.IsEmpty() {
 			a.pcache.Add(evt.Info.ID, evt.Info.MessageSource.Sender.ToNonAD().String())
 		}
-		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo)
+		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo, a.resolveAltJID)
 		if !ok {
 			return
 		}
@@ -1158,7 +1171,7 @@ func (a *Adapter) handleEvent(raw any) {
 				if !parsed.Info.MessageSource.Sender.IsEmpty() {
 					a.pcache.Add(parsed.Info.ID, parsed.Info.MessageSource.Sender.ToNonAD().String())
 				}
-				incoming, ok := normalizer.NormalizeMessage(parsed, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo)
+				incoming, ok := normalizer.NormalizeMessage(parsed, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo, a.resolveAltJID)
 				if !ok {
 					continue
 				}

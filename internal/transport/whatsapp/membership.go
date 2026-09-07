@@ -49,37 +49,55 @@ func (a *Adapter) PendingJoinRequests(ctx context.Context, alias string) ([]veri
 	}
 	out := make([]verification.PendingJoinRequest, 0, len(requests))
 	for _, request := range requests {
-		// Only phone JIDs can be safely matched to the applicant's submitted
-		// phone. LID-only requests are intentionally left for manual review.
-		if request.JID.Server != types.DefaultUserServer {
+		if request.JID.IsEmpty() {
 			continue
 		}
-		out = append(out, verification.PendingJoinRequest{Phone: request.JID.User, RequestedAt: request.RequestedAt})
+		id := request.JID.String()
+		phone := ""
+		if request.JID.Server == types.DefaultUserServer {
+			phone = request.JID.User
+		} else if (request.JID.Server == types.HiddenUserServer || request.JID.Server == types.HostedLIDServer) && a.client != nil && a.client.Store != nil {
+			if alt, err := a.client.Store.GetAltJID(ctx, request.JID); err == nil && !alt.IsEmpty() && alt.ToNonAD().Server == types.DefaultUserServer {
+				phone = alt.ToNonAD().User
+			}
+		}
+		out = append(out, verification.PendingJoinRequest{
+			ID:          id,
+			Phone:       phone,
+			RequestedAt: request.RequestedAt,
+		})
 	}
 	return out, nil
 }
-func (a *Adapter) ApproveJoinRequest(ctx context.Context, alias, phone string) error {
+func (a *Adapter) ApproveJoinRequest(ctx context.Context, alias, participant string) error {
 	target, err := a.membershipTarget(alias)
 	if err != nil {
 		return verification.ErrDestinationMissing
 	}
-	phone = strings.TrimPrefix(strings.TrimSpace(phone), "+")
-	if phone == "" {
+	participant = strings.TrimSpace(participant)
+	if participant == "" {
 		return errors.New("invalid participant")
 	}
-	_, err = a.client.UpdateGroupRequestParticipants(ctx, target, []types.JID{types.NewJID(phone, types.DefaultUserServer)}, whatsmeow.ParticipantChangeApprove)
+	var jid types.JID
+	if strings.Contains(participant, "@") {
+		var parseErr error
+		jid, parseErr = types.ParseJID(participant)
+		if parseErr != nil || jid.IsEmpty() {
+			return errors.New("invalid participant")
+		}
+	} else {
+		phone := strings.TrimPrefix(participant, "+")
+		if phone == "" {
+			return errors.New("invalid participant")
+		}
+		jid = types.NewJID(phone, types.DefaultUserServer)
+	}
+	_, err = a.client.UpdateGroupRequestParticipants(ctx, target, []types.JID{jid}, whatsmeow.ParticipantChangeApprove)
 	return err
 }
 
 func groupParticipantMatchesPhone(participant types.GroupParticipant, phone string) bool {
-	phone = strings.TrimPrefix(strings.TrimSpace(phone), "+")
-	if phone == "" {
-		return false
-	}
-	if participant.PhoneNumber.Server == types.DefaultUserServer && participant.PhoneNumber.User == phone {
-		return true
-	}
-	return participant.JID.Server == types.DefaultUserServer && participant.JID.User == phone
+	return ParticipantMatches(context.Background(), participant, phone, nil)
 }
 
 func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, error) {
@@ -92,7 +110,7 @@ func (a *Adapter) IsMember(ctx context.Context, alias, phone string) (bool, erro
 		return false, err
 	}
 	for _, p := range info.Participants {
-		if groupParticipantMatchesPhone(p, phone) {
+		if ParticipantMatches(ctx, p, phone, a.resolveAltJID) {
 			return true, nil
 		}
 	}

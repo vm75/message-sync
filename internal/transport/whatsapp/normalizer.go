@@ -49,7 +49,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 	return &Normalizer{endpoints: endpoints, hasher: hasher, usernameMode: usernameMode}, nil
 }
 
-func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor, contactGetter ContactGetter) (transport.Incoming, bool) {
+func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor, contactGetter ContactGetter, resolver JIDResolver) (transport.Incoming, bool) {
 	if n == nil || evt == nil || evt.Message == nil || !evt.Info.IsGroup || evt.Info.Chat.Server != types.GroupServer {
 		return transport.Incoming{}, false
 	}
@@ -90,7 +90,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 
 	contextInfo := getContextInfo(evt.Message)
 	if contextInfo != nil && len(contextInfo.GetMentionedJID()) > 0 {
-		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter)
+		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter, resolver)
 	}
 
 	if kind == "poll" {
@@ -186,10 +186,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		}
 	}
 
-	phone := evt.Info.Sender.User
-	if evt.Info.Sender.Server == types.HiddenUserServer || evt.Info.Sender.Server == types.HostedLIDServer {
-		phone = ""
-	}
+	canonical, phone := CanonicalSenderIdentity(context.Background(), evt.Info.Sender, evt.Info.SenderAlt, resolver)
 
 	return transport.Incoming{
 		Endpoint: endpoint,
@@ -197,7 +194,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		Sender: transport.Sender{
 			DisplayName: displayName,
 			PhoneNumber: phone,
-			OpaqueID:    n.hasher.UserID(evt.Info.Sender.ToNonAD().String()),
+			OpaqueID:    n.hasher.UserID(canonical.String()),
 		},
 		FromSelf:            evt.Info.IsFromMe,
 		Kind:                kind,
@@ -213,7 +210,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	}, true
 }
 
-func extractMentions(mentions []string, contactGetter ContactGetter) []transport.Mention {
+func extractMentions(mentions []string, contactGetter ContactGetter, resolver JIDResolver) []transport.Mention {
 	if len(mentions) == 0 {
 		return nil
 	}
@@ -226,6 +223,11 @@ func extractMentions(mentions []string, contactGetter ContactGetter) []transport
 		var name string
 		if contactGetter != nil {
 			info := contactGetter(jid)
+			if !info.Found && resolver != nil {
+				if alt, err := resolver(context.Background(), jid); err == nil && !alt.IsEmpty() {
+					info = contactGetter(alt)
+				}
+			}
 			if info.Found {
 				if info.PushName != "" {
 					name = info.PushName
