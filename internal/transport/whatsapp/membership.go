@@ -53,12 +53,16 @@ func (a *Adapter) PendingJoinRequests(ctx context.Context, alias string) ([]veri
 			continue
 		}
 		id := request.JID.String()
+		requestIdentity := normalizeWhatsAppIdentityJID(request.JID)
 		phone := ""
-		if request.JID.Server == types.DefaultUserServer {
-			phone = request.JID.User
-		} else if (request.JID.Server == types.HiddenUserServer || request.JID.Server == types.HostedLIDServer) && a.client != nil && a.client.Store != nil {
-			if alt, err := a.client.Store.GetAltJID(ctx, request.JID); err == nil && !alt.IsEmpty() && alt.ToNonAD().Server == types.DefaultUserServer {
-				phone = alt.ToNonAD().User
+		if requestIdentity.Server == types.DefaultUserServer {
+			phone = requestIdentity.User
+		} else if requestIdentity.Server == types.HiddenUserServer && a.client != nil && a.client.Store != nil {
+			if alt, err := a.client.Store.GetAltJID(ctx, requestIdentity); err == nil && !alt.IsEmpty() {
+				altIdentity := normalizeWhatsAppIdentityJID(alt)
+				if altIdentity.Server == types.DefaultUserServer {
+					phone = altIdentity.User
+				}
 			}
 		}
 		out = append(out, verification.PendingJoinRequest{
@@ -139,9 +143,9 @@ func (a *Adapter) MatchPendingJoinRequest(ctx context.Context, alias, phone stri
 	var submittedLID types.JID
 	if a.client != nil && a.client.Store != nil {
 		if alt, err := a.client.Store.GetAltJID(ctx, submittedPN); err == nil && !alt.IsEmpty() {
-			altNonAD := alt.ToNonAD()
-			if altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer {
-				submittedLID = altNonAD
+			altIdentity := normalizeWhatsAppIdentityJID(alt)
+			if altIdentity.Server == types.HiddenUserServer {
+				submittedLID = altIdentity
 			}
 		}
 	}
@@ -152,15 +156,15 @@ func (a *Adapter) MatchPendingJoinRequest(ctx context.Context, alias, phone stri
 		if req.JID.IsEmpty() {
 			continue
 		}
-		reqNonAD := req.JID.ToNonAD()
+		reqIdentity := normalizeWhatsAppIdentityJID(req.JID)
 		isMatch := false
 
-		if reqNonAD.Server == types.DefaultUserServer {
-			if reqNonAD.User == wanted {
+		if reqIdentity.Server == types.DefaultUserServer {
+			if reqIdentity.User == wanted {
 				isMatch = true
 			}
-		} else if reqNonAD.Server == types.HiddenUserServer || reqNonAD.Server == types.HostedLIDServer {
-			if !submittedLID.IsEmpty() && reqNonAD.String() == submittedLID.String() {
+		} else if reqIdentity.Server == types.HiddenUserServer {
+			if !submittedLID.IsEmpty() && reqIdentity.String() == submittedLID.String() {
 				isMatch = true
 			}
 		}
