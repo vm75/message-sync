@@ -40,8 +40,9 @@ func TestCanonicalSenderIdentity_Priority(t *testing.T) {
 
 	t.Run("primary sender is hosted LID", func(t *testing.T) {
 		canonical, phone := CanonicalSenderIdentity(ctx, hostedLID, pnJID, nil)
-		if canonical.String() != hostedLID.String() {
-			t.Fatalf("expected canonical %s, got %s", hostedLID, canonical)
+		expected := types.NewJID(hostedLID.User, types.HiddenUserServer)
+		if canonical.String() != expected.String() {
+			t.Fatalf("expected canonical %s, got %s", expected, canonical)
 		}
 		if phone != "15551234567" {
 			t.Fatalf("expected phone 15551234567, got %s", phone)
