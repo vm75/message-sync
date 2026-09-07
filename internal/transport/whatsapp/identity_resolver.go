@@ -10,31 +10,47 @@ import (
 // JIDResolver resolves an alternate JID (LID <-> PN) for a given JID.
 type JIDResolver func(ctx context.Context, jid types.JID) (types.JID, error)
 
+// normalizeWhatsAppIdentityJID removes device addressing and folds hosted LIDs
+// into the canonical @lid namespace used by whatsmeow's LID mapping store.
+// @hosted.lid and @lid are addressing forms of the same opaque WhatsApp identity
+// and must not become distinct application actors.
+func normalizeWhatsAppIdentityJID(jid types.JID) types.JID {
+	normalized := jid.ToNonAD()
+	if normalized.Server == types.HostedLIDServer {
+		normalized.Server = types.HiddenUserServer
+	}
+	return normalized
+}
+
+func isLIDJID(jid types.JID) bool {
+	return normalizeWhatsAppIdentityJID(jid).Server == types.HiddenUserServer
+}
+
 // CanonicalSenderIdentity returns the canonical identity JID and phone number
 // for an inbound WhatsApp message sender according to priority:
-// 1. If the primary sender is a LID, use normalized LID.
-// 2. Else if the alternate sender is a LID, use normalized alternate LID.
+// 1. If the primary sender is a LID, use normalized canonical @lid.
+// 2. Else if the alternate sender is a LID, use normalized canonical @lid.
 // 3. Else if the sender is PN and whatsmeow can resolve a LID for it, use that normalized LID.
 // 4. Otherwise fall back to the normalized PN JID.
 //
 // Phone number is populated only when an actual PN identity is available (from primary,
 // alternate, or resolved PN). An LID user component is never used as a phone number.
 func CanonicalSenderIdentity(ctx context.Context, sender, senderAlt types.JID, resolver JIDResolver) (canonical types.JID, phone string) {
-	s := sender.ToNonAD()
-	sAlt := senderAlt.ToNonAD()
+	s := normalizeWhatsAppIdentityJID(sender)
+	sAlt := normalizeWhatsAppIdentityJID(senderAlt)
 
 	// 1. If primary sender is LID, use normalized LID.
-	if s.Server == types.HiddenUserServer || s.Server == types.HostedLIDServer {
+	if s.Server == types.HiddenUserServer {
 		canonical = s
-	} else if sAlt.Server == types.HiddenUserServer || sAlt.Server == types.HostedLIDServer {
+	} else if sAlt.Server == types.HiddenUserServer {
 		// 2. Else if alternate sender is LID, use normalized alternate LID.
 		canonical = sAlt
 	} else if s.Server == types.DefaultUserServer && resolver != nil {
 		// 3. Else if sender is PN and whatsmeow can resolve a LID for it, use that normalized LID.
 		if alt, err := resolver(ctx, s); err == nil && !alt.IsEmpty() {
-			altNonAD := alt.ToNonAD()
-			if altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer {
-				canonical = altNonAD
+			altNormalized := normalizeWhatsAppIdentityJID(alt)
+			if altNormalized.Server == types.HiddenUserServer {
+				canonical = altNormalized
 			}
 		}
 	}
@@ -51,14 +67,14 @@ func CanonicalSenderIdentity(ctx context.Context, sender, senderAlt types.JID, r
 		phone = sAlt.User
 	} else if resolver != nil {
 		target := s
-		if target.Server != types.HiddenUserServer && target.Server != types.HostedLIDServer {
+		if target.Server != types.HiddenUserServer {
 			target = sAlt
 		}
-		if target.Server == types.HiddenUserServer || target.Server == types.HostedLIDServer {
+		if target.Server == types.HiddenUserServer {
 			if alt, err := resolver(ctx, target); err == nil && !alt.IsEmpty() {
-				altNonAD := alt.ToNonAD()
-				if altNonAD.Server == types.DefaultUserServer {
-					phone = altNonAD.User
+				altNormalized := normalizeWhatsAppIdentityJID(alt)
+				if altNormalized.Server == types.DefaultUserServer {
+					phone = altNormalized.User
 				}
 			}
 		}
@@ -80,45 +96,50 @@ func ParticipantMatchesPhone(ctx context.Context, p types.GroupParticipant, phon
 		return false
 	}
 
-	// 1. Direct match against genuine PN fields on the participant
-	if p.PhoneNumber.Server == types.DefaultUserServer && p.PhoneNumber.ToNonAD().User == cleanPhone {
+	participantPhone := normalizeWhatsAppIdentityJID(p.PhoneNumber)
+	participantPrimary := normalizeWhatsAppIdentityJID(p.JID)
+	participantLID := normalizeWhatsAppIdentityJID(p.LID)
+
+	// 1. Direct match against genuine PN fields on the participant.
+	if participantPhone.Server == types.DefaultUserServer && participantPhone.User == cleanPhone {
 		return true
 	}
-	if p.JID.Server == types.DefaultUserServer && p.JID.ToNonAD().User == cleanPhone {
+	if participantPrimary.Server == types.DefaultUserServer && participantPrimary.User == cleanPhone {
 		return true
 	}
 
-	// Never compare cleanPhone against p.LID.User or p.JID.User when they are LID servers.
+	// Never compare cleanPhone against a LID user component.
 	if resolver == nil {
 		return false
 	}
 
-	// 2. Resolve submitted phone number (as PN JID) to LID, and compare against participant's LID
+	// 2. Resolve submitted phone number (as PN JID) to canonical LID, and compare
+	// against the participant's LID identities.
 	submittedPN := types.NewJID(cleanPhone, types.DefaultUserServer)
 	if altLID, err := resolver(ctx, submittedPN); err == nil && !altLID.IsEmpty() {
-		altNonAD := altLID.ToNonAD()
-		if altNonAD.Server == types.HiddenUserServer || altNonAD.Server == types.HostedLIDServer {
-			if !p.LID.IsEmpty() && p.LID.ToNonAD().String() == altNonAD.String() {
+		altNormalized := normalizeWhatsAppIdentityJID(altLID)
+		if altNormalized.Server == types.HiddenUserServer {
+			if !participantLID.IsEmpty() && participantLID.String() == altNormalized.String() {
 				return true
 			}
-			if !p.JID.IsEmpty() && (p.JID.Server == types.HiddenUserServer || p.JID.Server == types.HostedLIDServer) && p.JID.ToNonAD().String() == altNonAD.String() {
+			if !participantPrimary.IsEmpty() && participantPrimary.Server == types.HiddenUserServer && participantPrimary.String() == altNormalized.String() {
 				return true
 			}
 		}
 	}
 
-	// 3. Resolve participant's LID to PN, and compare resolved PN against cleanPhone
+	// 3. Resolve participant LIDs to PN, and compare the resolved PN against cleanPhone.
 	lidFields := []types.JID{}
-	if !p.LID.IsEmpty() && (p.LID.Server == types.HiddenUserServer || p.LID.Server == types.HostedLIDServer) {
-		lidFields = append(lidFields, p.LID.ToNonAD())
+	if !participantLID.IsEmpty() && participantLID.Server == types.HiddenUserServer {
+		lidFields = append(lidFields, participantLID)
 	}
-	if !p.JID.IsEmpty() && (p.JID.Server == types.HiddenUserServer || p.JID.Server == types.HostedLIDServer) {
-		lidFields = append(lidFields, p.JID.ToNonAD())
+	if !participantPrimary.IsEmpty() && participantPrimary.Server == types.HiddenUserServer {
+		lidFields = append(lidFields, participantPrimary)
 	}
 	for _, lid := range lidFields {
 		if altPN, err := resolver(ctx, lid); err == nil && !altPN.IsEmpty() {
-			altNonAD := altPN.ToNonAD()
-			if altNonAD.Server == types.DefaultUserServer && altNonAD.User == cleanPhone {
+			altNormalized := normalizeWhatsAppIdentityJID(altPN)
+			if altNormalized.Server == types.DefaultUserServer && altNormalized.User == cleanPhone {
 				return true
 			}
 		}
@@ -133,12 +154,16 @@ func ParticipantMatchesIdentity(ctx context.Context, p types.GroupParticipant, t
 	if target.IsEmpty() {
 		return false
 	}
-	targetNonAD := target.ToNonAD()
-	fields := []types.JID{p.JID, p.LID, p.PhoneNumber}
+	targetNormalized := normalizeWhatsAppIdentityJID(target)
+	fields := []types.JID{
+		normalizeWhatsAppIdentityJID(p.JID),
+		normalizeWhatsAppIdentityJID(p.LID),
+		normalizeWhatsAppIdentityJID(p.PhoneNumber),
+	}
 
-	// 1. Direct match on normalized JID
+	// 1. Direct match on canonical normalized JID.
 	for _, f := range fields {
-		if !f.IsEmpty() && f.ToNonAD().String() == targetNonAD.String() {
+		if !f.IsEmpty() && f.String() == targetNormalized.String() {
 			return true
 		}
 	}
@@ -147,21 +172,21 @@ func ParticipantMatchesIdentity(ctx context.Context, p types.GroupParticipant, t
 		return false
 	}
 
-	// 2. Resolve target to alternate JID and compare with participant fields
-	if alt, err := resolver(ctx, targetNonAD); err == nil && !alt.IsEmpty() {
-		altNonAD := alt.ToNonAD()
+	// 2. Resolve target to alternate JID and compare with participant fields.
+	if alt, err := resolver(ctx, targetNormalized); err == nil && !alt.IsEmpty() {
+		altNormalized := normalizeWhatsAppIdentityJID(alt)
 		for _, f := range fields {
-			if !f.IsEmpty() && f.ToNonAD().String() == altNonAD.String() {
+			if !f.IsEmpty() && f.String() == altNormalized.String() {
 				return true
 			}
 		}
 	}
 
-	// 3. Resolve participant fields and compare with target
+	// 3. Resolve participant fields and compare with target.
 	for _, f := range fields {
 		if !f.IsEmpty() {
-			if alt, err := resolver(ctx, f.ToNonAD()); err == nil && !alt.IsEmpty() {
-				if alt.ToNonAD().String() == targetNonAD.String() {
+			if alt, err := resolver(ctx, f); err == nil && !alt.IsEmpty() {
+				if normalizeWhatsAppIdentityJID(alt).String() == targetNormalized.String() {
 					return true
 				}
 			}
