@@ -357,11 +357,13 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 
 ### Scenario 7: Polls & Vote Aggregation
 - [ ] **Create Poll in WhatsApp**: Create a poll with question `Lunch preference?` and options `Pizza`, `Sushi`, `Tacos`.
-  - **Verify Discord**: A native Discord poll appears with the same question, options, and single-answer semantics.
-  - **Verify Telegram**: A native Telegram poll appears with the same question, options, and single-answer semantics.
+  - **Verify Discord**: A native Discord poll appears with the same question, options, and single-answer semantics. For a cross-endpoint copy, the source label is included in the visible poll question and the bot remains the platform author.
+  - **Verify Telegram**: A native, non-anonymous Telegram poll appears with the same question, options, and single-answer semantics. For a cross-endpoint copy, the source label is included in the visible poll question and the bot remains the platform author.
   - **Verify All**: Each endpoint has one bridge-owned live-results companion containing aggregate option counts only, with no voter identity.
 - [ ] **Vote Aggregation**: Vote in the poll, then reply with the exact text `aggregate-response` to a poll copy.
-  - **Verify All**: The trigger message is suppressed and the aggregate-only companion is updated through normal delivery lanes.
+  - **Verify All**: The trigger message is suppressed and an immediate aggregate-only response is sent to each endpoint. The response is edited when later votes or provider snapshots change the aggregate, alongside the bridge-owned companion.
+- [ ] **Restart Poll State**: Restart the service after creating a poll, then request an aggregate response from a poll copy.
+  - **Verify**: The response still contains the original question and option labels, which are restored from encrypted `control.db` presentation storage; `sync.db` contains only routing-safe poll metadata and aggregate state.
 - [ ] **Unsupported representation**: Create a poll whose option count or semantics exceed a destination's native limits.
   - **Verify**: Only that destination receives the deterministic text fallback; representable destinations retain native polls.
 

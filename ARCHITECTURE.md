@@ -50,7 +50,7 @@ The HTTP server, router, adapters, connection manager, recovery coordinator, and
 | `internal/delivery` | Bounded FIFO lane per destination with independent retry/backoff. |
 | `internal/recovery` | Ordered provider checkpoints and safe advancement. |
 | `internal/store` | PII-free configuration, canonical mappings, delivery ledger, poll aggregates, and recovery cursors in `sync.db`. |
-| `internal/controlstore` | Sensitive accounts, sessions, encrypted connection credentials, audit data, and membership state in `control.db`. |
+| `internal/controlstore` | Sensitive accounts, sessions, encrypted connection credentials and poll presentation text, audit data, and membership state in `control.db`. |
 | `internal/identity` | Stable HMAC-derived actor identifiers. |
 | `internal/safelog` | Fixed safe error classification at the logging boundary. |
 
@@ -154,9 +154,9 @@ WhatsApp bridge lifecycle echoes use bounded, expiring, one-shot in-memory marke
 
 ### Polls
 
-Poll questions and option labels remain transient. The store retains canonical option positions, opaque hashes or provider references where required, aggregate counts, and bridge-owned result-companion IDs—never voters or labels.
+Poll questions and option labels are retained only in encrypted control-plane storage. The routing store retains canonical option positions, opaque hashes or provider references where required, aggregate counts, and bridge-owned result-companion IDs—never voters or labels or poll presentation text.
 
-Representable polls use native WhatsApp, Discord, and Telegram structures. Unsupported option counts, lengths, answer modes, durations, or media combinations use deterministic text. Each endpoint receives one editable aggregate-only live-results companion. Replying with any configured aggregation trigger phrase (default `aggregate-response`, supporting multiple space-separated triggers) to any poll copy produces an immediate on-demand aggregate summary and suppresses the trigger message. Telegram Bot API can provide absolute snapshots for bot-created polls but not complete ongoing results for arbitrary human-created source polls; those contributions remain explicitly partial rather than introducing MTProto identity storage.
+Representable polls use native WhatsApp, Discord, and Telegram structures. Cross-endpoint Discord and Telegram polls include the source label in the visible native poll presentation; Discord's platform author remains the bot, and Telegram polls are created as non-anonymous polls whose platform author remains the bot. Unsupported option counts, lengths, answer modes, durations, or media combinations use deterministic text. Each endpoint receives one editable aggregate-only live-results companion. Poll questions and option labels are encrypted in `control.db` using the identity-derived credential key, while `sync.db` retains only option indexes/hashes and aggregate state, so live results can be reconstructed after restart without weakening the routing database's privacy boundary. Replying with any configured aggregation trigger phrase (default `aggregate-response`, supporting multiple space-separated triggers) to any poll copy produces an immediate on-demand aggregate summary and suppresses the trigger message; those triggered result messages are also edited when the poll aggregate changes. Telegram Bot API can provide absolute snapshots for bot-created polls but not complete ongoing results for arbitrary human-created source polls; those contributions remain explicitly partial rather than introducing MTProto identity storage.
 
 ## Failure, retry, and recovery
 

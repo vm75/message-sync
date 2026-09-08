@@ -2,7 +2,7 @@
 
 This document is the single repository reference for the project that informed the original design exploration.
 
-**Upstream inspiration:** https://github.com/imvibecoder7/whatsappdiscordsync  
+**Upstream inspiration:** https://github.com/imvibecoder7/whatsappdiscordsync
 **Comparison snapshot:** 2026-09-04
 
 The comparison is behavioral and architectural. `message-sync` is not intended to remain source-compatible with the upstream project, and feature parity is not a goal by itself. Capabilities are carried forward only when they fit the current privacy, reliability, self-hosting, KISS, and YAGNI constraints.
@@ -39,7 +39,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Telegram forum topics | Incoming topic messages flatten to the configured parent chat while retaining opaque canonical topic context for native reply/lifecycle return | Telegram forum-topic discovery and bridge configuration are available through MTProto | Context-preserving Bot API operation with stable endpoint identity. |
 | Friendly child-context presentation | Optional global mode renders `group/user` or `group:topic-or-thread/user`; labels are local presentation metadata, generic when unknown, and never used for routing. Discord uses the label as its per-message APP name and removes the wrapper from the body; WhatsApp and Telegram retain body attribution | Platform-specific presentation and topic metadata are available in bridge flows | Deliberately opt-in; opaque mode remains the privacy-first default and disabling friendly mode clears its label catalog. Presentation is transport-specific because Telegram Bot API cannot rename a bot per message. |
 | Endpoint discovery | Authenticated live Discord discovery; bounded in-memory observed Telegram group discovery; WhatsApp joined-group discovery | Web-console discovery for WhatsApp, Discord, and Telegram resources | Preserved, with stricter persistence rules for human-readable names. |
-| Sender presentation in Discord | One managed webhook per destination channel. Opaque mode uses the transient sender display name or HMAC fallback, prefixing cross-endpoint messages with the source alias. Friendly mode uses the complete transient label, such as `tg1:tt1/Vijay`, as the per-message APP username and leaves the body unprefixed | Webhook delivery can override username/presentation per forwarded sender | Preserved and narrowed so sender presentation is transient metadata rather than persistent identity; no per-user webhook is created. |
+| Sender presentation in Discord | One managed webhook per destination channel. Opaque mode uses the transient sender display name or HMAC fallback, prefixing cross-endpoint messages with the source alias. Friendly mode uses the complete transient label, such as `tg1:tt1/Alice`, as the per-message APP username and leaves the body unprefixed | Webhook delivery can override username/presentation per forwarded sender | Preserved and narrowed so sender presentation is transient metadata rather than persistent identity; no per-user webhook is created. |
 | Identity model | HMAC-derived actor IDs for persisted canonical identity; transient display names where permitted | Persistent anonymized aliases plus broader contact/member identity records | Reworked to reduce stored identity. |
 | Text synchronization | Bidirectional across all configured transports | Bidirectional WhatsApp/Discord and additional bridge flows | Preserved and generalized. |
 | Media | Text, image, video, audio/voice, documents, stickers within configured in-memory limits | Rich media forwarding, with GCS fallback for larger files in some paths | Preserved without cloud overflow storage. |
@@ -48,9 +48,9 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Reactions | Add/remove reactions are normalized and propagated across transports | Reaction propagation is implemented with platform-specific handlers | Preserved and generalized. |
 | Edits | Canonical edit lifecycle routes to known destination copies | Edit propagation is implemented directly from bridge mappings | Preserved and generalized. |
 | Deletes/revokes | Canonical delete lifecycle routes to known destination copies and poll companions | Delete propagation is implemented with platform-specific mapping lookup | Preserved and generalized. |
-| Native polls | Native WhatsApp, Discord, and Telegram polls are used where destination semantics can represent the source; deterministic text fallback otherwise | Poll handling is centered on bridge-specific WhatsApp/Discord behavior | Expanded into transport-neutral poll semantics. |
+| Native polls | Native WhatsApp, Discord, and Telegram polls are used where destination semantics can represent the source; cross-endpoint Discord/Telegram polls include source labels in their visible poll presentation | Poll handling is centered on bridge-specific WhatsApp/Discord behavior | Expanded into transport-neutral poll semantics. |
 | Live poll results | Every bridged poll gets one bridge-owned editable companion containing aggregate option counts only; no voter names or per-voter choices | Live cross-group aggregate result messages are updated from upstream poll vote handling | Preserved conceptually, with a stricter aggregate-only privacy rule and generalized lifecycle. |
-| Manual poll aggregation | Exact `aggregate-response` reply remains supported | Aggregate-result behavior exists in the bridge flow | Preserved for compatibility with the established interaction. |
+| Manual poll aggregation | Exact `aggregate-response` reply remains supported; triggered aggregate responses continue updating with poll changes | Aggregate-result behavior exists in the bridge flow | Preserved and extended so on-demand results remain live. |
 | Loop prevention | Persistent copy/idempotency constraints plus bounded bridge-echo suppression | In-memory sent-message caches, processed-message checks, formatting guards, and stored mappings | Strengthened so restart correctness does not depend mainly on process-local caches. |
 | Canonical message identity | Random transport-neutral canonical ID | Platform message IDs are connected through bridge-specific mappings | New abstraction in `message-sync`. |
 | Persistent message-copy mapping | One canonical message may have one opaque remote copy per endpoint | Discord/WhatsApp mapping records connect corresponding messages | Generalized across every transport. |
@@ -119,9 +119,9 @@ This is intentionally more infrastructure than a small pairwise bridge needs, bu
 
 The live poll-results idea is retained, but its privacy contract is stricter.
 
-`message-sync` keeps only canonical option indexes and aggregate counts needed for synchronization. The live companion shows the poll question/options and aggregate counts but never voter names or a mapping of a voter to an option. Native polls are used on destinations that can represent the source semantics; otherwise a deterministic text representation is used.
+`message-sync` keeps only canonical option indexes and aggregate counts needed for synchronization in the routing database; poll question/options are encrypted in the control database so the live presentation survives restart. The live companion shows the poll question/options and aggregate counts but never voter names or a mapping of a voter to an option. Native polls are used on destinations that can represent the source semantics, with cross-endpoint Discord/Telegram source labels included in the visible native poll presentation. Otherwise a deterministic text representation is used.
 
-The result companion is bridge-owned so it can be edited as aggregate state changes and deleted when the poll is deleted. The existing `aggregate-response` interaction remains available as a manual refresh mechanism.
+The result companion is bridge-owned so it can be edited as aggregate state changes and deleted when the poll is deleted. The existing `aggregate-response` interaction remains available as an on-demand aggregate response; each triggered response is also edited as aggregate state changes.
 
 ### 4. Multi-user administration is separated from routing state
 

@@ -307,7 +307,14 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("create transport adapter registry: %w", err)
 	}
 
-	mesh, err := router.NewWithHasher(cfg, syncStore, adapterRegistry, hasher)
+	var pollPresentationStore router.PollPresentationStore
+	if controlStore != nil && credentialCipher != nil {
+		pollPresentationStore, err = controlstore.NewPollPresentationStore(controlStore.DB(), credentialCipher)
+		if err != nil {
+			return fmt.Errorf("create poll presentation store: %w", err)
+		}
+	}
+	mesh, err := router.NewWithHasherAndPollPresentationStore(cfg, syncStore, adapterRegistry, hasher, pollPresentationStore)
 	if err != nil {
 		return fmt.Errorf("create canonical router: %w", err)
 	}

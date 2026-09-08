@@ -57,7 +57,11 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		nativeChannelID = strings.TrimSpace(outgoing.ChildScope.RemoteID)
 	}
 	if outgoing.Kind == "poll" {
-		if poll, ok := discordNativePoll(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
+		question := outgoing.SourceText
+		if attribution := discordPollAttribution(outgoing); attribution != "" {
+			question = attribution + " " + question
+		}
+		if poll, ok := discordNativePoll(question, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours); ok {
 			message := &discordgo.MessageSend{Content: discordPresentation(outgoing.PollAttribution), Poll: poll, AllowedMentions: &discordgo.MessageAllowedMentions{}}
 			if outgoing.ReplyTo != nil {
 				message.Reference = &discordgo.MessageReference{MessageID: outgoing.ReplyTo.RemoteMessageID, ChannelID: nativeChannelID}
@@ -189,6 +193,23 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		IsTargetFromMe:  true,
 		ChildScope:      outgoing.ChildScope,
 	}, nil
+}
+
+func discordPollAttribution(outgoing transport.Outgoing) string {
+	if attribution := strings.TrimSpace(outgoing.PollAttribution); attribution != "" {
+		if strings.HasPrefix(attribution, "*_") && strings.HasSuffix(attribution, "_*:") {
+			return attribution[2:len(attribution)-3] + ":"
+		}
+		return attribution
+	}
+	if outgoing.OriginEndpoint == "" || outgoing.OriginEndpoint == outgoing.Endpoint || strings.TrimSpace(outgoing.SenderLabel) == "" {
+		return ""
+	}
+	label := outgoing.SenderLabel
+	if displayName := sanitizeWebhookUsername(outgoing.Sender.DisplayName); displayName != "" {
+		label = string(outgoing.OriginEndpoint) + "/" + displayName
+	}
+	return sanitizeWebhookUsername(label) + ":"
 }
 
 func (a *Adapter) replyLink(channelID, messageID string) string {

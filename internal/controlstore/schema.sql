@@ -147,6 +147,17 @@ CREATE TABLE IF NOT EXISTS transport_connections (
 );
 CREATE INDEX IF NOT EXISTS idx_transport_connections_transport ON transport_connections(transport);
 
+-- Poll questions/options are sensitive message content. Keep them encrypted
+-- in the control database rather than adding them to the PII-free sync store.
+CREATE TABLE IF NOT EXISTS poll_presentations (
+    canonical_id TEXT PRIMARY KEY,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_poll_presentations_updated ON poll_presentations(updated_at);
+
 -- Membership application configuration is keyed by the sync-set ID from
 -- sync.db. The databases are intentionally separate, so the API validates
 -- that the referenced sync set exists before writing this control-plane data.

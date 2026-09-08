@@ -85,7 +85,14 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		kind = "text"
 	}
 	if kind == "poll" {
-		if params, ok := telegramNativePoll(chatID, outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
+		question := outgoing.SourceText
+		questionParseMode := models.ParseMode("")
+		if attribution := telegramPollAttribution(outgoing); attribution != "" {
+			question = attribution + " " + html.EscapeString(question)
+			questionParseMode = models.ParseModeHTML
+		}
+		if params, ok := telegramNativePoll(chatID, question, outgoing.PollOptions, outgoing.PollSelectableCount, outgoing.PollDurationHours, reply); ok {
+			params.QuestionParseMode = questionParseMode
 			params.Description, params.DescriptionParseMode = telegramPollDescription(outgoing.PollAttribution, outgoing.Mentions)
 			params.MessageThreadID = threadID
 			err = a.callWithRetry(ctx, func() error {
@@ -190,6 +197,21 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}, nil
 }
 
+func telegramPollAttribution(outgoing transport.Outgoing) string {
+	if attribution := strings.TrimSpace(outgoing.PollAttribution); attribution != "" {
+		formatted, _ := telegramPollDescription(attribution, outgoing.Mentions)
+		return formatted
+	}
+	if outgoing.OriginEndpoint == "" || outgoing.OriginEndpoint == outgoing.Endpoint || strings.TrimSpace(outgoing.SenderLabel) == "" {
+		return ""
+	}
+	label := outgoing.SenderLabel
+	if displayName := sanitizeTelegramAttribution(outgoing.Sender.DisplayName); displayName != "" {
+		label = string(outgoing.OriginEndpoint) + "/" + displayName
+	}
+	return "<b><i>" + html.EscapeString(sanitizeTelegramAttribution(label)) + "</i></b>:"
+}
+
 func telegramNativePoll(chatID int64, question string, options []string, selectableCount, durationHours int, reply *models.ReplyParameters) (*telegrambot.SendPollParams, bool) {
 	question = strings.TrimSpace(question)
 	if utf8.RuneCountInString(question) < 1 || utf8.RuneCountInString(question) > 300 || len(options) < 2 || len(options) > 10 || (selectableCount != 1 && selectableCount != len(options)) || durationHours < 0 {
@@ -206,7 +228,7 @@ func telegramNativePoll(chatID int64, question string, options []string, selecta
 		}
 		input = append(input, models.InputPollOption{Text: option})
 	}
-	params := &telegrambot.SendPollParams{ChatID: chatID, Question: question, Options: input, IsAnonymous: boolPtr(true), AllowsMultipleAnswers: selectableCount > 1, ReplyParameters: reply}
+	params := &telegrambot.SendPollParams{ChatID: chatID, Question: question, Options: input, IsAnonymous: boolPtr(false), AllowsMultipleAnswers: selectableCount > 1, ReplyParameters: reply}
 	if durationHours > 0 {
 		params.OpenPeriod = durationHours * 3600
 	}

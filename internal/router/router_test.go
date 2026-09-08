@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/store"
 	"github.com/vm75/message-sync/internal/transport"
@@ -483,6 +484,22 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		if sent.outgoing.PollAttribution != "*_c1g1:Dinner \\* Plans/u_abcdefghij_*:" {
 			t.Fatalf("router did not propagate structured poll attribution: %#v", sent.outgoing)
 		}
+	}
+}
+
+func TestFriendlyPollAttributionPrefersDisplayNameOverPhone(t *testing.T) {
+	r, syncStore, _ := newTestRouter(t, config.UsernameModePushName)
+	defer r.Close()
+	defer syncStore.Close()
+
+	incoming := transport.Incoming{
+		Endpoint:   "wg2",
+		Sender:     transport.Sender{DisplayName: "Display Name", PhoneNumber: "test-phone", OpaqueID: "u_hash"},
+		ChildScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1", Label: "Plans"},
+	}
+	got := r.friendlyPollAttribution(context.Background(), config.ChildContextDisplayFriendly, incoming, incoming.ChildScope)
+	if got != "*_wg2:Plans/Display Name_*:" {
+		t.Fatalf("poll attribution = %q, want display name without phone", got)
 	}
 }
 
@@ -1305,6 +1322,33 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 			}
 		}
 	}
+
+	// Trigger responses are live results too: a later vote must update both
+	// the bridge-owned companions and the responses sent by the trigger.
+	waitForMutations(t, fake, 3, 0, 0)
+	fake.mu.Lock()
+	fake.edited = nil
+	fake.mu.Unlock()
+	if err := r.Handle(ctx, transport.Incoming{
+		Endpoint: "c1g1", RemoteID: "vote-after-trigger", Kind: "poll_vote",
+		Sender:           transport.Sender{OpaqueID: "u_ghijklmnop"},
+		ReplyTo:          &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-msg-1"},
+		PollOptionHashes: []string{hPizza}, Timestamp: time.Unix(1_700_000_050, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("Handle post-trigger vote error: %v", err)
+	}
+	waitForMutations(t, fake, 6, 0, 0)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	updated := 0
+	for _, edit := range fake.edited {
+		if strings.Contains(edit.text, "○ *Pizza* — 3 votes") {
+			updated++
+		}
+	}
+	if updated != 6 {
+		t.Fatalf("post-trigger updated results = %d, want 6 companion and trigger messages", updated)
+	}
 }
 
 func TestRouterPollAggregationAfterRestart(t *testing.T) {
@@ -1322,10 +1366,27 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = syncStore.Close() })
+	control, err := controlstore.Open(context.Background(), filepath.Join(t.TempDir(), "control.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = control.Close() })
+	cipher, err := controlstore.NewCredentialCipher([]byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentationStore, err := controlstore.NewPollPresentationStore(control.DB(), cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasher, err := identity.New([]byte("12345678901234567890123456789012"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	fake := &fakeSender{}
 	ctx := context.Background()
 
-	r1, err := New(cfg, syncStore, fake)
+	r1, err := NewWithHasherAndPollPresentationStore(cfg, syncStore, fake, hasher, presentationStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1369,7 +1430,7 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 
 	// Simulate restart by instantiating a new Router instance with empty memory cache
 	fake.sent = nil
-	r2, err := New(cfg, syncStore, fake)
+	r2, err := NewWithHasherAndPollPresentationStore(cfg, syncStore, fake, hasher, presentationStore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1396,11 +1457,70 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	}
 
 	for _, s := range fake.sent {
-		if !strings.Contains(s.outgoing.Text, "○ *Option 1* — 1 votes") {
-			t.Fatalf("expected Option 1 fallback label with 1 vote, got: %s", s.outgoing.Text)
+		if !strings.Contains(s.outgoing.Text, "❓ Question before restart") || !strings.Contains(s.outgoing.Text, "○ *Option Alpha* — 1 votes") {
+			t.Fatalf("expected persisted poll presentation with Alpha 1 vote, got: %s", s.outgoing.Text)
 		}
-		if !strings.Contains(s.outgoing.Text, "○ *Option 2* — 0 votes") {
-			t.Fatalf("expected Option 2 fallback label with 0 votes, got: %s", s.outgoing.Text)
+		if !strings.Contains(s.outgoing.Text, "○ *Option Beta* — 0 votes") {
+			t.Fatalf("expected persisted Beta label with 0 votes, got: %s", s.outgoing.Text)
+		}
+	}
+}
+
+func TestRouterSelfPollReplayRestoresPresentationAfterRestart(t *testing.T) {
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
+		},
+		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+	syncStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = syncStore.Close() })
+	fake := &fakeSender{}
+	ctx := context.Background()
+	poll := transport.Incoming{
+		Endpoint: "c1g1", RemoteID: "poll-msg-1", Kind: "poll",
+		Sender:   transport.Sender{OpaqueID: "u_abcdefghij"},
+		FromSelf: true, Text: "Where should we eat?", PollOptions: []string{"Pizza", "Sushi"},
+		PollSelectableCount: 1, Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}
+	r1, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r1.Handle(ctx, poll); err != nil {
+		t.Fatalf("initial poll: %v", err)
+	}
+	r1.Close()
+	fake.sent = nil
+
+	r2, err := New(cfg, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	if err := r2.Handle(ctx, poll); err != nil {
+		t.Fatalf("replayed poll: %v", err)
+	}
+	if err := r2.Handle(ctx, transport.Incoming{
+		Endpoint: "c1g1", RemoteID: "aggregate-trigger", Kind: "text", Text: "aggregate-response",
+		ReplyTo: &transport.MessageRef{Endpoint: "c1g1", RemoteMessageID: "poll-msg-1"}, Timestamp: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("aggregation trigger: %v", err)
+	}
+
+	if len(fake.sent) != 2 {
+		t.Fatalf("summary messages = %d, want 2", len(fake.sent))
+	}
+	for _, sent := range fake.sent {
+		if !strings.Contains(sent.outgoing.Text, "❓ Where should we eat?") ||
+			!strings.Contains(sent.outgoing.Text, "○ *Pizza* — 0 votes") ||
+			!strings.Contains(sent.outgoing.Text, "○ *Sushi* — 0 votes") {
+			t.Fatalf("summary lost poll presentation: %q", sent.outgoing.Text)
 		}
 	}
 }

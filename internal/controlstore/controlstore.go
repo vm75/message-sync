@@ -52,6 +52,9 @@ func (s *Store) PruneRetention(ctx context.Context, now time.Time, age time.Dura
 			return nil, fmt.Errorf("prune control artifacts: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM poll_presentations WHERE rowid IN (SELECT rowid FROM poll_presentations WHERE updated_at < ? LIMIT ?)`, cutoff, batch); err != nil {
+		return nil, fmt.Errorf("prune poll presentations: %w", err)
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT COALESCE(evidence_reference,'') FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? AND rowid IN (SELECT rowid FROM membership_requests WHERE (status IN ('rejected','fulfilled','cancelled','expired') OR (status='approved' AND fulfillment_state='succeeded')) AND updated_at < ? LIMIT ?)`, cutoff, cutoff, batch)
 	if err != nil {
 		return nil, fmt.Errorf("select expired membership evidence: %w", err)

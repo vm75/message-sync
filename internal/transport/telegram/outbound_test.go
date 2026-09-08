@@ -545,36 +545,35 @@ func TestSendPollUsesDeterministicTextFallback(t *testing.T) {
 func TestSendRepresentablePollUsesBotAPIPollAndReturnsOpaqueReference(t *testing.T) {
 	api := &fakeTelegramAPI{}
 	adapter := newOutboundTestAdapter(t, api)
-	ref, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1, PollAttribution: "*_family:Travel/Alice_*:"})
+	ref, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(api.polls) != 1 || ref.Provider != "telegram:conn-tg-test" || ref.ProviderReference != "opaque-telegram-poll" {
 		t.Fatalf("native Telegram poll = ref %#v polls=%d", ref, len(api.polls))
 	}
-	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || !*api.polls[0].IsAnonymous {
+	if api.polls[0].AllowsMultipleAnswers || api.polls[0].IsAnonymous == nil || *api.polls[0].IsAnonymous {
 		t.Fatalf("unexpected Telegram poll semantics: %#v", api.polls[0])
 	}
-	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "<b><i>family:Travel/Alice</i></b>:" {
+	if api.polls[0].Question != "Lunch?" || api.polls[0].Description != "" {
 		t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
 	}
-	if api.polls[0].DescriptionParseMode != models.ParseModeHTML {
+	if api.polls[0].DescriptionParseMode != "" {
 		t.Fatalf("native Telegram poll description parse mode = %q, want HTML", api.polls[0].DescriptionParseMode)
 	}
 }
 
 func TestTelegramNativePollPresentationKeepsSourceAttributionAndTopicOpaque(t *testing.T) {
 	tests := []struct {
-		name       string
-		pollAttr   string
-		childScope *transport.ChildScope
-		wantThread int
-		wantDesc   string
-		wantMode   models.ParseMode
+		name         string
+		pollAttr     string
+		childScope   *transport.ChildScope
+		wantThread   int
+		wantDesc     string
+		wantMode     models.ParseMode
+		wantQuestion string
 	}{
-		{name: "friendly root", pollAttr: "*_family/Alice_*:", wantDesc: "<b><i>family/Alice</i></b>:", wantMode: models.ParseModeHTML},
-		{name: "friendly topic", pollAttr: "*_family:Plans/Alice_*:", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77, wantDesc: "<b><i>family:Plans/Alice</i></b>:", wantMode: models.ParseModeHTML},
-		{name: "opaque topic", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77},
+		{name: "opaque topic", childScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "77"}, wantThread: 77, wantQuestion: "Lunch?"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -590,10 +589,41 @@ func TestTelegramNativePollPresentationKeepsSourceAttributionAndTopicOpaque(t *t
 			if len(api.polls) != 1 || api.polls[0].MessageThreadID != tc.wantThread {
 				t.Fatalf("native Telegram poll placement = %#v, want thread %d", api.polls, tc.wantThread)
 			}
-			if api.polls[0].Question != "Lunch?" || api.polls[0].Description != tc.wantDesc || api.polls[0].DescriptionParseMode != tc.wantMode || api.polls[0].Options[0].Text != "Idli" {
+			if api.polls[0].Question != tc.wantQuestion || api.polls[0].Description != tc.wantDesc || api.polls[0].DescriptionParseMode != tc.wantMode || api.polls[0].Options[0].Text != "Idli" {
 				t.Fatalf("native Telegram poll presentation = %#v", api.polls[0])
 			}
 		})
+	}
+}
+
+func TestSendAttributedPollUsesTextRepresentation(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", SenderLabel: "wa-family/Travel/Alice", SourceText: "Lunch?",
+		RenderedText: "*_wa-family/Travel/Alice_*: Lunch?", PollAttribution: "*_wa-family/Travel/Alice_*:",
+		Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.polls) != 1 || len(api.texts) != 0 || api.polls[0].Question != "<b><i>wa-family/Travel/Alice</i></b>: Lunch?" {
+		t.Fatalf("attributed Telegram poll presentation = polls=%d texts=%v", len(api.polls), api.texts)
+	}
+}
+
+func TestSendCrossEndpointPollUsesSourceTextRepresentationInOpaqueMode(t *testing.T) {
+	api := &fakeTelegramAPI{}
+	adapter := newOutboundTestAdapter(t, api)
+	_, err := adapter.Send(context.Background(), transport.Outgoing{
+		Endpoint: "tg", OriginEndpoint: "wa-family", SenderLabel: "wa-family/test-phone (Display Name)", Sender: transport.Sender{DisplayName: "Display Name", PhoneNumber: "test-phone", OpaqueID: "u_hash"},
+		SourceText: "Lunch?", Kind: "poll", PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.polls) != 1 || len(api.texts) != 0 || api.polls[0].Question != "<b><i>wa-family/Display Name</i></b>: Lunch?" {
+		t.Fatalf("cross-endpoint poll presentation = polls=%d texts=%v", len(api.polls), api.texts)
 	}
 }
 
@@ -602,13 +632,13 @@ func TestTelegramNativePollRetryReusesSingleRenderedAttribution(t *testing.T) {
 	adapter := newOutboundTestAdapter(t, api)
 	adapter.retryWait = func(context.Context, time.Duration) error { return nil }
 	_, err := adapter.Send(context.Background(), transport.Outgoing{
-		Endpoint: "tg", SourceText: "Lunch?", Kind: "poll", PollAttribution: "*_family:Plans/Alice_*:",
+		Endpoint: "tg", SourceText: "Lunch?", Kind: "poll",
 		PollOptions: []string{"Idli", "Dosa"}, PollSelectableCount: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.polls) != 2 || api.polls[0].Description != api.polls[1].Description || api.polls[1].Description != "<b><i>family:Plans/Alice</i></b>:" || api.polls[1].DescriptionParseMode != models.ParseModeHTML {
+	if len(api.polls) != 2 || api.polls[0].Description != api.polls[1].Description || api.polls[1].Description != "" || api.polls[1].DescriptionParseMode != "" {
 		t.Fatalf("poll retry attribution = %#v", api.polls)
 	}
 }

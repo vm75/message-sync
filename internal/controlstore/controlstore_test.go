@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func TestOpenCreatesSensitiveSchemaAndRestrictsFile(t *testing.T) {
 	if foreignKeys != 1 {
 		t.Fatalf("foreign_keys = %d, want 1", foreignKeys)
 	}
-	for _, table := range []string{"users", "sessions", "user_invites", "audit_events", "verification_pipelines", "membership_requests", "email_challenges", "verification_assessments", "transport_connections"} {
+	for _, table := range []string{"users", "sessions", "user_invites", "audit_events", "verification_pipelines", "membership_requests", "email_challenges", "verification_assessments", "transport_connections", "poll_presentations"} {
 		var count int
 		if err := s.db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -41,6 +42,41 @@ func TestOpenCreatesSensitiveSchemaAndRestrictsFile(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Fatalf("control.db permissions = %o, want 600", info.Mode().Perm())
+	}
+}
+
+func TestPollPresentationIsEncryptedAndRoundTrips(t *testing.T) {
+	s, err := Open(context.Background(), ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	cipher, err := NewCredentialCipher([]byte("01234567890123456789012345678901"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	presentations, err := NewPollPresentationStore(s.DB(), cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	question := "Synthetic question"
+	options := []string{"Synthetic option A", "Synthetic option B"}
+	if err := presentations.SavePollPresentation(context.Background(), "canonical-test", question, options); err != nil {
+		t.Fatal(err)
+	}
+	var ciphertext string
+	if err := s.DB().QueryRow(`SELECT CAST(ciphertext AS TEXT) FROM poll_presentations WHERE canonical_id=?`, "canonical-test").Scan(&ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(ciphertext, question) || strings.Contains(ciphertext, options[0]) {
+		t.Fatal("poll presentation was stored in plaintext")
+	}
+	gotQuestion, gotOptions, err := presentations.LoadPollPresentation(context.Background(), "canonical-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuestion != question || !reflect.DeepEqual(gotOptions, options) {
+		t.Fatalf("loaded presentation = %q, %#v; want %q, %#v", gotQuestion, gotOptions, question, options)
 	}
 }
 

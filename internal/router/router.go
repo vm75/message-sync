@@ -31,6 +31,13 @@ type renderedEditor interface {
 	EditRendered(context.Context, transport.MessageRef, string) error
 }
 
+// PollPresentationStore persists the human-readable part of a poll outside
+// the privacy-preserving routing database.
+type PollPresentationStore interface {
+	SavePollPresentation(context.Context, string, string, []string) error
+	LoadPollPresentation(context.Context, string) (string, []string, error)
+}
+
 type copyKey struct {
 	endpoint transport.EndpointID
 	remoteID string
@@ -75,6 +82,7 @@ type Router struct {
 	localPrefix        string
 	knownCopies        map[copyKey]string
 	pollPresentation   map[string]pollPresentation
+	pollAggregations   map[string][]transport.MessageRef
 	pendingEdits       map[mutationKey]pendingEdit
 	pendingResultEdits map[mutationKey]pendingEdit
 	pendingReactions   map[mutationKey]map[string]pendingReaction
@@ -84,6 +92,7 @@ type Router struct {
 	mu                 sync.RWMutex
 	pollResultMu       sync.Mutex
 	scopeHasher        *identity.Hasher
+	presentationStore  PollPresentationStore
 }
 
 type Outcome struct {
@@ -95,17 +104,24 @@ type Outcome struct {
 }
 
 func New(cfg *config.Config, syncStore *store.Store, transportSender sender) (*Router, error) {
-	return newRouter(cfg, syncStore, transportSender, nil)
+	return newRouter(cfg, syncStore, transportSender, nil, nil)
 }
 
 func NewWithHasher(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher) (*Router, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
 	}
-	return newRouter(cfg, syncStore, transportSender, hasher)
+	return newRouter(cfg, syncStore, transportSender, hasher, nil)
 }
 
-func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher) (*Router, error) {
+func NewWithHasherAndPollPresentationStore(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher, presentationStore PollPresentationStore) (*Router, error) {
+	if hasher == nil {
+		return nil, errors.New("identity hasher is required")
+	}
+	return newRouter(cfg, syncStore, transportSender, hasher, presentationStore)
+}
+
+func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sender, hasher *identity.Hasher, presentationStore PollPresentationStore) (*Router, error) {
 	if cfg == nil {
 		return nil, errors.New("config is required")
 	}
@@ -149,11 +165,13 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		localPrefix:        cfg.LocalPrefix,
 		knownCopies:        make(map[copyKey]string),
 		pollPresentation:   make(map[string]pollPresentation),
+		pollAggregations:   make(map[string][]transport.MessageRef),
 		pendingEdits:       make(map[mutationKey]pendingEdit),
 		pendingResultEdits: make(map[mutationKey]pendingEdit),
 		pendingReactions:   make(map[mutationKey]map[string]pendingReaction),
 		newCanonical:       newCanonicalID,
 		scopeHasher:        hasher,
+		presentationStore:  presentationStore,
 	}, nil
 }
 
@@ -373,6 +391,14 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		if err := r.store.TombstoneCanonical(ctx, targetCanonical, incoming.Timestamp); err != nil {
 			return fmt.Errorf("tombstone canonical: %w", err)
 		}
+		r.mu.Lock()
+		delete(r.pollAggregations, targetCanonical)
+		for key := range r.pendingResultEdits {
+			if strings.HasPrefix(key.canonical, targetCanonical+"\x00") {
+				delete(r.pendingResultEdits, key)
+			}
+		}
+		r.mu.Unlock()
 
 		for _, destination := range members {
 			if err := r.enqueuePollResultCompanionDelete(ctx, targetCanonical, destination); err != nil {
@@ -580,6 +606,14 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	if isTombstoned {
 		return nil
 	}
+	// A self-origin poll may already have a canonical copy after a restart.
+	// Refresh the transient presentation before the idempotence return so live
+	// result companions retain the question and option labels.
+	if incoming.Kind == "poll" {
+		if err := r.rememberPollPresentation(ctx, canonicalID, incoming); err != nil {
+			return fmt.Errorf("persist poll presentation: %w", err)
+		}
+	}
 	if incoming.FromSelf && !created {
 		return nil
 	}
@@ -605,12 +639,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				}
 			}
 		}
-		r.mu.Lock()
-		r.pollPresentation[canonicalID] = pollPresentation{
-			Question: incoming.Text,
-			Options:  incoming.PollOptions,
+		if err := r.rememberPollPresentation(ctx, canonicalID, incoming); err != nil {
+			return fmt.Errorf("persist poll presentation: %w", err)
 		}
-		r.mu.Unlock()
 	}
 
 	forwardedText, err := r.forwardedText(ctx, incoming)
@@ -723,6 +754,22 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	if incoming.Kind == "poll" {
 		r.updatePollResults(ctx, canonicalID, members)
+	}
+	return nil
+}
+
+func (r *Router) rememberPollPresentation(ctx context.Context, canonicalID string, incoming transport.Incoming) error {
+	if strings.TrimSpace(incoming.Text) == "" || len(incoming.PollOptions) == 0 {
+		return nil
+	}
+	presentation := pollPresentation{Question: incoming.Text, Options: append([]string(nil), incoming.PollOptions...)}
+	r.mu.Lock()
+	r.pollPresentation[canonicalID] = presentation
+	r.mu.Unlock()
+	if r.presentationStore != nil {
+		if err := r.presentationStore.SavePollPresentation(ctx, canonicalID, presentation.Question, presentation.Options); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -959,9 +1006,7 @@ func (r *Router) friendlyPollAttribution(ctx context.Context, mode config.ChildC
 	if r.getUsernameMode() == config.UsernameModePushName {
 		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
 		phone := incoming.Sender.PhoneNumber
-		if phone != "" && displayName != "" {
-			username = fmt.Sprintf("%s (%s)", phone, displayName)
-		} else if displayName != "" {
+		if displayName != "" {
 			username = displayName
 		} else if phone != "" {
 			username = phone
@@ -1001,6 +1046,19 @@ func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (str
 	r.mu.RLock()
 	presentation, hasPresentation := r.pollPresentation[canonicalID]
 	r.mu.RUnlock()
+	if !hasPresentation && r.presentationStore != nil {
+		question, options, err := r.presentationStore.LoadPollPresentation(ctx, canonicalID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("load poll presentation: %w", err)
+		}
+		if err == nil && strings.TrimSpace(question) != "" && len(options) > 0 {
+			presentation = pollPresentation{Question: question, Options: options}
+			hasPresentation = true
+			r.mu.Lock()
+			r.pollPresentation[canonicalID] = presentation
+			r.mu.Unlock()
+		}
+	}
 
 	var builder strings.Builder
 	builder.WriteString("📊 ***LIVE POLL RESULTS ACROSS ALL GROUPS***\n❓ ")
@@ -1086,6 +1144,30 @@ func (r *Router) updatePollResults(ctx context.Context, canonicalID string, memb
 		op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(endpoint), OperationKind: "poll_result_edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 		_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingResultEditCurrent(key, revision) }, func(jobCtx context.Context) error {
 			return r.sender.Edit(jobCtx, r.companionMessageRef(jobCtx, canonicalID, endpoint, companion.RemoteMessageID), text)
+		}, func() {
+			r.mu.Lock()
+			if current, ok := r.pendingResultEdits[key]; ok && current.revision == revision {
+				delete(r.pendingResultEdits, key)
+			}
+			r.mu.Unlock()
+		})
+	}
+	r.updatePollAggregations(ctx, canonicalID, text)
+}
+
+func (r *Router) updatePollAggregations(ctx context.Context, canonicalID, text string) {
+	r.mu.RLock()
+	results := append([]transport.MessageRef(nil), r.pollAggregations[canonicalID]...)
+	r.mu.RUnlock()
+	for _, ref := range results {
+		key := mutationKey{canonical: canonicalID + "\x00" + ref.RemoteMessageID, endpoint: ref.Endpoint}
+		revision := r.nextMutationRevision()
+		r.mu.Lock()
+		r.pendingResultEdits[key] = pendingEdit{revision: revision, text: text}
+		r.mu.Unlock()
+		op := store.DeliveryOperation{CanonicalID: canonicalID, EndpointID: string(ref.Endpoint), OperationKind: "poll_aggregation_edit", OperationRevision: revision, State: store.DeliveryQueued, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+		_ = r.enqueueMutation(ctx, op, func() bool { return r.pendingResultEditCurrent(key, revision) }, func(jobCtx context.Context) error {
+			return r.sender.Edit(jobCtx, ref, text)
 		}, func() {
 			r.mu.Lock()
 			if current, ok := r.pendingResultEdits[key]; ok && current.revision == revision {
@@ -1228,14 +1310,22 @@ func (r *Router) handlePollAggregation(ctx context.Context, incoming transport.I
 			}
 		}
 
-		if _, err := r.sender.Send(ctx, transport.Outgoing{
+		ref, err := r.sender.Send(ctx, transport.Outgoing{
 			Endpoint: destination,
 			Kind:     "text",
 			Text:     summaryText,
 			ReplyTo:  outgoingReplyTo, ChildScope: r.childScope(ctx, canonicalID, destination),
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("send aggregated poll results: %w", err)
 		}
+		if ref.Endpoint != destination || strings.TrimSpace(ref.RemoteMessageID) == "" {
+			return errors.New("aggregated poll result transport returned invalid message reference")
+		}
+		ref.ChildScope = r.childScope(ctx, canonicalID, destination)
+		r.mu.Lock()
+		r.pollAggregations[canonicalID] = append(r.pollAggregations[canonicalID], ref)
+		r.mu.Unlock()
 	}
 
 	return nil
