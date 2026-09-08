@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-09-08
+
+### Changed
+- Marked the Membership Verification feature as experimental across settings and documentation.
+
 ## [0.1.6] - 2026-09-08
 
 ### Added
@@ -24,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sensitive Control-Plane & Multi-User Support**:
   - Isolated control-plane database (`control.db`) with RBAC supporting Admin and Operator roles.
   - User management with one-time invite tokens, password reset flows, session revocation, and audit logging.
-  - Membership verification review workflow for transport endpoints.
+  - Experimental membership verification review workflow for transport endpoints.
 - **Endpoint Alias Management**:
   - Atomic endpoint alias renaming via `PUT /api/endpoints/{alias}`, automatically migrating historical message copy and reaction references.
   - Inline endpoint chip alias renaming and alias pre-filling in the sync-set editor.

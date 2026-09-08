@@ -91,19 +91,19 @@
           </svg>
         </div>
         <div class="settings-card-meta">
-          <div class="settings-card-title">Membership review</div>
-          <div class="settings-card-subtitle">Control whether membership review appears in this browser.</div>
+          <div class="settings-card-title">Membership review <span class="badge badge-warning" style="margin-left:8px;font-size:.68rem;vertical-align:middle;">Experimental</span></div>
+          <div class="settings-card-subtitle">Control whether experimental membership review appears in this browser.</div>
         </div>
       </div>
       <div class="settings-card-body">
         <label class="toggle-wrapper" for="settings-membership-review-enabled">
           <input type="checkbox" id="settings-membership-review-enabled" style="width:auto;flex-shrink:0;margin-top:3px;">
           <span>
-            <span class="toggle-title">Enable membership review</span>
+            <span class="toggle-title">Enable membership review (Experimental)</span>
             <span class="form-hint">Shows the Membership navigation tab and the Membership application section inside sync-set settings.</span>
           </span>
         </label>
-        <p class="membership-feature-note">Disabled by default. This is a client-only preference stored in this browser and does not change server-side membership configuration.</p>
+        <p class="membership-feature-note">Disabled by default. This experimental feature preference is stored in this browser and does not change server-side membership configuration.</p>
       </div>`;
 
     const actions = form.querySelector('.settings-form-actions');

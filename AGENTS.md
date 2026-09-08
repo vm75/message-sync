@@ -53,8 +53,8 @@ podman compose -f compose.yml config
 - `sync.db` and application logs must contain no PII/PHI, credentials, message content, raw provider objects, external media URLs, or arbitrary provider error text (including phone numbers, WhatsApp JIDs/LIDs, Discord/Telegram user IDs or usernames, group/channel/guild names, message bodies, or auth tokens).
 - Allowed routing state is limited to safe aliases, operational endpoint targets, random canonical IDs, opaque remote message IDs, HMAC actor IDs, emoji/reaction and aggregate poll state, non-content timestamps, and recovery cursors.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive protocol state owned by whatsmeow. Never query it for application features or expose it through the API; keep decrypted-event and retry plaintext persistence disabled.
-- `control.db` is the explicit sensitive boundary for accounts, sessions, encrypted bot credentials, audits, and membership verification. Keep it separate from routing state and mode `0600` where supported.
-- Membership evidence is short-lived private control-plane data. Human decisions are final, terminal decisions purge local evidence, and WhatsApp fulfillment must never add participants directly.
+- `control.db` is the explicit sensitive boundary for accounts, sessions, encrypted bot credentials, audits, and experimental membership verification. Keep it separate from routing state and mode `0600` where supported.
+- Membership evidence is short-lived private control-plane data for the experimental verification workflow. Human decisions are final, terminal decisions purge local evidence, and WhatsApp fulfillment must never add participants directly.
 - Download message media only long enough to forward it. Do not persist media for convenience.
 - Use `log/slog` with explicit safe fields and route arbitrary errors through `internal/safelog`.
 - Never log endpoint remote target IDs, bot/webhook tokens, `IDENTITY_SECRET`, or provider structs.

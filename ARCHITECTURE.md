@@ -42,7 +42,7 @@ The HTTP server, router, adapters, connection manager, recovery coordinator, and
 |---|---|
 | `cmd/message-sync` | CLI selection, structured logger setup, signal handling, and process start. |
 | `internal/app` | Opens stores, constructs shared services, manages dynamic adapters, starts the HTTP server, and feeds one ordered ingress loop. |
-| `internal/api` | Authentication/RBAC, configuration and connection administration, delivery status, membership workflows, and embedded static UI. |
+| `internal/api` | Authentication/RBAC, configuration and connection administration, delivery status, experimental membership workflows, and embedded static UI. |
 | `internal/connection` | Registers, replaces, stops, and dispatches to multiple independently authenticated adapters. |
 | `internal/transport` | Canonical transient event and outbound operation contracts. |
 | `internal/transport/*` | Provider authentication, discovery, normalization, media loading, recovery, and outbound operations. |
@@ -50,7 +50,7 @@ The HTTP server, router, adapters, connection manager, recovery coordinator, and
 | `internal/delivery` | Bounded FIFO lane per destination with independent retry/backoff. |
 | `internal/recovery` | Ordered provider checkpoints and safe advancement. |
 | `internal/store` | PII-free configuration, canonical mappings, delivery ledger, poll aggregates, and recovery cursors in `sync.db`. |
-| `internal/controlstore` | Sensitive accounts, sessions, encrypted connection credentials and poll presentation text, audit data, and membership state in `control.db`. |
+| `internal/controlstore` | Sensitive accounts, sessions, encrypted connection credentials and poll presentation text, audit data, and experimental membership state in `control.db`. |
 | `internal/identity` | Stable HMAC-derived actor identifiers. |
 | `internal/safelog` | Fixed safe error classification at the logging boundary. |
 
@@ -98,11 +98,11 @@ The store enables foreign keys and uses uniqueness constraints and transactions 
 - users, roles, hashed sessions, invites and reset tokens;
 - fixed-field audit records;
 - transport connection records and encrypted Discord/Telegram credentials;
-- membership configuration, applications, verification challenges, decisions, fulfillment state, and bounded advisory assessments.
+- experimental membership configuration, applications, verification challenges, decisions, fulfillment state, and bounded advisory assessments.
 
 Bot credentials are encrypted with AES-256-GCM. The encryption key is domain-derived from `IDENTITY_SECRET`, and each write receives a fresh nonce. Plaintext tokens are accepted only at write boundaries, remain transient, and are never returned by read APIs. Losing or changing `IDENTITY_SECRET` makes stored bot credentials unreadable and changes actor HMACs.
 
-Membership definitions and answers stay in this control-plane boundary and are shared per sync set through endpoint resolution. Decisions remain human-authorized; automated checks and optional image analysis are advisory only. WhatsApp fulfillment uses join approval and an invite flow, never direct participant addition.
+Membership verification (experimental): Membership definitions and answers stay in this control-plane boundary and are shared per sync set through endpoint resolution. Decisions remain human-authorized; automated checks and optional image analysis are advisory only. WhatsApp fulfillment uses join approval and an invite flow, never direct participant addition.
 
 Evidence files use random names under `/data/membership-evidence`, with a private directory and mode-`0600` regular files where supported. Final approve/reject decisions purge local evidence immediately. Startup and daily bounded cleanup remove expired control artifacts, terminal requests after retention, queued evidence, and old unreferenced files.
 
@@ -118,7 +118,7 @@ Deleting a WhatsApp connection removes only its validated database path and SQLi
 
 Application logs use explicit safe fields such as endpoint aliases, canonical IDs, counts, and fixed event/failure classes. Raw provider structs, remote target IDs, participant data, tokens, payloads, and arbitrary provider error strings never cross the logging boundary. `internal/safelog` converts unexpected errors into fixed safe classes.
 
-Message media is loaded into memory only after an event is accepted for routing, bounded by configuration/provider limits, and released after forwarding. Membership evidence is the only deliberate on-disk content exception and belongs to the control plane described above.
+Message media is loaded into memory only after an event is accepted for routing, bounded by configuration/provider limits, and released after forwarding. Membership evidence is the only deliberate on-disk content exception (for the experimental membership verification workflow) and belongs to the control plane described above.
 
 ## Message and lifecycle flow
 
@@ -178,7 +178,7 @@ The embedded UI calls the authenticated HTTP API. The first setup creates an adm
 
 Connections and endpoints remain separate. A connection may own several endpoints, endpoint reassignment is limited to a compatible transport, and a referenced connection cannot be deleted. Discord and Telegram token replacement stops the old adapter before registering the replacement. Discovery data is connection-scoped and transient unless an operator deliberately creates a safe endpoint alias.
 
-Membership pipeline mutations resolve the selected endpoint and sync set but do not copy provider addressing into `control.db`. Public intake exposes only the bounded form needed by the applicant; review and final decisions require authenticated human roles.
+Experimental membership pipeline mutations resolve the selected endpoint and sync set but do not copy provider addressing into `control.db`. Public intake exposes only the bounded form needed by the applicant; review and final decisions require authenticated human roles.
 
 ### HTTP API surface
 
@@ -204,12 +204,12 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates sync set endpoints or deletes sync set. |
 | `/api/config` | `GET`, `PUT` | Authenticated | Reads or modifies `global_config` in `sync.db` with live router reload. |
 | `/api/delivery/status` | `GET` | Authenticated | Real-time content-free delivery health, lane depth, and failure classes. |
-| `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages membership intake pipelines bound to endpoint sync sets. |
-| `/api/sync-sets/{id}/membership` | `GET`, `PUT` | Admin | Configures sync-set membership instructions and custom fields. |
-| `/api/verification/requests` | `GET` | Authenticated | Reviews pending email-verified membership applications. |
-| `/api/verification/requests/{id}/decision` | `POST` | Authenticated | Human-authorized approve/reject/needs-review decision. |
-| `/api/verification/join/{token}` | `GET`, `POST` | Public | Public membership application intake form submission. |
-| `/api/verification/email/verify` | `GET`, `POST` | Public | Validates email challenge token. |
+| `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages experimental membership intake pipelines bound to endpoint sync sets. |
+| `/api/sync-sets/{id}/membership` | `GET`, `PUT` | Admin | Configures experimental sync-set membership instructions and custom fields. |
+| `/api/verification/requests` | `GET` | Authenticated | Reviews pending email-verified membership applications (experimental). |
+| `/api/verification/requests/{id}/decision` | `POST` | Authenticated | Human-authorized approve/reject/needs-review decision (experimental). |
+| `/api/verification/join/{token}` | `GET`, `POST` | Public | Public membership application intake form submission (experimental). |
+| `/api/verification/email/verify` | `GET`, `POST` | Public | Validates email challenge token (experimental). |
 
 ## Container and release model
 

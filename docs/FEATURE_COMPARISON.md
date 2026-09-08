@@ -15,7 +15,7 @@ The comparison is behavioral and architectural. `message-sync` is not intended t
 - it supports WhatsApp, Discord, and Telegram in mixed all-to-all sync sets;
 - it treats message identity, copies, lifecycle events, retries, and recovery as persistent transport-neutral state;
 - it keeps the core routing database and application logs free of PII/PHI;
-- it isolates multi-user administration and membership verification into a separate sensitive control plane;
+- it isolates multi-user administration and experimental membership verification into a separate sensitive control plane;
 - it requires no cloud database, cloud object storage, paid AI service, paid email service, or managed hosting for normal operation;
 - it is packaged as a small rootless container with a read-only root filesystem and local SQLite persistence.
 
@@ -61,7 +61,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Historical import/bootstrap | No user-facing historical ZIP importer | Historical/bootstrap upload and Telegram history synchronization are available | Not carried forward into the core product. |
 | Multi-user Web UI | Persistent admin/operator accounts, server-side sessions, invites, activation controls, reset tokens, role checks, and audit events in `control.db` | Multi-user console with admin/sub-admin concepts, invitations, registration verification, sharing/ownership, and in-memory active sessions | Preserved at the product level but redesigned with persistent session/account state and narrower roles. |
 | Bridge/config ownership | Admins/operators manage one shared endpoint/sync-set configuration according to role policy | Mapping ownership and sharing are first-class concepts | Simplified. Per-user ownership of routing configuration is not part of the current model. |
-| Membership pipelines | Public high-entropy pipeline URLs bind to endpoints; forms/reviewer guidance are inherited from the endpoint's sync set | WhatsApp membership pipelines and broader member-request workflows are implemented | Preserved and redesigned behind the isolated control plane. |
+| Membership pipelines (Experimental) | Public high-entropy pipeline URLs bind to endpoints; forms/reviewer guidance are inherited from the endpoint's sync set | WhatsApp membership pipelines and broader member-request workflows are implemented | Preserved and redesigned behind the isolated control plane as an experimental feature. |
 | Work-email verification | Optional email challenge; request remains reviewable when mail delivery is not configured | Email verification is integrated into registration/membership flows | Preserved with optional provider configuration. |
 | Discord identity verification | Fulfillment resolves a Discord member and assigns a configured role; the control plane avoids copying Discord identity into `sync.db` | Registration/member flows can verify Discord identity by DM and manage roles | Narrowed to the minimum needed for the current membership workflow. |
 | WhatsApp membership fulfillment | Human-approved hashed join token, WhatsApp invite, and pending join-request matching; no server-side direct add or per-member invite rotation | Direct participant add and membership tooling are implemented | Narrowed to an approval-gated, identity-safe invite flow. |
@@ -131,9 +131,9 @@ Both projects provide more than a single shared admin password. The difference i
 
 This separation allows membership workflows to handle the minimum necessary work email, transport identity, and evidence without weakening the privacy rules for normal message synchronization.
 
-### 5. Membership verification keeps human authority
+### 5. Membership verification (experimental) keeps human authority
 
-The upstream implementation demonstrates a broad automated workflow: account verification, email verification, Discord checks, membership requests, evidence analysis, enrichment, WhatsApp participant actions, Discord role assignment, and external provider integrations.
+The upstream implementation demonstrates a broad automated workflow: account verification, email verification, Discord checks, membership requests, evidence analysis, enrichment, WhatsApp participant actions, Discord role assignment, and external provider integrations. In `message-sync`, membership verification is an experimental, opt-in feature.
 
 `message-sync` keeps the useful workflow but narrows automation:
 

@@ -22,7 +22,7 @@
 - **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
 - **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration, and live runtime configuration reload without process restarts.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
-- **Membership Intake & Verification Pipeline**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
+- **Membership Intake & Verification Pipeline (Experimental)**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
 - **Automated WhatsApp Chat Cleanup**: Scheduled AppState background cleanup to prune old messages on the sync account according to configurable retention rules.
 - **Hardened Container Deployment**: Static non-root container (UID 1000) with read-only root filesystem, dropped Linux capabilities, and `/tmp` tmpfs, fully compatible with Docker, rootful Podman, and rootless Podman.
 
@@ -36,8 +36,8 @@ The core routing boundary is deliberately content-free at rest:
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
-- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram credentials, and membership verification.
-- Membership evidence is stored privately under `/data/membership-evidence/`, removed on final approve/reject decisions, and subject to bounded cleanup.
+- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram credentials, and experimental membership verification.
+- Membership evidence is stored privately under `/data/membership-evidence/`, removed on final approve/reject decisions, and subject to bounded cleanup when the experimental verification workflow is used.
 
 The optional `friendly` child-context display mode stores bounded current thread/topic labels in `sync.db` for presentation only. The default `opaque` mode does not; labels never control routing or identity.
 
@@ -103,9 +103,9 @@ Deployment settings come from the environment; routing and feature settings are 
 | `API_ADDR` | no | derived from `PORT` | Full HTTP listen address, mainly useful for direct source runs and tests. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 | `WHATSAPP_DEVICE_NAME` | no | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
-| `VERIFICATION_MAIL_API_KEY` | no | none | Enables Resend-compatible membership email delivery with `VERIFICATION_MAIL_FROM`. |
-| `VERIFICATION_MAIL_FROM` | no | none | Sender used by optional membership email delivery. |
-| `VERIFICATION_PUBLIC_BASE_URL` | no | request origin | External base URL used in membership links behind a proxy. |
+| `VERIFICATION_MAIL_API_KEY` | no | none | Enables Resend-compatible email delivery for experimental membership verification with `VERIFICATION_MAIL_FROM`. |
+| `VERIFICATION_MAIL_FROM` | no | none | Sender used by optional experimental membership email delivery. |
+| `VERIFICATION_PUBLIC_BASE_URL` | no | request origin | External base URL used in experimental membership links behind a proxy. |
 | `OPENROUTER_API_KEY` | no | none | Enables advisory image evidence analysis only when training is explicitly disabled. |
 | `OPENROUTER_ALLOW_TRAINING` | no | unset | Must equal `false` for OpenRouter analysis to run. |
 | `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
@@ -130,6 +130,8 @@ Global routing and feature settings are configured in the Web UI Settings tab or
 | `whatsapp_cleanup.retention_days` | `30` | Minimum message age in days before WhatsApp AppState chat cleanup prunes messages. |
 | `whatsapp_device_name` | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
 | `child_scope_mode` | `opaque` | Child-conversation presentation mode: `opaque` (privacy default) or `friendly` (presentation thread/topic labels). |
+
+The Web UI Settings tab also includes a browser-local preference to enable the experimental **Membership review** interface (disabled by default).
 
 The current SQLite schemas initialize fresh databases and do not provide an upgrade migration path for older development databases. Back up `/data` before upgrades and consult release notes before reusing existing state.
 

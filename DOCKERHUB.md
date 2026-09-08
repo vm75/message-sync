@@ -25,7 +25,7 @@ The release workflow publishes the same multi-architecture `message-sync` image 
 - **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
 - **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
-- **Membership Intake Pipeline**: Sync-set bound public intake forms, automated email verification challenges, private evidence handling (mode 0600 with automatic purge), optional advisory AI image analysis (zero-training), and human review with automated fulfillment.
+- **Membership Intake Pipeline (Experimental)**: Sync-set bound public intake forms, automated email verification challenges, private evidence handling (mode 0600 with automatic purge), optional advisory AI image analysis (zero-training), and human review with automated fulfillment.
 - **Security & Hardening**: Static non-root container (UID 1000), read-only root filesystem, dropped capabilities, no extra privileges required, and fully compatible with Docker, rootful Podman, and rootless Podman.
 
 See the [README](https://github.com/vm75/message-sync#readme) for detailed product setup and provider requirements. This page is limited to image behavior, runtime configuration, and container deployment.
@@ -98,9 +98,9 @@ The image entry point is `/usr/local/bin/message-sync`; its default command is `
 | `API_ADDR` | no | derived from `PORT` | Complete HTTP listen address. |
 | `LOG_LEVEL` | no | `info` | `debug`, `info`, `warn`, or `error`. |
 | `WHATSAPP_DEVICE_NAME` | no | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
-| `VERIFICATION_MAIL_API_KEY` | no | none | Enables Resend-compatible membership email delivery with `VERIFICATION_MAIL_FROM`. |
-| `VERIFICATION_MAIL_FROM` | no | none | Sender used by optional membership email delivery. |
-| `VERIFICATION_PUBLIC_BASE_URL` | no | request origin | External base URL used in membership links behind a proxy. |
+| `VERIFICATION_MAIL_API_KEY` | no | none | Enables Resend-compatible email delivery for experimental membership verification with `VERIFICATION_MAIL_FROM`. |
+| `VERIFICATION_MAIL_FROM` | no | none | Sender used by optional experimental membership email delivery. |
+| `VERIFICATION_PUBLIC_BASE_URL` | no | request origin | External base URL used in experimental membership links behind a proxy. |
 | `OPENROUTER_API_KEY` | no | none | Enables advisory image evidence analysis only when training is explicitly disabled. |
 | `OPENROUTER_ALLOW_TRAINING` | no | unset | Must equal `false` for OpenRouter analysis to run. |
 | `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
@@ -110,9 +110,9 @@ Discord and Telegram bot tokens are pasted into the authenticated Web UI and enc
 The service exposes HTTP on the configured port and requires one persistent writable mount at `/data`. That mount contains:
 
 - `sync.db` — PII-free routing/configuration state;
-- `control.db` — sensitive accounts, sessions, encrypted credentials, audit, and membership state;
+- `control.db` — sensitive accounts, sessions, encrypted credentials, audit, and experimental membership state;
 - `whatsapp/<connection-id>.db` — isolated sensitive whatsmeow protocol state;
-- `membership-evidence/` — short-lived private membership evidence when that feature is used.
+- `membership-evidence/` — short-lived private membership evidence when the experimental verification feature is used.
 
 Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the current code initializes fresh schemas and does not provide an upgrade migration path for older development databases.
 

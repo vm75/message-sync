@@ -17,7 +17,7 @@ For the local automated gate, including the fake three-transport integration har
 5. [Starting message-sync](#5-starting-message-sync)
 6. [Connections, Endpoints & Sync Sets in the Web UI](#6-connections-endpoints--sync-sets-in-the-web-ui)
 7. [Testing Checklist & Verification Scenarios](#7-testing-checklist--verification-scenarios)
-8. [Membership Verification Testing](#8-membership-verification-testing)
+8. [Membership Verification Testing (Experimental)](#8-membership-verification-testing-experimental)
 9. [Troubleshooting & Common Pitfalls](#9-troubleshooting--common-pitfalls)
 
 ---
@@ -411,9 +411,12 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 
 ---
 
-## 8. Membership Verification Testing
+## 8. Membership Verification Testing (Experimental)
 
-The current membership workflow supports public applications with a work email, a WhatsApp phone number or Discord user ID, an optional LinkedIn URL, bounded custom fields, and optional PDF/image evidence. Deterministic checks and optional OpenRouter analysis are advisory; only an authenticated human reviewer can approve or reject an application.
+> [!NOTE]
+> Membership verification is an experimental feature and is disabled by default in the Web UI.
+
+The current experimental membership workflow supports public applications with a work email, a WhatsApp phone number or Discord user ID, an optional LinkedIn URL, bounded custom fields, and optional PDF/image evidence. Deterministic checks and optional OpenRouter analysis are advisory; only an authenticated human reviewer can approve or reject an application.
 
 Use a dedicated test sync set, an email address you control, test transport identities, and synthetic or thoroughly redacted evidence. Do not upload a real immigration notice, A-number, home address, passport number, Social Security number, or unrelated personal data during routine testing.
 
@@ -448,7 +451,7 @@ The analyzer is disabled unless `OPENROUTER_ALLOW_TRAINING` is exactly `false`. 
 
 ### Configure the test application
 
-1. In **Settings**, enable the browser-local **Membership review** preference so the Membership navigation and sync-set application controls are visible.
+1. In **Settings**, enable the browser-local **Membership review** preference (marked as Experimental) so the Membership navigation and sync-set application controls are visible.
 2. Create a dedicated sync set with a configured WhatsApp or Discord endpoint.
 3. Open that sync set's **Membership Application** controls, require evidence, and configure bounded instructions. For example:
 

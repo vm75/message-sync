@@ -257,8 +257,8 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
         </span>
         <div class="syncset-membership-heading">
-          <div class="syncset-membership-title">Membership application</div>
-          <div class="syncset-membership-subtitle">Optional intake and reviewer guidance shared by membership pipelines targeting this sync set.</div>
+          <div class="syncset-membership-title">Membership application <span class="badge badge-warning" style="margin-left:6px;font-size:.68rem;vertical-align:middle;">Experimental</span></div>
+          <div class="syncset-membership-subtitle">Optional experimental intake and reviewer guidance shared by membership pipelines targeting this sync set.</div>
         </div>
       </div>
       <div class="syncset-membership-body">
