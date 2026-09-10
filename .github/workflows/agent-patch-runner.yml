@@ -6,6 +6,7 @@ on:
       - agent/telegram-mtproto-support
     paths:
       - .agent/patch.diff
+      - .agent/change.py
       - .agent/commit-message.txt
 
 permissions:
@@ -23,15 +24,21 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Apply patch
+      - name: Apply change
         shell: bash
         run: |
           set -euo pipefail
-          test -s .agent/patch.diff
           test -s .agent/commit-message.txt
-          git apply --index .agent/patch.diff
-          rm -f .agent/patch.diff .agent/commit-message.txt
-          git add -u .agent || true
+          if [[ -s .agent/change.py ]]; then
+            python3 .agent/change.py
+          elif [[ -s .agent/patch.diff ]]; then
+            git apply .agent/patch.diff
+          else
+            echo "missing .agent/change.py or .agent/patch.diff" >&2
+            exit 1
+          fi
+          rm -f .agent/patch.diff .agent/change.py
+          git add -A
       - name: Format
         shell: bash
         run: |
@@ -48,18 +55,15 @@ jobs:
         run: go test ./...
       - name: Vet
         run: go vet ./...
-      - name: Commit tested patch
+      - name: Commit tested change
         shell: bash
         env:
           COMMIT_AUTHOR_NAME: vm75
           COMMIT_AUTHOR_EMAIL: vm75@users.noreply.github.com
         run: |
           set -euo pipefail
-          msg="$(cat .agent/commit-message.txt 2>/dev/null || true)"
-          # The message file was removed after reading by design; recover it from HEAD.
-          if [[ -z "$msg" ]]; then
-            msg="$(git show HEAD:.agent/commit-message.txt)"
-          fi
+          msg="$(cat .agent/commit-message.txt)"
+          rm -f .agent/commit-message.txt
           git config user.name "$COMMIT_AUTHOR_NAME"
           git config user.email "$COMMIT_AUTHOR_EMAIL"
           git add -A
