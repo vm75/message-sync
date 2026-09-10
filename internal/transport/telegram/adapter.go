@@ -44,6 +44,8 @@ type Options struct {
 	MigrateEndpoint        func(context.Context, transport.EndpointID, string, string) error
 	ResolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
 	ObserveChildScopeLabel transport.ChildScopeLabelObserver
+	MTProtoStateStore      MTProtoStateStore
+	mtprotoRuntimeFactory  mtprotoRuntimeFactory
 }
 
 type Adapter struct {

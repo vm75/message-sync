@@ -87,8 +87,8 @@ var openTelegram = func(ctx context.Context, opts telegram.Options) (telegramTra
 	return telegram.Open(ctx, opts)
 }
 
-var openTelegramMTProto = func(context.Context, telegram.Options) (telegramTransport, error) {
-	return nil, telegram.ErrMTProtoAdapterUnavailable
+var openTelegramMTProto = func(ctx context.Context, opts telegram.Options) (telegramTransport, error) {
+	return telegram.OpenMTProto(ctx, opts)
 }
 
 func openTelegramForIntegrationMode(ctx context.Context, mode string, opts telegram.Options) (telegramTransport, error) {
@@ -245,7 +245,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						continue
 					}
 					discordAdapters[c.ID] = dcInst
-					credentialFingerprints[c.ID] = credentialFingerprint(c)
+					if c.IntegrationMode != controlstore.TelegramIntegrationModeMTProto {
+						credentialFingerprints[c.ID] = credentialFingerprint(c)
+					}
 					defer dcInst.Close()
 				}
 			}
@@ -258,10 +260,22 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err == nil {
 			for _, c := range allConns {
 				if c.Transport == "telegram" && c.Enabled {
-					tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
-					if err != nil {
-						safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
-						continue
+					var token string
+					var mtState telegram.MTProtoStateStore
+					if c.IntegrationMode == controlstore.TelegramIntegrationModeMTProto {
+						stateStore, stateErr := controlstore.NewConnectionSecretStore(controlStore.DB(), credentialCipher, c.ID)
+						if stateErr != nil {
+							safelog.Error(logger, "initialize Telegram MTProto state store failed", "telegram_mtproto_state", stateErr)
+							continue
+						}
+						mtState = stateStore
+					} else {
+						tokenBytes, decryptErr := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+						if decryptErr != nil {
+							safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", decryptErr)
+							continue
+						}
+						token = string(tokenBytes)
 					}
 					connChatIDs := make(map[string]string)
 					for alias, ep := range cfg.Endpoints {
@@ -276,15 +290,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 					connID := c.ID
 					tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
-						ConnectionID:    connID,
-						Token:           string(tokenBytes),
-						ChatIDs:         connChatIDs,
-						Hasher:          hasher,
-						UsernameMode:    cfg.Identity.UsernameMode,
-						Logger:          logger,
-						MediaEnabled:    cfg.Media.Enabled,
-						MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-						InitialUpdateID: initialUpdateID,
+						ConnectionID:      connID,
+						Token:             token,
+						MTProtoStateStore: mtState,
+						ChatIDs:           connChatIDs,
+						Hasher:            hasher,
+						UsernameMode:      cfg.Identity.UsernameMode,
+						Logger:            logger,
+						MediaEnabled:      cfg.Media.Enabled,
+						MediaMaxBytes:     uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+						InitialUpdateID:   initialUpdateID,
 						MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 							return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), connID, oldRemoteID, newRemoteID)
 						},
@@ -369,7 +384,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			if err == nil {
 				credentialChanged := make(map[string]bool)
 				for _, c := range allConns {
-					if c.Enabled && (c.Transport == "discord" || c.Transport == "telegram") {
+					if c.Enabled && (c.Transport == "discord" || (c.Transport == "telegram" && c.IntegrationMode != controlstore.TelegramIntegrationModeMTProto)) {
 						previous, known := credentialFingerprints[c.ID]
 						credentialChanged[c.ID] = known && previous != credentialFingerprint(c)
 					}
@@ -485,7 +500,9 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							continue
 						}
 						discordAdapters[c.ID] = dcInst
-						credentialFingerprints[c.ID] = credentialFingerprint(c)
+						if c.IntegrationMode != controlstore.TelegramIntegrationModeMTProto {
+							credentialFingerprints[c.ID] = credentialFingerprint(c)
+						}
 					}
 				}
 
@@ -498,13 +515,25 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				for connID, c := range enabledTelegram {
 					_, exists := telegramAdapters[connID]
 					if !exists || credentialChanged[connID] {
-						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
-						if err != nil {
-							safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", err)
-							if exists && credentialChanged[connID] {
-								reloadErr = errors.Join(reloadErr, errors.New("decrypt Telegram credential failed"))
+						var token string
+						var mtState telegram.MTProtoStateStore
+						if c.IntegrationMode == controlstore.TelegramIntegrationModeMTProto {
+							stateStore, stateErr := controlstore.NewConnectionSecretStore(controlStore.DB(), credentialCipher, c.ID)
+							if stateErr != nil {
+								safelog.Error(logger, "initialize Telegram MTProto state store failed", "telegram_mtproto_state", stateErr)
+								continue
 							}
-							continue
+							mtState = stateStore
+						} else {
+							tokenBytes, decryptErr := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+							if decryptErr != nil {
+								safelog.Error(logger, "decrypt telegram credential failed", "telegram_decrypt", decryptErr)
+								if exists && credentialChanged[connID] {
+									reloadErr = errors.Join(reloadErr, errors.New("decrypt Telegram credential failed"))
+								}
+								continue
+							}
+							token = string(tokenBytes)
 						}
 						connChatIDs := make(map[string]string)
 						for alias, ep := range updatedCfg.Endpoints {
@@ -519,15 +548,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 						cid := c.ID
 						tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
-							ConnectionID:    cid,
-							Token:           string(tokenBytes),
-							ChatIDs:         connChatIDs,
-							Hasher:          hasher,
-							UsernameMode:    updatedCfg.Identity.UsernameMode,
-							Logger:          logger,
-							MediaEnabled:    updatedCfg.Media.Enabled,
-							MediaMaxBytes:   uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
-							InitialUpdateID: initialUpdateID,
+							ConnectionID:      cid,
+							Token:             token,
+							MTProtoStateStore: mtState,
+							ChatIDs:           connChatIDs,
+							Hasher:            hasher,
+							UsernameMode:      updatedCfg.Identity.UsernameMode,
+							Logger:            logger,
+							MediaEnabled:      updatedCfg.Media.Enabled,
+							MediaMaxBytes:     uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+							InitialUpdateID:   initialUpdateID,
 							MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 								return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), cid, oldRemoteID, newRemoteID)
 							},
@@ -854,6 +884,56 @@ func (s *appConnectionService) ValidateTelegramTarget(ctx context.Context, id, r
 		return telegram.ErrTargetValidationUnavailable
 	}
 	return tg.ValidateTarget(ctx, remoteID)
+}
+
+func (s *appConnectionService) telegramMTProtoAuth(id string) (telegram.MTProtoAuthService, error) {
+	if s == nil || s.connMgr == nil {
+		return nil, errors.New("connection manager unavailable")
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return nil, errors.New("connection is not running")
+	}
+	service, ok := adapter.(telegram.MTProtoAuthService)
+	if !ok {
+		return nil, errors.New("not a Telegram MTProto connection")
+	}
+	return service, nil
+}
+func (s *appConnectionService) TelegramMTProtoConfigure(ctx context.Context, id string, apiID int, apiHash, phone string) (any, error) {
+	svc, err := s.telegramMTProtoAuth(id)
+	if err != nil {
+		return nil, err
+	}
+	return svc.ConfigureMTProto(ctx, apiID, apiHash, phone)
+}
+func (s *appConnectionService) TelegramMTProtoSendCode(ctx context.Context, id string) (any, error) {
+	svc, err := s.telegramMTProtoAuth(id)
+	if err != nil {
+		return nil, err
+	}
+	return svc.SendMTProtoCode(ctx)
+}
+func (s *appConnectionService) TelegramMTProtoSubmitCode(ctx context.Context, id, code string) (any, error) {
+	svc, err := s.telegramMTProtoAuth(id)
+	if err != nil {
+		return nil, err
+	}
+	return svc.SubmitMTProtoCode(ctx, code)
+}
+func (s *appConnectionService) TelegramMTProtoSubmitPassword(ctx context.Context, id string, password []byte) (any, error) {
+	svc, err := s.telegramMTProtoAuth(id)
+	if err != nil {
+		return nil, err
+	}
+	return svc.SubmitMTProtoPassword(ctx, password)
+}
+func (s *appConnectionService) TelegramMTProtoLogout(ctx context.Context, id string) error {
+	svc, err := s.telegramMTProtoAuth(id)
+	if err != nil {
+		return err
+	}
+	return svc.LogoutMTProto(ctx)
 }
 
 func (s *appConnectionService) WhatsAppPair(ctx context.Context, id string) (api.WhatsAppPairResponse, error) {

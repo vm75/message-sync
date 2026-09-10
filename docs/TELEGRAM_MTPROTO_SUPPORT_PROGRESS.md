@@ -86,7 +86,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
   - capability model
   - existing Telegram rows remain Bot API
 
-- [ ] #103 — Implement secure Telegram MTProto authentication and session lifecycle
+- [x] #103 — Implement secure Telegram MTProto authentication and session lifecycle
   - API ID/hash + phone
   - code flow
   - optional 2FA
@@ -271,6 +271,15 @@ The final implementation must cover at least:
 - Startup/reload adapter selection is connection-metadata driven; the MTProto runtime hook is intentionally completed by #103.
 - Existing Bot API connections remain the default and continue to use the existing adapter/token path.
 - Verification: focused schema/API/capability/selection tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #103 — complete
+
+- Added `gotd/td` MTProto client authentication with phone code and optional 2FA using `PasswordWith`/`srpguard` so the 2FA value is consumed from wipeable memory.
+- Added an encrypted control-store-backed gotd session storage adapter; API credentials, phone, and reusable session stay inside the encrypted connection blob. OTP, code hash, and 2FA are runtime-only.
+- Pending MTProto connections now start as control-plane adapters, expose sanitized auth states, reconnect from authorized persisted sessions, and support explicit logout/session clearing.
+- Added mode-specific authenticated admin routes for setup, code request/verification, and 2FA; generic Bot API token handling remains unchanged.
+- MTProto session writes are excluded from credential-fingerprint reload logic so normal session persistence cannot trigger spurious adapter restarts.
+- Verification: focused encrypted-state/auth/API tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

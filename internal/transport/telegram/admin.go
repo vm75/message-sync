@@ -29,6 +29,8 @@ type EndpointReadiness struct {
 
 type AdminStatus struct {
 	TokenConfigured    bool                `json:"tokenConfigured"`
+	IntegrationMode    string              `json:"integrationMode,omitempty"`
+	Configured         bool                `json:"configured,omitempty"`
 	Running            bool                `json:"running"`
 	Status             string              `json:"status"`
 	Endpoints          []EndpointReadiness `json:"endpoints"`
@@ -58,6 +60,7 @@ type observedChatEntry struct {
 
 func (a *Adapter) AdminStatus(ctx context.Context) AdminStatus {
 	status := AdminStatus{
+		IntegrationMode:    "bot",
 		TokenConfigured:    false,
 		Status:             "not_configured",
 		Endpoints:          []EndpointReadiness{},

@@ -678,6 +678,29 @@ func (s *Server) handleWhatsAppConnectionLogout(w http.ResponseWriter, r *http.R
 		WriteError(w, http.StatusInternalServerError, "database error")
 		return
 	}
+	if transport == "telegram" {
+		var mode string
+		if err := s.controlDB.QueryRowContext(r.Context(), `SELECT integration_mode FROM transport_connections WHERE id = ?`, id).Scan(&mode); err != nil {
+			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if controlstore.NormalizeIntegrationMode(transport, mode) != controlstore.TelegramIntegrationModeMTProto {
+			WriteError(w, http.StatusBadRequest, "logout is not supported for Telegram Bot API connections")
+			return
+		}
+		svc, ok := s.mtprotoService()
+		if !ok {
+			WriteError(w, http.StatusServiceUnavailable, "Telegram MTProto runtime unavailable")
+			return
+		}
+		if err := svc.TelegramMTProtoLogout(r.Context(), id); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit(r, "telegram_mtproto_logged_out", id)
+		_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+		return
+	}
 	if transport != "whatsapp" {
 		WriteError(w, http.StatusBadRequest, "not a WhatsApp connection")
 		return

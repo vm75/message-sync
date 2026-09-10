@@ -47,6 +47,14 @@ type ConnectionService interface {
 	ConnectionAdapter(id string) (any, bool)
 }
 
+type telegramMTProtoAuthService interface {
+	TelegramMTProtoConfigure(context.Context, string, int, string, string) (any, error)
+	TelegramMTProtoSendCode(context.Context, string) (any, error)
+	TelegramMTProtoSubmitCode(context.Context, string, string) (any, error)
+	TelegramMTProtoSubmitPassword(context.Context, string, []byte) (any, error)
+	TelegramMTProtoLogout(context.Context, string) error
+}
+
 type telegramTargetValidator interface {
 	ValidateTelegramTarget(context.Context, string, string) error
 }
@@ -194,6 +202,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/connections/{id}/status", s.handleGetConnectionStatus)
 	s.mux.HandleFunc("GET /api/connections/{id}/discovery", s.handleGetConnectionDiscovery)
 	s.mux.HandleFunc("GET /api/connections/{id}/membership-readiness", s.handleGetMembershipReadiness)
+	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/setup", s.handleTelegramMTProtoSetup)
+	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/send-code", s.handleTelegramMTProtoSendCode)
+	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/code", s.handleTelegramMTProtoCode)
+	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/password", s.handleTelegramMTProtoPassword)
 	s.mux.HandleFunc("POST /api/connections/{id}/pair", s.handleWhatsAppConnectionPair)
 	s.mux.HandleFunc("DELETE /api/connections/{id}/pair", s.handleWhatsAppConnectionCancelPair)
 	s.mux.HandleFunc("POST /api/connections/{id}/logout", s.handleWhatsAppConnectionLogout)
