@@ -79,7 +79,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 
 ### Phase 1 — Connection model and lifecycle
 
-- [ ] #102 — Telegram dual integration foundation: exclusive bot vs MTProto connection modes
+- [x] #102 — Telegram dual integration foundation: exclusive bot vs MTProto connection modes
   - connection-level `integration_mode`
   - schema/API validation
   - adapter selection
@@ -260,6 +260,17 @@ The final implementation must cover at least:
 - automatic conversion of an existing Bot API connection into MTProto
 - generalized provider/plugin framework
 - account export / unlimited history scraping
+
+## Implementation log
+
+### #102 — complete
+
+- Added connection-level `integration_mode` metadata with restart-safe migration of existing Telegram rows to `bot`.
+- Added explicit Bot API vs MTProto capability metadata without changing canonical `telegram` routing identity.
+- Generic connection APIs expose mode/capabilities while credentials remain encrypted and omitted from DTOs.
+- Startup/reload adapter selection is connection-metadata driven; the MTProto runtime hook is intentionally completed by #103.
+- Existing Bot API connections remain the default and continue to use the existing adapter/token path.
+- Verification: focused schema/API/capability/selection tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

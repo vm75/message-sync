@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS transport_connections (
     transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
     label TEXT NOT NULL CHECK (length(label) > 0),
     enabled BOOLEAN NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    integration_mode TEXT NOT NULL DEFAULT '',
     encrypted_credential BLOB,
     credential_nonce BLOB,
     credential_key_version INTEGER NOT NULL DEFAULT 1,

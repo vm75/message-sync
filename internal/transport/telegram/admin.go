@@ -35,6 +35,7 @@ type AdminStatus struct {
 	PrivacyModeKnown   bool                `json:"privacyModeKnown"`
 	PrivacyModeEnabled *bool               `json:"privacyModeEnabled,omitempty"`
 	VisibilityGuidance string              `json:"visibilityGuidance"`
+	Capabilities       Capabilities        `json:"capabilities"`
 }
 
 type DiscoveredChat struct {
@@ -62,6 +63,7 @@ func (a *Adapter) AdminStatus(ctx context.Context) AdminStatus {
 		Endpoints:          []EndpointReadiness{},
 		PrivacyModeKnown:   false,
 		VisibilityGuidance: VisibilityGuidance,
+		Capabilities:       CapabilitiesForIntegrationMode("bot"),
 	}
 	if a == nil {
 		return status

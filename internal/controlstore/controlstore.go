@@ -138,6 +138,40 @@ func (s *Store) pruneOrphanEvidence(ctx context.Context, now time.Time, batch in
 	}
 }
 
+func ensureTransportConnectionIntegrationMode(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(transport_connections)`)
+	if err != nil {
+		return fmt.Errorf("inspect transport connection schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan transport connection schema: %w", err)
+		}
+		if name == "integration_mode" {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate transport connection schema: %w", err)
+	}
+	rows.Close()
+	if !found {
+		if _, err := db.ExecContext(ctx, `ALTER TABLE transport_connections ADD COLUMN integration_mode TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add transport connection integration mode: %w", err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE transport_connections SET integration_mode='bot' WHERE transport='telegram' AND TRIM(integration_mode)=''`); err != nil {
+		return fmt.Errorf("default existing Telegram integration modes: %w", err)
+	}
+	return nil
+}
+
 func Open(ctx context.Context, path string) (*Store, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -185,6 +219,10 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	if err := tx.Commit(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("commit control schema initialization: %w", err)
+	}
+	if err := ensureTransportConnectionIntegrationMode(ctx, db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	if path != ":memory:" {
 		if err := os.Chmod(path, 0o600); err != nil {

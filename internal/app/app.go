@@ -87,6 +87,17 @@ var openTelegram = func(ctx context.Context, opts telegram.Options) (telegramTra
 	return telegram.Open(ctx, opts)
 }
 
+var openTelegramMTProto = func(context.Context, telegram.Options) (telegramTransport, error) {
+	return nil, telegram.ErrMTProtoAdapterUnavailable
+}
+
+func openTelegramForIntegrationMode(ctx context.Context, mode string, opts telegram.Options) (telegramTransport, error) {
+	if controlstore.NormalizeIntegrationMode("telegram", mode) == controlstore.TelegramIntegrationModeMTProto {
+		return openTelegramMTProto(ctx, opts)
+	}
+	return openTelegram(ctx, opts)
+}
+
 // Run supervises persistence, the transport adapters, the HTTP API server, and
 // the single ordered router worker.
 func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
@@ -264,7 +275,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						continue
 					}
 					connID := c.ID
-					tgInst, err := openTelegram(ctx, telegram.Options{
+					tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
 						ConnectionID:    connID,
 						Token:           string(tokenBytes),
 						ChatIDs:         connChatIDs,
@@ -507,7 +518,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							continue
 						}
 						cid := c.ID
-						tgInst, err := openTelegram(ctx, telegram.Options{
+						tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
 							ConnectionID:    cid,
 							Token:           string(tokenBytes),
 							ChatIDs:         connChatIDs,
