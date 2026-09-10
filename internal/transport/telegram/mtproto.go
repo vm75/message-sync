@@ -177,11 +177,13 @@ func (c *gotdAuthClient) Logout(ctx context.Context) error {
 }
 
 type MTProtoAdapter struct {
-	connectionID   string
-	logger         interface{ Error(string, ...any) }
-	events         chan transport.Incoming
-	state          *mtprotoStateBox
-	runtimeFactory mtprotoRuntimeFactory
+	connectionID    string
+	logger          interface{ Error(string, ...any) }
+	events          chan transport.Incoming
+	state           *mtprotoStateBox
+	runtimeFactory  mtprotoRuntimeFactory
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 
 	mu         sync.RWMutex
 	cfg        *config.Config
@@ -222,10 +224,11 @@ func OpenMTProto(ctx context.Context, opts Options) (*MTProtoAdapter, error) {
 	if factory == nil {
 		factory = newGotdRuntime
 	}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(ctx)
 	adapter := &MTProtoAdapter{
 		connectionID: strings.TrimSpace(opts.ConnectionID), events: make(chan transport.Incoming, eventBufferSize),
 		state: &mtprotoStateBox{raw: opts.MTProtoStateStore}, runtimeFactory: factory,
-		authState: MTProtoAuthDisconnected,
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel, authState: MTProtoAuthDisconnected,
 	}
 	state, err := adapter.state.load(ctx)
 	if err != nil {
@@ -233,7 +236,7 @@ func OpenMTProto(ctx context.Context, opts Options) (*MTProtoAdapter, error) {
 	}
 	if state.APIID > 0 && strings.TrimSpace(state.APIHash) != "" && strings.TrimSpace(state.Phone) != "" {
 		adapter.configured = true
-		adapter.startRuntime(ctx, state)
+		adapter.startRuntime(lifecycleCtx, state)
 	}
 	return adapter, nil
 }
@@ -276,6 +279,9 @@ func (a *MTProtoAdapter) Delete(context.Context, transport.MessageRef) error {
 func (a *MTProtoAdapter) Close() error {
 	if a == nil {
 		return nil
+	}
+	if a.lifecycleCancel != nil {
+		a.lifecycleCancel()
 	}
 	a.stopRuntime()
 	a.mu.Lock()
@@ -396,7 +402,7 @@ func (a *MTProtoAdapter) ConfigureMTProto(ctx context.Context, apiID int, apiHas
 	a.configured = true
 	a.codeHash = ""
 	a.mu.Unlock()
-	a.startRuntime(ctx, current)
+	a.startRuntime(a.lifecycleCtx, current)
 	return a.AdminStatus(ctx), nil
 }
 

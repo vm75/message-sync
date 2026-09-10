@@ -132,6 +132,26 @@ func TestMTProtoAuthLifecycleAndRestartSession(t *testing.T) {
 		t.Fatal("logout retained reusable session")
 	}
 }
+func TestMTProtoConfigureRuntimeOutlivesRequestContext(t *testing.T) {
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	store := &memoryMTStore{}
+	f := &fakeMTAuth{}
+	a, err := OpenMTProto(appCtx, Options{ConnectionID: "tg-lifecycle", Logger: testLogger(), MTProtoStateStore: store, mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime { return fakeMTRuntime{f} }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	if _, err := a.ConfigureMTProto(reqCtx, 1, "hash", "+1000"); err != nil {
+		t.Fatal(err)
+	}
+	reqCancel()
+	if _, err := a.SendMTProtoCode(context.Background()); err != nil {
+		t.Fatalf("runtime stopped with request context: %v", err)
+	}
+}
+
 func TestMTProtoInvalidCodeIsSanitizedAndCodeHashNotPersisted(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -1,1 +1,0 @@
-fix: keep MTProto client lifecycle independent of auth request (#103)
