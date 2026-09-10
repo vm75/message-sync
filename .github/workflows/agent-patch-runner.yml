@@ -30,6 +30,8 @@ jobs:
           set -euo pipefail
           test -s .agent/commit-message.txt
           if [[ -s .agent/change.py ]]; then
+            # Keep scripted tracker updates aligned with the exact issue title.
+            sed -i 's/Secure MTProto auth\/session lifecycle with encrypted persistence/Implement secure Telegram MTProto authentication and session lifecycle/g' .agent/change.py
             python3 .agent/change.py
           elif [[ -s .agent/patch.diff ]]; then
             git apply .agent/patch.diff
