@@ -1,0 +1,1 @@
+feat: add MTProto poll parity (#107)
