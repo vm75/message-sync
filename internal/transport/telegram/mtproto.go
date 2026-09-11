@@ -558,8 +558,9 @@ func (a *MTProtoAdapter) LogoutMTProto(ctx context.Context) error {
 	}
 	state.Session = nil
 	state.Peers = nil
+	state.Polls = nil
 	if a.live != nil {
-		a.live.loadPeers(nil)
+		a.live.clearAccountState()
 	}
 	if err := a.state.store(ctx, state); err != nil {
 		return err

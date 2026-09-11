@@ -33,9 +33,10 @@ type CreateConnectionRequest struct {
 }
 
 type UpdateConnectionRequest struct {
-	Label   *string `json:"label,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-	Token   *string `json:"token,omitempty"`
+	Label           *string `json:"label,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	Token           *string `json:"token,omitempty"`
+	IntegrationMode *string `json:"integrationMode,omitempty"`
 }
 
 func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -294,6 +295,18 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	conn.EncryptedCredential = encCred
 	conn.CredentialNonce = nonce
 	conn.IntegrationMode = controlstore.NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
+	if req.IntegrationMode != nil {
+		requestedMode := strings.TrimSpace(*req.IntegrationMode)
+		if err := controlstore.ValidateIntegrationMode(conn.Transport, requestedMode); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		requestedMode = controlstore.NormalizeIntegrationMode(conn.Transport, requestedMode)
+		if requestedMode != conn.IntegrationMode {
+			WriteError(w, http.StatusConflict, "connection integration mode cannot be changed in place; create a new connection and reassign endpoints")
+			return
+		}
+	}
 	oldEncCred := append([]byte(nil), encCred...)
 	oldNonce := append([]byte(nil), nonce...)
 	oldKeyVersion := conn.CredentialKeyVersion

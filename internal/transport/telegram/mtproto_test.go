@@ -103,6 +103,8 @@ func TestMTProtoAuthLifecycleAndRestartSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	state.Session = []byte("reusable-session")
+	state.Peers = map[string]mtprotoPeerState{"-1000000000042": {RemoteID: "-1000000000042", Kind: "channel", ID: 42, AccessHash: 9}}
+	state.Polls = map[string]mtprotoPollState{"99": {RemoteID: "-1000000000042", MessageID: 7, OptionKeys: []string{"MA", "MQ"}}}
 	if err := a.state.store(ctx, state); err != nil {
 		t.Fatal(err)
 	}
@@ -130,6 +132,12 @@ func TestMTProtoAuthLifecycleAndRestartSession(t *testing.T) {
 	cleared, _ := b.state.load(ctx)
 	if len(cleared.Session) != 0 {
 		t.Fatal("logout retained reusable session")
+	}
+	if len(cleared.Peers) != 0 || len(cleared.Polls) != 0 {
+		t.Fatalf("logout retained account-bound peer/poll state: peers=%d polls=%d", len(cleared.Peers), len(cleared.Polls))
+	}
+	if b.live != nil && len(b.live.peerSnapshot()) != 0 {
+		t.Fatal("logout retained live peer cache")
 	}
 }
 func TestMTProtoConfigureRuntimeOutlivesRequestContext(t *testing.T) {

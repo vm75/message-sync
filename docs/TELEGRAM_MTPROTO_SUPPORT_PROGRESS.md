@@ -129,7 +129,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 
 ### Phase 5 — Product integration and hardening
 
-- [ ] #108 — Complete Telegram integration-mode UI, end-to-end hardening, documentation, and tracker cleanup
+- [x] #108 — Complete Telegram integration-mode UI, end-to-end hardening, documentation, and tracker cleanup
   - mutually exclusive mode choice in UI
   - Bot API flow unchanged
   - phone/code/2FA MTProto UI
@@ -313,6 +313,14 @@ The final implementation must cover at least:
 - `updateMessagePoll` produces aggregate-only `poll_snapshot` events. Per-voter `updateMessagePollVote` is intentionally not registered or consumed.
 - Restart-safe poll correlation stores only remote/message/topic IDs plus opaque option tokens inside the existing encrypted MTProto state; questions, option text and voter identities are not persisted there.
 - Verification: focused ingress/outbound/multiple-choice/topic/snapshot/restart/isolation/privacy tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #108 — implementation complete; tracker pending post-close cleanup
+
+- Admin creation now explicitly selects Bot API or Phone/MTProto. Existing connections display the fixed mode; in-place mode changes are rejected.
+- The MTProto management UI supports API ID/hash/phone setup, code request/submission, optional 2FA, sanitized status, logout, complete group/topic discovery, and explicitly bounded backfill. Capability flags drive discovery/history/privacy controls.
+- Logout scrubs reusable session, peer/access-hash runtime/cache state and poll correlation; delete removes the encrypted connection row. Endpoint transport/connection matching remains enforced server-side.
+- Added UI/API/logout/log-privacy hardening tests and permanent `docs/TELEGRAM.md`; README now documents both integration methods and their security/capability differences.
+- Verification target: focused tests plus full `go test ./...` and `go vet ./...`. After #108 closes, this tracker and temporary branch-only CI helpers will be deleted in a final tested cleanup commit.
 
 ## Completion rule
 

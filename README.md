@@ -36,7 +36,7 @@ The core routing boundary is deliberately content-free at rest:
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
-- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram credentials, and experimental membership verification.
+- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. OTPs and Telegram 2FA passwords are never persisted.
 - Membership evidence is stored privately under `/data/membership-evidence/`, removed on final approve/reject decisions, and subject to bounded cleanup when the experimental verification workflow is used.
 
 The optional `friendly` child-context display mode stores bounded current thread/topic labels in `sync.db` for presentation only. The default `opaque` mode does not; labels never control routing or identity.
@@ -85,9 +85,9 @@ Create a Discord bot, enable the privileged **Message Content** intent, and gran
 
 ### Telegram
 
-Create a bot with BotFather, disable Bot Privacy Mode, add it to target groups, and make it an administrator when per-user reaction updates are required. Disable anonymous reactions in those groups. Telegram discovery is observation-based, so send a message after adding the bot before refreshing discovered chats. Broadcast channels are not supported.
+Telegram connections support two mutually exclusive methods: **Bot API** (BotFather token, observation-based discovery, Bot Privacy Mode applies) and **Phone / MTProto** (Telegram API ID/hash + phone login, complete joined-group/forum-topic discovery, and bounded history recovery). Both use the canonical `telegram` transport, but every endpoint names exactly one connection and never falls back to the other method. Private DMs and broadcast channels are not synchronized.
 
-See the [manual testing guide](docs/TESTING_GUIDE.md) for detailed provider setup and end-to-end checks.
+See [Telegram integrations](docs/TELEGRAM.md) for the capability comparison, secure phone/code/2FA setup, session storage model, recovery behavior, and troubleshooting. See the [manual testing guide](docs/TESTING_GUIDE.md) for broader end-to-end checks.
 
 ## Configuration
 
@@ -111,7 +111,7 @@ Deployment settings come from the environment; routing and feature settings are 
 | `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
 | `MESSAGE_SYNC_DATA_DIR` | no | `./data` | Host-side `/data` bind source used by `compose.yml`; it is not read by the service. |
 
-Discord and Telegram tokens are configured dynamically, encrypted with AES-256-GCM in `control.db`, and never belong in `.env`.
+Discord/Telegram Bot API tokens and Telegram MTProto application/session state are configured dynamically and encrypted with AES-256-GCM in `control.db`; they never belong in `.env`.
 
 ### Runtime settings
 
@@ -154,6 +154,7 @@ The complete automated gate and safe smoke-test procedure are in [TESTING.md](TE
 - [Architecture and privacy invariants](ARCHITECTURE.md)
 - [Automated testing](TESTING.md)
 - [Manual provider testing](docs/TESTING_GUIDE.md)
+- [Telegram Bot API and Phone/MTProto setup](docs/TELEGRAM.md)
 - [Container images](DOCKERHUB.md)
 - [Feature comparison](docs/FEATURE_COMPARISON.md)
 - [Contributor and coding-agent guide](AGENTS.md)

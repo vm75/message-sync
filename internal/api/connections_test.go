@@ -552,3 +552,27 @@ func TestConnections_DiscoveryScopedByConnection(t *testing.T) {
 		t.Fatalf("unexpected discovery response: %+v", channels)
 	}
 }
+
+func TestConnections_TelegramIntegrationModeIsImmutableAndDeleteRemovesState(t *testing.T) {
+	srv, _, db, adminToken, _ := setupConnectionsTestEnv(t)
+	create := authenticatedConnectionRequest(t, srv, adminToken, http.MethodPost, "/api/connections", `{"id":"conn-mt-hard","transport":"telegram","integrationMode":"mtproto","label":"Phone Telegram"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create MTProto: %d %s", create.Code, create.Body.String())
+	}
+	patch := authenticatedConnectionRequest(t, srv, adminToken, http.MethodPatch, "/api/connections/conn-mt-hard", `{"integrationMode":"bot"}`)
+	if patch.Code != http.StatusConflict {
+		t.Fatalf("mode change status=%d body=%s", patch.Code, patch.Body.String())
+	}
+	var mode string
+	if err := db.QueryRow(`SELECT integration_mode FROM transport_connections WHERE id='conn-mt-hard'`).Scan(&mode); err != nil || mode != "mtproto" {
+		t.Fatalf("mode=%q err=%v", mode, err)
+	}
+	del := authenticatedConnectionRequest(t, srv, adminToken, http.MethodDelete, "/api/connections/conn-mt-hard", "")
+	if del.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", del.Code, del.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM transport_connections WHERE id='conn-mt-hard'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("deleted MTProto state remains count=%d err=%v", count, err)
+	}
+}

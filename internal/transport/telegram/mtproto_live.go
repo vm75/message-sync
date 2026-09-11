@@ -246,6 +246,21 @@ func (l *mtprotoLiveState) setSelfID(id int64) {
 	l.mu.Unlock()
 }
 
+func (l *mtprotoLiveState) clearAccountState() {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.selfID = 0
+	l.peers = make(map[string]mtprotoPeerState)
+	l.messageEndpoints = make(map[int]transport.EndpointID)
+	l.messageOrder = nil
+	l.reactions = make(map[string]map[int64]mtprotoReactionState)
+	l.pendingSends = make(map[string]int)
+	l.pendingMutations = make(map[string]int)
+	l.mu.Unlock()
+}
+
 func (l *mtprotoLiveState) stateForNormalize() (*Normalizer, int64, bool, uint64) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()

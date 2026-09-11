@@ -95,6 +95,14 @@ func TestStaticHandler(t *testing.T) {
 			"Disabling friendly names removes stored names",
 			`id="add-conn-help-discord"`,
 			`id="add-conn-help-telegram"`,
+			`id="add-conn-telegram-mode"`,
+			`id="add-conn-mtproto-api-id"`,
+			`id="add-conn-mtproto-api-hash"`,
+			`id="add-conn-mtproto-phone"`,
+			`id="modal-telegram-mtproto"`,
+			`id="mtproto-code"`,
+			`id="mtproto-password"`,
+			`id="mtproto-backfill-group"`,
 			`id="add-conn-wa-help"`,
 			"Create &amp; Pair",
 			"Linked Devices",
@@ -178,6 +186,24 @@ func TestStaticHandler(t *testing.T) {
 		}
 		if strings.Contains(appJS, "closeModal(modalAddConnection);\n        await openWaPairModal(createdID)") {
 			t.Fatal("WhatsApp create flow still leaves Add Connection before pairing")
+		}
+
+		resp, err = client.Get(ts.URL + "/js/app-base.js")
+		if err != nil {
+			t.Fatalf("GET /js/app-base.js failed: %v", err)
+		}
+		baseBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		baseJS := string(baseBytes)
+		for _, expected := range []string{"selectAddTelegramMode", "openTelegramMTProto", "setupTelegramMTProto", "submitTelegramMTProtoCode", "submitTelegramMTProtoPassword", "backfillTelegramMTProto", "caps.historyRecovery", "caps.topicDiscovery"} {
+			if !strings.Contains(baseJS, expected) {
+				t.Fatalf("Admin base JS missing Telegram dual-mode symbol %q", expected)
+			}
+		}
+		for _, forbidden := range []string{"localStorage.setItem('apiHash'", "localStorage.setItem('phone'", "localStorage.setItem('code'", "localStorage.setItem('password'", "sessionStorage.setItem('apiHash'", "sessionStorage.setItem('phone'"} {
+			if strings.Contains(baseJS, forbidden) {
+				t.Fatalf("Admin JS persists MTProto secret %q", forbidden)
+			}
 		}
 	})
 

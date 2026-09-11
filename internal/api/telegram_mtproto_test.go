@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"testing"
 )
@@ -38,6 +40,8 @@ func (s *mtprotoAPITestService) TelegramMTProtoLogout(context.Context, string) e
 }
 func TestMTProtoAdminAPIFlow(t *testing.T) {
 	srv, _, db, token, _ := setupConnectionsTestEnv(t)
+	var logs bytes.Buffer
+	srv.logger = slog.New(slog.NewTextHandler(&logs, nil))
 	_, err := db.Exec(`INSERT INTO transport_connections(id,transport,integration_mode,label,enabled,encrypted_credential,credential_nonce,created_at,updated_at) VALUES('conn-mt-api','telegram','mtproto','mt',1,x'01',x'02',1,1)`)
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +67,12 @@ func TestMTProtoAdminAPIFlow(t *testing.T) {
 		body := rec.Body.String()
 		if containsString(body, "super-secret") || containsString(body, "+1555") || containsString(body, "top-secret") || containsString(body, "12345") {
 			t.Fatalf("secret reflected in response %q", body)
+		}
+	}
+	logText := logs.String()
+	for _, secret := range []string{"super-secret", "+15551234567", "top-secret", "12345"} {
+		if containsString(logText, secret) {
+			t.Fatalf("MTProto auth secret leaked to logs: %q", secret)
 		}
 	}
 }
