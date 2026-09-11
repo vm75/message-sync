@@ -169,6 +169,40 @@ func (c *Coordinator) Recover(ctx context.Context, sources []transport.RecoveryS
 	wg.Wait()
 }
 
+// RecoverStream runs one explicitly bounded source stream through the same canonical
+// recovery path used at startup/reconnect.
+func (c *Coordinator) RecoverStream(ctx context.Context, source transport.RecoverySource, key string, maxEvents int, maxAge time.Duration) error {
+	if c == nil || source == nil {
+		return errors.New("recovery coordinator and source are required")
+	}
+	if key == "" || maxEvents <= 0 || maxAge <= 0 {
+		return errors.New("recovery stream and positive bounds are required")
+	}
+	allowed := false
+	for _, candidate := range source.RecoveryStreams() {
+		if candidate == key {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return errors.New("recovery stream is not configured")
+	}
+	c.recoverMu.Lock()
+	defer c.recoverMu.Unlock()
+	cursor := transport.Checkpoint{StreamKey: key, Valid: true}
+	if saved, err := c.store.RecoveryCursor(ctx, key); err == nil {
+		cursor.Position = saved.Position
+		cursor.EventTimestamp = saved.EventTimestamp
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	return source.Recover(ctx, transport.RecoveryRequest{Cursor: cursor, MaxEvents: maxEvents, MaxAge: maxAge}, func(eventCtx context.Context, incoming transport.Incoming) error {
+		_, err := c.Handle(eventCtx, incoming)
+		return err
+	})
+}
+
 // RegisterSource registers a new recovery-capable source, runs its bounded recovery,
 // and begins listening for its reconnect signals.
 func (c *Coordinator) RegisterSource(ctx context.Context, source transport.RecoverySource) {

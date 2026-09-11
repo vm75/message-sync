@@ -111,7 +111,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
   - complete forum-topic enumeration
   - keep Bot API observed-discovery behavior
 
-- [ ] #106 — Implement MTProto historical recovery and bounded backfill through RecoverySource
+- [x] #106 — Implement MTProto historical recovery and bounded backfill through RecoverySource
   - provider-history recovery
   - bounded max-age/max-count behavior
   - deterministic ordering
@@ -297,6 +297,14 @@ The final implementation must cover at least:
 - Added complete MTProto forum-topic enumeration with explicit General-topic ID `1`; no English label is fabricated when Telegram does not supply one.
 - Added a capability-specific topic-discovery API available only to MTProto connections.
 - Verification: focused transport/API discovery tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #106 — complete
+
+- MTProto adapters now implement `transport.RecoverySource` with connection+endpoint-scoped stream keys and matching checkpoints on live ordinary-message ingress.
+- Historical reads use bounded `messages.getHistory`, normalize through the same Telegram privacy/routing semantics, preserve replies/topics/media loaders, and emit deterministic chronological events through the existing recovery coordinator.
+- Recovery honors cursor, max-event, max-age, media and cancellation bounds; private dialogs remain excluded and no raw history payloads are persisted/logged.
+- Added an explicitly bounded MTProto-only manual backfill API that routes through `Coordinator.RecoverStream`; Bot API returns an unsupported-capability response.
+- Verification: focused ordering/bounds/topic/media/cancellation/isolation/API tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

@@ -370,6 +370,7 @@ func (a *MTProtoAdapter) initializeMTProtoLive(ctx context.Context, auth mtproto
 	if a.live.replacePeers(groups) {
 		_ = a.persistMTProtoPeers(ctx)
 	}
+	a.signalMTProtoRecovery()
 }
 
 func (a *MTProtoAdapter) persistMTProtoPeers(ctx context.Context) error {
@@ -695,6 +696,11 @@ func (a *MTProtoAdapter) normalizeMTProtoMessage(ctx context.Context, entities t
 		return
 	}
 	a.live.rememberMessage(incoming.Endpoint, msg.ID)
+	if !edit {
+		incoming.Checkpoint = transport.Checkpoint{
+			StreamKey: a.mtprotoRecoveryStreamKey(incoming.Endpoint), Position: int64(msg.ID), EventTimestamp: incoming.Timestamp, Valid: true,
+		}
+	}
 	a.emitMTProto(incoming)
 }
 

@@ -203,17 +203,18 @@ type MTProtoAdapter struct {
 	lifecycleCancel context.CancelFunc
 	live            *mtprotoLiveState
 
-	mu         sync.RWMutex
-	cfg        *config.Config
-	authState  string
-	configured bool
-	auth       mtprotoAuthClient
-	codeHash   string
-	runCancel  context.CancelFunc
-	runDone    chan struct{}
-	ready      chan struct{}
-	readyOnce  *sync.Once
-	closed     bool
+	mu              sync.RWMutex
+	cfg             *config.Config
+	authState       string
+	configured      bool
+	auth            mtprotoAuthClient
+	codeHash        string
+	runCancel       context.CancelFunc
+	runDone         chan struct{}
+	ready           chan struct{}
+	readyOnce       *sync.Once
+	closed          bool
+	recoverySignals chan struct{}
 }
 
 var _ transport.Adapter = (*MTProtoAdapter)(nil)
@@ -248,6 +249,7 @@ func OpenMTProto(ctx context.Context, opts Options) (*MTProtoAdapter, error) {
 		connectionID: strings.TrimSpace(opts.ConnectionID), events: make(chan transport.Incoming, eventBufferSize),
 		state: &mtprotoStateBox{raw: opts.MTProtoStateStore}, runtimeFactory: factory,
 		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel, authState: MTProtoAuthDisconnected, live: live,
+		recoverySignals: make(chan struct{}, 1),
 	}
 	if adapter.runtimeFactory == nil {
 		adapter.runtimeFactory = func(apiID int, apiHash string, storage gotdsession.Storage) mtprotoRuntime {
@@ -291,6 +293,7 @@ func (a *MTProtoAdapter) UpdateConfig(cfg *config.Config) error {
 	a.mu.Lock()
 	a.cfg = cfg
 	a.mu.Unlock()
+	a.signalMTProtoRecovery()
 	return nil
 }
 func (a *MTProtoAdapter) Send(ctx context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {

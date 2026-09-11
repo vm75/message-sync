@@ -632,7 +632,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		ControlDB:        controlStore.DB(),
 		Secret:           []byte(secret),
 		CredentialCipher: credentialCipher,
-		Connections:      &appConnectionService{connMgr: connMgr, dataDir: dataDir},
+		Connections:      &appConnectionService{connMgr: connMgr, coordinator: recoveryCoordinator, dataDir: dataDir},
 		Delivery:         mesh,
 		OnConfigChange:   onConfigChange,
 		EvidenceDir:      filepath.Join(dataDir, "membership-evidence"),
@@ -823,8 +823,9 @@ func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB
 }
 
 type appConnectionService struct {
-	connMgr *connection.Manager
-	dataDir string
+	connMgr     *connection.Manager
+	coordinator *recovery.Coordinator
+	dataDir     string
 }
 
 func (s *appConnectionService) ConnectionStatus(ctx context.Context, id string) (any, error) {
@@ -869,6 +870,31 @@ func (s *appConnectionService) ConnectionDiscovery(ctx context.Context, id strin
 		return tg.DiscoverChats(ctx)
 	}
 	return nil, errors.New("discovery not supported for this transport")
+}
+
+func (s *appConnectionService) TelegramHistoricalBackfill(ctx context.Context, id, endpoint string, maxEvents int, maxAge time.Duration) error {
+	if s == nil || s.connMgr == nil || s.coordinator == nil {
+		return errors.New("recovery runtime unavailable")
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return errors.New("connection is not running")
+	}
+	source, ok := adapter.(transport.RecoverySource)
+	if !ok {
+		return errors.New("historical recovery is not supported")
+	}
+	provider, ok := adapter.(interface {
+		RecoveryStream(transport.EndpointID) (string, bool)
+	})
+	if !ok {
+		return errors.New("historical recovery is not supported")
+	}
+	stream, ok := provider.RecoveryStream(transport.EndpointID(strings.TrimSpace(endpoint)))
+	if !ok {
+		return errors.New("endpoint is not configured on this connection")
+	}
+	return s.coordinator.RecoverStream(ctx, source, stream, maxEvents, maxAge)
 }
 
 func (s *appConnectionService) TelegramTopicDiscovery(ctx context.Context, id, remoteID string) (any, error) {

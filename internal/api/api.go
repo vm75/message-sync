@@ -63,6 +63,10 @@ type telegramTopicDiscoveryService interface {
 	TelegramTopicDiscovery(context.Context, string, string) (any, error)
 }
 
+type telegramBackfillService interface {
+	TelegramHistoricalBackfill(context.Context, string, string, int, time.Duration) error
+}
+
 type Options struct {
 	Addr       string
 	Logger     *slog.Logger
@@ -206,6 +210,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/connections/{id}/status", s.handleGetConnectionStatus)
 	s.mux.HandleFunc("GET /api/connections/{id}/discovery", s.handleGetConnectionDiscovery)
 	s.mux.HandleFunc("GET /api/connections/{id}/telegram/topics", s.handleTelegramTopicDiscovery)
+	s.mux.HandleFunc("POST /api/connections/{id}/telegram/backfill", s.handleTelegramHistoricalBackfill)
 	s.mux.HandleFunc("GET /api/connections/{id}/membership-readiness", s.handleGetMembershipReadiness)
 	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/setup", s.handleTelegramMTProtoSetup)
 	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/send-code", s.handleTelegramMTProtoSendCode)
