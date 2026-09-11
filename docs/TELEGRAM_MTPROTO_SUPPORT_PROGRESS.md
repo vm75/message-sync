@@ -66,7 +66,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 | Reactions | Yes | Yes |
 | Edits/deletes | Yes | Yes |
 | Telegram topics | Yes, observed/live | Yes |
-| Native polls/live aggregate results | Yes | Yes after #107 |
+| Native polls/live aggregate results | Yes | Yes |
 | Group discovery | Observed chats | Full joined dialogs |
 | Forum-topic discovery | Observed topics | Full enumeration |
 | Bot Privacy Mode guidance | Applicable | Not applicable |
@@ -120,7 +120,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 
 ### Phase 4 — Poll parity
 
-- [ ] #107 — Add Telegram MTProto poll parity with canonical live poll synchronization
+- [x] #107 — Add Telegram MTProto poll parity with canonical live poll synchronization
   - inbound native polls
   - outbound native polls
   - aggregate poll snapshots
@@ -305,6 +305,14 @@ The final implementation must cover at least:
 - Recovery honors cursor, max-event, max-age, media and cancellation bounds; private dialogs remain excluded and no raw history payloads are persisted/logged.
 - Added an explicitly bounded MTProto-only manual backfill API that routes through `Coordinator.RecoverStream`; Bot API returns an unsupported-capability response.
 - Verification: focused ordering/bounds/topic/media/cancellation/isolation/API tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #107 — complete
+
+- MTProto native polls now normalize through the existing canonical Telegram poll fields and preserve reply/topic identity.
+- Outbound canonical polls use native MTProto `inputMediaPoll` when representable and return the same connection-scoped provider reference contract as Bot API; unsupported poll shapes retain the existing text fallback.
+- `updateMessagePoll` produces aggregate-only `poll_snapshot` events. Per-voter `updateMessagePollVote` is intentionally not registered or consumed.
+- Restart-safe poll correlation stores only remote/message/topic IDs plus opaque option tokens inside the existing encrypted MTProto state; questions, option text and voter identities are not persisted there.
+- Verification: focused ingress/outbound/multiple-choice/topic/snapshot/restart/isolation/privacy tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

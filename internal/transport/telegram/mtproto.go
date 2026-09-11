@@ -43,6 +43,7 @@ type mtprotoState struct {
 	Phone   string                      `json:"phone,omitempty"`
 	Session []byte                      `json:"session,omitempty"`
 	Peers   map[string]mtprotoPeerState `json:"peers,omitempty"`
+	Polls   map[string]mtprotoPollState `json:"polls,omitempty"`
 }
 
 type mtprotoStateBox struct {

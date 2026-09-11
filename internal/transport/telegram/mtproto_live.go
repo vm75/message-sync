@@ -563,7 +563,13 @@ func mtprotoSyntheticMessage(msg *tg.Message, entities tg.Entities, selfID int64
 			Chat: telegrambotmodels.Chat{ID: remote, Type: chatType},
 		}
 	}
-	if media {
+	if pollMedia, pollOK := msg.Media.(*tg.MessageMediaPoll); pollOK {
+		poll, ok := mtprotoSyntheticPoll(pollMedia)
+		if !ok {
+			return nil, false
+		}
+		synthetic.Poll = poll
+	} else if media {
 		synthetic.Document = &telegrambotmodels.Document{FileID: "mtproto"}
 	}
 	return synthetic, true
@@ -689,6 +695,13 @@ func (a *MTProtoAdapter) normalizeMTProtoMessage(ctx context.Context, entities t
 	if incoming.ChildScope != nil {
 		topicID, _ = strconv.Atoi(incoming.ChildScope.RemoteID)
 	}
+	if !edit && incoming.Kind == "poll" {
+		if pollMedia, pollOK := msg.Media.(*tg.MessageMediaPoll); pollOK {
+			_ = a.rememberMTProtoPoll(ctx, pollMedia.Poll.ID, mtprotoPollState{
+				RemoteID: peer.RemoteID, MessageID: msg.ID, TopicID: topicID, OptionKeys: mtprotoPollOptionKeys(pollMedia.Poll),
+			})
+		}
+	}
 	if incoming.FromSelf && !edit && a.live.consumePendingSend(incoming.Endpoint, incoming.Kind, topicID, incoming.Text) {
 		return
 	}
@@ -790,6 +803,10 @@ func (a *MTProtoAdapter) handleMTProtoUpdates(ctx context.Context, updates tg.Up
 	})
 	dispatcher.OnMessageReactions(func(handlerCtx context.Context, _ tg.Entities, update *tg.UpdateMessageReactions) error {
 		a.handleMTProtoReactionUpdate(handlerCtx, update)
+		return nil
+	})
+	dispatcher.OnMessagePoll(func(handlerCtx context.Context, _ tg.Entities, update *tg.UpdateMessagePoll) error {
+		a.handleMTProtoPollUpdate(handlerCtx, update)
 		return nil
 	})
 	return dispatcher.Handle(ctx, updates)
@@ -978,7 +995,42 @@ func (a *MTProtoAdapter) sendMTProto(ctx context.Context, outgoing transport.Out
 		kind = "text"
 	}
 	if kind == "poll" {
-		return transport.MessageRef{}, errors.New("Telegram MTProto polls are not enabled yet")
+		pollClient, supported := client.(mtprotoPollClient)
+		if supported {
+			question, options, selectable, duration, native := mtprotoNativePoll(outgoing)
+			if native {
+				done := a.live.markPendingSend(outgoing.Endpoint, "poll", topicID, question)
+				result, sendErr := pollClient.SendPoll(ctx, peer, question, options, selectable, duration, replyID, topicID)
+				done(sendErr == nil)
+				if sendErr != nil {
+					return transport.MessageRef{}, errors.New("send Telegram MTProto poll")
+				}
+				if result.MessageID <= 0 || result.PollID == 0 {
+					return transport.MessageRef{}, errors.New("Telegram MTProto poll response was incomplete")
+				}
+				_ = a.rememberMTProtoPoll(ctx, result.PollID, mtprotoPollState{
+					RemoteID: peer.RemoteID, MessageID: result.MessageID, TopicID: topicID, OptionKeys: result.OptionKeys,
+				})
+				a.live.rememberMessage(outgoing.Endpoint, result.MessageID)
+				return transport.MessageRef{
+					Endpoint: outgoing.Endpoint, RemoteMessageID: strconv.Itoa(result.MessageID), IsTargetFromMe: true,
+					Provider: a.mtprotoPollProviderNamespace(), ProviderReference: strconv.FormatInt(result.PollID, 10), ChildScope: outgoing.ChildScope,
+				}, nil
+			}
+		}
+		pollText, pollErr := telegramPollText(outgoing.SourceText, outgoing.PollOptions, outgoing.PollSelectableCount)
+		if pollErr != nil {
+			return transport.MessageRef{}, pollErr
+		}
+		outgoing.SourceText = pollText
+		if outgoing.RenderedText != "" {
+			if attribution := strings.TrimSpace(outgoing.PollAttribution); attribution != "" {
+				outgoing.RenderedText = attribution + " " + pollText
+			} else {
+				outgoing.RenderedText = pollText
+			}
+		}
+		kind = "text"
 	}
 	content := telegramOutgoingText(outgoing)
 	if outgoing.ReplyFallback {

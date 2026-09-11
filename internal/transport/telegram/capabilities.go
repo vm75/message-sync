@@ -29,7 +29,7 @@ func CapabilitiesForIntegrationMode(mode string) Capabilities {
 			TopicDiscovery:    DiscoveryFull,
 			HistoryRecovery:   true,
 			PrivacyModeStatus: false,
-			Polls:             false,
+			Polls:             true,
 		}
 	}
 	return Capabilities{
