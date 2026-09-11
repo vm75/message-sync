@@ -96,7 +96,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 
 ### Phase 2 — Live transport parity
 
-- [ ] #104 — Implement Telegram MTProto live transport parity for messages, media, replies, reactions, edits, deletes, and topics
+- [x] #104 — Implement Telegram MTProto live transport parity for messages, media, replies, reactions, edits, deletes, and topics
   - new MTProto adapter behind existing transport contract
   - peer/access-hash persistence or reliable reconstruction
   - loop prevention
@@ -280,6 +280,14 @@ The final implementation must cover at least:
 - Added mode-specific authenticated admin routes for setup, code request/verification, and 2FA; generic Bot API token handling remains unchanged.
 - MTProto session writes are excluded from credential-fingerprint reload logic so normal session persistence cannot trigger spurious adapter restarts.
 - Verification: focused encrypted-state/auth/API tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #104 — complete
+
+- Added MTProto live message transport for configured Telegram groups/supergroups/channels while preserving canonical transport identity `telegram`.
+- Added restart-safe encrypted per-connection peer/access-hash persistence with on-demand dialog refresh, so ordinary outbound sends do not depend on fresh post-restart traffic.
+- Added live text/media, native reply/topic routing, reactions, edits and deletes through gotd while preserving media limits and privacy boundaries.
+- Self-originated bridge sends/mutations are suppressed while genuine linked-account user events remain routable; peer/session state remains isolated per Telegram connection.
+- Verification: focused MTProto live-adapter tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

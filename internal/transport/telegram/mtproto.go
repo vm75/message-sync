@@ -37,11 +37,12 @@ type MTProtoStateStore interface {
 }
 
 type mtprotoState struct {
-	Version int    `json:"version"`
-	APIID   int    `json:"apiId,omitempty"`
-	APIHash string `json:"apiHash,omitempty"`
-	Phone   string `json:"phone,omitempty"`
-	Session []byte `json:"session,omitempty"`
+	Version int                         `json:"version"`
+	APIID   int                         `json:"apiId,omitempty"`
+	APIHash string                      `json:"apiHash,omitempty"`
+	Phone   string                      `json:"phone,omitempty"`
+	Session []byte                      `json:"session,omitempty"`
+	Peers   map[string]mtprotoPeerState `json:"peers,omitempty"`
 }
 
 type mtprotoStateBox struct {
@@ -79,6 +80,22 @@ func (s *mtprotoStateBox) loadLocked(ctx context.Context) (mtprotoState, error) 
 func (s *mtprotoStateBox) store(ctx context.Context, state mtprotoState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	state.Version = mtprotoStateVersion
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return errors.New("encode MTProto state")
+	}
+	return s.raw.Store(ctx, raw)
+}
+
+func (s *mtprotoStateBox) update(ctx context.Context, mutate func(*mtprotoState)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, err := s.loadLocked(ctx)
+	if err != nil {
+		return err
+	}
+	mutate(&state)
 	state.Version = mtprotoStateVersion
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -184,6 +201,7 @@ type MTProtoAdapter struct {
 	runtimeFactory  mtprotoRuntimeFactory
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
+	live            *mtprotoLiveState
 
 	mu         sync.RWMutex
 	cfg        *config.Config
@@ -220,20 +238,27 @@ func OpenMTProto(ctx context.Context, opts Options) (*MTProtoAdapter, error) {
 	if opts.MTProtoStateStore == nil {
 		return nil, errors.New("encrypted MTProto state store is required")
 	}
-	factory := opts.mtprotoRuntimeFactory
-	if factory == nil {
-		factory = newGotdRuntime
+	live, err := newMTProtoLiveState(opts)
+	if err != nil {
+		return nil, err
 	}
+	factory := opts.mtprotoRuntimeFactory
 	lifecycleCtx, lifecycleCancel := context.WithCancel(ctx)
 	adapter := &MTProtoAdapter{
 		connectionID: strings.TrimSpace(opts.ConnectionID), events: make(chan transport.Incoming, eventBufferSize),
 		state: &mtprotoStateBox{raw: opts.MTProtoStateStore}, runtimeFactory: factory,
-		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel, authState: MTProtoAuthDisconnected,
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel, authState: MTProtoAuthDisconnected, live: live,
+	}
+	if adapter.runtimeFactory == nil {
+		adapter.runtimeFactory = func(apiID int, apiHash string, storage gotdsession.Storage) mtprotoRuntime {
+			return newGotdRuntimeWithUpdates(apiID, apiHash, storage, gotdtelegram.UpdateHandlerFunc(adapter.handleMTProtoUpdates))
+		}
 	}
 	state, err := adapter.state.load(ctx)
 	if err != nil {
 		return nil, err
 	}
+	adapter.live.loadPeers(state.Peers)
 	if state.APIID > 0 && strings.TrimSpace(state.APIHash) != "" && strings.TrimSpace(state.Phone) != "" {
 		adapter.configured = true
 		adapter.startRuntime(lifecycleCtx, state)
@@ -258,22 +283,27 @@ func (a *MTProtoAdapter) UpdateConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return errors.New("config is required")
 	}
+	if a.live != nil {
+		if err := a.live.updateConfig(cfg, a.connectionID); err != nil {
+			return err
+		}
+	}
 	a.mu.Lock()
 	a.cfg = cfg
 	a.mu.Unlock()
 	return nil
 }
-func (a *MTProtoAdapter) Send(context.Context, transport.Outgoing) (transport.MessageRef, error) {
-	return transport.MessageRef{}, errors.New("Telegram MTProto live messaging is not enabled yet")
+func (a *MTProtoAdapter) Send(ctx context.Context, outgoing transport.Outgoing) (transport.MessageRef, error) {
+	return a.sendMTProto(ctx, outgoing)
 }
-func (a *MTProtoAdapter) React(context.Context, transport.Reaction) error {
-	return errors.New("Telegram MTProto live messaging is not enabled yet")
+func (a *MTProtoAdapter) React(ctx context.Context, reaction transport.Reaction) error {
+	return a.reactMTProto(ctx, reaction)
 }
-func (a *MTProtoAdapter) Edit(context.Context, transport.MessageRef, string) error {
-	return errors.New("Telegram MTProto live messaging is not enabled yet")
+func (a *MTProtoAdapter) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	return a.editMTProto(ctx, ref, text)
 }
-func (a *MTProtoAdapter) Delete(context.Context, transport.MessageRef) error {
-	return errors.New("Telegram MTProto live messaging is not enabled yet")
+func (a *MTProtoAdapter) Delete(ctx context.Context, ref transport.MessageRef) error {
+	return a.deleteMTProto(ctx, ref)
 }
 
 func (a *MTProtoAdapter) Close() error {
@@ -318,6 +348,9 @@ func (a *MTProtoAdapter) startRuntime(parent context.Context, state mtprotoState
 				a.authState = MTProtoAuthCodeRequired
 			}
 			a.mu.Unlock()
+			if statusErr == nil && authorized {
+				a.initializeMTProtoLive(clientCtx, authClient)
+			}
 			once.Do(func() { close(ready) })
 			if statusErr != nil {
 				return statusErr
@@ -393,6 +426,10 @@ func (a *MTProtoAdapter) ConfigureMTProto(ctx context.Context, apiID int, apiHas
 	}
 	if current.APIID != apiID || current.APIHash != apiHash || current.Phone != phone {
 		current.Session = nil
+		current.Peers = nil
+		if a.live != nil {
+			a.live.loadPeers(nil)
+		}
 	}
 	current.APIID, current.APIHash, current.Phone = apiID, apiHash, phone
 	if err := a.state.store(ctx, current); err != nil {
@@ -466,6 +503,9 @@ func (a *MTProtoAdapter) SubmitMTProtoCode(ctx context.Context, code string) (Ad
 		a.authState = MTProtoAuthConnected
 	}
 	a.mu.Unlock()
+	if !passwordRequired {
+		a.initializeMTProtoLive(ctx, client)
+	}
 	return a.AdminStatus(ctx), nil
 }
 
@@ -495,6 +535,7 @@ func (a *MTProtoAdapter) SubmitMTProtoPassword(ctx context.Context, password []b
 	a.mu.Lock()
 	a.authState = MTProtoAuthConnected
 	a.mu.Unlock()
+	a.initializeMTProtoLive(ctx, client)
 	return a.AdminStatus(ctx), nil
 }
 func (a *MTProtoAdapter) setAuthError() { a.mu.Lock(); a.authState = MTProtoAuthError; a.mu.Unlock() }
@@ -512,6 +553,10 @@ func (a *MTProtoAdapter) LogoutMTProto(ctx context.Context) error {
 		return err
 	}
 	state.Session = nil
+	state.Peers = nil
+	if a.live != nil {
+		a.live.loadPeers(nil)
+	}
 	if err := a.state.store(ctx, state); err != nil {
 		return err
 	}
