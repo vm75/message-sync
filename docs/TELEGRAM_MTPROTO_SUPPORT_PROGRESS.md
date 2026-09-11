@@ -105,7 +105,7 @@ Avoid plaintext session-file storage. Adapt gotd session storage to encrypted `c
 
 ### Phase 3 — MTProto-only capability gains
 
-- [ ] #105 — Add MTProto full chat and forum-topic discovery with capability-aware admin APIs
+- [x] #105 — Add MTProto full chat and forum-topic discovery with capability-aware admin APIs
   - full joined-group discovery
   - direct target validation
   - complete forum-topic enumeration
@@ -288,6 +288,15 @@ The final implementation must cover at least:
 - Added live text/media, native reply/topic routing, reactions, edits and deletes through gotd while preserving media limits and privacy boundaries.
 - Self-originated bridge sends/mutations are suppressed while genuine linked-account user events remain routable; peer/session state remains isolated per Telegram connection.
 - Verification: focused MTProto live-adapter tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
+
+### #105 — complete
+
+- MTProto discovery now enumerates all joined supported Telegram basic groups and supergroups/forums without waiting for an observed message; private dialogs and broadcast-only channels remain excluded by product policy.
+- Discovery refreshes only encrypted operational peer/access-hash state; group/topic labels remain transient presentation metadata.
+- MTProto target validation resolves directly against current joined groups, while Bot API observed discovery/validation behavior is unchanged.
+- Added complete MTProto forum-topic enumeration with explicit General-topic ID `1`; no English label is fabricated when Telegram does not supply one.
+- Added a capability-specific topic-discovery API available only to MTProto connections.
+- Verification: focused transport/API discovery tests plus `go test ./...` and `go vet ./...` in the tested-change workflow.
 
 ## Completion rule
 

@@ -59,6 +59,10 @@ type telegramTargetValidator interface {
 	ValidateTelegramTarget(context.Context, string, string) error
 }
 
+type telegramTopicDiscoveryService interface {
+	TelegramTopicDiscovery(context.Context, string, string) (any, error)
+}
+
 type Options struct {
 	Addr       string
 	Logger     *slog.Logger
@@ -201,6 +205,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/connections/{id}", s.handleDeleteConnection)
 	s.mux.HandleFunc("GET /api/connections/{id}/status", s.handleGetConnectionStatus)
 	s.mux.HandleFunc("GET /api/connections/{id}/discovery", s.handleGetConnectionDiscovery)
+	s.mux.HandleFunc("GET /api/connections/{id}/telegram/topics", s.handleTelegramTopicDiscovery)
 	s.mux.HandleFunc("GET /api/connections/{id}/membership-readiness", s.handleGetMembershipReadiness)
 	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/setup", s.handleTelegramMTProtoSetup)
 	s.mux.HandleFunc("POST /api/connections/{id}/telegram/mtproto/send-code", s.handleTelegramMTProtoSendCode)

@@ -871,6 +871,21 @@ func (s *appConnectionService) ConnectionDiscovery(ctx context.Context, id strin
 	return nil, errors.New("discovery not supported for this transport")
 }
 
+func (s *appConnectionService) TelegramTopicDiscovery(ctx context.Context, id, remoteID string) (any, error) {
+	if s == nil || s.connMgr == nil {
+		return nil, errors.New("connection manager unavailable")
+	}
+	adapter, ok := s.connMgr.GetAdapter(id)
+	if !ok {
+		return nil, errors.New("connection is not running")
+	}
+	service, ok := adapter.(telegram.TopicDiscoveryService)
+	if !ok {
+		return nil, errors.New("full Telegram topic discovery is not supported")
+	}
+	return service.DiscoverTopics(ctx, remoteID)
+}
+
 func (s *appConnectionService) ValidateTelegramTarget(ctx context.Context, id, remoteID string) error {
 	if s == nil || s.connMgr == nil {
 		return telegram.ErrTargetValidationUnavailable

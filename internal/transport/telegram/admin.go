@@ -45,6 +45,17 @@ type DiscoveredChat struct {
 	Title    string `json:"title,omitempty"`
 	Username string `json:"username,omitempty"`
 	Type     string `json:"type"`
+	Forum    bool   `json:"forum,omitempty"`
+}
+
+type DiscoveredTopic struct {
+	RemoteID string `json:"remoteId"`
+	Label    string `json:"label,omitempty"`
+	General  bool   `json:"general,omitempty"`
+}
+
+type TopicDiscoveryService interface {
+	DiscoverTopics(context.Context, string) ([]DiscoveredTopic, error)
 }
 
 type AdminService interface {

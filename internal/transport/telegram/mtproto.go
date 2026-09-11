@@ -596,9 +596,9 @@ func (a *MTProtoAdapter) AdminStatus(_ context.Context) AdminStatus {
 	}
 	return status
 }
-func (a *MTProtoAdapter) DiscoverChats(context.Context) ([]DiscoveredChat, error) {
-	return nil, errors.New("full MTProto discovery is not enabled yet")
+func (a *MTProtoAdapter) DiscoverChats(ctx context.Context) ([]DiscoveredChat, error) {
+	return a.discoverMTProtoChats(ctx)
 }
-func (a *MTProtoAdapter) ValidateTarget(context.Context, string) error {
-	return ErrTargetValidationUnavailable
+func (a *MTProtoAdapter) ValidateTarget(ctx context.Context, remoteID string) error {
+	return a.validateMTProtoTarget(ctx, remoteID)
 }
