@@ -1,1 +1,0 @@
-chore: remove completed MTProto implementation tracker
