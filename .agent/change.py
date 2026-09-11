@@ -10,8 +10,13 @@ def decode_chunks(prefix):
     encoded = ''.join(p.read_text().strip() for p in parts)
     return gzip.decompress(base64.b64decode(encoded)).decode()
 
-(root / 'internal/transport/telegram/mtproto_live.go').write_text(decode_chunks('live'))
-(root / 'internal/transport/telegram/mtproto_live_test.go').write_text(decode_chunks('test'))
+live = decode_chunks('live')
+test = decode_chunks('test')
+for n, line in enumerate(live.splitlines(), 1):
+    if n <= 180 or 300 <= n <= 470:
+        print(f'MTPROTO_LIVE:{n:04d}:{line}')
+(root / 'internal/transport/telegram/mtproto_live.go').write_text(live)
+(root / 'internal/transport/telegram/mtproto_live_test.go').write_text(test)
 
 for p in root.glob('.agent/*.gz.b64.*'):
     p.unlink()
