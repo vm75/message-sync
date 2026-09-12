@@ -26,8 +26,9 @@ Start with targeted search and read only what the task needs:
 
 1. [`README.md`](README.md) for current scope, setup, and user-facing behavior.
 2. [`ARCHITECTURE.md`](ARCHITECTURE.md) for boundaries, data flow, and invariants.
-3. The package being changed and its tests.
-4. [`docs/FEATURE_COMPARISON.md`](docs/FEATURE_COMPARISON.md) only for capability or architectural comparisons.
+3. [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md) before changing sender attribution, WhatsApp PN/LID identity handling, Discord threads/forum posts, Telegram topics, reactions, polls, replies, edits, or any rendered bridge header.
+4. The package being changed and its tests.
+5. [`docs/FEATURE_COMPARISON.md`](docs/FEATURE_COMPARISON.md) only for capability or architectural comparisons.
 
 Use [`TESTING.md`](TESTING.md) for the full reliability gate, [`docs/TESTING_GUIDE.md`](docs/TESTING_GUIDE.md) for manual provider testing, and [`DOCKERHUB.md`](DOCKERHUB.md) for published-image usage.
 
@@ -70,6 +71,8 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
+- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and a friendly child-context attribution is `<group-alias>:<thread-or-topic-label>/<name>`. The `:` after the group alias is intentional child-context identification; do not replace it with `/` and do not add `thread:` or `topic:` prefixes. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Do not confuse child-context syntax with the default child-context mode: `childContextDisplayMode` currently defaults to `opaque`; the `group:child/name` form applies when `friendly` presentation is enabled.
 
 ## SQLite and Go conventions
 
@@ -102,6 +105,7 @@ AI agents MUST keep all repository documentation in sync with the implementation
 - `DOCKERHUB.md`: Public container overview, key features, image names, tags, environment variables, volume layouts, compose usage, and security hardening.
 - `ARCHITECTURE.md`: Components, dependency direction, data flow, schema definitions, privacy boundaries, lifecycle flow, failure/retry semantics, and REST API surface.
 - `AGENTS.md`: Agent workflow, repository map, definition of done, and mandatory constraints.
+- `docs/MESSAGE_PRESENTATION.md`: Exact sender attribution and child-context presentation syntax; update it whenever rendered bridge headers or identity precedence change.
 - `CHANGELOG.md`: Release notes, notable changes, and version history.
 - `TESTING.md` / `docs/TESTING_GUIDE.md`: Automated test commands, test coverage, manual provider testing steps, and troubleshooting.
 - `docs/FEATURE_COMPARISON.md`: Capability or architectural comparisons with upstream or alternative designs.
