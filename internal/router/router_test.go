@@ -254,7 +254,7 @@ func TestReplyLineageRetainsMultipleChildScopesAndOmitsNativeScopeHeader(t *test
 			sawNative = sent.outgoing.ChildScope != nil && sent.outgoing.ChildScope.Kind == transport.ScopeKindDiscordThread && sent.outgoing.ChildScope.RemoteID == "123456789012345678"
 		}
 		if sent.outgoing.Endpoint == "c1g3" {
-			sawFlat = strings.Contains(sent.outgoing.Text, "[contexts ") && strings.Contains(sent.outgoing.Text, hasher.ScopeToken("c1g1\x00discord_thread\x00123456789012345678"))
+			sawFlat = sent.outgoing.Text == "*_c1g2/topic/u_abcdefghij_*: reply from topic" && !strings.Contains(sent.outgoing.Text, "[contexts")
 		}
 	}
 	if !sawNative || !sawFlat {
@@ -462,13 +462,13 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 	known := testIncoming("c1g1", "known")
 	known.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-1"}
 	knownText, err := r.forwardedText(ctx, known)
-	if err != nil || knownText != "*_c1g1:Dinner \\* Plans/u_abcdefghij_*: hello" {
+	if err != nil || knownText != "*_c1g1/Dinner \\* Plans/u_abcdefghij_*: hello" {
 		t.Fatalf("friendly persisted child = %q, err=%v", knownText, err)
 	}
 	unknown := testIncoming("c1g1", "unknown")
 	unknown.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1"}
 	unknownText, err := r.forwardedText(ctx, unknown)
-	if err != nil || unknownText != "*_c1g1:topic/u_abcdefghij_*: hello" {
+	if err != nil || unknownText != "*_c1g1/topic/u_abcdefghij_*: hello" {
 		t.Fatalf("friendly unknown child = %q, err=%v", unknownText, err)
 	}
 	if err := r.Handle(ctx, known); err != nil {
@@ -481,7 +481,7 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		if sent.outgoing.RenderedText != knownText || strings.Contains(sent.outgoing.RenderedText, "[contexts") {
 			t.Fatalf("router did not propagate friendly rendered text: %#v", sent.outgoing)
 		}
-		if sent.outgoing.PollAttribution != "*_c1g1:Dinner \\* Plans/u_abcdefghij_*:" {
+		if sent.outgoing.PollAttribution != "*_c1g1/Dinner \\* Plans/u_abcdefghij_*:" {
 			t.Fatalf("router did not propagate structured poll attribution: %#v", sent.outgoing)
 		}
 	}
@@ -497,8 +497,8 @@ func TestFriendlyPollAttributionPrefersDisplayNameOverPhone(t *testing.T) {
 		Sender:     transport.Sender{DisplayName: "Display Name", PhoneNumber: "test-phone", OpaqueID: "u_hash"},
 		ChildScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1", Label: "Plans"},
 	}
-	got := r.friendlyPollAttribution(context.Background(), config.ChildContextDisplayFriendly, incoming, incoming.ChildScope)
-	if got != "*_wg2:Plans/Display Name_*:" {
+	got := r.childAwarePollAttribution(context.Background(), config.ChildContextDisplayFriendly, incoming, incoming.ChildScope)
+	if got != "*_wg2/Plans/Display Name_*:" {
 		t.Fatalf("poll attribution = %q, want display name without phone", got)
 	}
 }

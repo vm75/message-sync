@@ -330,11 +330,11 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
   - **Verify WhatsApp & Discord**: Mapped reply accurately references the original canonical message.
 
 - [ ] **Discord thread/forum post**: Send a message in a configured parent's thread or forum post.
-  - **Verify**: WhatsApp/Telegram flat copies show one deterministic `[contexts ...]` header without the raw thread ID; reply from either transport returns to the original thread.
+  - **Verify**: WhatsApp/Telegram flat copies show `<group-alias>/<thread-name>/<username>: <message>` with no `[contexts ...]` preamble or raw thread ID; reply from either transport returns to the original thread.
 - [ ] **Telegram forum topic**: Send a message in a non-General topic.
-  - **Verify**: flat copies show a deterministic privacy-safe context header; a WhatsApp or Discord reply is sent with the original `MessageThreadID`.
+  - **Verify**: flat copies show `<group-alias>/<topic-name>/<username>: <message>` (or generic `topic` when the name is unavailable), with no opaque context token; a WhatsApp or Discord reply is sent with the original `MessageThreadID`.
 - [ ] **Cross-child reply lineage**: Reply to the flattened Discord message from inside a Telegram topic.
-  - **Verify**: the canonical lineage retains both endpoint-specific scopes, Telegram remains in its topic, Discord returns to its thread, and WhatsApp receives deterministic presentation only.
+  - **Verify**: the canonical lineage retains both endpoint-specific scopes, Telegram remains in its topic, Discord returns to its thread, and WhatsApp receives only the human-facing group/child/user attribution.
 
 ### Scenario 4: Emoji Reactions
 - [ ] **React in Discord**: Add a `:thumbsup:` reaction to a bridged message in Discord.

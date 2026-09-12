@@ -560,12 +560,12 @@
                 <div class="form-group">
                   <label for="settings-child-context-mode" class="form-label">Thread/topic names</label>
                   <select id="settings-child-context-mode" class="form-select">
-                    <option value="opaque">Opaque context tokens — privacy-first; names are not stored</option>
+                    <option value="opaque">Transient thread/topic names — privacy-first; names are not stored</option>
                     <option value="friendly">Friendly thread/topic names — stores observed names in sync.db</option>
                   </select>
-                  <div class="form-hint">Friendly mode affects future display only. New names are learned locally; existing Telegram topics may show generic <code>topic</code> until observed. No provider backfill is performed. Disabling friendly names removes stored names; routing history is unaffected.</div>
+                  <div class="form-hint">Both modes render child messages as <code>group/thread-or-topic/user</code>. Transient mode uses the live child name when available (otherwise <code>thread</code>/<code>topic</code>) without storing it. Friendly mode also stores observed names so they remain available after restart. Disabling friendly names removes stored names; routing history is unaffected.</div>
                 </div>
-                <div class="form-hint">Examples: opaque <code>[contexts s_abcd1234]</code>; friendly <code>family:Travel/Alice</code> or <code>family/Alice</code>. Names are never parsed for routing, and unique child names are recommended but not required.</div>
+                <div class="form-hint">Examples: <code>family/Travel/Alice</code> or <code>family/Alice</code>. Opaque child IDs are never shown and names are never parsed for routing.</div>
               </div>
             </div>
 

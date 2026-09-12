@@ -117,6 +117,10 @@ func TestStaticHandler(t *testing.T) {
 			}
 		}
 
+		if strings.Contains(html, "Opaque context tokens") || strings.Contains(html, "[contexts s_") {
+			t.Fatal("settings UI still advertises opaque context tokens in forwarded messages")
+		}
+
 		dashboardStart := strings.Index(html, `id="view-dashboard"`)
 		dashboardEnd := strings.Index(html, `id="view-connections"`)
 		if dashboardStart < 0 || dashboardEnd <= dashboardStart {

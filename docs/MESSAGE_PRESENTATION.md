@@ -31,41 +31,36 @@ The router currently wraps the attribution portion in bold-italic provider marku
 When `childContextDisplayMode=friendly` and a Discord thread/forum-post or Telegram topic label is available, the visible attribution header is:
 
 ```text
-<group-alias>:<thread-or-topic-label>/<name>: <message>
+<group-alias>/<thread-or-topic-label>/<name>: <message>
 ```
 
 For example:
 
 ```text
-developers:Backend API/Alice: deployed the fix
-community:Travel Plans/Bob: Saturday works for me
+developers/Backend API/Alice: deployed the fix
+community/Travel Plans/Bob: Saturday works for me
 ```
 
-The colon between `<group-alias>` and `<thread-or-topic-label>` is **intentional**. It identifies the child-context boundary and is part of the presentation contract. Do not replace it with `/`, and do not add `thread:` or `topic:` prefixes unless the product contract is deliberately changed together with tests and documentation.
+The `/` separators are intentional and part of the presentation contract. Do not add `thread:` or `topic:` prefixes unless the product contract is deliberately changed together with tests and documentation.
 
-The child label itself is sufficient presentation context; routing still uses opaque child-scope identity and never parses this rendered header.
+The child label itself is sufficient presentation context; routing still uses opaque child-scope identity and never parses this rendered header. Opaque child IDs or context tokens must never be shown in forwarded messages.
 
-## Default child-context mode
+## Child-context storage mode
 
-The current default is `childContextDisplayMode=opaque`, not `friendly`.
+The current default is `childContextDisplayMode=opaque`. This setting controls **label persistence**, not the visible header shape.
 
-In `opaque` mode, the sender header remains:
+- `opaque`: use a live thread/topic label transiently when available; otherwise show the generic `thread` or `topic` fallback. Do not persist the child name.
+- `friendly`: use the same `<group>/<thread-or-topic>/<user>` header and additionally persist bounded observed labels so names can survive restart/replay.
 
-```text
-<group-alias>/<name>: <message>
-```
-
-and flattened child lineage may be represented separately by the router's opaque `[contexts ...]` presentation header. Friendly labels are presentation-only and have no routing authority.
-
-Therefore, the friendly thread/topic syntax above is the invariant **when friendly child-context presentation is enabled**; it is not the default child-context storage/presentation mode.
+Both modes therefore use the same human-facing syntax and neither mode emits an opaque context preamble. ChildScope IDs remain internal routing metadata only.
 
 ## Do-not-regress checklist
 
 Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/forum posts, Telegram topics, reactions, polls, edits, replies, or routing presentation must preserve these rules unless a product change explicitly says otherwise:
 
 - ordinary attribution: `<group-alias>/<name>`;
-- friendly child attribution: `<group-alias>:<thread-or-topic-label>/<name>`;
-- `:` after the group alias is the intentional child-context delimiter;
+- child attribution: `<group-alias>/<thread-or-topic-label>/<name>`;
+- `/` separates the group alias, child label, and sender;
 - display name wins over phone number in `push_name` mode;
 - phone number is only a fallback when display name is absent;
 - hash mode continues to use the opaque sender ID;

@@ -60,6 +60,13 @@ podman compose -f compose.yml config
 - Use `log/slog` with explicit safe fields and route arbitrary errors through `internal/safelog`.
 - Never log endpoint remote target IDs, bot/webhook tokens, `IDENTITY_SECRET`, or provider structs.
 
+## Change-control invariant
+
+- Existing observable behavior is a compatibility contract unless the task explicitly requests a product change. Do not alter message formatting, defaults, routing semantics, persistence/privacy behavior, API payloads, transport behavior, UI workflow, or lifecycle semantics as a side effect of an unrelated fix or refactor.
+- Before changing established behavior, identify the explicit user request or issue acceptance criterion that authorizes it. If none exists, preserve the behavior and make the smallest implementation change that satisfies the task.
+- When shared code is touched, add regression tests for behavior that must remain unchanged. Do not reinterpret ambiguous requirements as permission to redesign existing behavior.
+- Documentation and refactors must describe the current contract; they must not silently redefine it. Intentional behavior changes require code, tests, and permanent documentation to change together.
+
 ## Architecture invariants
 
 - Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out.
@@ -71,8 +78,8 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
-- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and a friendly child-context attribution is `<group-alias>:<thread-or-topic-label>/<name>`. The `:` after the group alias is intentional child-context identification; do not replace it with `/` and do not add `thread:` or `topic:` prefixes. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
-- Do not confuse child-context syntax with the default child-context mode: `childContextDisplayMode` currently defaults to `opaque`; the `group:child/name` form applies when `friendly` presentation is enabled.
+- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
 ## SQLite and Go conventions
 
