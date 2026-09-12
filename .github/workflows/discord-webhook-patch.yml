@@ -1,0 +1,68 @@
+name: Apply Discord explicit webhook patch
+
+on:
+  push:
+    branches:
+      - agent/telegram-mtproto-support
+    paths:
+      - .agent/commit-message.txt
+
+permissions:
+  contents: write
+
+jobs:
+  apply-test-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/telegram-mtproto-support
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Apply change
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s .agent/change.py
+          test -s .agent/commit-message.txt
+          python3 .agent/change.py
+          rm -f .agent/change.py
+          git add -A
+      - name: Format
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed="$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)"
+          if [[ -n "$changed" ]]; then
+            while IFS= read -r f; do gofmt -w "$f"; git add "$f"; done <<< "$changed"
+          fi
+      - name: Tidy modules
+        run: |
+          go mod tidy
+          git add go.mod go.sum
+      - name: Browser syntax
+        run: |
+          node --check internal/api/web/js/api.js
+          node --check internal/api/web/js/app-base.js
+          node --check internal/api/web/js/app.js
+      - name: Test
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Commit tested change
+        shell: bash
+        env:
+          COMMIT_AUTHOR_NAME: vm75
+          COMMIT_AUTHOR_EMAIL: vm75@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          msg="$(cat .agent/commit-message.txt)"
+          rm -f .agent/commit-message.txt .github/workflows/discord-webhook-patch.yml
+          git config user.name "$COMMIT_AUTHOR_NAME"
+          git config user.email "$COMMIT_AUTHOR_EMAIL"
+          git add -A
+          git commit -m "$msg"
+          git push origin HEAD:agent/telegram-mtproto-support
