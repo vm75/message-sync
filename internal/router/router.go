@@ -535,18 +535,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return err
 		}
 
-		username := incoming.Sender.OpaqueID
-		if r.getUsernameMode() == config.UsernameModePushName {
-			displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-			phone := incoming.Sender.PhoneNumber
-			if phone != "" && displayName != "" {
-				username = fmt.Sprintf("%s (%s)", phone, displayName)
-			} else if displayName != "" {
-				username = displayName
-			} else if phone != "" {
-				username = phone
-			}
-		}
+		username := senderPresentationUsername(incoming.Sender, r.getUsernameMode())
 		fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
 		if emoji != "" {
 			fallbackText = fmt.Sprintf("%s/%s reacted %s to a message", incoming.Endpoint, username, emoji)
@@ -1002,16 +991,7 @@ func (r *Router) friendlyPollAttribution(ctx context.Context, mode config.ChildC
 	if mode != config.ChildContextDisplayFriendly {
 		return ""
 	}
-	username := incoming.Sender.OpaqueID
-	if r.getUsernameMode() == config.UsernameModePushName {
-		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-		phone := incoming.Sender.PhoneNumber
-		if displayName != "" {
-			username = displayName
-		} else if phone != "" {
-			username = phone
-		}
-	}
+	username := senderPresentationUsername(incoming.Sender, r.getUsernameMode())
 	if strings.TrimSpace(username) == "" {
 		return ""
 	}
@@ -1374,18 +1354,7 @@ func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming)
 }
 
 func (r *Router) senderLabel(ctx context.Context, incoming transport.Incoming) (string, error) {
-	username := incoming.Sender.OpaqueID
-	if r.getUsernameMode() == config.UsernameModePushName {
-		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-		phone := incoming.Sender.PhoneNumber
-		if phone != "" && displayName != "" {
-			username = fmt.Sprintf("%s (%s)", phone, displayName)
-		} else if displayName != "" {
-			username = displayName
-		} else if phone != "" {
-			username = phone
-		}
-	}
+	username := senderPresentationUsername(incoming.Sender, r.getUsernameMode())
 	if strings.TrimSpace(username) == "" {
 		return "", errors.New("incoming sender identity is required")
 	}
@@ -1454,6 +1423,18 @@ func (r *Router) withChildContextHeaders(incoming transport.Incoming, destinatio
 		return text
 	}
 	return "[contexts " + strings.Join(labels, " ") + "]\n" + text
+}
+
+func senderPresentationUsername(sender transport.Sender, mode config.UsernameMode) string {
+	if mode == config.UsernameModePushName {
+		if displayName := normalizeDisplayName(sender.DisplayName); displayName != "" {
+			return displayName
+		}
+		if sender.PhoneNumber != "" {
+			return sender.PhoneNumber
+		}
+	}
+	return sender.OpaqueID
 }
 
 func normalizeDisplayName(value string) string {

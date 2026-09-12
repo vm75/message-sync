@@ -380,7 +380,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		t.Fatalf("destinations = %v, want set %v", gotEndpoints, wantEndpoints)
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "*_c1g2/15551234567 (Alice Example)_*: hello" {
+		if sent.outgoing.Text != "*_c1g2/Alice Example_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 		if sent.outgoing.SourceText != "hello" || sent.outgoing.Sender.DisplayName != "  Alice   Example  " {
@@ -1630,4 +1630,26 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 func cryptoSHA256(s string) []byte {
 	h := sha256.Sum256([]byte(s))
 	return h[:]
+}
+
+func TestSenderPresentationUsernamePrefersDisplayNameAndFallsBackSafely(t *testing.T) {
+	sender := transport.Sender{
+		DisplayName: "  Alice   Example  ",
+		PhoneNumber: "15551234567",
+		OpaqueID:    "u_abcdefghij",
+	}
+
+	if got := senderPresentationUsername(sender, config.UsernameModePushName); got != "Alice Example" {
+		t.Fatalf("push-name presentation = %q, want display name without phone number", got)
+	}
+
+	sender.DisplayName = ""
+	if got := senderPresentationUsername(sender, config.UsernameModePushName); got != "15551234567" {
+		t.Fatalf("push-name presentation without display name = %q, want phone fallback", got)
+	}
+
+	sender.DisplayName = "Alice Example"
+	if got := senderPresentationUsername(sender, config.UsernameModeHash); got != "u_abcdefghij" {
+		t.Fatalf("hash presentation = %q, want opaque ID", got)
+	}
 }
