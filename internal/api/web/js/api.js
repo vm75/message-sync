@@ -205,6 +205,29 @@
       return this.request(`/api/connections/${encodeURIComponent(id)}/discovery`);
     },
 
+    async setupTelegramMTProto(id, apiId, apiHash, phone) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/mtproto/setup`, { method: 'POST', body: { apiId, apiHash, phone } });
+    },
+    async requestTelegramMTProtoCode(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/mtproto/send-code`, { method: 'POST' });
+    },
+    async submitTelegramMTProtoCode(id, code) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/mtproto/code`, { method: 'POST', body: { code } });
+    },
+    async submitTelegramMTProtoPassword(id, password) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/mtproto/password`, { method: 'POST', body: { password } });
+    },
+    async logoutTelegramMTProto(id) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/logout`, { method: 'POST' });
+    },
+    async getTelegramTopics(id, remoteId) {
+      const query = new URLSearchParams({ remoteId });
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/topics?${query.toString()}`);
+    },
+    async backfillTelegramMTProto(id, endpoint, maxEvents, maxAgeHours) {
+      return this.request(`/api/connections/${encodeURIComponent(id)}/telegram/backfill`, { method: 'POST', body: { endpoint, maxEvents, maxAgeHours } });
+    },
+
     async pairWhatsAppConnection(id) {
       return this.request(`/api/connections/${encodeURIComponent(id)}/pair`, {
         method: 'POST'

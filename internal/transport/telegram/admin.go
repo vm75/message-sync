@@ -29,12 +29,15 @@ type EndpointReadiness struct {
 
 type AdminStatus struct {
 	TokenConfigured    bool                `json:"tokenConfigured"`
+	IntegrationMode    string              `json:"integrationMode,omitempty"`
+	Configured         bool                `json:"configured,omitempty"`
 	Running            bool                `json:"running"`
 	Status             string              `json:"status"`
 	Endpoints          []EndpointReadiness `json:"endpoints"`
 	PrivacyModeKnown   bool                `json:"privacyModeKnown"`
 	PrivacyModeEnabled *bool               `json:"privacyModeEnabled,omitempty"`
 	VisibilityGuidance string              `json:"visibilityGuidance"`
+	Capabilities       Capabilities        `json:"capabilities"`
 }
 
 type DiscoveredChat struct {
@@ -42,6 +45,17 @@ type DiscoveredChat struct {
 	Title    string `json:"title,omitempty"`
 	Username string `json:"username,omitempty"`
 	Type     string `json:"type"`
+	Forum    bool   `json:"forum,omitempty"`
+}
+
+type DiscoveredTopic struct {
+	RemoteID string `json:"remoteId"`
+	Label    string `json:"label,omitempty"`
+	General  bool   `json:"general,omitempty"`
+}
+
+type TopicDiscoveryService interface {
+	DiscoverTopics(context.Context, string) ([]DiscoveredTopic, error)
 }
 
 type AdminService interface {
@@ -57,11 +71,13 @@ type observedChatEntry struct {
 
 func (a *Adapter) AdminStatus(ctx context.Context) AdminStatus {
 	status := AdminStatus{
+		IntegrationMode:    "bot",
 		TokenConfigured:    false,
 		Status:             "not_configured",
 		Endpoints:          []EndpointReadiness{},
 		PrivacyModeKnown:   false,
 		VisibilityGuidance: VisibilityGuidance,
+		Capabilities:       CapabilitiesForIntegrationMode("bot"),
 	}
 	if a == nil {
 		return status

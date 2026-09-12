@@ -552,3 +552,103 @@ func TestConnections_DiscoveryScopedByConnection(t *testing.T) {
 		t.Fatalf("unexpected discovery response: %+v", channels)
 	}
 }
+
+func TestConnections_TelegramIntegrationModeIsImmutableAndDeleteRemovesState(t *testing.T) {
+	srv, _, db, adminToken, _ := setupConnectionsTestEnv(t)
+	create := authenticatedConnectionRequest(t, srv, adminToken, http.MethodPost, "/api/connections", `{"id":"conn-mt-hard","transport":"telegram","integrationMode":"mtproto","label":"Phone Telegram"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create MTProto: %d %s", create.Code, create.Body.String())
+	}
+	patch := authenticatedConnectionRequest(t, srv, adminToken, http.MethodPatch, "/api/connections/conn-mt-hard", `{"integrationMode":"bot"}`)
+	if patch.Code != http.StatusConflict {
+		t.Fatalf("mode change status=%d body=%s", patch.Code, patch.Body.String())
+	}
+	var mode string
+	if err := db.QueryRow(`SELECT integration_mode FROM transport_connections WHERE id='conn-mt-hard'`).Scan(&mode); err != nil || mode != "mtproto" {
+		t.Fatalf("mode=%q err=%v", mode, err)
+	}
+	del := authenticatedConnectionRequest(t, srv, adminToken, http.MethodDelete, "/api/connections/conn-mt-hard", "")
+	if del.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", del.Code, del.Body.String())
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM transport_connections WHERE id='conn-mt-hard'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("deleted MTProto state remains count=%d err=%v", count, err)
+	}
+}
+
+func TestConnections_DiscordExplicitWebhookCredential(t *testing.T) {
+	srv, _, controlDB, adminToken, _ := setupConnectionsTestEnv(t)
+	body := `{"id":"conn-dc-hook","transport":"discord","integrationMode":"webhook","label":"Webhook Discord","token":"bot-secret","webhookUrl":"https://discord.com/api/webhooks/123456789/webhook-secret","channelId":"987654321012345678"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/connections", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+adminToken)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create explicit webhook connection got %d: %s", rec.Code, rec.Body.String())
+	}
+	response := rec.Body.String()
+	for _, forbidden := range []string{"bot-secret", "webhook-secret", "webhookUrl", "channelId"} {
+		if strings.Contains(response, forbidden) {
+			t.Fatalf("create response leaked Discord credential field %q: %s", forbidden, response)
+		}
+	}
+	if !strings.Contains(response, `"integrationMode":"webhook"`) {
+		t.Fatalf("response missing explicit webhook integration mode: %s", response)
+	}
+
+	var encrypted, nonce []byte
+	if err := controlDB.QueryRow(`SELECT encrypted_credential, credential_nonce FROM transport_connections WHERE id = 'conn-dc-hook'`).Scan(&encrypted, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := srv.credentialCipher.Decrypt(encrypted, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err := discord.DecodeStoredCredential("webhook", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.BotToken != "bot-secret" || credential.ChannelID != "987654321012345678" || !strings.Contains(credential.WebhookURL, "webhook-secret") {
+		t.Fatalf("unexpected stored Discord webhook credential: %#v", credential)
+	}
+
+	patch := httptest.NewRequest(http.MethodPatch, "/api/connections/conn-dc-hook", strings.NewReader(`{"token":"replacement-bot-secret"}`))
+	patch.Header.Set("Authorization", "Bearer "+adminToken)
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, patch)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replace bot token got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := controlDB.QueryRow(`SELECT encrypted_credential, credential_nonce FROM transport_connections WHERE id = 'conn-dc-hook'`).Scan(&encrypted, &nonce); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = srv.credentialCipher.Decrypt(encrypted, nonce)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential, err = discord.DecodeStoredCredential("webhook", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if credential.BotToken != "replacement-bot-secret" || credential.ChannelID != "987654321012345678" || !strings.Contains(credential.WebhookURL, "webhook-secret") {
+		t.Fatalf("bot token replacement did not preserve explicit webhook binding: %#v", credential)
+	}
+}
+
+func TestConnections_DiscordExplicitWebhookRequiresURLAndChannel(t *testing.T) {
+	srv, _, _, adminToken, _ := setupConnectionsTestEnv(t)
+	for _, body := range []string{
+		`{"transport":"discord","integrationMode":"webhook","label":"bad","token":"bot-secret","channelId":"123456789"}`,
+		`{"transport":"discord","integrationMode":"webhook","label":"bad","token":"bot-secret","webhookUrl":"https://discord.com/api/webhooks/123/token"}`,
+		`{"transport":"discord","integrationMode":"webhook","label":"bad","token":"bot-secret","webhookUrl":"https://example.com/api/webhooks/123/token","channelId":"123456789"}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/connections", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid explicit webhook create got %d, want 400: %s", rec.Code, rec.Body.String())
+		}
+	}
+}

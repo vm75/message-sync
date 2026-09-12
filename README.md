@@ -18,7 +18,7 @@
   - Message edit and deletion/revocation propagation with canonical tombstones to prevent replay resurrection.
 - **Native & Aggregate Polls**: Native polls across WhatsApp, Discord, and Telegram where destination semantics are representable; cross-endpoint Discord and Telegram polls include the source label in the visible poll presentation, while unsupported poll shapes use deterministic text fallback. Includes aggregate-only live-result companion messages, plus live on-demand aggregate responses that continue updating as votes/snapshots change, via configurable reply triggers (supports multiple triggers, e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions and options survive server restarts without entering the PII-free routing database.
 - **Source-Local Message Suppression**: Configurable prefix filtering (supports multiple prefixes, e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before canonicalization, transmission, or media loading; edits, reactions, and deletes for suppressed messages also remain local.
-- **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints; supports privacy-first `opaque` (default) and presentation-only `friendly` label modes.
+- **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints. Forwarded child messages use `<group-alias>/<thread-or-topic>/<username>`; opaque provider child IDs never appear in message text. `opaque` (default) keeps names transient, while `friendly` may persist bounded labels for restart/replay presentation.
 - **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
 - **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration, and live runtime configuration reload without process restarts.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
@@ -36,7 +36,7 @@ The core routing boundary is deliberately content-free at rest:
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
-- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram credentials, and experimental membership verification.
+- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord bot/webhook credentials, encrypted Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. Discord webhook URLs and bot tokens are never returned through read APIs; Telegram OTPs and 2FA passwords are never persisted.
 - Membership evidence is stored privately under `/data/membership-evidence/`, removed on final approve/reject decisions, and subject to bounded cleanup when the experimental verification workflow is used.
 
 The optional `friendly` child-context display mode stores bounded current thread/topic labels in `sync.db` for presentation only. The default `opaque` mode does not; labels never control routing or identity.
@@ -81,13 +81,55 @@ Create a WhatsApp connection, start pairing, then scan the QR code from **Linked
 
 ### Discord
 
-Create a Discord bot, enable the privileged **Message Content** intent, and grant **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks** in destination channels. Paste the bot token once when creating the connection; the service encrypts it in `control.db` and never returns it through read APIs.
+Discord always uses a **bot token** for inbound Gateway events and native Discord operations. Enable the privileged **Message Content** intent in the Discord Developer Portal, install the bot in the target server, and grant the permissions required by the features you use. At minimum for normal bidirectional message sync, grant **View Channel**, **Read Message History**, and **Send Messages**; grant **Add Reactions** for reaction sync and the appropriate thread/poll permissions for those features.
+
+`message-sync` supports two outbound webhook setups. Choose one when creating the Discord connection.
+
+#### Option A — managed webhook (default)
+
+Use this when you want the simplest setup or one Discord bot connection to serve multiple channels.
+
+1. Create the Discord application and bot, enable **Message Content** intent, and copy the bot token.
+2. Install the bot in the server with **View Channel**, **Read Message History**, **Send Messages**, **Manage Webhooks**, plus any reaction/thread/poll permissions you need.
+3. In `message-sync`, create a Discord connection and choose **Managed by message-sync**.
+4. Paste the bot token once.
+5. Use **Discover** to add one or more Discord channels as endpoints.
+
+For every configured channel, `message-sync` finds or creates one bridge-owned webhook and keeps the webhook credential only inside the Discord adapter process. The bot needs **Manage Webhooks** because it provisions and repairs those webhooks.
+
+#### Option B — existing webhook + channel ID
+
+Use this when you prefer to create the webhook yourself and do **not** want to grant the bot **Manage Webhooks**.
+
+1. Create the Discord application and bot, enable **Message Content** intent, and copy the bot token.
+2. Install the bot in the server with **View Channel**, **Read Message History**, **Send Messages**, plus any reaction/thread/poll permissions you need. **Manage Webhooks is not required.**
+3. In Discord, open the target channel's **Edit Channel → Integrations → Webhooks**, create a webhook, and copy its webhook URL.
+4. Enable Discord Developer Mode if necessary, then copy the same channel's numeric **Channel ID**.
+5. In `message-sync`, create a Discord connection and choose **Use existing webhook + channel ID**.
+6. Paste the **bot token**, **webhook URL**, and matching **channel ID**.
+7. Use **Discover**; this connection exposes only the configured channel, which you can then add as an endpoint.
+
+The bot token is still required in this mode. The bot listens for Discord → WhatsApp/Telegram messages, edits, reactions, polls, threads, and history events; the supplied webhook handles WhatsApp/Telegram → Discord message delivery and webhook-owned edits/deletes. Messages sent by that webhook are recognized as bridge-owned and ignored on ingress to prevent loops.
+
+An explicit-webhook Discord connection is intentionally bound to **one Discord channel**. Use managed-webhook mode when one connection must serve multiple Discord channels. The bot token and explicit webhook URL are encrypted in `control.db` and are never returned by connection read APIs.
+
+| Discord requirement | Managed webhook | Existing webhook + channel ID |
+|---|---:|---:|
+| Bot application + bot token | Required | Required |
+| Message Content intent | Required for ordinary message ingress | Required for ordinary message ingress |
+| View Channel / Read Message History | Required | Required |
+| Send Messages | Required for native bot operations | Required for native bot operations |
+| Add Reactions | Required only for reaction sync | Required only for reaction sync |
+| Manage Webhooks | **Required** | **Not required** |
+| Webhook creation | Automatic | Manual |
+| Channel ID entry | Discovered | Entered during connection setup |
+| Multiple Discord channels per connection | Yes | No — one configured channel |
 
 ### Telegram
 
-Create a bot with BotFather, disable Bot Privacy Mode, add it to target groups, and make it an administrator when per-user reaction updates are required. Disable anonymous reactions in those groups. Telegram discovery is observation-based, so send a message after adding the bot before refreshing discovered chats. Broadcast channels are not supported.
+Telegram connections support two mutually exclusive methods: **Bot API** (BotFather token, observation-based discovery, Bot Privacy Mode applies) and **Phone / MTProto** (Telegram API ID/hash + phone login, complete joined-group/forum-topic discovery, and bounded history recovery). Both use the canonical `telegram` transport, but every endpoint names exactly one connection and never falls back to the other method. Private DMs and broadcast channels are not synchronized.
 
-See the [manual testing guide](docs/TESTING_GUIDE.md) for detailed provider setup and end-to-end checks.
+See [Telegram integrations](docs/TELEGRAM.md) for the capability comparison, secure phone/code/2FA setup, session storage model, recovery behavior, and troubleshooting. See the [manual testing guide](docs/TESTING_GUIDE.md) for broader end-to-end checks.
 
 ## Configuration
 
@@ -111,7 +153,7 @@ Deployment settings come from the environment; routing and feature settings are 
 | `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
 | `MESSAGE_SYNC_DATA_DIR` | no | `./data` | Host-side `/data` bind source used by `compose.yml`; it is not read by the service. |
 
-Discord and Telegram tokens are configured dynamically, encrypted with AES-256-GCM in `control.db`, and never belong in `.env`.
+Discord bot tokens, optional explicit Discord webhook URLs, Telegram Bot API tokens, and Telegram MTProto application/session state are configured dynamically and encrypted with AES-256-GCM in `control.db`; they never belong in `.env`.
 
 ### Runtime settings
 
@@ -154,6 +196,7 @@ The complete automated gate and safe smoke-test procedure are in [TESTING.md](TE
 - [Architecture and privacy invariants](ARCHITECTURE.md)
 - [Automated testing](TESTING.md)
 - [Manual provider testing](docs/TESTING_GUIDE.md)
+- [Telegram Bot API and Phone/MTProto setup](docs/TELEGRAM.md)
 - [Container images](DOCKERHUB.md)
 - [Feature comparison](docs/FEATURE_COMPARISON.md)
 - [Contributor and coding-agent guide](AGENTS.md)

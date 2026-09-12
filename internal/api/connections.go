@@ -9,29 +9,37 @@ import (
 
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/safelog"
+	discord "github.com/vm75/message-sync/internal/transport/discord"
+	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 )
 
 type ConnectionDTO struct {
-	ID        string `json:"id"`
-	Transport string `json:"transport"`
-	Label     string `json:"label"`
-	Enabled   bool   `json:"enabled"`
-	CreatedAt int64  `json:"createdAt"`
-	UpdatedAt int64  `json:"updatedAt"`
+	ID              string                 `json:"id"`
+	Transport       string                 `json:"transport"`
+	IntegrationMode string                 `json:"integrationMode,omitempty"`
+	Capabilities    *telegram.Capabilities `json:"capabilities,omitempty"`
+	Label           string                 `json:"label"`
+	Enabled         bool                   `json:"enabled"`
+	CreatedAt       int64                  `json:"createdAt"`
+	UpdatedAt       int64                  `json:"updatedAt"`
 }
 
 type CreateConnectionRequest struct {
-	ID        string `json:"id,omitempty"`
-	Transport string `json:"transport"`
-	Label     string `json:"label"`
-	Enabled   *bool  `json:"enabled,omitempty"`
-	Token     string `json:"token,omitempty"`
+	ID              string `json:"id,omitempty"`
+	Transport       string `json:"transport"`
+	Label           string `json:"label"`
+	Enabled         *bool  `json:"enabled,omitempty"`
+	Token           string `json:"token,omitempty"`
+	IntegrationMode string `json:"integrationMode,omitempty"`
+	WebhookURL      string `json:"webhookUrl,omitempty"`
+	ChannelID       string `json:"channelId,omitempty"`
 }
 
 type UpdateConnectionRequest struct {
-	Label   *string `json:"label,omitempty"`
-	Enabled *bool   `json:"enabled,omitempty"`
-	Token   *string `json:"token,omitempty"`
+	Label           *string `json:"label,omitempty"`
+	Enabled         *bool   `json:"enabled,omitempty"`
+	Token           *string `json:"token,omitempty"`
+	IntegrationMode *string `json:"integrationMode,omitempty"`
 }
 
 func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +48,7 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.controlDB.QueryContext(r.Context(), `
-		SELECT id, transport, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
 		FROM transport_connections
 		ORDER BY id ASC
 	`)
@@ -54,11 +62,12 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 	conns := make([]ConnectionDTO, 0)
 	for rows.Next() {
 		var dto ConnectionDTO
-		if err := rows.Scan(&dto.ID, &dto.Transport, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt); err != nil {
+		if err := rows.Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt); err != nil {
 			safelog.Error(s.logger, "scan connection failed", "connection_list", err)
 			WriteError(w, http.StatusInternalServerError, "failed to scan connection")
 			return
 		}
+		applyConnectionCapabilities(&dto)
 		conns = append(conns, dto)
 	}
 	if err := rows.Err(); err != nil {
@@ -82,10 +91,10 @@ func (s *Server) handleGetConnection(w http.ResponseWriter, r *http.Request) {
 
 	var dto ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&dto.ID, &dto.Transport, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt)
+	`, id).Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -95,6 +104,7 @@ func (s *Server) handleGetConnection(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, http.StatusInternalServerError, "failed to query connection")
 		return
 	}
+	applyConnectionCapabilities(&dto)
 	_ = WriteJSON(w, http.StatusOK, dto)
 }
 
@@ -113,11 +123,19 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	req.Label = strings.TrimSpace(req.Label)
 	req.ID = strings.TrimSpace(req.ID)
 	req.Token = strings.TrimSpace(req.Token)
+	req.IntegrationMode = strings.TrimSpace(req.IntegrationMode)
+	req.WebhookURL = strings.TrimSpace(req.WebhookURL)
+	req.ChannelID = strings.TrimSpace(req.ChannelID)
 
 	if req.Transport != "whatsapp" && req.Transport != "discord" && req.Transport != "telegram" {
 		WriteError(w, http.StatusBadRequest, "invalid transport: must be whatsapp, discord, or telegram")
 		return
 	}
+	if err := controlstore.ValidateIntegrationMode(req.Transport, req.IntegrationMode); err != nil {
+		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.IntegrationMode = controlstore.NormalizeIntegrationMode(req.Transport, req.IntegrationMode)
 	if req.Label == "" {
 		WriteError(w, http.StatusBadRequest, "connection label is required")
 		return
@@ -151,23 +169,42 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 		enabled = *req.Enabled
 	}
 
-	var encCred, nonce []byte
-	if req.Transport == "whatsapp" {
+	var credential []byte
+	switch {
+	case req.Transport == "whatsapp":
 		if req.Token != "" {
 			WriteError(w, http.StatusBadRequest, "whatsapp connections must not store credentials")
 			return
 		}
-	} else {
-		if req.Token == "" {
-			WriteError(w, http.StatusBadRequest, req.Transport+" connections require a bot token")
+	case req.Transport == "discord":
+		var credentialErr error
+		credential, credentialErr = discord.EncodeStoredCredential(req.IntegrationMode, req.Token, req.WebhookURL, req.ChannelID)
+		if credentialErr != nil {
+			WriteError(w, http.StatusBadRequest, credentialErr.Error())
 			return
 		}
+	case req.Transport == "telegram" && req.IntegrationMode == controlstore.TelegramIntegrationModeBot:
+		if req.Token == "" {
+			WriteError(w, http.StatusBadRequest, "telegram connections require a bot token")
+			return
+		}
+		credential = []byte(req.Token)
+	case req.Transport == "telegram" && req.IntegrationMode == controlstore.TelegramIntegrationModeMTProto:
+		if req.Token != "" {
+			WriteError(w, http.StatusBadRequest, "mtproto connections do not accept bot tokens")
+			return
+		}
+		credential = []byte(`{"version":1}`)
+	}
+
+	var encCred, nonce []byte
+	if len(credential) > 0 {
 		if s.credentialCipher == nil {
 			WriteError(w, http.StatusInternalServerError, "credential cipher unavailable")
 			return
 		}
 		var encErr error
-		encCred, nonce, encErr = s.credentialCipher.Encrypt([]byte(req.Token))
+		encCred, nonce, encErr = s.credentialCipher.Encrypt(credential)
 		if encErr != nil {
 			safelog.Error(s.logger, "encrypt connection credential failed", "connection_create", encErr)
 			WriteError(w, http.StatusInternalServerError, "failed to secure credentials")
@@ -185,6 +222,7 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	conn := controlstore.Connection{
 		ID:                   req.ID,
 		Transport:            req.Transport,
+		IntegrationMode:      req.IntegrationMode,
 		Label:                req.Label,
 		Enabled:              enabled,
 		EncryptedCredential:  encCred,
@@ -210,9 +248,9 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 			nonceVal = nonce
 		}
 		_, err := s.controlDB.ExecContext(r.Context(), `
-			INSERT INTO transport_connections (id, transport, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, conn.ID, conn.Transport, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
+			INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
 		if err != nil {
 			safelog.Error(s.logger, "insert connection failed", "connection_create", err)
 			WriteError(w, http.StatusInternalServerError, "failed to create connection")
@@ -223,14 +261,7 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	s.audit(r, "connection_created", conn.ID)
 	s.notifyConfigChange(r.Context())
 
-	_ = WriteJSON(w, http.StatusCreated, ConnectionDTO{
-		ID:        conn.ID,
-		Transport: conn.Transport,
-		Label:     conn.Label,
-		Enabled:   conn.Enabled,
-		CreatedAt: conn.CreatedAt,
-		UpdatedAt: conn.UpdatedAt,
-	})
+	_ = WriteJSON(w, http.StatusCreated, connectionDTOFromControl(conn))
 }
 
 func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) {
@@ -254,10 +285,10 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	var encCred, nonce []byte
 	var createdBy sql.NullString
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -269,6 +300,19 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	conn.EncryptedCredential = encCred
 	conn.CredentialNonce = nonce
+	conn.IntegrationMode = controlstore.NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
+	if req.IntegrationMode != nil {
+		requestedMode := strings.TrimSpace(*req.IntegrationMode)
+		if err := controlstore.ValidateIntegrationMode(conn.Transport, requestedMode); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		requestedMode = controlstore.NormalizeIntegrationMode(conn.Transport, requestedMode)
+		if requestedMode != conn.IntegrationMode {
+			WriteError(w, http.StatusConflict, "connection integration mode cannot be changed in place; create a new connection and reassign endpoints")
+			return
+		}
+	}
 	oldEncCred := append([]byte(nil), encCred...)
 	oldNonce := append([]byte(nil), nonce...)
 	oldKeyVersion := conn.CredentialKeyVersion
@@ -299,6 +343,10 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 
 	credentialReplaced := req.Token != nil
 	if credentialReplaced {
+		if conn.Transport == "telegram" && conn.IntegrationMode == controlstore.TelegramIntegrationModeMTProto {
+			WriteError(w, http.StatusBadRequest, "mtproto credentials are managed through Telegram authentication endpoints")
+			return
+		}
 		if conn.Transport == "whatsapp" {
 			WriteError(w, http.StatusBadRequest, "whatsapp connections must not store credentials")
 			return
@@ -312,7 +360,25 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 			WriteError(w, http.StatusInternalServerError, "credential cipher unavailable")
 			return
 		}
-		newEnc, newNonce, encErr := s.credentialCipher.Encrypt([]byte(tok))
+		replacement := []byte(tok)
+		if conn.Transport == "discord" {
+			currentRaw, decryptErr := s.credentialCipher.Decrypt(conn.EncryptedCredential, conn.CredentialNonce)
+			if decryptErr != nil {
+				WriteError(w, http.StatusInternalServerError, "failed to read existing Discord credentials")
+				return
+			}
+			currentCredential, decodeErr := discord.DecodeStoredCredential(conn.IntegrationMode, currentRaw)
+			if decodeErr != nil {
+				WriteError(w, http.StatusInternalServerError, "failed to read existing Discord credentials")
+				return
+			}
+			replacement, decodeErr = discord.EncodeStoredCredential(conn.IntegrationMode, tok, currentCredential.WebhookURL, currentCredential.ChannelID)
+			if decodeErr != nil {
+				WriteError(w, http.StatusBadRequest, decodeErr.Error())
+				return
+			}
+		}
+		newEnc, newNonce, encErr := s.credentialCipher.Encrypt(replacement)
 		if encErr != nil {
 			safelog.Error(s.logger, "encrypt replacement credential failed", "connection_update", encErr)
 			WriteError(w, http.StatusInternalServerError, "failed to secure credentials")
@@ -371,14 +437,7 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 		s.audit(r, "connection_credential_replaced", id)
 	}
 
-	_ = WriteJSON(w, http.StatusOK, ConnectionDTO{
-		ID:        conn.ID,
-		Transport: conn.Transport,
-		Label:     conn.Label,
-		Enabled:   conn.Enabled,
-		CreatedAt: conn.CreatedAt,
-		UpdatedAt: conn.UpdatedAt,
-	})
+	_ = WriteJSON(w, http.StatusOK, connectionDTOFromControl(conn))
 }
 
 func (s *Server) handleDeleteConnection(w http.ResponseWriter, r *http.Request) {
@@ -445,10 +504,10 @@ func (s *Server) handleGetConnectionStatus(w http.ResponseWriter, r *http.Reques
 
 	var conn ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -459,6 +518,7 @@ func (s *Server) handleGetConnectionStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	applyConnectionCapabilities(&conn)
 	if !conn.Enabled {
 		_ = WriteJSON(w, http.StatusOK, map[string]any{
 			"id":        conn.ID,
@@ -505,10 +565,10 @@ func (s *Server) handleGetConnectionDiscovery(w http.ResponseWriter, r *http.Req
 
 	var conn ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -519,6 +579,7 @@ func (s *Server) handleGetConnectionDiscovery(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	applyConnectionCapabilities(&conn)
 	if !conn.Enabled {
 		WriteError(w, http.StatusBadRequest, "connection is disabled")
 		return
@@ -652,6 +713,29 @@ func (s *Server) handleWhatsAppConnectionLogout(w http.ResponseWriter, r *http.R
 	if err != nil {
 		safelog.Error(s.logger, "query connection failed", "whatsapp_logout", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+	if transport == "telegram" {
+		var mode string
+		if err := s.controlDB.QueryRowContext(r.Context(), `SELECT integration_mode FROM transport_connections WHERE id = ?`, id).Scan(&mode); err != nil {
+			WriteError(w, http.StatusInternalServerError, "database error")
+			return
+		}
+		if controlstore.NormalizeIntegrationMode(transport, mode) != controlstore.TelegramIntegrationModeMTProto {
+			WriteError(w, http.StatusBadRequest, "logout is not supported for Telegram Bot API connections")
+			return
+		}
+		svc, ok := s.mtprotoService()
+		if !ok {
+			WriteError(w, http.StatusServiceUnavailable, "Telegram MTProto runtime unavailable")
+			return
+		}
+		if err := svc.TelegramMTProtoLogout(r.Context(), id); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		s.audit(r, "telegram_mtproto_logged_out", id)
+		_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 		return
 	}
 	if transport != "whatsapp" {

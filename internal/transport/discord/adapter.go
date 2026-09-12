@@ -17,28 +17,31 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
-	ConnectionID  string
-	Token         string
-	ChannelIDs    map[string]string
-	Hasher        *identity.Hasher
-	UsernameMode  config.UsernameMode
-	Logger        *slog.Logger
-	Webhook       ChannelWebhook
-	MediaEnabled  bool
-	MediaMaxBytes uint64
+	ConnectionID             string
+	Token                    string
+	ChannelIDs               map[string]string
+	Hasher                   *identity.Hasher
+	UsernameMode             config.UsernameMode
+	Logger                   *slog.Logger
+	Webhook                  ChannelWebhook
+	ExplicitWebhookURL       string
+	ExplicitWebhookChannelID string
+	MediaEnabled             bool
+	MediaMaxBytes            uint64
 }
 
 type Adapter struct {
-	connectionID string
-	session      *discordgo.Session
-	api          discordAPI
-	adminAPI     discordAdminAPI
-	normalizer   *Normalizer
-	hasher       *identity.Hasher
-	webhook      ChannelWebhook
-	targets      map[transport.EndpointID]string
-	events       chan transport.Incoming
-	logger       *slog.Logger
+	connectionID          string
+	session               *discordgo.Session
+	api                   discordAPI
+	adminAPI              discordAdminAPI
+	normalizer            *Normalizer
+	hasher                *identity.Hasher
+	webhook               ChannelWebhook
+	fixedWebhookChannelID string
+	targets               map[transport.EndpointID]string
+	events                chan transport.Incoming
+	logger                *slog.Logger
 
 	mediaEnabled      bool
 	mediaMaxBytes     uint64
@@ -70,6 +73,18 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
 		return nil, err
 	}
+	explicitWebhookURL := strings.TrimSpace(opts.ExplicitWebhookURL)
+	explicitWebhookChannelID := strings.TrimSpace(opts.ExplicitWebhookChannelID)
+	if (explicitWebhookURL == "") != (explicitWebhookChannelID == "") {
+		return nil, errors.New("Discord explicit webhook URL and channel ID must be configured together")
+	}
+	if explicitWebhookChannelID != "" {
+		for _, channelID := range opts.ChannelIDs {
+			if strings.TrimSpace(channelID) != explicitWebhookChannelID {
+				return nil, errors.New("Discord explicit webhook connection is bound to its configured channel ID")
+			}
+		}
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -100,26 +115,35 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	targets := discordTargets(opts.ChannelIDs)
 	webhook := opts.Webhook
 	if webhook == nil {
-		webhook = newManagedWebhookClient(session)
+		if explicitWebhookURL != "" {
+			webhook, err = newExplicitWebhookClient(session, explicitWebhookChannelID, explicitWebhookURL)
+			if err != nil {
+				_ = session.Close()
+				return nil, err
+			}
+		} else {
+			webhook = newManagedWebhookClient(session)
+		}
 	}
 	adapter := &Adapter{
-		connectionID:      strings.TrimSpace(opts.ConnectionID),
-		session:           session,
-		api:               session,
-		adminAPI:          session,
-		normalizer:        normalizer,
-		hasher:            opts.Hasher,
-		webhook:           webhook,
-		targets:           targets,
-		events:            make(chan transport.Incoming, eventBufferSize),
-		logger:            opts.Logger,
-		mediaEnabled:      opts.MediaEnabled,
-		mediaMaxBytes:     opts.MediaMaxBytes,
-		reactionState:     make(map[reactionKey]string),
-		suppressedDeletes: make(map[string]struct{}),
-		pollSelections:    make(map[pollActorKey]map[int]struct{}),
-		recoverySignals:   make(chan struct{}, 1),
-		historyStatus:     make(map[string]HistoryStatus),
+		connectionID:          strings.TrimSpace(opts.ConnectionID),
+		session:               session,
+		api:                   session,
+		adminAPI:              session,
+		normalizer:            normalizer,
+		hasher:                opts.Hasher,
+		webhook:               webhook,
+		fixedWebhookChannelID: explicitWebhookChannelID,
+		targets:               targets,
+		events:                make(chan transport.Incoming, eventBufferSize),
+		logger:                opts.Logger,
+		mediaEnabled:          opts.MediaEnabled,
+		mediaMaxBytes:         opts.MediaMaxBytes,
+		reactionState:         make(map[reactionKey]string),
+		suppressedDeletes:     make(map[string]struct{}),
+		pollSelections:        make(map[pollActorKey]map[int]struct{}),
+		recoverySignals:       make(chan struct{}, 1),
+		historyStatus:         make(map[string]HistoryStatus),
 	}
 	session.AddHandler(adapter.handleReady)
 	session.AddHandler(adapter.handleResumed)
@@ -283,6 +307,16 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 				continue
 			}
 			channelIDs[alias] = endpoint.RemoteID
+		}
+	}
+	a.mu.RLock()
+	fixedWebhookChannelID := a.fixedWebhookChannelID
+	a.mu.RUnlock()
+	if fixedWebhookChannelID != "" {
+		for _, channelID := range channelIDs {
+			if strings.TrimSpace(channelID) != fixedWebhookChannelID {
+				return errors.New("Discord explicit webhook connection is bound to its configured channel ID")
+			}
 		}
 	}
 	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.Identity.UsernameMode)

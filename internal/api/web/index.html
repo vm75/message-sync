@@ -560,12 +560,12 @@
                 <div class="form-group">
                   <label for="settings-child-context-mode" class="form-label">Thread/topic names</label>
                   <select id="settings-child-context-mode" class="form-select">
-                    <option value="opaque">Opaque context tokens — privacy-first; names are not stored</option>
+                    <option value="opaque">Transient thread/topic names — privacy-first; names are not stored</option>
                     <option value="friendly">Friendly thread/topic names — stores observed names in sync.db</option>
                   </select>
-                  <div class="form-hint">Friendly mode affects future display only. New names are learned locally; existing Telegram topics may show generic <code>topic</code> until observed. No provider backfill is performed. Disabling friendly names removes stored names; routing history is unaffected.</div>
+                  <div class="form-hint">Both modes render child messages as <code>group/thread-or-topic/user</code>. Transient mode uses the live child name when available (otherwise <code>thread</code>/<code>topic</code>) without storing it. Friendly mode also stores observed names so they remain available after restart. Disabling friendly names removes stored names; routing history is unaffected.</div>
                 </div>
-                <div class="form-hint">Examples: opaque <code>[contexts s_abcd1234]</code>; friendly <code>family:Travel/Alice</code> or <code>family/Alice</code>. Names are never parsed for routing, and unique child names are recommended but not required.</div>
+                <div class="form-hint">Examples: <code>family/Travel/Alice</code> or <code>family/Alice</code>. Opaque child IDs are never shown and names are never parsed for routing.</div>
               </div>
             </div>
 
@@ -946,20 +946,76 @@
             <p class="form-hint">Alphanumeric, dashes, underscores. 1–64 characters.</p>
           </div>
 
+          <div id="add-conn-discord-mode-group" class="form-group hidden">
+            <label for="add-conn-discord-mode" class="form-label">Discord Outbound Webhook</label>
+            <select id="add-conn-discord-mode" class="form-select">
+              <option value="managed">Managed by message-sync</option>
+              <option value="webhook">Use existing webhook + channel ID</option>
+            </select>
+            <p class="form-hint">Both modes still use the bot token for Discord Gateway ingress. Existing-webhook mode avoids granting the bot Manage Webhooks and binds this connection to one Discord channel.</p>
+          </div>
+
+          <div id="add-conn-telegram-mode-group" class="form-group hidden">
+            <label for="add-conn-telegram-mode" class="form-label">Telegram Integration Method</label>
+            <select id="add-conn-telegram-mode" class="form-select">
+              <option value="bot">Bot API</option>
+              <option value="mtproto">Phone / MTProto</option>
+            </select>
+            <p class="form-hint">A Telegram connection uses exactly one method. Change methods by creating a new connection and reassigning endpoints.</p>
+          </div>
+
           <div id="add-conn-token-group" class="form-group hidden">
             <label for="conn-bot-token" class="form-label">Bot Token (Paste once)</label>
             <input type="password" id="conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste bot token">
             <p class="form-hint">Token is encrypted immediately with a domain-separated AES key. It is never logged or exposed in read APIs.</p>
           </div>
+
+          <div id="add-conn-discord-webhook-group" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+            <div class="form-group">
+              <label for="add-conn-discord-webhook-url" class="form-label">Existing Webhook URL</label>
+              <input type="password" id="add-conn-discord-webhook-url" class="form-input" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
+              <p class="form-hint">Stored encrypted with the bot token and never returned by read APIs.</p>
+            </div>
+            <div class="form-group">
+              <label for="add-conn-discord-channel-id" class="form-label">Discord Channel ID</label>
+              <input type="text" id="add-conn-discord-channel-id" class="form-input font-mono" inputmode="numeric" placeholder="123456789012345678">
+              <p class="form-hint">The bot listens to this channel; the existing webhook posts forwarded messages into the same channel.</p>
+            </div>
+          </div>
+
+          <div id="add-conn-mtproto-group" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+            <div class="form-group">
+              <label for="add-conn-mtproto-api-id" class="form-label">Telegram API ID</label>
+              <input type="number" min="1" id="add-conn-mtproto-api-id" class="form-input" inputmode="numeric" placeholder="123456">
+            </div>
+            <div class="form-group">
+              <label for="add-conn-mtproto-api-hash" class="form-label">Telegram API Hash</label>
+              <input type="password" id="add-conn-mtproto-api-hash" class="form-input" autocomplete="new-password" placeholder="API hash">
+            </div>
+            <div class="form-group">
+              <label for="add-conn-mtproto-phone" class="form-label">Phone Number</label>
+              <input type="tel" id="add-conn-mtproto-phone" class="form-input" autocomplete="off" placeholder="+15551234567">
+              <p class="form-hint">The API hash, phone and resulting Telegram session are stored only inside the encrypted connection state in control.db.</p>
+            </div>
+          </div>
           <div id="add-conn-wa-help" class="form-hint">After creating a WhatsApp connection, pairing starts automatically. Scan the QR code from WhatsApp <strong>Linked Devices → Link a Device</strong>.</div>
 
           <div id="add-conn-help-discord" class="form-hint hidden">
             <strong>Discord setup</strong><br>
-            In the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">official Discord Developer Portal</a>, create/select an application, open its Bot page, enable Message Content Intent, and copy/reset the bot token here. Install the bot in the target server with View Channel, Read Message History, Send Messages, Add Reactions, Manage Webhooks, and thread/poll access as needed. Then return here and use connection-scoped Discover to add channels.
+            Create/select an application in the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">official Discord Developer Portal</a>, enable Message Content Intent, and paste the bot token above. The bot is always used for inbound Gateway events, reactions, polls, threads, history, and other native operations.<br><br>
+            <strong>Managed webhook:</strong> grant Manage Webhooks; message-sync creates/reuses one bridge webhook for each configured channel.<br>
+            <strong>Existing webhook + channel ID:</strong> create the webhook yourself in Channel Settings → Integrations → Webhooks, paste its URL and the matching channel ID here, and Manage Webhooks is not required. This mode is intentionally bound to that one channel.
           </div>
           <div id="add-conn-help-telegram" class="form-hint hidden">
-            <strong>Telegram setup</strong><br>
-            In Telegram, message the official <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>, run <code>/newbot</code>, and paste the token here. Add the bot to the intended groups/supergroups; disable Bot Privacy Mode with BotFather when ordinary group-message discovery requires it, then send a message and use Discover. Forum topics are automatic child scopes. Broadcast channels are not supported. See the <a href="https://core.telegram.org/bots/faq#what-messages-will-my-bot-get" target="_blank" rel="noopener noreferrer">official Bot API visibility guidance</a> for privacy behavior.
+            <div id="add-conn-help-telegram-bot">
+              <strong>Telegram Bot API</strong><br>
+              Create a bot with <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer">@BotFather</a>. Discovery is observation-based; Bot Privacy Mode/admin visibility controls which group messages the bot can observe.
+            </div>
+            <div id="add-conn-help-telegram-mtproto" class="hidden">
+              <strong>Telegram Phone / MTProto</strong><br>
+              Obtain an API ID/hash from Telegram's application-development page, then authenticate the phone account with the one-time code and, when enabled, its 2FA password. Joined-group/topic discovery is complete and bounded history recovery is available after login.
+            </div>
+            <div style="margin-top:6px;">Telegram private DMs and broadcast channels are not synchronized.</div>
           </div>
         </div>
         <div class="modal-footer">
@@ -1002,6 +1058,39 @@
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Telegram MTProto Session Modal -->
+  <div id="modal-telegram-mtproto" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-card" style="max-width:620px;">
+      <div class="modal-header">
+        <div><h3 class="modal-title">Telegram Phone / MTProto</h3><div id="mtproto-conn-info" class="alias-badge" style="margin-top:4px;"></div></div>
+        <button type="button" class="btn-modal-close" data-modal="modal-telegram-mtproto" aria-label="Close"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+        <div id="mtproto-alert" class="alert hidden"></div>
+        <div><span class="form-label">Session state</span> <span id="mtproto-status" class="badge badge-neutral">Disconnected</span></div>
+        <div id="mtproto-setup-group" style="display:flex;flex-direction:column;gap:10px;">
+          <div class="form-group"><label for="mtproto-api-id" class="form-label">API ID</label><input type="number" min="1" id="mtproto-api-id" class="form-input" inputmode="numeric"></div>
+          <div class="form-group"><label for="mtproto-api-hash" class="form-label">API Hash</label><input type="password" id="mtproto-api-hash" class="form-input" autocomplete="new-password"></div>
+          <div class="form-group"><label for="mtproto-phone" class="form-label">Phone</label><input type="tel" id="mtproto-phone" class="form-input" autocomplete="off" placeholder="+15551234567"></div>
+          <button type="button" id="btn-mtproto-setup" class="btn btn-primary"><span class="btn-text">Save &amp; Request Code</span><div class="btn-spinner hidden"></div></button>
+        </div>
+        <button type="button" id="btn-mtproto-request-code" class="btn btn-primary hidden"><span class="btn-text">Request Login Code</span><div class="btn-spinner hidden"></div></button>
+        <div id="mtproto-code-group" class="form-group hidden"><label for="mtproto-code" class="form-label">One-time Login Code</label><div style="display:flex;gap:8px;"><input type="text" id="mtproto-code" class="form-input" autocomplete="one-time-code" inputmode="numeric"><button type="button" id="btn-mtproto-code" class="btn btn-primary"><span class="btn-text">Verify Code</span><div class="btn-spinner hidden"></div></button></div></div>
+        <div id="mtproto-password-group" class="form-group hidden"><label for="mtproto-password" class="form-label">Telegram 2FA Password</label><div style="display:flex;gap:8px;"><input type="password" id="mtproto-password" class="form-input" autocomplete="current-password"><button type="button" id="btn-mtproto-password" class="btn btn-primary"><span class="btn-text">Verify 2FA</span><div class="btn-spinner hidden"></div></button></div></div>
+        <div id="mtproto-backfill-group" class="hidden" style="border-top:1px solid var(--border);padding-top:12px;">
+          <div class="form-label">Bounded History Backfill</div>
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px;margin-top:8px;">
+            <select id="mtproto-backfill-endpoint" class="form-select"></select>
+            <input type="number" id="mtproto-backfill-events" class="form-input" min="1" max="1000" value="200" title="Maximum events">
+            <input type="number" id="mtproto-backfill-hours" class="form-input" min="1" max="720" value="24" title="Maximum age in hours">
+          </div>
+          <button type="button" id="btn-mtproto-backfill" class="btn btn-ghost btn-sm" style="margin-top:8px;"><span class="btn-text">Run Bounded Backfill</span><div class="btn-spinner hidden"></div></button>
+        </div>
+      </div>
+      <div class="modal-footer"><button type="button" class="btn btn-ghost" data-modal="modal-telegram-mtproto">Close</button><button type="button" id="btn-mtproto-logout" class="btn btn-danger hidden">Log Out Telegram Session</button></div>
     </div>
   </div>
 

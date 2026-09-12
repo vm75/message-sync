@@ -14,6 +14,57 @@ import (
 
 var connectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+const (
+	TelegramIntegrationModeBot     = "bot"
+	TelegramIntegrationModeMTProto = "mtproto"
+	DiscordIntegrationModeManaged  = "managed"
+	DiscordIntegrationModeWebhook  = "webhook"
+)
+
+func NormalizeIntegrationMode(transportName, mode string) string {
+	transportName = strings.ToLower(strings.TrimSpace(transportName))
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	switch transportName {
+	case "telegram":
+		if mode == "" {
+			return TelegramIntegrationModeBot
+		}
+		return mode
+	case "discord":
+		if mode == "" {
+			return DiscordIntegrationModeManaged
+		}
+		return mode
+	default:
+		return ""
+	}
+}
+
+func ValidateIntegrationMode(transportName, mode string) error {
+	transportName = strings.ToLower(strings.TrimSpace(transportName))
+	switch transportName {
+	case "telegram":
+		switch NormalizeIntegrationMode(transportName, mode) {
+		case TelegramIntegrationModeBot, TelegramIntegrationModeMTProto:
+			return nil
+		default:
+			return fmt.Errorf("invalid telegram integration mode %q: must be bot or mtproto", strings.TrimSpace(mode))
+		}
+	case "discord":
+		switch NormalizeIntegrationMode(transportName, mode) {
+		case DiscordIntegrationModeManaged, DiscordIntegrationModeWebhook:
+			return nil
+		default:
+			return fmt.Errorf("invalid discord integration mode %q: must be managed or webhook", strings.TrimSpace(mode))
+		}
+	default:
+		if strings.TrimSpace(mode) != "" {
+			return fmt.Errorf("integration mode is only supported for discord and telegram connections")
+		}
+		return nil
+	}
+}
+
 func ValidateConnectionID(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -36,6 +87,7 @@ func NewConnectionID() (string, error) {
 type Connection struct {
 	ID                   string  `json:"id"`
 	Transport            string  `json:"transport"`
+	IntegrationMode      string  `json:"integrationMode,omitempty"`
 	Label                string  `json:"label"`
 	Enabled              bool    `json:"enabled"`
 	EncryptedCredential  []byte  `json:"-"`
@@ -48,6 +100,9 @@ type Connection struct {
 
 func (c Connection) Validate() error {
 	if err := ValidateConnectionID(c.ID); err != nil {
+		return err
+	}
+	if err := ValidateIntegrationMode(c.Transport, c.IntegrationMode); err != nil {
 		return err
 	}
 	switch c.Transport {
@@ -78,6 +133,10 @@ func (s *Store) CreateConnection(ctx context.Context, conn Connection) error {
 	if conn.CredentialKeyVersion == 0 {
 		conn.CredentialKeyVersion = CurrentKeyVersion
 	}
+	if err := ValidateIntegrationMode(conn.Transport, conn.IntegrationMode); err != nil {
+		return err
+	}
+	conn.IntegrationMode = NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
 	if err := conn.Validate(); err != nil {
 		return err
 	}
@@ -98,9 +157,9 @@ func (s *Store) CreateConnection(ctx context.Context, conn Connection) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO transport_connections (id, transport, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, conn.ID, conn.Transport, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
+		INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert connection: %w", err)
 	}
@@ -112,14 +171,14 @@ func (s *Store) GetConnection(ctx context.Context, id string) (*Connection, erro
 		return nil, errors.New("control database is required")
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, transport, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
 		FROM transport_connections
 		WHERE id = ?
 	`, id)
 	var conn Connection
 	var encCred, nonce []byte
 	var createdBy sql.NullString
-	if err := row.Scan(&conn.ID, &conn.Transport, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
+	if err := row.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("connection not found")
 		}
@@ -127,6 +186,7 @@ func (s *Store) GetConnection(ctx context.Context, id string) (*Connection, erro
 	}
 	conn.EncryptedCredential = encCred
 	conn.CredentialNonce = nonce
+	conn.IntegrationMode = NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
 	if createdBy.Valid {
 		conn.CreatedBy = &createdBy.String
 	}
@@ -138,7 +198,7 @@ func (s *Store) ListConnections(ctx context.Context) ([]Connection, error) {
 		return nil, errors.New("control database is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, transport, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
 		FROM transport_connections
 		ORDER BY id ASC
 	`)
@@ -152,11 +212,12 @@ func (s *Store) ListConnections(ctx context.Context) ([]Connection, error) {
 		var conn Connection
 		var encCred, nonce []byte
 		var createdBy sql.NullString
-		if err := rows.Scan(&conn.ID, &conn.Transport, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
+		if err := rows.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		conn.EncryptedCredential = encCred
 		conn.CredentialNonce = nonce
+		conn.IntegrationMode = NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
 		if createdBy.Valid {
 			conn.CreatedBy = &createdBy.String
 		}
@@ -190,6 +251,10 @@ func (s *Store) UpdateConnection(ctx context.Context, conn Connection) error {
 	if s == nil || s.db == nil {
 		return errors.New("control database is required")
 	}
+	if err := ValidateIntegrationMode(conn.Transport, conn.IntegrationMode); err != nil {
+		return err
+	}
+	conn.IntegrationMode = NormalizeIntegrationMode(conn.Transport, conn.IntegrationMode)
 	if err := conn.Validate(); err != nil {
 		return err
 	}
@@ -206,9 +271,9 @@ func (s *Store) UpdateConnection(ctx context.Context, conn Connection) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE transport_connections
-		SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+		SET integration_mode = ?, label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
 		WHERE id = ?
-	`, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.UpdatedAt, conn.ID)
+	`, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.UpdatedAt, conn.ID)
 	if err != nil {
 		return fmt.Errorf("update connection: %w", err)
 	}

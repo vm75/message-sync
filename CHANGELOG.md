@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-09-12
+
+### Fixed
+- Telegram MTProto endpoint readiness is now initialized at startup, so connected endpoints report `ready` immediately instead of the generic `polling` fallback.
+- Telegram MTProto now refreshes full poll totals for minimal poll updates, allowing Telegram-authored votes to update canonical live results.
+- Telegram MTProto now correlates non-anonymous bridge-created polls with Telegram's server-returned poll ID and answer keys, restoring aggregate updates and vote removal for polls originating on WhatsApp or Discord.
+- Telegram MTProto sends and edits bridge attribution and live poll summaries with native bold/italic entities instead of displaying transport-neutral Markdown markers.
+
 ## [0.1.7] - 2026-09-08
 
 ### Changed

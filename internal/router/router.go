@@ -535,18 +535,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return err
 		}
 
-		username := incoming.Sender.OpaqueID
-		if r.getUsernameMode() == config.UsernameModePushName {
-			displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-			phone := incoming.Sender.PhoneNumber
-			if phone != "" && displayName != "" {
-				username = fmt.Sprintf("%s (%s)", phone, displayName)
-			} else if displayName != "" {
-				username = displayName
-			} else if phone != "" {
-				username = phone
-			}
-		}
+		username := senderPresentationUsername(incoming.Sender, r.getUsernameMode())
 		fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
 		if emoji != "" {
 			fallbackText = fmt.Sprintf("%s/%s reacted %s to a message", incoming.Endpoint, username, emoji)
@@ -900,8 +889,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					SenderLabel: senderLabel,
 					SourceText:  incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: forwardedText,
-					RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
-					PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
+					RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, forwardedText),
+					PollAttribution: r.childAwarePollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
 					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
@@ -930,8 +919,8 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				SenderLabel: senderLabel,
 				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
 				Kind: incoming.Kind, Text: forwardedText, Mentions: incoming.Mentions,
-				RenderedText:    friendlyRenderedText(r.getChildContextMode(), forwardedText),
-				PollAttribution: r.friendlyPollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
+				RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, forwardedText),
+				PollAttribution: r.childAwarePollAttribution(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: incoming.QuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
 				PollDurationHours: incoming.PollDurationHours,
@@ -991,51 +980,26 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 	return nil
 }
 
-func friendlyRenderedText(mode config.ChildContextDisplayMode, text string) string {
-	if mode == config.ChildContextDisplayFriendly {
+func childAwareRenderedText(mode config.ChildContextDisplayMode, childScope *transport.ChildScope, text string) string {
+	// Preserve legacy adapter rendering for opaque root messages. A child source
+	// must use the router-rendered text so group/child/user survives all adapters.
+	if mode == config.ChildContextDisplayFriendly || childScope != nil {
 		return text
 	}
 	return ""
 }
 
-func (r *Router) friendlyPollAttribution(ctx context.Context, mode config.ChildContextDisplayMode, incoming transport.Incoming, childScope *transport.ChildScope) string {
-	if mode != config.ChildContextDisplayFriendly {
+func (r *Router) childAwarePollAttribution(ctx context.Context, mode config.ChildContextDisplayMode, incoming transport.Incoming, childScope *transport.ChildScope) string {
+	// Preserve legacy opaque root-poll behavior. Child polls always carry the
+	// same source child attribution as ordinary child messages.
+	if mode != config.ChildContextDisplayFriendly && childScope == nil {
 		return ""
 	}
-	username := incoming.Sender.OpaqueID
-	if r.getUsernameMode() == config.UsernameModePushName {
-		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-		phone := incoming.Sender.PhoneNumber
-		if displayName != "" {
-			username = displayName
-		} else if phone != "" {
-			username = phone
-		}
-	}
-	if strings.TrimSpace(username) == "" {
+	label, err := r.senderLabel(ctx, incoming)
+	if err != nil {
 		return ""
 	}
-	prefix := string(incoming.Endpoint)
-	if childScope != nil {
-		label := normalizeDisplayName(childScope.Label)
-		if label == "" {
-			if stored, err := r.store.ChildScopeLabel(ctx, string(incoming.Endpoint), string(childScope.Kind), childScope.RemoteID); err == nil {
-				label = normalizeDisplayName(stored.DisplayName)
-			}
-		}
-		if label == "" {
-			switch childScope.Kind {
-			case transport.ScopeKindDiscordThread:
-				label = "thread"
-			case transport.ScopeKindTelegramTopic:
-				label = "topic"
-			}
-		}
-		if label != "" {
-			prefix += ":" + escapePresentation(label)
-		}
-	}
-	return fmt.Sprintf("*_%s/%s_*:", prefix, username)
+	return fmt.Sprintf("*_%s_*:", label)
 }
 
 func (r *Router) renderPollResults(ctx context.Context, canonicalID string) (string, error) {
@@ -1374,25 +1338,16 @@ func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming)
 }
 
 func (r *Router) senderLabel(ctx context.Context, incoming transport.Incoming) (string, error) {
-	username := incoming.Sender.OpaqueID
-	if r.getUsernameMode() == config.UsernameModePushName {
-		displayName := normalizeDisplayName(incoming.Sender.DisplayName)
-		phone := incoming.Sender.PhoneNumber
-		if phone != "" && displayName != "" {
-			username = fmt.Sprintf("%s (%s)", phone, displayName)
-		} else if displayName != "" {
-			username = displayName
-		} else if phone != "" {
-			username = phone
-		}
-	}
+	username := senderPresentationUsername(incoming.Sender, r.getUsernameMode())
 	if strings.TrimSpace(username) == "" {
 		return "", errors.New("incoming sender identity is required")
 	}
 	prefix := string(incoming.Endpoint)
-	if r.getChildContextMode() == config.ChildContextDisplayFriendly && incoming.ChildScope != nil {
+	if incoming.ChildScope != nil {
 		label := normalizeDisplayName(incoming.ChildScope.Label)
-		if label == "" {
+		// childContextDisplayMode controls label persistence, not visible syntax.
+		// Opaque mode may use a live label transiently but must not store it.
+		if label == "" && r.getChildContextMode() == config.ChildContextDisplayFriendly {
 			if stored, err := r.store.ChildScopeLabel(ctx, string(incoming.Endpoint), string(incoming.ChildScope.Kind), incoming.ChildScope.RemoteID); err == nil {
 				label = normalizeDisplayName(stored.DisplayName)
 			}
@@ -1406,7 +1361,7 @@ func (r *Router) senderLabel(ctx context.Context, incoming transport.Incoming) (
 			}
 		}
 		if label != "" {
-			prefix += ":" + escapePresentation(label)
+			prefix += "/" + escapePresentation(label)
 		}
 	}
 	return prefix + "/" + username, nil
@@ -1419,41 +1374,20 @@ func (r *Router) getChildContextMode() config.ChildContextDisplayMode {
 }
 
 func (r *Router) withChildContextHeaders(incoming transport.Incoming, destination transport.EndpointID, scopes []store.CanonicalScope, text string) string {
-	if r.getChildContextMode() == config.ChildContextDisplayFriendly {
-		return text
-	}
-	if r.scopeHasher == nil || len(scopes) == 0 {
-		return text
-	}
-	sort.SliceStable(scopes, func(i, j int) bool {
-		if scopes[i].EndpointID != scopes[j].EndpointID {
-			return scopes[i].EndpointID < scopes[j].EndpointID
+	// Opaque ChildScope IDs are routing-only. Never expose them in forwarded text.
+	return text
+}
+
+func senderPresentationUsername(sender transport.Sender, mode config.UsernameMode) string {
+	if mode == config.UsernameModePushName {
+		if displayName := normalizeDisplayName(sender.DisplayName); displayName != "" {
+			return displayName
 		}
-		return scopes[i].ScopeKind < scopes[j].ScopeKind
-	})
-	labels := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		if scope.EndpointID == string(destination) {
-			continue
-		}
-		token := r.scopeHasher.ScopeToken(scope.EndpointID + "\x00" + scope.ScopeKind + "\x00" + scope.RemoteScopeID)
-		label := ""
-		if scope.EndpointID == string(incoming.Endpoint) && incoming.ChildScope != nil && incoming.ChildScope.RemoteID == scope.RemoteScopeID && string(incoming.ChildScope.Kind) == scope.ScopeKind {
-			label = strings.Join(strings.Fields(incoming.ChildScope.Label), " ")
-			if len([]rune(label)) > 80 {
-				label = string([]rune(label)[:80])
-			}
-		}
-		if label != "" {
-			labels = append(labels, token+": "+label)
-		} else {
-			labels = append(labels, token)
+		if sender.PhoneNumber != "" {
+			return sender.PhoneNumber
 		}
 	}
-	if len(labels) == 0 {
-		return text
-	}
-	return "[contexts " + strings.Join(labels, " ") + "]\n" + text
+	return sender.OpaqueID
 }
 
 func normalizeDisplayName(value string) string {

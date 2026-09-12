@@ -119,8 +119,21 @@
   const addConnId             = document.getElementById('add-conn-id');
   const addConnToken          = document.getElementById('conn-bot-token');
   const addConnTokenGroup     = document.getElementById('add-conn-token-group');
+  const addConnDiscordModeGroup = document.getElementById('add-conn-discord-mode-group');
+  const addConnDiscordMode = document.getElementById('add-conn-discord-mode');
+  const addConnDiscordWebhookGroup = document.getElementById('add-conn-discord-webhook-group');
+  const addConnDiscordWebhookURL = document.getElementById('add-conn-discord-webhook-url');
+  const addConnDiscordChannelID = document.getElementById('add-conn-discord-channel-id');
+  const addConnTelegramModeGroup = document.getElementById('add-conn-telegram-mode-group');
+  const addConnTelegramMode   = document.getElementById('add-conn-telegram-mode');
+  const addConnMTProtoGroup   = document.getElementById('add-conn-mtproto-group');
+  const addConnMTProtoAPIID   = document.getElementById('add-conn-mtproto-api-id');
+  const addConnMTProtoAPIHash = document.getElementById('add-conn-mtproto-api-hash');
+  const addConnMTProtoPhone   = document.getElementById('add-conn-mtproto-phone');
   const addConnHelpDiscord    = document.getElementById('add-conn-help-discord');
   const addConnHelpTelegram   = document.getElementById('add-conn-help-telegram');
+  const addConnHelpTelegramBot = document.getElementById('add-conn-help-telegram-bot');
+  const addConnHelpTelegramMTProto = document.getElementById('add-conn-help-telegram-mtproto');
   const addConnWaHelp         = document.getElementById('add-conn-wa-help');
   const btnSubmitAddConn      = document.getElementById('btn-submit-add-conn');
   const addConnFormView       = document.getElementById('add-conn-form-view');
@@ -132,6 +145,29 @@
   const replaceTokenConnInfo  = document.getElementById('replace-token-conn-info');
   const replaceTokenInput     = document.getElementById('replace-conn-bot-token');
   const btnSubmitReplaceToken = document.getElementById('btn-submit-replace-token');
+
+  const modalTelegramMTProto = document.getElementById('modal-telegram-mtproto');
+  const mtprotoConnInfo = document.getElementById('mtproto-conn-info');
+  const mtprotoAlert = document.getElementById('mtproto-alert');
+  const mtprotoStatus = document.getElementById('mtproto-status');
+  const mtprotoSetupGroup = document.getElementById('mtproto-setup-group');
+  const mtprotoAPIID = document.getElementById('mtproto-api-id');
+  const mtprotoAPIHash = document.getElementById('mtproto-api-hash');
+  const mtprotoPhone = document.getElementById('mtproto-phone');
+  const btnMTProtoSetup = document.getElementById('btn-mtproto-setup');
+  const btnMTProtoRequestCode = document.getElementById('btn-mtproto-request-code');
+  const mtprotoCodeGroup = document.getElementById('mtproto-code-group');
+  const mtprotoCode = document.getElementById('mtproto-code');
+  const btnMTProtoCode = document.getElementById('btn-mtproto-code');
+  const mtprotoPasswordGroup = document.getElementById('mtproto-password-group');
+  const mtprotoPassword = document.getElementById('mtproto-password');
+  const btnMTProtoPassword = document.getElementById('btn-mtproto-password');
+  const mtprotoBackfillGroup = document.getElementById('mtproto-backfill-group');
+  const mtprotoBackfillEndpoint = document.getElementById('mtproto-backfill-endpoint');
+  const mtprotoBackfillEvents = document.getElementById('mtproto-backfill-events');
+  const mtprotoBackfillHours = document.getElementById('mtproto-backfill-hours');
+  const btnMTProtoBackfill = document.getElementById('btn-mtproto-backfill');
+  const btnMTProtoLogout = document.getElementById('btn-mtproto-logout');
 
   const modalDiscovery        = document.getElementById('modal-discovery');
   const discoveryConnBadge    = document.getElementById('discovery-conn-badge');
@@ -1221,7 +1257,7 @@
 
       const transports = [
         { key: 'whatsapp', label: 'WhatsApp Accounts', icon: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>' },
-        { key: 'discord', label: 'Discord Bots', icon: '<path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>' },
+        { key: 'discord', label: 'Discord Connections', icon: '<path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>' },
         { key: 'telegram', label: 'Telegram Bots', icon: '<path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path>' }
       ];
 
@@ -1268,12 +1304,13 @@
             detailHtml = 'Account not linked. Pairing requires mobile camera scan.';
           }
         } else if (conn.transport === 'discord') {
+          const explicitWebhook = conn.integrationMode === 'webhook';
           if (st.connected) {
-            const hasPermIssue = Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
+            const hasPermIssue = !explicitWebhook && Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
             statusBadgeClass = hasPermIssue ? 'badge-warning' : 'badge-success';
             statusText = hasPermIssue ? 'Permission Needed' : 'Connected';
-            nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? 'Discover & add channels as endpoints.' : 'Ready to sync.');
-            detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : `Gateway active (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`;
+            nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? (explicitWebhook ? 'Discover the configured webhook channel and add it as an endpoint.' : 'Discover & add channels as endpoints.') : 'Ready to sync.');
+            detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : (explicitWebhook ? `Gateway active · Existing webhook outbound (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).` : `Gateway active · Managed webhook outbound (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`);
           } else if (st.configured) {
             statusBadgeClass = 'badge-warning';
             statusText = 'Connecting';
@@ -1286,17 +1323,25 @@
             detailHtml = 'No active connection.';
           }
         } else if (conn.transport === 'telegram') {
-          if (st.running) {
+          const caps = conn.capabilities || st.capabilities || {};
+          if (caps.historyRecovery) {
+            const connected = st.status === 'connected';
+            statusBadgeClass = connected ? 'badge-success' : (st.status === 'error' ? 'badge-danger' : 'badge-warning');
+            statusText = connected ? 'Connected' : (st.status || 'Disconnected');
+            nextAction = connected ? (connEps.length === 0 ? 'Discover joined groups.' : 'Ready to sync; bounded history is available.') : 'Complete or resume phone-account authentication.';
+            detailHtml = connected ? 'MTProto user session active. Full group/topic discovery is available.' : 'Phone / MTProto connection is not authorized yet.';
+          } else if (st.running) {
+            const privacyApplicable = caps.privacyModeStatus === true;
             const privacyDisabled = st.privacyModeEnabled === false;
-            statusBadgeClass = privacyDisabled ? 'badge-success' : 'badge-warning';
+            statusBadgeClass = !privacyApplicable || privacyDisabled ? 'badge-success' : 'badge-warning';
             statusText = 'Running';
-            nextAction = !privacyDisabled ? 'Disable Bot Privacy Mode via @BotFather to receive group messages.' : (connEps.length === 0 ? 'Discover observed group chats.' : 'Ready to sync.');
-            detailHtml = `Long polling active. Bot Privacy Mode: ${privacyDisabled ? 'Disabled (can read group messages)' : 'Enabled (may miss group messages)'}.`;
+            nextAction = privacyApplicable && !privacyDisabled ? 'Adjust Bot Privacy Mode/admin visibility to observe ordinary group messages.' : (connEps.length === 0 ? 'Discover observed group chats.' : 'Ready to sync.');
+            detailHtml = privacyApplicable ? `Bot API polling active. Bot Privacy Mode: ${privacyDisabled ? 'Disabled' : 'Enabled'}.` : 'Telegram connection running.';
           } else {
             statusBadgeClass = 'badge-neutral';
             statusText = 'Stopped';
-            nextAction = 'Polling stopped. Check token or enable connection.';
-            detailHtml = 'Bot is not running.';
+            nextAction = 'Check credentials or enable the connection.';
+            detailHtml = 'Telegram connection is not running.';
           }
         }
 
@@ -1304,9 +1349,11 @@
           ? `Endpoints (${connEps.length}): ` + connEps.map(e => escapeHtml(e.alias)).join(', ')
           : 'No endpoints configured under this connection.';
 
+        const caps = conn.capabilities || st.capabilities || {};
+        const discoveryLabel = conn.transport === 'telegram' && caps.chatDiscovery === 'full' ? 'Discover All' : 'Discover';
         let actionButtons = `<button class="btn btn-ghost btn-sm" onclick="window.App.openDiscovery('${escapeHtml(conn.id)}')">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-          Discover
+          ${discoveryLabel}
         </button>`;
 
         if (isAdmin) {
@@ -1315,16 +1362,12 @@
           </button>`;
 
           if (conn.transport === 'whatsapp') {
-            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">
-              Pair
-            </button>`;
-            actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">
-              Logout
-            </button>`;
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">Pair</button>`;
+            actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">Logout</button>`;
+          } else if (conn.transport === 'telegram' && caps.historyRecovery) {
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.openTelegramMTProto('${escapeHtml(conn.id)}')">Manage Login</button>`;
           } else {
-            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.openReplaceTokenModal('${escapeHtml(conn.id)}', '${escapeHtml(conn.label)}')">
-              Replace Token
-            </button>`;
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.openReplaceTokenModal('${escapeHtml(conn.id)}', '${escapeHtml(conn.label)}')">Replace Token</button>`;
           }
 
           actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.deleteConnection('${escapeHtml(conn.id)}', ${connEps.length})">
@@ -1345,6 +1388,8 @@
             </div>
             <div class="connection-badges">
               <span class="badge ${conn.transport === 'discord' ? 'badge-discord' : conn.transport === 'telegram' ? 'badge-telegram' : 'badge-wa'}">${escapeHtml(conn.transport)}</span>
+              ${conn.transport === 'discord' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'webhook' ? 'Existing Webhook' : 'Managed Webhook')}</span>` : ''}
+              ${conn.transport === 'telegram' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'mtproto' ? 'Phone / MTProto' : 'Bot API')}</span>` : ''}
               <span class="badge ${conn.enabled ? 'badge-primary' : 'badge-neutral'}">${conn.enabled ? 'Enabled' : 'Disabled'}</span>
               <span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>
             </div>
@@ -1382,8 +1427,35 @@
     if (addConnLabel) addConnLabel.value = '';
     if (addConnId) addConnId.value = '';
     if (addConnToken) addConnToken.value = '';
+    if (addConnDiscordMode) addConnDiscordMode.value = 'managed';
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+    if (addConnDiscordChannelID) addConnDiscordChannelID.value = '';
+    if (addConnTelegramMode) addConnTelegramMode.value = 'bot';
+    if (addConnMTProtoAPIID) addConnMTProtoAPIID.value = '';
+    if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
+    if (addConnMTProtoPhone) addConnMTProtoPhone.value = '';
     selectAddConnTransport('whatsapp');
     openModal(modalAddConnection);
+  }
+
+  function selectAddDiscordMode(mode) {
+    const isExplicitWebhook = addConnTransport === 'discord' && mode === 'webhook';
+    if (addConnDiscordWebhookGroup) addConnDiscordWebhookGroup.classList.toggle('hidden', !isExplicitWebhook);
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.required = isExplicitWebhook;
+    if (addConnDiscordChannelID) addConnDiscordChannelID.required = isExplicitWebhook;
+  }
+
+  function selectAddTelegramMode(mode) {
+    const isMTProto = addConnTransport === 'telegram' && mode === 'mtproto';
+    const needsToken = addConnTransport === 'discord' || (addConnTransport === 'telegram' && !isMTProto);
+    if (addConnTokenGroup) addConnTokenGroup.classList.toggle('hidden', !needsToken);
+    if (addConnMTProtoGroup) addConnMTProtoGroup.classList.toggle('hidden', !isMTProto);
+    if (addConnHelpTelegramBot) addConnHelpTelegramBot.classList.toggle('hidden', isMTProto);
+    if (addConnHelpTelegramMTProto) addConnHelpTelegramMTProto.classList.toggle('hidden', !isMTProto);
+    if (addConnToken) addConnToken.required = needsToken;
+    if (addConnMTProtoAPIID) addConnMTProtoAPIID.required = isMTProto;
+    if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.required = isMTProto;
+    if (addConnMTProtoPhone) addConnMTProtoPhone.required = isMTProto;
   }
 
   function selectAddConnTransport(transport) {
@@ -1394,9 +1466,8 @@
       t.classList.toggle('active', tp === transport);
       t.classList.toggle(tp, tp === transport);
     });
-    if (addConnTokenGroup) {
-      addConnTokenGroup.classList.toggle('hidden', transport === 'whatsapp');
-    }
+    if (addConnDiscordModeGroup) addConnDiscordModeGroup.classList.toggle('hidden', transport !== 'discord');
+    if (addConnTelegramModeGroup) addConnTelegramModeGroup.classList.toggle('hidden', transport !== 'telegram');
     if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
     if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
     if (addConnWaHelp) addConnWaHelp.classList.toggle('hidden', transport !== 'whatsapp');
@@ -1404,49 +1475,80 @@
       const buttonText = btnSubmitAddConn.querySelector('.btn-text');
       if (buttonText) buttonText.textContent = transport === 'whatsapp' ? 'Create & Pair' : 'Create Connection';
     }
-    if (addConnToken) {
-      addConnToken.required = transport !== 'whatsapp';
-      addConnToken.value = '';
+    if (addConnToken) addConnToken.value = '';
+    if (transport !== 'discord') {
+      if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+      if (addConnDiscordChannelID) addConnDiscordChannelID.value = '';
     }
+    selectAddDiscordMode(addConnDiscordMode ? addConnDiscordMode.value : 'managed');
+    selectAddTelegramMode(addConnTelegramMode ? addConnTelegramMode.value : 'bot');
   }
 
   async function handleAddConnectionSubmit(e) {
     e.preventDefault();
     const label = addConnLabel ? addConnLabel.value.trim() : '';
     const id = addConnId ? addConnId.value.trim() : '';
-    const token = addConnToken ? addConnToken.value.trim() : '';
+    let token = addConnToken ? addConnToken.value.trim() : '';
+    const discordMode = addConnTransport === 'discord' && addConnDiscordMode ? addConnDiscordMode.value : 'managed';
+    const isDiscordWebhook = addConnTransport === 'discord' && discordMode === 'webhook';
+    const webhookUrl = isDiscordWebhook && addConnDiscordWebhookURL ? addConnDiscordWebhookURL.value.trim() : '';
+    const discordChannelId = isDiscordWebhook && addConnDiscordChannelID ? addConnDiscordChannelID.value.trim() : '';
+    const telegramMode = addConnTransport === 'telegram' && addConnTelegramMode ? addConnTelegramMode.value : 'bot';
+    const isMTProto = addConnTransport === 'telegram' && telegramMode === 'mtproto';
+    const apiId = isMTProto && addConnMTProtoAPIID ? parseInt(addConnMTProtoAPIID.value, 10) : 0;
+    let apiHash = isMTProto && addConnMTProtoAPIHash ? addConnMTProtoAPIHash.value.trim() : '';
+    let phone = isMTProto && addConnMTProtoPhone ? addConnMTProtoPhone.value.trim() : '';
 
-    // CRITICAL: Immediately clear token input from memory and DOM
     if (addConnToken) addConnToken.value = '';
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+    if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
+    if (addConnMTProtoPhone) addConnMTProtoPhone.value = '';
 
     if (!label) {
       if (addConnAlert) { addConnAlert.textContent = 'Connection label is required.'; addConnAlert.classList.remove('hidden'); }
       return;
     }
-    if (addConnTransport !== 'whatsapp' && !token) {
+    if (isDiscordWebhook && (!webhookUrl || !DISCORD_CHANNEL_REGEX.test(discordChannelId))) {
+      if (addConnAlert) { addConnAlert.textContent = 'A valid existing webhook URL and numeric channel ID are required.'; addConnAlert.classList.remove('hidden'); }
+      return;
+    }
+    if (isMTProto && (!Number.isInteger(apiId) || apiId <= 0 || !apiHash || !phone)) {
+      if (addConnAlert) { addConnAlert.textContent = 'API ID, API hash, and phone are required for Phone / MTProto.'; addConnAlert.classList.remove('hidden'); }
+      return;
+    }
+    if (!isMTProto && addConnTransport !== 'whatsapp' && !token) {
       if (addConnAlert) { addConnAlert.textContent = 'Bot token is required.'; addConnAlert.classList.remove('hidden'); }
       return;
     }
 
     setButtonLoading(btnSubmitAddConn, true);
     try {
-      const payload = {
-        transport: addConnTransport,
-        label,
-        enabled: true
-      };
+      const payload = { transport: addConnTransport, label, enabled: true };
       if (id) payload.id = id;
-      if (addConnTransport !== 'whatsapp') payload.token = token;
+      if (addConnTransport === 'telegram') payload.integrationMode = telegramMode;
+      if (addConnTransport === 'discord') payload.integrationMode = discordMode;
+      if (!isMTProto && addConnTransport !== 'whatsapp') payload.token = token;
+      if (isDiscordWebhook) {
+        payload.webhookUrl = webhookUrl;
+        payload.channelId = discordChannelId;
+      }
 
       const created = await window.API.createConnection(payload);
-      showToast(`Connection '${label}' created!`, 'success');
-      await loadConnections();
+      const createdID = created && created.id ? created.id : id;
+      if (!createdID) throw new Error('created connection did not return an ID');
       if (addConnTransport === 'whatsapp') {
-        const createdID = created && created.id ? created.id : id;
-        if (!createdID) throw new Error('created WhatsApp connection did not return an ID');
+        await loadConnections();
         await requestWaPairing(createdID, true);
+      } else if (isMTProto) {
+        await window.API.setupTelegramMTProto(createdID, apiId, apiHash, phone);
+        apiHash = ''; phone = ''; token = '';
+        await window.API.requestTelegramMTProtoCode(createdID);
+        closeModal(modalAddConnection);
+        await loadConnections();
+        await openTelegramMTProto(createdID);
       } else {
         closeModal(modalAddConnection);
+        await loadConnections();
       }
     } catch (err) {
       if (addConnAlert) {
@@ -1454,9 +1556,156 @@
         addConnAlert.classList.remove('hidden');
       }
     } finally {
+      token = ''; apiHash = ''; phone = '';
       setButtonLoading(btnSubmitAddConn, false);
       if (addConnToken) addConnToken.value = '';
+      if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+      if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
+      if (addConnMTProtoPhone) addConnMTProtoPhone.value = '';
     }
+  }
+
+  let mtprotoConnId = '';
+
+  function mtprotoCapabilities() {
+    const conn = (cachedConnections || []).find(c => c.id === mtprotoConnId);
+    return conn && conn.capabilities ? conn.capabilities : {};
+  }
+
+  function renderMTProtoStatus(status) {
+    const state = status && status.status ? status.status : 'disconnected';
+    const configured = Boolean(status && status.configured);
+    const connected = state === 'connected';
+    if (mtprotoStatus) {
+      mtprotoStatus.textContent = state.replaceAll('_', ' ');
+      mtprotoStatus.className = `badge ${connected ? 'badge-success' : state === 'error' ? 'badge-danger' : 'badge-warning'}`;
+    }
+    if (mtprotoSetupGroup) mtprotoSetupGroup.classList.toggle('hidden', configured);
+    if (btnMTProtoRequestCode) btnMTProtoRequestCode.classList.toggle('hidden', !configured || connected || state === 'password_required');
+    if (mtprotoCodeGroup) mtprotoCodeGroup.classList.toggle('hidden', state !== 'code_required');
+    if (mtprotoPasswordGroup) mtprotoPasswordGroup.classList.toggle('hidden', state !== 'password_required');
+    if (btnMTProtoLogout) btnMTProtoLogout.classList.toggle('hidden', !configured);
+    const caps = mtprotoCapabilities();
+    if (mtprotoBackfillGroup) mtprotoBackfillGroup.classList.toggle('hidden', !connected || caps.historyRecovery !== true);
+    if (mtprotoBackfillEndpoint) {
+      const eps = (cachedEndpoints || []).filter(e => e.connectionId === mtprotoConnId && e.transport === 'telegram');
+      mtprotoBackfillEndpoint.innerHTML = eps.length ? eps.map(e => `<option value="${escapeHtml(e.alias)}">${escapeHtml(e.alias)}</option>`).join('') : '<option value="">No endpoints configured</option>';
+    }
+  }
+
+  async function refreshMTProtoModal() {
+    if (!mtprotoConnId) return;
+    try {
+      const status = await window.API.getConnectionStatus(mtprotoConnId);
+      renderMTProtoStatus(status || {});
+      if (mtprotoAlert) mtprotoAlert.classList.add('hidden');
+    } catch (err) {
+      if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Unable to read Telegram session status.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); }
+    }
+  }
+
+  async function openTelegramMTProto(connId) {
+    const conn = (cachedConnections || []).find(c => c.id === connId);
+    if (!conn || conn.transport !== 'telegram' || !(conn.capabilities && conn.capabilities.historyRecovery)) {
+      showToast('This connection does not support the Phone / MTProto session flow.', 'danger');
+      return;
+    }
+    mtprotoConnId = connId;
+    if (mtprotoConnInfo) mtprotoConnInfo.textContent = `${conn.label} (${conn.id}) · Phone / MTProto`;
+    if (mtprotoAlert) mtprotoAlert.classList.add('hidden');
+    if (mtprotoAPIID) mtprotoAPIID.value = '';
+    if (mtprotoAPIHash) mtprotoAPIHash.value = '';
+    if (mtprotoPhone) mtprotoPhone.value = '';
+    if (mtprotoCode) mtprotoCode.value = '';
+    if (mtprotoPassword) mtprotoPassword.value = '';
+    openModal(modalTelegramMTProto);
+    await refreshMTProtoModal();
+  }
+
+  async function setupMTProtoSession() {
+    const apiId = parseInt(mtprotoAPIID ? mtprotoAPIID.value : '', 10);
+    let apiHash = mtprotoAPIHash ? mtprotoAPIHash.value.trim() : '';
+    let phone = mtprotoPhone ? mtprotoPhone.value.trim() : '';
+    if (mtprotoAPIHash) mtprotoAPIHash.value = '';
+    if (mtprotoPhone) mtprotoPhone.value = '';
+    if (!mtprotoConnId || !Number.isInteger(apiId) || apiId <= 0 || !apiHash || !phone) {
+      if (mtprotoAlert) { mtprotoAlert.textContent = 'API ID, API hash, and phone are required.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); }
+      return;
+    }
+    setButtonLoading(btnMTProtoSetup, true);
+    try {
+      await window.API.setupTelegramMTProto(mtprotoConnId, apiId, apiHash, phone);
+      apiHash = ''; phone = '';
+      await window.API.requestTelegramMTProtoCode(mtprotoConnId);
+      await refreshMTProtoModal();
+    } catch (err) {
+      if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram setup failed.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); }
+    } finally {
+      apiHash = ''; phone = '';
+      setButtonLoading(btnMTProtoSetup, false);
+    }
+  }
+
+  async function requestMTProtoCode() {
+    if (!mtprotoConnId) return;
+    setButtonLoading(btnMTProtoRequestCode, true);
+    try { await window.API.requestTelegramMTProtoCode(mtprotoConnId); await refreshMTProtoModal(); }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Could not request login code.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    finally { setButtonLoading(btnMTProtoRequestCode, false); }
+  }
+
+  async function submitMTProtoCode() {
+    let code = mtprotoCode ? mtprotoCode.value.trim() : '';
+    if (mtprotoCode) mtprotoCode.value = '';
+    if (!code) return;
+    setButtonLoading(btnMTProtoCode, true);
+    try { await window.API.submitTelegramMTProtoCode(mtprotoConnId, code); code=''; await refreshMTProtoModal(); }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram login code was rejected.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    finally { code=''; setButtonLoading(btnMTProtoCode, false); }
+  }
+
+  async function submitMTProtoPassword() {
+    let password = mtprotoPassword ? mtprotoPassword.value : '';
+    if (mtprotoPassword) mtprotoPassword.value = '';
+    if (!password) return;
+    setButtonLoading(btnMTProtoPassword, true);
+    try { await window.API.submitTelegramMTProtoPassword(mtprotoConnId, password); password=''; await refreshMTProtoModal(); await loadConnections(); }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram 2FA password was rejected.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    finally { password=''; setButtonLoading(btnMTProtoPassword, false); }
+  }
+
+  async function logoutMTProtoSession() {
+    if (!mtprotoConnId) return;
+    try { await window.API.logoutTelegramMTProto(mtprotoConnId); await refreshMTProtoModal(); await loadConnections(); }
+    catch (err) { showToast(err.message || 'Failed to log out Telegram session.', 'danger'); }
+  }
+
+  async function runMTProtoBackfill() {
+    const endpoint = mtprotoBackfillEndpoint ? mtprotoBackfillEndpoint.value : '';
+    const maxEvents = parseInt(mtprotoBackfillEvents ? mtprotoBackfillEvents.value : '200', 10);
+    const maxAgeHours = parseInt(mtprotoBackfillHours ? mtprotoBackfillHours.value : '24', 10);
+    if (!endpoint || !Number.isInteger(maxEvents) || maxEvents < 1 || maxEvents > 1000 || !Number.isInteger(maxAgeHours) || maxAgeHours < 1 || maxAgeHours > 720) {
+      showToast('Select an endpoint and valid bounded history limits.', 'danger'); return;
+    }
+    setButtonLoading(btnMTProtoBackfill, true);
+    try { await window.API.backfillTelegramMTProto(mtprotoConnId, endpoint, maxEvents, maxAgeHours); }
+    catch (err) { showToast(err.message || 'Telegram history backfill failed.', 'danger'); }
+    finally { setButtonLoading(btnMTProtoBackfill, false); }
+  }
+
+  async function showTelegramTopics(connId, remoteId, title) {
+    const conn = (cachedConnections || []).find(c => c.id === connId);
+    const caps = conn && conn.capabilities ? conn.capabilities : {};
+    if (caps.topicDiscovery !== 'full') return;
+    try {
+      const topics = await window.API.getTelegramTopics(connId, remoteId);
+      const items = Array.isArray(topics) ? topics : [];
+      if (discoveryAlert) {
+        discoveryAlert.className = 'alert alert-info';
+        discoveryAlert.innerHTML = `<strong>${escapeHtml(title || remoteId)} topics:</strong> ` + (items.length ? items.map(t => `${escapeHtml(t.label || (t.general ? 'General' : 'Topic'))} <code>${escapeHtml(t.remoteId)}</code>`).join(' · ') : 'No forum topics found.');
+        discoveryAlert.classList.remove('hidden');
+      }
+    } catch (err) { showToast(err.message || 'Topic discovery failed.', 'danger'); }
   }
 
   function openReplaceTokenModal(connId, label) {
@@ -1561,8 +1810,9 @@
             if (discoveryEmptyTitle) discoveryEmptyTitle.textContent = 'No Discord Channels Found';
             if (discoveryEmptyDesc) discoveryEmptyDesc.textContent = 'Ensure the bot has View Channel permissions in your Discord server.';
           } else {
-            if (discoveryEmptyTitle) discoveryEmptyTitle.textContent = 'No Observed Telegram Chats';
-            if (discoveryEmptyDesc) discoveryEmptyDesc.textContent = 'Send a message in a group where the bot is a member (with Bot Privacy Mode disabled), then refresh.';
+            const caps = conn && conn.capabilities ? conn.capabilities : {};
+            if (discoveryEmptyTitle) discoveryEmptyTitle.textContent = caps.chatDiscovery === 'full' ? 'No Joined Telegram Groups' : 'No Observed Telegram Chats';
+            if (discoveryEmptyDesc) discoveryEmptyDesc.textContent = caps.chatDiscovery === 'full' ? 'The authenticated phone account has no joined supported groups/supergroups.' : 'Send a message in a group the bot can observe, then refresh discovery. Bot Privacy Mode/admin visibility may limit observation.';
           }
         }
         return;
@@ -1589,11 +1839,14 @@
           const actionBtn = existingEp
             ? `<button class="btn btn-ghost btn-sm" disabled>Added</button>`
             : `<button class="btn btn-primary btn-sm" onclick="window.App.selectDiscoveredTarget(${index})">Add Endpoint</button>`;
+          const caps = conn && conn.capabilities ? conn.capabilities : {};
+          const topicsBtn = conn && conn.transport === 'telegram' && item.forum && caps.topicDiscovery === 'full'
+            ? `<button class="btn btn-ghost btn-sm" onclick="window.App.showTelegramTopics('${escapeHtml(conn.id)}','${escapeHtml(remoteId)}','${escapeHtml(item.title || remoteId)}')">Topics</button>` : '';
 
           return `<tr>
             <td><strong>${escapeHtml(name)}</strong></td>
             <td><code class="font-mono" style="font-size:.75rem;">${escapeHtml(remoteId)}</code></td>
-            <td style="text-align:right;">${statusText} ${actionBtn}</td>
+            <td style="text-align:right;">${statusText} ${topicsBtn} ${actionBtn}</td>
           </tr>`;
         }).join('');
       }
@@ -2840,6 +3093,8 @@
     selectDiscoveredTarget,
     openReassignModal,
     openReplaceTokenModal,
+    openTelegramMTProto,
+    showTelegramTopics,
     toggleConnection,
     deleteConnection,
     pairWhatsApp: openWaPairModal,
@@ -2908,6 +3163,14 @@
     if (btnEmptyAddConnection) btnEmptyAddConnection.addEventListener('click', openAddConnectionModal);
     if (formAddConnection) formAddConnection.addEventListener('submit', handleAddConnectionSubmit);
     if (formReplaceToken) formReplaceToken.addEventListener('submit', handleReplaceTokenSubmit);
+    if (addConnDiscordMode) addConnDiscordMode.addEventListener('change', () => selectAddDiscordMode(addConnDiscordMode.value));
+  if (addConnTelegramMode) addConnTelegramMode.addEventListener('change', () => selectAddTelegramMode(addConnTelegramMode.value));
+    if (btnMTProtoSetup) btnMTProtoSetup.addEventListener('click', setupMTProtoSession);
+    if (btnMTProtoRequestCode) btnMTProtoRequestCode.addEventListener('click', requestMTProtoCode);
+    if (btnMTProtoCode) btnMTProtoCode.addEventListener('click', submitMTProtoCode);
+    if (btnMTProtoPassword) btnMTProtoPassword.addEventListener('click', submitMTProtoPassword);
+    if (btnMTProtoLogout) btnMTProtoLogout.addEventListener('click', logoutMTProtoSession);
+    if (btnMTProtoBackfill) btnMTProtoBackfill.addEventListener('click', runMTProtoBackfill);
     if (formReassignEndpoint) formReassignEndpoint.addEventListener('submit', submitReassign);
     if (btnDiscoverySubmitCreate) btnDiscoverySubmitCreate.addEventListener('click', submitDiscoveryCreate);
     if (btnDiscoveryCancelCreate) {

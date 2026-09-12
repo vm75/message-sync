@@ -175,6 +175,19 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 		}
 	}
 	waitStarted()
+	for i := 0; i < 100; i++ {
+		tg.mu.Lock()
+		updated := len(tg.updatedConfigs) > 0
+		tg.mu.Unlock()
+		if updated {
+			break
+		}
+		if i == 99 {
+			cancel()
+			t.Fatal("initial configuration was not applied to Telegram adapter")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	wa.events <- transport.Incoming{
 		Endpoint:  "wa",
