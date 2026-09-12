@@ -60,6 +60,8 @@ func TestValidateIntegrationMode(t *testing.T) {
 		{"telegram", "mtproto", false},
 		{"telegram", "other", true},
 		{"discord", "", false},
+		{"discord", "managed", false},
+		{"discord", "webhook", false},
 		{"discord", "bot", true},
 	} {
 		if err := ValidateIntegrationMode(tc.transport, tc.mode); (err != nil) != tc.wantErr {

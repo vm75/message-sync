@@ -219,9 +219,14 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err == nil {
 			for _, c := range allConns {
 				if c.Transport == "discord" && c.Enabled {
-					tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+					credentialBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 					if err != nil {
 						safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
+						continue
+					}
+					discordCredential, err := discord.DecodeStoredCredential(c.IntegrationMode, credentialBytes)
+					if err != nil {
+						safelog.Error(logger, "decode discord credential failed", "discord_credential", err)
 						continue
 					}
 					connChannelIDs := make(map[string]string)
@@ -231,14 +236,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 					}
 					dcInst, err := openDiscord(ctx, discord.Options{
-						ConnectionID:  c.ID,
-						Token:         string(tokenBytes),
-						ChannelIDs:    connChannelIDs,
-						Hasher:        hasher,
-						UsernameMode:  cfg.Identity.UsernameMode,
-						Logger:        logger,
-						MediaEnabled:  cfg.Media.Enabled,
-						MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+						ConnectionID:             c.ID,
+						Token:                    discordCredential.BotToken,
+						ChannelIDs:               connChannelIDs,
+						ExplicitWebhookURL:       discordCredential.WebhookURL,
+						ExplicitWebhookChannelID: discordCredential.ChannelID,
+						Hasher:                   hasher,
+						UsernameMode:             cfg.Identity.UsernameMode,
+						Logger:                   logger,
+						MediaEnabled:             cfg.Media.Enabled,
+						MediaMaxBytes:            uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 					})
 					if err != nil {
 						safelog.Error(logger, "start Discord transport failed", "discord_start", err)
@@ -456,12 +463,17 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				for connID, c := range enabledDiscord {
 					_, exists := discordAdapters[connID]
 					if !exists || credentialChanged[connID] {
-						tokenBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
+						credentialBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
 							if exists && credentialChanged[connID] {
 								reloadErr = errors.Join(reloadErr, errors.New("decrypt Discord credential failed"))
 							}
+							continue
+						}
+						discordCredential, err := discord.DecodeStoredCredential(c.IntegrationMode, credentialBytes)
+						if err != nil {
+							safelog.Error(logger, "decode discord credential failed", "discord_credential", err)
 							continue
 						}
 						connChannelIDs := make(map[string]string)
@@ -471,14 +483,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							}
 						}
 						dcInst, err := openDiscord(ctx, discord.Options{
-							ConnectionID:  c.ID,
-							Token:         string(tokenBytes),
-							ChannelIDs:    connChannelIDs,
-							Hasher:        hasher,
-							UsernameMode:  updatedCfg.Identity.UsernameMode,
-							Logger:        logger,
-							MediaEnabled:  updatedCfg.Media.Enabled,
-							MediaMaxBytes: uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+							ConnectionID:             c.ID,
+							Token:                    discordCredential.BotToken,
+							ChannelIDs:               connChannelIDs,
+							ExplicitWebhookURL:       discordCredential.WebhookURL,
+							ExplicitWebhookChannelID: discordCredential.ChannelID,
+							Hasher:                   hasher,
+							UsernameMode:             updatedCfg.Identity.UsernameMode,
+							Logger:                   logger,
+							MediaEnabled:             updatedCfg.Media.Enabled,
+							MediaMaxBytes:            uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
 						})
 						if err != nil {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)

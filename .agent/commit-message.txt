@@ -1,1 +1,0 @@
-feat: support explicit Discord webhooks with channel binding

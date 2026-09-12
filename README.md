@@ -36,7 +36,7 @@ The core routing boundary is deliberately content-free at rest:
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
-- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord/Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. OTPs and Telegram 2FA passwords are never persisted.
+- `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord bot/webhook credentials, encrypted Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. Discord webhook URLs and bot tokens are never returned through read APIs; Telegram OTPs and 2FA passwords are never persisted.
 - Membership evidence is stored privately under `/data/membership-evidence/`, removed on final approve/reject decisions, and subject to bounded cleanup when the experimental verification workflow is used.
 
 The optional `friendly` child-context display mode stores bounded current thread/topic labels in `sync.db` for presentation only. The default `opaque` mode does not; labels never control routing or identity.
@@ -81,7 +81,49 @@ Create a WhatsApp connection, start pairing, then scan the QR code from **Linked
 
 ### Discord
 
-Create a Discord bot, enable the privileged **Message Content** intent, and grant **View Channel**, **Read Message History**, **Send Messages**, **Add Reactions**, and **Manage Webhooks** in destination channels. Paste the bot token once when creating the connection; the service encrypts it in `control.db` and never returns it through read APIs.
+Discord always uses a **bot token** for inbound Gateway events and native Discord operations. Enable the privileged **Message Content** intent in the Discord Developer Portal, install the bot in the target server, and grant the permissions required by the features you use. At minimum for normal bidirectional message sync, grant **View Channel**, **Read Message History**, and **Send Messages**; grant **Add Reactions** for reaction sync and the appropriate thread/poll permissions for those features.
+
+`message-sync` supports two outbound webhook setups. Choose one when creating the Discord connection.
+
+#### Option A — managed webhook (default)
+
+Use this when you want the simplest setup or one Discord bot connection to serve multiple channels.
+
+1. Create the Discord application and bot, enable **Message Content** intent, and copy the bot token.
+2. Install the bot in the server with **View Channel**, **Read Message History**, **Send Messages**, **Manage Webhooks**, plus any reaction/thread/poll permissions you need.
+3. In `message-sync`, create a Discord connection and choose **Managed by message-sync**.
+4. Paste the bot token once.
+5. Use **Discover** to add one or more Discord channels as endpoints.
+
+For every configured channel, `message-sync` finds or creates one bridge-owned webhook and keeps the webhook credential only inside the Discord adapter process. The bot needs **Manage Webhooks** because it provisions and repairs those webhooks.
+
+#### Option B — existing webhook + channel ID
+
+Use this when you prefer to create the webhook yourself and do **not** want to grant the bot **Manage Webhooks**.
+
+1. Create the Discord application and bot, enable **Message Content** intent, and copy the bot token.
+2. Install the bot in the server with **View Channel**, **Read Message History**, **Send Messages**, plus any reaction/thread/poll permissions you need. **Manage Webhooks is not required.**
+3. In Discord, open the target channel's **Edit Channel → Integrations → Webhooks**, create a webhook, and copy its webhook URL.
+4. Enable Discord Developer Mode if necessary, then copy the same channel's numeric **Channel ID**.
+5. In `message-sync`, create a Discord connection and choose **Use existing webhook + channel ID**.
+6. Paste the **bot token**, **webhook URL**, and matching **channel ID**.
+7. Use **Discover**; this connection exposes only the configured channel, which you can then add as an endpoint.
+
+The bot token is still required in this mode. The bot listens for Discord → WhatsApp/Telegram messages, edits, reactions, polls, threads, and history events; the supplied webhook handles WhatsApp/Telegram → Discord message delivery and webhook-owned edits/deletes. Messages sent by that webhook are recognized as bridge-owned and ignored on ingress to prevent loops.
+
+An explicit-webhook Discord connection is intentionally bound to **one Discord channel**. Use managed-webhook mode when one connection must serve multiple Discord channels. The bot token and explicit webhook URL are encrypted in `control.db` and are never returned by connection read APIs.
+
+| Discord requirement | Managed webhook | Existing webhook + channel ID |
+|---|---:|---:|
+| Bot application + bot token | Required | Required |
+| Message Content intent | Required for ordinary message ingress | Required for ordinary message ingress |
+| View Channel / Read Message History | Required | Required |
+| Send Messages | Required for native bot operations | Required for native bot operations |
+| Add Reactions | Required only for reaction sync | Required only for reaction sync |
+| Manage Webhooks | **Required** | **Not required** |
+| Webhook creation | Automatic | Manual |
+| Channel ID entry | Discovered | Entered during connection setup |
+| Multiple Discord channels per connection | Yes | No — one configured channel |
 
 ### Telegram
 
@@ -111,7 +153,7 @@ Deployment settings come from the environment; routing and feature settings are 
 | `OPENROUTER_MODEL` | no | `openrouter/free` | Model used by optional advisory analysis. |
 | `MESSAGE_SYNC_DATA_DIR` | no | `./data` | Host-side `/data` bind source used by `compose.yml`; it is not read by the service. |
 
-Discord/Telegram Bot API tokens and Telegram MTProto application/session state are configured dynamically and encrypted with AES-256-GCM in `control.db`; they never belong in `.env`.
+Discord bot tokens, optional explicit Discord webhook URLs, Telegram Bot API tokens, and Telegram MTProto application/session state are configured dynamically and encrypted with AES-256-GCM in `control.db`; they never belong in `.env`.
 
 ### Runtime settings
 

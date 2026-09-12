@@ -946,6 +946,15 @@
             <p class="form-hint">Alphanumeric, dashes, underscores. 1–64 characters.</p>
           </div>
 
+          <div id="add-conn-discord-mode-group" class="form-group hidden">
+            <label for="add-conn-discord-mode" class="form-label">Discord Outbound Webhook</label>
+            <select id="add-conn-discord-mode" class="form-select">
+              <option value="managed">Managed by message-sync</option>
+              <option value="webhook">Use existing webhook + channel ID</option>
+            </select>
+            <p class="form-hint">Both modes still use the bot token for Discord Gateway ingress. Existing-webhook mode avoids granting the bot Manage Webhooks and binds this connection to one Discord channel.</p>
+          </div>
+
           <div id="add-conn-telegram-mode-group" class="form-group hidden">
             <label for="add-conn-telegram-mode" class="form-label">Telegram Integration Method</label>
             <select id="add-conn-telegram-mode" class="form-select">
@@ -959,6 +968,19 @@
             <label for="conn-bot-token" class="form-label">Bot Token (Paste once)</label>
             <input type="password" id="conn-bot-token" class="form-input" autocomplete="new-password" placeholder="Paste bot token">
             <p class="form-hint">Token is encrypted immediately with a domain-separated AES key. It is never logged or exposed in read APIs.</p>
+          </div>
+
+          <div id="add-conn-discord-webhook-group" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
+            <div class="form-group">
+              <label for="add-conn-discord-webhook-url" class="form-label">Existing Webhook URL</label>
+              <input type="password" id="add-conn-discord-webhook-url" class="form-input" autocomplete="new-password" placeholder="https://discord.com/api/webhooks/...">
+              <p class="form-hint">Stored encrypted with the bot token and never returned by read APIs.</p>
+            </div>
+            <div class="form-group">
+              <label for="add-conn-discord-channel-id" class="form-label">Discord Channel ID</label>
+              <input type="text" id="add-conn-discord-channel-id" class="form-input font-mono" inputmode="numeric" placeholder="123456789012345678">
+              <p class="form-hint">The bot listens to this channel; the existing webhook posts forwarded messages into the same channel.</p>
+            </div>
           </div>
 
           <div id="add-conn-mtproto-group" class="hidden" style="display:flex;flex-direction:column;gap:12px;">
@@ -980,7 +1002,9 @@
 
           <div id="add-conn-help-discord" class="form-hint hidden">
             <strong>Discord setup</strong><br>
-            In the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">official Discord Developer Portal</a>, create/select an application, open its Bot page, enable Message Content Intent, and copy/reset the bot token here. Install the bot in the target server with View Channel, Read Message History, Send Messages, Add Reactions, Manage Webhooks, and thread/poll access as needed. Then return here and use connection-scoped Discover to add channels.
+            Create/select an application in the <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer">official Discord Developer Portal</a>, enable Message Content Intent, and paste the bot token above. The bot is always used for inbound Gateway events, reactions, polls, threads, history, and other native operations.<br><br>
+            <strong>Managed webhook:</strong> grant Manage Webhooks; message-sync creates/reuses one bridge webhook for each configured channel.<br>
+            <strong>Existing webhook + channel ID:</strong> create the webhook yourself in Channel Settings → Integrations → Webhooks, paste its URL and the matching channel ID here, and Manage Webhooks is not required. This mode is intentionally bound to that one channel.
           </div>
           <div id="add-conn-help-telegram" class="form-hint hidden">
             <div id="add-conn-help-telegram-bot">

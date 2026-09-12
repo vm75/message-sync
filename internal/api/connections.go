@@ -9,6 +9,7 @@ import (
 
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/safelog"
+	discord "github.com/vm75/message-sync/internal/transport/discord"
 	telegram "github.com/vm75/message-sync/internal/transport/telegram"
 )
 
@@ -30,6 +31,8 @@ type CreateConnectionRequest struct {
 	Enabled         *bool  `json:"enabled,omitempty"`
 	Token           string `json:"token,omitempty"`
 	IntegrationMode string `json:"integrationMode,omitempty"`
+	WebhookURL      string `json:"webhookUrl,omitempty"`
+	ChannelID       string `json:"channelId,omitempty"`
 }
 
 type UpdateConnectionRequest struct {
@@ -121,6 +124,8 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	req.ID = strings.TrimSpace(req.ID)
 	req.Token = strings.TrimSpace(req.Token)
 	req.IntegrationMode = strings.TrimSpace(req.IntegrationMode)
+	req.WebhookURL = strings.TrimSpace(req.WebhookURL)
+	req.ChannelID = strings.TrimSpace(req.ChannelID)
 
 	if req.Transport != "whatsapp" && req.Transport != "discord" && req.Transport != "telegram" {
 		WriteError(w, http.StatusBadRequest, "invalid transport: must be whatsapp, discord, or telegram")
@@ -172,11 +177,12 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	case req.Transport == "discord":
-		if req.Token == "" {
-			WriteError(w, http.StatusBadRequest, "discord connections require a bot token")
+		var credentialErr error
+		credential, credentialErr = discord.EncodeStoredCredential(req.IntegrationMode, req.Token, req.WebhookURL, req.ChannelID)
+		if credentialErr != nil {
+			WriteError(w, http.StatusBadRequest, credentialErr.Error())
 			return
 		}
-		credential = []byte(req.Token)
 	case req.Transport == "telegram" && req.IntegrationMode == controlstore.TelegramIntegrationModeBot:
 		if req.Token == "" {
 			WriteError(w, http.StatusBadRequest, "telegram connections require a bot token")
@@ -354,7 +360,25 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 			WriteError(w, http.StatusInternalServerError, "credential cipher unavailable")
 			return
 		}
-		newEnc, newNonce, encErr := s.credentialCipher.Encrypt([]byte(tok))
+		replacement := []byte(tok)
+		if conn.Transport == "discord" {
+			currentRaw, decryptErr := s.credentialCipher.Decrypt(conn.EncryptedCredential, conn.CredentialNonce)
+			if decryptErr != nil {
+				WriteError(w, http.StatusInternalServerError, "failed to read existing Discord credentials")
+				return
+			}
+			currentCredential, decodeErr := discord.DecodeStoredCredential(conn.IntegrationMode, currentRaw)
+			if decodeErr != nil {
+				WriteError(w, http.StatusInternalServerError, "failed to read existing Discord credentials")
+				return
+			}
+			replacement, decodeErr = discord.EncodeStoredCredential(conn.IntegrationMode, tok, currentCredential.WebhookURL, currentCredential.ChannelID)
+			if decodeErr != nil {
+				WriteError(w, http.StatusBadRequest, decodeErr.Error())
+				return
+			}
+		}
+		newEnc, newNonce, encErr := s.credentialCipher.Encrypt(replacement)
 		if encErr != nil {
 			safelog.Error(s.logger, "encrypt replacement credential failed", "connection_update", encErr)
 			WriteError(w, http.StatusInternalServerError, "failed to secure credentials")

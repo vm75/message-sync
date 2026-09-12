@@ -17,33 +17,51 @@ var connectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 const (
 	TelegramIntegrationModeBot     = "bot"
 	TelegramIntegrationModeMTProto = "mtproto"
+	DiscordIntegrationModeManaged  = "managed"
+	DiscordIntegrationModeWebhook  = "webhook"
 )
 
 func NormalizeIntegrationMode(transportName, mode string) string {
 	transportName = strings.ToLower(strings.TrimSpace(transportName))
 	mode = strings.ToLower(strings.TrimSpace(mode))
-	if transportName == "telegram" && mode == "" {
-		return TelegramIntegrationModeBot
-	}
-	if transportName != "telegram" {
+	switch transportName {
+	case "telegram":
+		if mode == "" {
+			return TelegramIntegrationModeBot
+		}
+		return mode
+	case "discord":
+		if mode == "" {
+			return DiscordIntegrationModeManaged
+		}
+		return mode
+	default:
 		return ""
 	}
-	return mode
 }
 
 func ValidateIntegrationMode(transportName, mode string) error {
 	transportName = strings.ToLower(strings.TrimSpace(transportName))
-	if transportName != "telegram" {
+	switch transportName {
+	case "telegram":
+		switch NormalizeIntegrationMode(transportName, mode) {
+		case TelegramIntegrationModeBot, TelegramIntegrationModeMTProto:
+			return nil
+		default:
+			return fmt.Errorf("invalid telegram integration mode %q: must be bot or mtproto", strings.TrimSpace(mode))
+		}
+	case "discord":
+		switch NormalizeIntegrationMode(transportName, mode) {
+		case DiscordIntegrationModeManaged, DiscordIntegrationModeWebhook:
+			return nil
+		default:
+			return fmt.Errorf("invalid discord integration mode %q: must be managed or webhook", strings.TrimSpace(mode))
+		}
+	default:
 		if strings.TrimSpace(mode) != "" {
-			return fmt.Errorf("integration mode is only supported for telegram connections")
+			return fmt.Errorf("integration mode is only supported for discord and telegram connections")
 		}
 		return nil
-	}
-	switch NormalizeIntegrationMode(transportName, mode) {
-	case TelegramIntegrationModeBot, TelegramIntegrationModeMTProto:
-		return nil
-	default:
-		return fmt.Errorf("invalid telegram integration mode %q: must be bot or mtproto", strings.TrimSpace(mode))
 	}
 }
 

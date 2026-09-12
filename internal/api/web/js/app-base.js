@@ -119,6 +119,11 @@
   const addConnId             = document.getElementById('add-conn-id');
   const addConnToken          = document.getElementById('conn-bot-token');
   const addConnTokenGroup     = document.getElementById('add-conn-token-group');
+  const addConnDiscordModeGroup = document.getElementById('add-conn-discord-mode-group');
+  const addConnDiscordMode = document.getElementById('add-conn-discord-mode');
+  const addConnDiscordWebhookGroup = document.getElementById('add-conn-discord-webhook-group');
+  const addConnDiscordWebhookURL = document.getElementById('add-conn-discord-webhook-url');
+  const addConnDiscordChannelID = document.getElementById('add-conn-discord-channel-id');
   const addConnTelegramModeGroup = document.getElementById('add-conn-telegram-mode-group');
   const addConnTelegramMode   = document.getElementById('add-conn-telegram-mode');
   const addConnMTProtoGroup   = document.getElementById('add-conn-mtproto-group');
@@ -1252,7 +1257,7 @@
 
       const transports = [
         { key: 'whatsapp', label: 'WhatsApp Accounts', icon: '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path>' },
-        { key: 'discord', label: 'Discord Bots', icon: '<path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>' },
+        { key: 'discord', label: 'Discord Connections', icon: '<path d="M8 9h.01"></path><path d="M16 9h.01"></path><path d="M7 15c2 1 8 1 10 0"></path><path d="M5 5c4-2 10-2 14 0 2 4 3 8 2 12-2 2-4 3-6 3l-1-2h-4l-1 2c-2 0-4-1-6-3-1-4 0-8 2-12z"></path>' },
         { key: 'telegram', label: 'Telegram Bots', icon: '<path d="M22 2L11 13"></path><path d="M22 2L15 22l-4-9-9-4 20-7z"></path>' }
       ];
 
@@ -1299,12 +1304,13 @@
             detailHtml = 'Account not linked. Pairing requires mobile camera scan.';
           }
         } else if (conn.transport === 'discord') {
+          const explicitWebhook = conn.integrationMode === 'webhook';
           if (st.connected) {
-            const hasPermIssue = Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
+            const hasPermIssue = !explicitWebhook && Array.isArray(st.webhooks) && st.webhooks.some(w => w.status === 'missing_permission');
             statusBadgeClass = hasPermIssue ? 'badge-warning' : 'badge-success';
             statusText = hasPermIssue ? 'Permission Needed' : 'Connected';
-            nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? 'Discover & add channels as endpoints.' : 'Ready to sync.');
-            detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : `Gateway active (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`;
+            nextAction = hasPermIssue ? 'Grant Manage Webhooks permission on bridged Discord channels.' : (connEps.length === 0 ? (explicitWebhook ? 'Discover the configured webhook channel and add it as an endpoint.' : 'Discover & add channels as endpoints.') : 'Ready to sync.');
+            detailHtml = hasPermIssue ? 'Gateway active · Webhook permission degraded.' : (explicitWebhook ? `Gateway active · Existing webhook outbound (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).` : `Gateway active · Managed webhook outbound (${connEps.length} endpoint${connEps.length === 1 ? '' : 's'}).`);
           } else if (st.configured) {
             statusBadgeClass = 'badge-warning';
             statusText = 'Connecting';
@@ -1382,6 +1388,7 @@
             </div>
             <div class="connection-badges">
               <span class="badge ${conn.transport === 'discord' ? 'badge-discord' : conn.transport === 'telegram' ? 'badge-telegram' : 'badge-wa'}">${escapeHtml(conn.transport)}</span>
+              ${conn.transport === 'discord' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'webhook' ? 'Existing Webhook' : 'Managed Webhook')}</span>` : ''}
               ${conn.transport === 'telegram' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'mtproto' ? 'Phone / MTProto' : 'Bot API')}</span>` : ''}
               <span class="badge ${conn.enabled ? 'badge-primary' : 'badge-neutral'}">${conn.enabled ? 'Enabled' : 'Disabled'}</span>
               <span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>
@@ -1420,6 +1427,9 @@
     if (addConnLabel) addConnLabel.value = '';
     if (addConnId) addConnId.value = '';
     if (addConnToken) addConnToken.value = '';
+    if (addConnDiscordMode) addConnDiscordMode.value = 'managed';
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+    if (addConnDiscordChannelID) addConnDiscordChannelID.value = '';
     if (addConnTelegramMode) addConnTelegramMode.value = 'bot';
     if (addConnMTProtoAPIID) addConnMTProtoAPIID.value = '';
     if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
@@ -1428,13 +1438,21 @@
     openModal(modalAddConnection);
   }
 
+  function selectAddDiscordMode(mode) {
+    const isExplicitWebhook = addConnTransport === 'discord' && mode === 'webhook';
+    if (addConnDiscordWebhookGroup) addConnDiscordWebhookGroup.classList.toggle('hidden', !isExplicitWebhook);
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.required = isExplicitWebhook;
+    if (addConnDiscordChannelID) addConnDiscordChannelID.required = isExplicitWebhook;
+  }
+
   function selectAddTelegramMode(mode) {
     const isMTProto = addConnTransport === 'telegram' && mode === 'mtproto';
-    if (addConnTokenGroup) addConnTokenGroup.classList.toggle('hidden', addConnTransport === 'whatsapp' || isMTProto);
+    const needsToken = addConnTransport === 'discord' || (addConnTransport === 'telegram' && !isMTProto);
+    if (addConnTokenGroup) addConnTokenGroup.classList.toggle('hidden', !needsToken);
     if (addConnMTProtoGroup) addConnMTProtoGroup.classList.toggle('hidden', !isMTProto);
     if (addConnHelpTelegramBot) addConnHelpTelegramBot.classList.toggle('hidden', isMTProto);
     if (addConnHelpTelegramMTProto) addConnHelpTelegramMTProto.classList.toggle('hidden', !isMTProto);
-    if (addConnToken) addConnToken.required = addConnTransport !== 'whatsapp' && !isMTProto;
+    if (addConnToken) addConnToken.required = needsToken;
     if (addConnMTProtoAPIID) addConnMTProtoAPIID.required = isMTProto;
     if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.required = isMTProto;
     if (addConnMTProtoPhone) addConnMTProtoPhone.required = isMTProto;
@@ -1448,6 +1466,7 @@
       t.classList.toggle('active', tp === transport);
       t.classList.toggle(tp, tp === transport);
     });
+    if (addConnDiscordModeGroup) addConnDiscordModeGroup.classList.toggle('hidden', transport !== 'discord');
     if (addConnTelegramModeGroup) addConnTelegramModeGroup.classList.toggle('hidden', transport !== 'telegram');
     if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
     if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
@@ -1457,6 +1476,11 @@
       if (buttonText) buttonText.textContent = transport === 'whatsapp' ? 'Create & Pair' : 'Create Connection';
     }
     if (addConnToken) addConnToken.value = '';
+    if (transport !== 'discord') {
+      if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
+      if (addConnDiscordChannelID) addConnDiscordChannelID.value = '';
+    }
+    selectAddDiscordMode(addConnDiscordMode ? addConnDiscordMode.value : 'managed');
     selectAddTelegramMode(addConnTelegramMode ? addConnTelegramMode.value : 'bot');
   }
 
@@ -1465,6 +1489,10 @@
     const label = addConnLabel ? addConnLabel.value.trim() : '';
     const id = addConnId ? addConnId.value.trim() : '';
     let token = addConnToken ? addConnToken.value.trim() : '';
+    const discordMode = addConnTransport === 'discord' && addConnDiscordMode ? addConnDiscordMode.value : 'managed';
+    const isDiscordWebhook = addConnTransport === 'discord' && discordMode === 'webhook';
+    const webhookUrl = isDiscordWebhook && addConnDiscordWebhookURL ? addConnDiscordWebhookURL.value.trim() : '';
+    const discordChannelId = isDiscordWebhook && addConnDiscordChannelID ? addConnDiscordChannelID.value.trim() : '';
     const telegramMode = addConnTransport === 'telegram' && addConnTelegramMode ? addConnTelegramMode.value : 'bot';
     const isMTProto = addConnTransport === 'telegram' && telegramMode === 'mtproto';
     const apiId = isMTProto && addConnMTProtoAPIID ? parseInt(addConnMTProtoAPIID.value, 10) : 0;
@@ -1472,11 +1500,16 @@
     let phone = isMTProto && addConnMTProtoPhone ? addConnMTProtoPhone.value.trim() : '';
 
     if (addConnToken) addConnToken.value = '';
+    if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
     if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
     if (addConnMTProtoPhone) addConnMTProtoPhone.value = '';
 
     if (!label) {
       if (addConnAlert) { addConnAlert.textContent = 'Connection label is required.'; addConnAlert.classList.remove('hidden'); }
+      return;
+    }
+    if (isDiscordWebhook && (!webhookUrl || !DISCORD_CHANNEL_REGEX.test(discordChannelId))) {
+      if (addConnAlert) { addConnAlert.textContent = 'A valid existing webhook URL and numeric channel ID are required.'; addConnAlert.classList.remove('hidden'); }
       return;
     }
     if (isMTProto && (!Number.isInteger(apiId) || apiId <= 0 || !apiHash || !phone)) {
@@ -1493,7 +1526,12 @@
       const payload = { transport: addConnTransport, label, enabled: true };
       if (id) payload.id = id;
       if (addConnTransport === 'telegram') payload.integrationMode = telegramMode;
+      if (addConnTransport === 'discord') payload.integrationMode = discordMode;
       if (!isMTProto && addConnTransport !== 'whatsapp') payload.token = token;
+      if (isDiscordWebhook) {
+        payload.webhookUrl = webhookUrl;
+        payload.channelId = discordChannelId;
+      }
 
       const created = await window.API.createConnection(payload);
       const createdID = created && created.id ? created.id : id;
@@ -1521,6 +1559,7 @@
       token = ''; apiHash = ''; phone = '';
       setButtonLoading(btnSubmitAddConn, false);
       if (addConnToken) addConnToken.value = '';
+      if (addConnDiscordWebhookURL) addConnDiscordWebhookURL.value = '';
       if (addConnMTProtoAPIHash) addConnMTProtoAPIHash.value = '';
       if (addConnMTProtoPhone) addConnMTProtoPhone.value = '';
     }
@@ -3124,7 +3163,8 @@
     if (btnEmptyAddConnection) btnEmptyAddConnection.addEventListener('click', openAddConnectionModal);
     if (formAddConnection) formAddConnection.addEventListener('submit', handleAddConnectionSubmit);
     if (formReplaceToken) formReplaceToken.addEventListener('submit', handleReplaceTokenSubmit);
-    if (addConnTelegramMode) addConnTelegramMode.addEventListener('change', () => selectAddTelegramMode(addConnTelegramMode.value));
+    if (addConnDiscordMode) addConnDiscordMode.addEventListener('change', () => selectAddDiscordMode(addConnDiscordMode.value));
+  if (addConnTelegramMode) addConnTelegramMode.addEventListener('change', () => selectAddTelegramMode(addConnTelegramMode.value));
     if (btnMTProtoSetup) btnMTProtoSetup.addEventListener('click', setupMTProtoSession);
     if (btnMTProtoRequestCode) btnMTProtoRequestCode.addEventListener('click', requestMTProtoCode);
     if (btnMTProtoCode) btnMTProtoCode.addEventListener('click', submitMTProtoCode);

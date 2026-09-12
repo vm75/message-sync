@@ -10,13 +10,15 @@ func applyConnectionCapabilities(dto *ConnectionDTO) {
 		return
 	}
 	dto.IntegrationMode = controlstore.NormalizeIntegrationMode(dto.Transport, dto.IntegrationMode)
-	if dto.Transport != "telegram" {
-		dto.IntegrationMode = ""
-		dto.Capabilities = nil
+	if dto.Transport == "telegram" {
+		caps := telegram.CapabilitiesForIntegrationMode(dto.IntegrationMode)
+		dto.Capabilities = &caps
 		return
 	}
-	caps := telegram.CapabilitiesForIntegrationMode(dto.IntegrationMode)
-	dto.Capabilities = &caps
+	if dto.Transport != "discord" {
+		dto.IntegrationMode = ""
+	}
+	dto.Capabilities = nil
 }
 
 func connectionDTOFromControl(conn controlstore.Connection) ConnectionDTO {

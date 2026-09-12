@@ -119,6 +119,7 @@ func (a *Adapter) DiscoverChannels(ctx context.Context) ([]DiscoveredChannel, er
 	a.mu.RLock()
 	connected := a.connected
 	api := a.adminAPI
+	fixedWebhookChannelID := a.fixedWebhookChannelID
 	a.mu.RUnlock()
 	if !connected {
 		return nil, errors.New("Discord gateway is not connected")
@@ -165,6 +166,9 @@ func (a *Adapter) DiscoverChannels(ctx context.Context) ([]DiscoveredChannel, er
 			}
 			channelID := strings.TrimSpace(channel.ID)
 			if channelID == "" {
+				continue
+			}
+			if fixedWebhookChannelID != "" && channelID != fixedWebhookChannelID {
 				continue
 			}
 			channels = append(channels, DiscoveredChannel{

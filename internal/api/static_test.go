@@ -94,6 +94,9 @@ func TestStaticHandler(t *testing.T) {
 			"Friendly thread/topic names",
 			"Disabling friendly names removes stored names",
 			`id="add-conn-help-discord"`,
+			`id="add-conn-discord-mode"`,
+			`id="add-conn-discord-webhook-url"`,
+			`id="add-conn-discord-channel-id"`,
 			`id="add-conn-help-telegram"`,
 			`id="add-conn-telegram-mode"`,
 			`id="add-conn-mtproto-api-id"`,
@@ -135,6 +138,7 @@ func TestStaticHandler(t *testing.T) {
 		// Verify token forms are password type with autocomplete="new-password"
 		for _, expected := range []string{
 			`type="password" id="conn-bot-token" class="form-input" autocomplete="new-password"`,
+			`type="password" id="add-conn-discord-webhook-url" class="form-input" autocomplete="new-password"`,
 			`type="password" id="replace-conn-bot-token" class="form-input" autocomplete="new-password"`,
 		} {
 			if !strings.Contains(html, expected) {
@@ -195,12 +199,12 @@ func TestStaticHandler(t *testing.T) {
 		baseBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		baseJS := string(baseBytes)
-		for _, expected := range []string{"selectAddTelegramMode", "openTelegramMTProto", "setupTelegramMTProto", "submitTelegramMTProtoCode", "submitTelegramMTProtoPassword", "backfillTelegramMTProto", "caps.historyRecovery", "caps.topicDiscovery"} {
+		for _, expected := range []string{"selectAddDiscordMode", "selectAddTelegramMode", "openTelegramMTProto", "setupTelegramMTProto", "submitTelegramMTProtoCode", "submitTelegramMTProtoPassword", "backfillTelegramMTProto", "caps.historyRecovery", "caps.topicDiscovery"} {
 			if !strings.Contains(baseJS, expected) {
 				t.Fatalf("Admin base JS missing Telegram dual-mode symbol %q", expected)
 			}
 		}
-		for _, forbidden := range []string{"localStorage.setItem('apiHash'", "localStorage.setItem('phone'", "localStorage.setItem('code'", "localStorage.setItem('password'", "sessionStorage.setItem('apiHash'", "sessionStorage.setItem('phone'"} {
+		for _, forbidden := range []string{"localStorage.setItem('webhookUrl'", "sessionStorage.setItem('webhookUrl'", "localStorage.setItem('apiHash'", "localStorage.setItem('phone'", "localStorage.setItem('code'", "localStorage.setItem('password'", "sessionStorage.setItem('apiHash'", "sessionStorage.setItem('phone'"} {
 			if strings.Contains(baseJS, forbidden) {
 				t.Fatalf("Admin JS persists MTProto secret %q", forbidden)
 			}
