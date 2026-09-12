@@ -147,6 +147,9 @@ func (a *MTProtoAdapter) DiscoverTopics(ctx context.Context, remoteID string) ([
 		return nil, errors.New("discover Telegram forum topics")
 	}
 	topics = normalizeMTProtoTopics(topics)
+	if a.live != nil {
+		a.live.replaceTopicLabels(target.Peer.RemoteID, topics)
+	}
 	out := make([]DiscoveredTopic, 0, len(topics))
 	for _, topic := range topics {
 		out = append(out, DiscoveredTopic{

@@ -102,8 +102,9 @@ type mtprotoLiveState struct {
 	mediaEnabled  bool
 	mediaMaxBytes uint64
 
-	selfID int64
-	peers  map[string]mtprotoPeerState
+	selfID      int64
+	peers       map[string]mtprotoPeerState
+	topicLabels map[string]map[int]string
 
 	messageEndpoints map[int]transport.EndpointID
 	messageOrder     []int
@@ -120,6 +121,7 @@ func newMTProtoLiveState(opts Options) (*mtprotoLiveState, error) {
 		mediaEnabled:     opts.MediaEnabled,
 		mediaMaxBytes:    opts.MediaMaxBytes,
 		peers:            make(map[string]mtprotoPeerState),
+		topicLabels:      make(map[string]map[int]string),
 		messageEndpoints: make(map[int]transport.EndpointID),
 		reactions:        make(map[string]map[int64]mtprotoReactionState),
 		pendingSends:     make(map[string]int),
@@ -253,6 +255,7 @@ func (l *mtprotoLiveState) clearAccountState() {
 	l.mu.Lock()
 	l.selfID = 0
 	l.peers = make(map[string]mtprotoPeerState)
+	l.topicLabels = make(map[string]map[int]string)
 	l.messageEndpoints = make(map[int]transport.EndpointID)
 	l.messageOrder = nil
 	l.reactions = make(map[string]map[int64]mtprotoReactionState)
@@ -289,6 +292,36 @@ func (l *mtprotoLiveState) endpointForMessage(id int) (transport.EndpointID, boo
 	defer l.mu.RUnlock()
 	ep, ok := l.messageEndpoints[id]
 	return ep, ok
+}
+
+func (l *mtprotoLiveState) replaceTopicLabels(remoteID string, topics []mtprotoTopic) {
+	remoteID = strings.TrimSpace(remoteID)
+	if l == nil || remoteID == "" {
+		return
+	}
+	labels := make(map[int]string, len(topics))
+	for _, topic := range topics {
+		if topic.ID > 0 {
+			if label := strings.TrimSpace(topic.Title); label != "" {
+				labels[topic.ID] = label
+			}
+		}
+	}
+	l.mu.Lock()
+	if l.topicLabels == nil {
+		l.topicLabels = make(map[string]map[int]string)
+	}
+	l.topicLabels[remoteID] = labels
+	l.mu.Unlock()
+}
+
+func (l *mtprotoLiveState) topicLabel(remoteID string, topicID int) string {
+	if l == nil || topicID <= 0 {
+		return ""
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return strings.TrimSpace(l.topicLabels[strings.TrimSpace(remoteID)][topicID])
 }
 
 func mtprotoPendingSendKey(endpoint transport.EndpointID, kind string, topic int, text string) string {
@@ -384,6 +417,16 @@ func (a *MTProtoAdapter) initializeMTProtoLive(ctx context.Context, auth mtproto
 	}
 	if a.live.replacePeers(groups) {
 		_ = a.persistMTProtoPeers(ctx)
+	}
+	if topicClient, ok := auth.(mtprotoTopicClient); ok {
+		for _, group := range groups {
+			if !group.Forum || group.Peer.Kind != "channel" {
+				continue
+			}
+			if topics, err := topicClient.ListForumTopics(ctx, group.Peer); err == nil {
+				a.live.replaceTopicLabels(group.Peer.RemoteID, topics)
+			}
+		}
 	}
 	a.signalMTProtoRecovery()
 }
@@ -688,6 +731,10 @@ func (a *MTProtoAdapter) normalizeMTProtoMessage(ctx context.Context, entities t
 		return
 	}
 	incoming.FromSelf = msg.Out
+	topicID, _ := mtprotoTopicAndReply(msg)
+	if incoming.ChildScope != nil && topicID > 0 {
+		incoming.ChildScope.Label = a.live.topicLabel(peer.RemoteID, topicID)
+	}
 	if hasMedia && !edit {
 		if !mediaEnabled {
 			if strings.TrimSpace(incoming.Text) == "" {
@@ -706,7 +753,7 @@ func (a *MTProtoAdapter) normalizeMTProtoMessage(ctx context.Context, entities t
 			}
 		}
 	}
-	topicID := 0
+	topicID = 0
 	if incoming.ChildScope != nil {
 		topicID, _ = strconv.Atoi(incoming.ChildScope.RemoteID)
 	}
@@ -879,7 +926,7 @@ func (a *MTProtoAdapter) handleMTProtoReactionUpdate(ctx context.Context, update
 		}
 		var child *transport.ChildScope
 		if topicID > 0 {
-			child = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(topicID)}
+			child = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(topicID), Label: a.live.topicLabel(strconv.FormatInt(remote, 10), topicID)}
 		}
 		displayName := ""
 		if a.live.usernameMode == config.UsernameModePushName {

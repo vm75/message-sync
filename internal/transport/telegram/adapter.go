@@ -71,6 +71,7 @@ type Adapter struct {
 	lastUpdateID       int64
 	haveUpdateID       bool
 	observed           map[int64]observedChatEntry
+	topicLabels        map[int64]map[int]string
 	observeSeq         uint64
 	polling            bool
 	privacyModeKnown   bool
@@ -129,6 +130,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		observeChildScopeLabel: opts.ObserveChildScopeLabel,
 		messageKinds:           make(map[messageKindKey]string),
 		observed:               make(map[int64]observedChatEntry),
+		topicLabels:            make(map[int64]map[int]string),
 		polling:                true,
 		pollCancel:             pollCancel,
 	}
@@ -300,6 +302,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		}
 		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
 		if ok {
+			incoming = a.withObservedTopicLabel(update.Message, incoming)
 			incoming, ok = a.withTelegramMedia(incoming, update.Message)
 		} else {
 			a.logIgnoredTelegramMessage(normalizer, update.Message, botUserID)
@@ -307,6 +310,9 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	case update.EditedMessage != nil:
 		a.observeForumTopicLabel(ctx, normalizer, update.EditedMessage)
 		incoming, ok = normalizer.NormalizeEditedMessage(update.EditedMessage, botUserID)
+		if ok {
+			incoming = a.withObservedTopicLabel(update.EditedMessage, incoming)
+		}
 	case update.MessageReaction != nil:
 		incoming, ok = normalizer.NormalizeReaction(update.MessageReaction, botUserID)
 		if a.logger != nil {
@@ -346,7 +352,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 }
 
 func (a *Adapter) observeForumTopicLabel(ctx context.Context, normalizer *Normalizer, message *models.Message) {
-	if a == nil || normalizer == nil || message == nil || message.Chat.Type != "supergroup" || message.MessageThreadID <= 0 || a.observeChildScopeLabel == nil {
+	if a == nil || normalizer == nil || message == nil || message.Chat.Type != "supergroup" || message.MessageThreadID <= 0 {
 		return
 	}
 	var label string
@@ -361,13 +367,44 @@ func (a *Adapter) observeForumTopicLabel(ctx context.Context, normalizer *Normal
 	if strings.TrimSpace(label) == "" {
 		return
 	}
+	// Keep the existing observer payload untouched; normalize only inside the
+	// new transient presentation cache.
+	a.rememberTopicLabel(message.Chat.ID, message.MessageThreadID, label)
 	endpoint, ok := normalizer.endpoint(message.Chat.ID)
-	if !ok {
+	if !ok || a.observeChildScopeLabel == nil {
 		return
 	}
 	a.observeChildScopeLabel(ctx, endpoint, transport.ChildScope{
 		Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(message.MessageThreadID), Label: label,
 	})
+}
+
+func (a *Adapter) rememberTopicLabel(chatID int64, topicID int, label string) {
+	if a == nil || chatID == 0 || topicID <= 0 || strings.TrimSpace(label) == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.topicLabels == nil {
+		a.topicLabels = make(map[int64]map[int]string)
+	}
+	if a.topicLabels[chatID] == nil {
+		a.topicLabels[chatID] = make(map[int]string)
+	}
+	a.topicLabels[chatID][topicID] = strings.TrimSpace(label)
+}
+
+func (a *Adapter) withObservedTopicLabel(message *models.Message, incoming transport.Incoming) transport.Incoming {
+	if a == nil || message == nil || incoming.ChildScope == nil || incoming.ChildScope.Kind != transport.ScopeKindTelegramTopic || message.MessageThreadID <= 0 {
+		return incoming
+	}
+	a.mu.RLock()
+	label := strings.TrimSpace(a.topicLabels[message.Chat.ID][message.MessageThreadID])
+	a.mu.RUnlock()
+	if label != "" {
+		incoming.ChildScope.Label = label
+	}
+	return incoming
 }
 
 func telegramUpdateTimestamp(update *models.Update) time.Time {

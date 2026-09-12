@@ -21,6 +21,8 @@ type fakeMTLiveAuth struct {
 
 	groups    []mtprotoGroup
 	groupsErr error
+	topics    []mtprotoTopic
+	topicsErr error
 	nextID    int
 
 	lastPeer    mtprotoPeerState
@@ -45,6 +47,14 @@ func (f *fakeMTLiveAuth) ListGroups(context.Context) ([]mtprotoGroup, error) {
 		return nil, f.groupsErr
 	}
 	return append([]mtprotoGroup(nil), f.groups...), nil
+}
+func (f *fakeMTLiveAuth) ListForumTopics(context.Context, mtprotoPeerState) ([]mtprotoTopic, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.topicsErr != nil {
+		return nil, f.topicsErr
+	}
+	return append([]mtprotoTopic(nil), f.topics...), nil
 }
 func (f *fakeMTLiveAuth) SendText(_ context.Context, peer mtprotoPeerState, text string, replyID, topicID int) (int, error) {
 	f.mu.Lock()
@@ -147,7 +157,7 @@ func TestMTProtoLiveIngressTextReplyTopicAndSelfSuppression(t *testing.T) {
 	live := &fakeMTLiveAuth{groups: []mtprotoGroup{{
 		Peer:  mtprotoPeerState{RemoteID: "-1000000000099", Kind: "channel", ID: 99, AccessHash: 777},
 		Title: "Group", Forum: true,
-	}}}
+	}}, topics: []mtprotoTopic{{ID: 10, Title: "Planning"}}}
 	adapter, _ := newMTProtoLiveAdapter(t, "mt-live", "-1000000000099", live)
 	defer adapter.Close()
 
@@ -166,7 +176,7 @@ func TestMTProtoLiveIngressTextReplyTopicAndSelfSuppression(t *testing.T) {
 		if incoming.Endpoint != "tg" || incoming.Text != "hello" || incoming.Kind != "text" {
 			t.Fatalf("unexpected incoming: %+v", incoming)
 		}
-		if incoming.ChildScope == nil || incoming.ChildScope.Kind != transport.ScopeKindTelegramTopic || incoming.ChildScope.RemoteID != "10" {
+		if incoming.ChildScope == nil || incoming.ChildScope.Kind != transport.ScopeKindTelegramTopic || incoming.ChildScope.RemoteID != "10" || incoming.ChildScope.Label != "Planning" {
 			t.Fatalf("unexpected child scope: %+v", incoming.ChildScope)
 		}
 		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "18" {
