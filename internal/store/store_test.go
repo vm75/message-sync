@@ -731,3 +731,66 @@ func TestSuppressedReactions(t *testing.T) {
 		t.Fatal("expected suppressed reaction to be cleared")
 	}
 }
+
+// TestAnonymizeToDiscordOldSchemaUpgrade verifies that an existing database
+// created before the anonymize_to_discord column was introduced is safely
+// upgraded during Open(), preserves pre-existing sync sets with the default
+// value (0 / false), and can be reopened idempotently.
+func TestAnonymizeToDiscordOldSchemaUpgrade(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+
+	// 1. Manually create the old database with sync_sets containing only id TEXT PRIMARY KEY
+	// and insert a pre-existing sync set row.
+	rawDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("create raw db: %v", err)
+	}
+	if _, err := rawDB.Exec(`
+		CREATE TABLE sync_sets (
+			id TEXT PRIMARY KEY
+		);
+		INSERT INTO sync_sets (id) VALUES ('legacy-sync-set');
+	`); err != nil {
+		rawDB.Close()
+		t.Fatalf("setup legacy table: %v", err)
+	}
+	rawDB.Close()
+
+	// 2. Open the store with current code: initialize runs schema.sql (CREATE TABLE IF NOT EXISTS
+	// which leaves existing sync_sets intact) and then applies the ADD COLUMN migration.
+	s1, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("Open failed on legacy database: %v", err)
+	}
+
+	// 3. Assert anonymize_to_discord column now exists and legacy row defaults to 0 (false).
+	var val int
+	if err := s1.db.QueryRowContext(ctx,
+		`SELECT anonymize_to_discord FROM sync_sets WHERE id = 'legacy-sync-set'`,
+	).Scan(&val); err != nil {
+		s1.Close()
+		t.Fatalf("anonymize_to_discord column query failed on upgraded row: %v", err)
+	}
+	if val != 0 {
+		s1.Close()
+		t.Fatalf("expected existing row anonymize_to_discord to default to 0, got %d", val)
+	}
+	_ = s1.Close()
+
+	// 4. Reopen again: assert reopening is idempotent (no duplicate column error).
+	s2, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("second Open failed (idempotency check): %v", err)
+	}
+	defer s2.Close()
+
+	if err := s2.db.QueryRowContext(ctx,
+		`SELECT anonymize_to_discord FROM sync_sets WHERE id = 'legacy-sync-set'`,
+	).Scan(&val); err != nil {
+		t.Fatalf("anonymize_to_discord unreadable on second open: %v", err)
+	}
+	if val != 0 {
+		t.Fatalf("expected value to remain 0 after second open, got %d", val)
+	}
+}

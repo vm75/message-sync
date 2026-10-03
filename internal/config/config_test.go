@@ -465,3 +465,71 @@ func TestValidateRejectsMissingOrInvalidConnectionID(t *testing.T) {
 		t.Fatalf("expected valid config, got: %v", err)
 	}
 }
+
+func TestSyncSetAnonymizeToDiscordPersistenceAndDefaults(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// 1. Fresh schema contains the column
+	var count int
+	err = st.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('sync_sets') WHERE name = 'anonymize_to_discord'`).Scan(&count)
+	if err != nil {
+		t.Fatalf("check table info: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected anonymize_to_discord column in sync_sets, got count = %d", count)
+	}
+
+	// 2. Default is false
+	cfg := validConfig()
+	if cfg.SyncSets[0].AnonymizeToDiscord {
+		t.Fatal("expected default AnonymizeToDiscord to be false")
+	}
+
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("save initial config: %v", err)
+	}
+
+	loaded, err := Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("load initial config: %v", err)
+	}
+	if loaded.SyncSets[0].AnonymizeToDiscord {
+		t.Fatal("expected loaded AnonymizeToDiscord to be false")
+	}
+
+	// 3. True round-trips through Save and Load
+	cfg.SyncSets[0].AnonymizeToDiscord = true
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("save config with AnonymizeToDiscord=true: %v", err)
+	}
+
+	loaded, err = Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("load config with AnonymizeToDiscord=true: %v", err)
+	}
+	if !loaded.SyncSets[0].AnonymizeToDiscord {
+		t.Fatal("expected loaded AnonymizeToDiscord to be true")
+	}
+	if len(loaded.SyncSets[0].Endpoints) != len(cfg.SyncSets[0].Endpoints) {
+		t.Fatalf("expected endpoint membership unchanged: %+v", loaded.SyncSets[0].Endpoints)
+	}
+
+	// 4. False round-trips after being true
+	cfg.SyncSets[0].AnonymizeToDiscord = false
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatalf("save config with AnonymizeToDiscord=false: %v", err)
+	}
+
+	loaded, err = Load(ctx, st.DB())
+	if err != nil {
+		t.Fatalf("load config with AnonymizeToDiscord=false: %v", err)
+	}
+	if loaded.SyncSets[0].AnonymizeToDiscord {
+		t.Fatal("expected loaded AnonymizeToDiscord to be false")
+	}
+}

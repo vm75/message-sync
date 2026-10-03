@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on SyncSets. When enabled, sender presentation, structured mentions, reply quotes, and reaction fallbacks forwarded to Discord endpoints are replaced with deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, while non-Discord destinations retain normal push name attribution.
+- Web UI and REST API support for configuring `anonymizeToDiscord` when creating and updating sync sets.
+
+### Fixed
+- Edit events forwarded to Discord now pseudonymize `@mention` names and strip bridge-generated quoted attribution headers, matching the privacy guarantees already applied to creates.
+- `PhoneNumber` is now cleared for all Discord-bound senders when `anonymizeToDiscord` is set, regardless of `usernameMode`; previously it was only cleared in `push_name` mode.
+- Structured Telegram and Discord mentions now remain privacy-safe HMAC actor tokens through canonical routing, allowing Discord-bound anonymization to replace real mention display names without broad free-text redaction. Provider-native mention IDs that still require derivation are keyed by source transport, and anonymization-enabled routing requires the identity hasher.
+- Quoted-attribution sanitization now strips the exact formatted bridge wrapper and the plain `endpoint/name: body` form emitted by Telegram only when `endpoint` is a configured alias, avoiding both real-name leakage and broad `/`-based free-text stripping.
+- Pseudonym suffix entropy increased from 3 to 5 characters, reducing the per-group collision probability for large WhatsApp groups.
+
 ## [0.1.8] - 2026-09-12
 
 ### Fixed

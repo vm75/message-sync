@@ -8,6 +8,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/transport"
 )
 
 const (
@@ -92,7 +93,7 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 		t.Fatalf("quoted text = %q", incoming.QuotedText)
 	}
 	if incoming.Mentions != nil {
-		t.Fatal("Discord identities must not leave the adapter as structured mentions")
+		t.Fatal("unreferenced Discord mention metadata must not create structured mentions")
 	}
 	if !incoming.Timestamp.Equal(evt.Timestamp) {
 		t.Fatalf("timestamp = %v, want %v", incoming.Timestamp, evt.Timestamp)
@@ -254,17 +255,38 @@ func TestNormalizeDiscordMentionsUseSafeTextFallbacks(t *testing.T) {
 	if !ok {
 		t.Fatal("configured Discord message was ignored")
 	}
-	if !strings.Contains(incoming.Text, "@Bob Example") || !strings.Contains(incoming.Text, "@role") || !strings.Contains(incoming.Text, "#channel") {
-		t.Fatalf("safe mention fallbacks missing: %q", incoming.Text)
+	if strings.Contains(incoming.Text, "@Bob Example") || !strings.Contains(incoming.Text, "@role") || !strings.Contains(incoming.Text, "#channel") {
+		t.Fatalf("Discord canonical text did not preserve privacy-safe mention tokens: %q", incoming.Text)
 	}
 	if strings.Contains(incoming.Text, knownID) || strings.Contains(incoming.Text, unknownID) || strings.Contains(incoming.Text, roleID) || strings.Contains(incoming.Text, channelID) {
 		t.Fatalf("raw Discord identifier leaked into normalized text: %q", incoming.Text)
 	}
 	if !strings.Contains(incoming.Text, "@u_") {
-		t.Fatalf("unknown Discord user did not use HMAC fallback: %q", incoming.Text)
+		t.Fatalf("Discord user mentions did not use HMAC actor tokens: %q", incoming.Text)
 	}
-	if incoming.Mentions != nil {
-		t.Fatal("Discord structured mentions should not cross the privacy boundary")
+	if len(incoming.Mentions) != 2 {
+		t.Fatalf("structured Discord mentions = %d, want 2: %#v", len(incoming.Mentions), incoming.Mentions)
+	}
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownOpaque := hasher.UserID("discord:" + knownID)
+	unknownOpaque := hasher.UserID("discord:" + unknownID)
+	var knownMention, unknownMention *transport.Mention
+	for i := range incoming.Mentions {
+		switch incoming.Mentions[i].RemoteID {
+		case knownOpaque:
+			knownMention = &incoming.Mentions[i]
+		case unknownOpaque:
+			unknownMention = &incoming.Mentions[i]
+		}
+	}
+	if knownMention == nil || knownMention.Name != "Bob Example" {
+		t.Fatalf("known Discord mention did not retain transient display name: %#v", incoming.Mentions)
+	}
+	if unknownMention == nil || unknownMention.Name != unknownOpaque {
+		t.Fatalf("unknown Discord mention did not use opaque fallback: %#v", incoming.Mentions)
 	}
 }
 

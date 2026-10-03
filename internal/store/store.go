@@ -217,6 +217,11 @@ func initialize(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("initialize sync schema: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE sync_sets ADD COLUMN anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate sync_sets schema: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sync schema initialization: %w", err)
 	}

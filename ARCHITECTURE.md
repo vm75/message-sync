@@ -63,7 +63,7 @@ The application preserves four distinct concepts:
 - **Connection** authenticates one WhatsApp account, Discord bot, or Telegram bot.
 - **Endpoint** gives a safe alias to one configured parent conversation owned by a connection.
 - **ChildScope** carries an opaque Discord thread/forum-post or Telegram topic context for a message.
-- **Sync Set** groups endpoint aliases for all-to-all fan-out.
+- **Sync Set** groups endpoint aliases for all-to-all fan-out, with optional route-aware one-way Discord anonymization (`anonymizeToDiscord`).
 
 Endpoint aliases are the only routing identifiers safe for display and logging. They match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and must not encode a person, phone number, JID, group subject, guild, or channel name. Provider target IDs are retained only for operational addressing and are never canonical IDs.
 
@@ -72,6 +72,8 @@ Child scopes are not endpoint rows and do not create independent routes. Opaque 
 Flattened child messages use one human-facing attribution header: `<group-alias>/<thread-or-topic-label>/<username>`. Opaque child IDs never enter forwarded message text. The default `opaque` child-context mode keeps thread/topic names transient and falls back to the generic `thread`/`topic` label when a live name is unavailable. The explicit `friendly` mode may retain bounded normalized labels in the presentation-only `child_scope_labels` table so names survive restart/replay; switching back to `opaque` clears them. Labels never participate in routing, identity, or copy lookup.
 
 Telegram basic-group to supergroup migrations are handled as addressing maintenance: the adapter recognizes the migration service message and transactionally updates only the matching endpoint's `remote_id` in `sync.db`, preserving the alias, sync set, and canonical lineage. Telegram mentions are sanitized at the adapter boundary: `text_mention` entities are reduced to HMAC actor IDs plus transient display labels, and `@username` entities are rewritten to the generic `@mention` fallback to keep raw usernames out of canonical state.
+
+Route-aware Discord anonymization: When a sync set configures `anonymizeToDiscord = true`, outbound deliveries to Discord endpoints replace sender presentation names, structured mentions, reply quotes, and reaction fallback attributions with deterministic pseudonyms (e.g., `Silent Falcon Q7M`) derived purely from HMAC actor IDs. No PII-to-pseudonym mapping table is stored. WhatsApp and Telegram endpoints in the same sync set retain normal push name attribution in `push_name` mode.
 
 ## Persistence and trust boundaries
 
@@ -82,6 +84,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 `internal/store/schema.sql` initializes the application routing database. It may contain:
 
 - safe endpoint aliases, connection IDs, and provider target IDs needed for addressing;
+- sync set definitions (including the boolean `anonymize_to_discord` flag) and endpoint memberships;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
 - HMAC actor IDs, reaction emoji, poll option indexes/hashes and aggregate counts;
@@ -89,7 +92,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 
 It must not contain message or quoted text, captions, poll questions/options, media, participant identity, provider display names, raw updates, credentials, external file URLs, or arbitrary error strings. `message_copies` maps `(endpoint, remote message ID)` to a random canonical ID and enforces one copy per canonical message and endpoint.
 
-The store enables foreign keys and uses uniqueness constraints and transactions for duplicate safety. Retention removes old canonical state in bounded batches. The current schema is a fresh-database schema: no schema-version dispatcher or compatibility migration path exists for older development databases.
+The store enables foreign keys and uses uniqueness constraints and transactions for duplicate safety. Retention removes old canonical state in bounded batches. The project does not have a general versioned migration framework; schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests.
 
 ### `control.db`: sensitive application boundary
 
@@ -200,8 +203,8 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | `/api/connections/{id}/pair`, `/logout` | `POST` | Admin | Serialized WhatsApp QR pairing lifecycle and session logout. |
 | `/api/endpoints` | `GET`, `POST` | Authenticated | Lists or creates safe endpoint aliases mapping to connection targets. |
 | `/api/endpoints/{alias}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates alias, sync set, or deletes endpoint. |
-| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets for fan-out between endpoint aliases. |
-| `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates sync set endpoints or deletes sync set. |
+| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets (with optional `anonymizeToDiscord`) for fan-out. |
+| `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates sync set endpoints, anonymization settings, or deletes sync set. |
 | `/api/config` | `GET`, `PUT` | Authenticated | Reads or modifies `global_config` in `sync.db` with live router reload. |
 | `/api/delivery/status` | `GET` | Authenticated | Real-time content-free delivery health, lane depth, and failure classes. |
 | `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages experimental membership intake pipelines bound to endpoint sync sets. |

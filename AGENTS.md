@@ -69,7 +69,7 @@ podman compose -f compose.yml config
 
 ## Architecture invariants
 
-- Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out.
+- Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out (with optional route-aware one-way Discord anonymization `anonymizeToDiscord`).
 - Endpoint aliases must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, be safe to display, reference their owning connection, and belong to exactly one validated sync set.
 - Provider message IDs are never global canonical IDs. `message_copies` owns bidirectional lookup and idempotent fan-out.
 - Keep ingress deterministic with one canonical router worker. All three transports use the same router for creates, replies, reactions, polls, edits, deletes, and recovery.
@@ -78,13 +78,13 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
-- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. When `anonymizeToDiscord` is enabled on a sync set, Discord destinations use deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, strip phone numbers, and pseudonymize mentions and quotes, while non-Discord destinations retain normal push names. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
 - Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
 ## SQLite and Go conventions
 
 - Enable foreign keys, use committed schemas, transactions for related canonical/copy updates, uniqueness for duplicate safety, and bounded retention.
-- The current schemas initialize fresh databases; there is no upgrade migration path. Do not claim compatibility with older development databases.
+- The project does not have a general versioned migration framework. Schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests. Do not claim compatibility with older development databases.
 - Pass `context.Context` through blocking, network, and database operations.
 - Prefer concrete types until an interface represents a real boundary.
 - Validate inputs at configuration and transport edges. Wrap errors with operation context but never sensitive values.

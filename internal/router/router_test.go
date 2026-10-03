@@ -1653,3 +1653,911 @@ func TestSenderPresentationUsernamePrefersDisplayNameAndFallsBackSafely(t *testi
 		t.Fatalf("hash presentation = %q, want opaque ID", got)
 	}
 }
+
+func TestRouterAnonymizeToDiscordCreates(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "tg1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	incoming := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "msg-anon-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Realname",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "text",
+		Text: "Hello @15559876543 from Alice",
+		Mentions: []transport.Mention{{
+			RemoteID: "15559876543",
+			Name:     "Bob Realname",
+		}},
+		QuotedText: "*_wa1/Bob Realname_*: original statement",
+		Timestamp:  time.Unix(1_700_000_000, 0).UTC(),
+	}
+
+	if err := r.Handle(ctx, incoming); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+
+	var tgOut, dcOut *transport.Outgoing
+	for i := range fake.sent {
+		msg := fake.sent[i].outgoing
+		if msg.Endpoint == "tg1" {
+			tgOut = &msg
+		} else if msg.Endpoint == "dc1" {
+			dcOut = &msg
+		}
+	}
+
+	if tgOut == nil || dcOut == nil {
+		t.Fatalf("expected messages to both tg1 and dc1, got: %#v", fake.sent)
+	}
+
+	// Verify Telegram copy retains real push names and sender fields
+	if !strings.Contains(tgOut.Text, "Alice Realname") {
+		t.Errorf("tg1 text should contain real sender name, got: %s", tgOut.Text)
+	}
+	if tgOut.Sender.DisplayName != "Alice Realname" {
+		t.Errorf("tg1 sender should be Alice Realname, got: %s", tgOut.Sender.DisplayName)
+	}
+	if len(tgOut.Mentions) > 0 && tgOut.Mentions[0].Name != "Bob Realname" {
+		t.Errorf("tg1 mention name should be Bob Realname, got: %s", tgOut.Mentions[0].Name)
+	}
+
+	// Verify Discord copy uses pseudonym and contains NO real names or phone numbers
+	expectedPseudonym := identity.Pseudonym("u_abcdefghij")
+	if !strings.Contains(dcOut.Text, expectedPseudonym) {
+		t.Errorf("dc1 text should contain pseudonym %q, got: %s", expectedPseudonym, dcOut.Text)
+	}
+	if strings.Contains(dcOut.Text, "Alice Realname") || strings.Contains(dcOut.Text, "+15551234567") {
+		t.Errorf("dc1 text leaked PII: %s", dcOut.Text)
+	}
+	if dcOut.Sender.DisplayName != expectedPseudonym {
+		t.Errorf("dc1 sender display name = %q, want %q", dcOut.Sender.DisplayName, expectedPseudonym)
+	}
+	if dcOut.Sender.PhoneNumber != "" {
+		t.Errorf("dc1 sender phone must be empty, got: %q", dcOut.Sender.PhoneNumber)
+	}
+
+	// Verify Discord mentions are pseudonymized
+	if len(dcOut.Mentions) == 0 {
+		t.Fatal("dc1 expected mentions")
+	}
+	if dcOut.Mentions[0].Name == "Bob Realname" || dcOut.Mentions[0].Name == "" {
+		t.Errorf("dc1 mention should be pseudonymized, got: %q", dcOut.Mentions[0].Name)
+	}
+
+	// Verify QuotedText in Discord has no real attribution
+	if strings.Contains(dcOut.QuotedText, "Bob Realname") {
+		t.Errorf("dc1 quoted text leaked real attribution: %s", dcOut.QuotedText)
+	}
+}
+
+func TestRouterAnonymizeToDiscordEditAndReaction(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "tg1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// Initial message
+	orig := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "orig-msg",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:      "text",
+		Text:      "Initial text",
+		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+
+	// Edit
+	editEvt := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "edit-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "edit",
+		Text: "Edited content",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "wa1",
+			RemoteMessageID: "orig-msg",
+		},
+		Timestamp: time.Unix(1_700_000_010, 0).UTC(),
+	}
+	if err := r.Handle(ctx, editEvt); err != nil {
+		t.Fatal(err)
+	}
+	waitForMutations(t, fake, 2, 0, 0)
+
+	expectedPseudonym := identity.Pseudonym("u_abcdefghij")
+	for _, ed := range fake.edited {
+		if ed.ref.Endpoint == "dc1" {
+			if !strings.Contains(ed.text, expectedPseudonym) {
+				t.Errorf("dc1 edit text should contain pseudonym %q, got: %s", expectedPseudonym, ed.text)
+			}
+			if strings.Contains(ed.text, "Alice Real") || strings.Contains(ed.text, "+15551234567") {
+				t.Errorf("dc1 edit text leaked PII: %s", ed.text)
+			}
+		} else if ed.ref.Endpoint == "tg1" {
+			if !strings.Contains(ed.text, "Alice Real") {
+				t.Errorf("tg1 edit text should contain real name, got: %s", ed.text)
+			}
+		}
+	}
+
+	// Reaction
+	reactionEvt := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "react-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "reaction",
+		Text: "👍",
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "wa1",
+			RemoteMessageID: "orig-msg",
+		},
+		Timestamp: time.Unix(1_700_000_020, 0).UTC(),
+	}
+	if err := r.Handle(ctx, reactionEvt); err != nil {
+		t.Fatal(err)
+	}
+	waitForMutations(t, fake, 0, 2, 0)
+
+	for _, rx := range fake.reacted {
+		if rx.Endpoint == "dc1" {
+			if !strings.Contains(rx.FallbackText, expectedPseudonym) {
+				t.Errorf("dc1 reaction fallback should contain pseudonym, got: %s", rx.FallbackText)
+			}
+			if strings.Contains(rx.FallbackText, "Alice Real") || strings.Contains(rx.FallbackText, "+15551234567") {
+				t.Errorf("dc1 reaction fallback leaked PII: %s", rx.FallbackText)
+			}
+		} else if rx.Endpoint == "tg1" {
+			if !strings.Contains(rx.FallbackText, "Alice Real") {
+				t.Errorf("tg1 reaction fallback should contain real name, got: %s", rx.FallbackText)
+			}
+		}
+	}
+}
+
+func TestRouterAnonymizeToDiscordPreservesHashMode(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	incoming := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "msg-hash-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:      "text",
+		Text:      "Testing hash mode",
+		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}
+
+	if err := r.Handle(ctx, incoming); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 1)
+
+	dcOut := fake.sent[0].outgoing
+	// In hash mode, the presentation username is the raw OpaqueID "u_abcdefghij"
+	if !strings.Contains(dcOut.Text, "u_abcdefghij") {
+		t.Errorf("dc1 text in hash mode must preserve hash representation %q, got: %s", "u_abcdefghij", dcOut.Text)
+	}
+	if strings.Contains(dcOut.Text, "Alice Real") {
+		t.Errorf("dc1 text leaked PII: %s", dcOut.Text)
+	}
+}
+
+func TestRouterAnonymizeToDiscordUpdateConfig(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: false,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	inc1 := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "msg-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:      "text",
+		Text:      "First message",
+		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r.Handle(ctx, inc1); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 1)
+
+	// AnonymizeToDiscord was false: should have real name
+	if !strings.Contains(fake.sent[0].outgoing.Text, "Alice Real") {
+		t.Fatalf("expected real name when AnonymizeToDiscord is false, got: %s", fake.sent[0].outgoing.Text)
+	}
+
+	// Update config to enable AnonymizeToDiscord
+	cfgUpdated := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+	if err := r.UpdateConfig(cfgUpdated); err != nil {
+		t.Fatal(err)
+	}
+
+	fake.mu.Lock()
+	fake.sent = nil
+	fake.mu.Unlock()
+
+	inc2 := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "msg-2",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:      "text",
+		Text:      "Second message",
+		Timestamp: time.Unix(1_700_000_001, 0).UTC(),
+	}
+	if err := r.Handle(ctx, inc2); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 1)
+
+	// Now AnonymizeToDiscord is true: must have pseudonym and no real name
+	expectedPseudonym := identity.Pseudonym("u_abcdefghij")
+	if !strings.Contains(fake.sent[0].outgoing.Text, expectedPseudonym) {
+		t.Fatalf("expected pseudonym %q after update, got: %s", expectedPseudonym, fake.sent[0].outgoing.Text)
+	}
+	if strings.Contains(fake.sent[0].outgoing.Text, "Alice Real") {
+		t.Fatalf("leaked real name after update: %s", fake.sent[0].outgoing.Text)
+	}
+}
+
+// TestRouterAnonymizeToDiscordEditMentionPseudonymization verifies that when
+// AnonymizeToDiscord is set, edits forwarded to Discord have their @mentions
+// pseudonymized, preventing real mention names from leaking via the edit path.
+func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "tg1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// Original message
+	orig := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "orig-mention-msg",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_alice00001",
+		},
+		Kind:      "text",
+		Text:      "Hello @15559998888",
+		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}
+	if err := r.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, fake, 2)
+	fake.mu.Lock()
+	fake.sent = nil
+	fake.mu.Unlock()
+
+	// Edit with a mention that carries a real name
+	editEvt := transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "edit-mention-1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_alice00001",
+		},
+		Kind: "edit",
+		Text: "Edited with mention @15559998888",
+		Mentions: []transport.Mention{
+			{RemoteID: "15559998888@s.whatsapp.net", Name: "Bob Realname"},
+		},
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "wa1",
+			RemoteMessageID: "orig-mention-msg",
+		},
+		Timestamp: time.Unix(1_700_000_010, 0).UTC(),
+	}
+	if err := r.Handle(ctx, editEvt); err != nil {
+		t.Fatal(err)
+	}
+	waitForMutations(t, fake, 2, 0, 0)
+
+	expectedPseudonym := identity.Pseudonym("u_alice00001")
+	expectedMentionActorID := h.ActorID("mention:whatsapp", "15559998888@s.whatsapp.net")
+	expectedMentionPseudo := identity.Pseudonym(expectedMentionActorID)
+
+	for _, ed := range fake.edited {
+		if ed.ref.Endpoint == "dc1" {
+			// Sender must be pseudonymized
+			if !strings.Contains(ed.text, expectedPseudonym) {
+				t.Errorf("dc1 edit must contain sender pseudonym %q, got: %s", expectedPseudonym, ed.text)
+			}
+			// Mention must be pseudonymized
+			if !strings.Contains(ed.text, expectedMentionPseudo) {
+				t.Errorf("dc1 edit must contain mention pseudonym %q, got: %s", expectedMentionPseudo, ed.text)
+			}
+			// Real sender name and phone must not appear
+			if strings.Contains(ed.text, "Alice Real") || strings.Contains(ed.text, "+15551234567") {
+				t.Errorf("dc1 edit leaked sender PII: %s", ed.text)
+			}
+			// Real mention name and raw remote ID must not appear
+			if strings.Contains(ed.text, "Bob Realname") || strings.Contains(ed.text, "15559998888") {
+				t.Errorf("dc1 edit leaked mention PII: %s", ed.text)
+			}
+		} else if ed.ref.Endpoint == "tg1" {
+			// Non-Discord destination must keep real sender name
+			if !strings.Contains(ed.text, "Alice Real") {
+				t.Errorf("tg1 edit must contain real sender name, got: %s", ed.text)
+			}
+			// Non-Discord destination must keep real mention representation
+			if !strings.Contains(ed.text, "15559998888") {
+				t.Errorf("tg1 edit must keep original mention text, got: %s", ed.text)
+			}
+			if strings.Contains(ed.text, expectedMentionPseudo) {
+				t.Errorf("tg1 edit should not receive Discord mention pseudonym: %s", ed.text)
+			}
+		}
+	}
+}
+
+// TestRouterAnonymizeToDiscordHashModeClearsPhone verifies that even in hash
+// (opaque) username mode, PhoneNumber is cleared for Discord-bound messages
+// when AnonymizeToDiscord is set, so the Discord adapter never receives it.
+func TestRouterAnonymizeToDiscordHashModeClearsPhone(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	var mu sync.Mutex
+	var discordSenders []transport.Sender
+
+	recordingFake := &fakeSender{
+		sendError: func(outgoing transport.Outgoing) error {
+			if outgoing.Endpoint == "dc1" {
+				mu.Lock()
+				discordSenders = append(discordSenders, outgoing.Sender)
+				mu.Unlock()
+			}
+			return nil
+		},
+	}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, recordingFake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if err := r.Handle(ctx, transport.Incoming{
+		Endpoint: "wa1",
+		RemoteID: "msg-hash-phone",
+		Sender: transport.Sender{
+			DisplayName: "Alice Real",
+			PhoneNumber: "+15551234567",
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind:      "text",
+		Text:      "hash mode phone test",
+		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitForSent(t, recordingFake, 1)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(discordSenders) == 0 {
+		t.Fatal("no Discord sends recorded")
+	}
+	for _, s := range discordSenders {
+		if s.PhoneNumber != "" {
+			t.Errorf("Discord-bound Sender.PhoneNumber must be empty in hash+anonymize mode, got %q", s.PhoneNumber)
+		}
+		if s.DisplayName == "Alice Real" {
+			t.Errorf("Discord-bound Sender.DisplayName must not leak real name in hash mode, got %q", s.DisplayName)
+		}
+	}
+}
+
+// TestSanitizeQuotedAttributionOnlyStripsKnownBridgeFormat verifies that
+// sanitizeQuotedAttribution only removes the exact bridge-generated *_..._*:
+// wrapper and does not strip legitimate "/" content in quoted messages.
+func TestSanitizeQuotedAttributionOnlyStripsKnownBridgeFormat(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "strips bridge header",
+			input: "*_wa1/thread/Alice_*: hello world",
+			want:  "hello world",
+		},
+		{
+			name:  "strips simple bridge header",
+			input: "*_group/Alice_*: body text",
+			want:  "body text",
+		},
+		{
+			name:  "strips user-reported bridge format",
+			input: "*_wa/Alice_*: hello",
+			want:  "hello",
+		},
+		{
+			name:  "preserves AC/DC band name with slash and colon",
+			input: "AC/DC: Thunderstruck",
+			want:  "AC/DC: Thunderstruck",
+		},
+		{
+			name:  "preserves path with slash and colon",
+			input: "path/to/file: permission denied",
+			want:  "path/to/file: permission denied",
+		},
+		{
+			name:  "preserves non-bridge slash content",
+			input: "path/to/something: not a bridge header",
+			want:  "path/to/something: not a bridge header",
+		},
+		{
+			name:  "preserves URL with slash",
+			input: "https://example.com/page: see this",
+			want:  "https://example.com/page: see this",
+		},
+		{
+			name:  "preserves plain text",
+			input: "just a plain message",
+			want:  "just a plain message",
+		},
+		{
+			name:  "does not strip partial bridge prefix",
+			input: "*_wa1/Alice_*: no trailing space",
+			want:  "no trailing space",
+		},
+		{
+			name:  "empty body after separator",
+			input: "*_group/name_*:",
+			want:  "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sanitizeQuotedAttribution(tc.input)
+			if got != tc.want {
+				t.Errorf("sanitizeQuotedAttribution(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRouterAnonymizeToDiscordRequiresHasher verifies that configuring
+// AnonymizeToDiscord without an identity hasher is rejected at constructor
+// time and at UpdateConfig time.
+func TestRouterAnonymizeToDiscordRequiresHasher(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfgWithAnonymize := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	// 1. New() without hasher must fail
+	_, err = New(cfgWithAnonymize, syncStore, fake)
+	if err == nil {
+		t.Fatal("expected error when constructing anonymize router without hasher, got nil")
+	}
+	if !strings.Contains(err.Error(), "identity hasher is required") {
+		t.Fatalf("expected hasher required error, got: %v", err)
+	}
+
+	// 2. Router created without anonymization then updated to enable it without hasher must fail
+	cfgWithout := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "dc1"},
+			AnonymizeToDiscord: false,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+	r, err := New(cfgWithout, syncStore, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if err := r.UpdateConfig(cfgWithAnonymize); err == nil {
+		t.Fatal("expected error on UpdateConfig enabling anonymization without hasher, got nil")
+	}
+}
+
+// TestRouterMentionPseudonymsDomainSeparation verifies that mention pseudonym
+// derivation is keyed, deterministic, and properly namespaced by provider.
+func TestRouterMentionPseudonymsDomainSeparation(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	fake := &fakeSender{}
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+			"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
+			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "mesh",
+			Endpoints:          []string{"wa1", "tg1", "dc1"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := NewWithHasher(cfg, syncStore, fake, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	// 1. Same provider + same remote ID => same pseudonym
+	p1 := r.mentionPseudonym("wa1", "123456")
+	p2 := r.mentionPseudonym("wa1", "123456")
+	if p1 != p2 {
+		t.Fatalf("expected identical pseudonyms for same provider and remote ID, got %q vs %q", p1, p2)
+	}
+
+	// 2. Same provider + different ID => different pseudonym
+	p3 := r.mentionPseudonym("wa1", "987654")
+	if p1 == p3 {
+		t.Fatalf("expected different pseudonyms for different remote IDs, got collision: %q", p1)
+	}
+
+	// 3. Different providers + same raw ID => different pseudonyms (namespaced)
+	pWA := r.mentionPseudonym("wa1", "user-common-id")
+	pTG := r.mentionPseudonym("tg1", "user-common-id")
+	pDC := r.mentionPseudonym("dc1", "user-common-id")
+	if pWA == pTG || pWA == pDC || pTG == pDC {
+		t.Fatalf("cross-provider collision for raw ID 'user-common-id': WA=%q, TG=%q, DC=%q", pWA, pTG, pDC)
+	}
+
+	// 4. Fallback when remoteID is empty
+	if got := r.mentionPseudonym("wa1", ""); got != "Member" {
+		t.Fatalf("expected 'Member' fallback for empty remoteID, got %q", got)
+	}
+}
+
+func TestPresentationForTargetAnonymizesCanonicalTelegramMention(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionedOpaque := h.UserID("telegram:523456789")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"tg1": config.TransportTelegram,
+			"dc1": config.TransportDiscord,
+		},
+	}
+	incoming := transport.Incoming{
+		Endpoint: "tg1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Telegram",
+			OpaqueID:    h.UserID("telegram:123456789"),
+		},
+		Text: "Hello @" + mentionedOpaque,
+		Mentions: []transport.Mention{{
+			RemoteID: mentionedOpaque,
+			Name:     "Bob Telegram",
+		}},
+	}
+
+	_, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc1", AnonymizeToDiscord: true})
+	wantMention := identity.Pseudonym(mentionedOpaque)
+	if len(mentions) != 1 || mentions[0].Name != wantMention {
+		t.Fatalf("Telegram mention pseudonym = %#v, want %q", mentions, wantMention)
+	}
+	if !strings.Contains(text, "@"+wantMention) {
+		t.Fatalf("Discord-bound Telegram text missing pseudonymous mention: %q", text)
+	}
+	for _, forbidden := range []string{"Bob Telegram", mentionedOpaque} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Discord-bound Telegram text leaked %q: %q", forbidden, text)
+		}
+	}
+}
+
+func TestPresentationForTargetAnonymizesCanonicalDiscordMention(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionedOpaque := h.UserID("discord:523456789012345678")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"dc1": config.TransportDiscord,
+			"dc2": config.TransportDiscord,
+		},
+	}
+	incoming := transport.Incoming{
+		Endpoint: "dc1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Discord",
+			OpaqueID:    h.UserID("discord:323456789012345678"),
+		},
+		Text: "Hello @" + mentionedOpaque,
+		Mentions: []transport.Mention{{
+			RemoteID: mentionedOpaque,
+			Name:     "Bob Discord",
+		}},
+	}
+
+	sender, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc2", AnonymizeToDiscord: true})
+	if sender.DisplayName == "Alice Discord" {
+		t.Fatalf("Discord-to-Discord sender was not anonymized: %#v", sender)
+	}
+	wantMention := identity.Pseudonym(mentionedOpaque)
+	if len(mentions) != 1 || mentions[0].Name != wantMention {
+		t.Fatalf("Discord-to-Discord mention pseudonym = %#v, want %q", mentions, wantMention)
+	}
+	if !strings.Contains(text, "@"+wantMention) {
+		t.Fatalf("Discord-to-Discord text missing pseudonymous mention: %q", text)
+	}
+	for _, forbidden := range []string{"Bob Discord", mentionedOpaque} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Discord-to-Discord text leaked %q: %q", forbidden, text)
+		}
+	}
+}
+
+func TestRouterSanitizeQuotedAttributionRecognizesConfiguredTelegramPlainHeader(t *testing.T) {
+	r := &Router{
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"wa-family": config.TransportWhatsApp,
+			"tg-family": config.TransportTelegram,
+		},
+	}
+
+	if got := r.sanitizeQuotedAttribution("wa-family/Alice Real: Dinner at 7?"); got != "Dinner at 7?" {
+		t.Fatalf("configured plain bridge quote was not stripped: %q", got)
+	}
+	if got := r.sanitizeQuotedAttribution("unknown/Alice Real: Dinner at 7?"); got != "unknown/Alice Real: Dinner at 7?" {
+		t.Fatalf("unconfigured plain quote was modified: %q", got)
+	}
+	if got := r.sanitizeQuotedAttribution("AC/DC: Thunderstruck"); got != "AC/DC: Thunderstruck" {
+		t.Fatalf("legitimate slash content was modified: %q", got)
+	}
+}
+
+func TestMentionPseudonymUsesExistingOpaqueActorIdentity(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaqueID := h.UserID("telegram:523456789")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"tg1": config.TransportTelegram,
+		},
+	}
+	if got, want := r.mentionPseudonym("tg1", opaqueID), identity.Pseudonym(opaqueID); got != want {
+		t.Fatalf("mention pseudonym %q != sender-compatible pseudonym %q", got, want)
+	}
+}

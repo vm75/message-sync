@@ -233,11 +233,14 @@ func TestNormalizeTelegramTextMentionUsesHMACIdentity(t *testing.T) {
 	if strings.Contains(mention.RemoteID, strconv.FormatInt(mentionedID, 10)) {
 		t.Fatalf("raw Telegram mentioned-user ID escaped normalization: %#v", mention)
 	}
-	if incoming.Text != "Hello @Bob Example and @mention" {
-		t.Fatalf("privacy-safe mention text = %q", incoming.Text)
+	wantText := "Hello @" + mention.RemoteID + " and @mention"
+	if incoming.Text != wantText {
+		t.Fatalf("privacy-safe canonical mention text = %q, want %q", incoming.Text, wantText)
 	}
-	if strings.Contains(incoming.Text, "username_only") {
-		t.Fatalf("raw Telegram username crossed the normalization boundary: %q", incoming.Text)
+	for _, forbidden := range []string{"Bob Example", "username_only", strconv.FormatInt(mentionedID, 10)} {
+		if strings.Contains(incoming.Text, forbidden) {
+			t.Fatalf("Telegram canonical mention text leaked %q: %q", forbidden, incoming.Text)
+		}
 	}
 }
 

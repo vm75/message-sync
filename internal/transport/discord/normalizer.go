@@ -128,19 +128,20 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 				RemoteMessageID: strings.TrimSpace(ref.MessageID),
 			}
 			if msg.ReferencedMessage != nil {
-				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher)
+				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher, n.usernameMode)
 			}
 		}
 	}
 
-	text := sanitizeDiscordMentions(msg.Content, msg.Mentions, n.hasher)
+	text, mentions := normalizeDiscordMentions(msg.Content, msg.Mentions, n.hasher, n.usernameMode)
 	kind := "text"
 	var pollOptions []string
 	selectableCount := 0
 	durationHours := 0
 	if msg.Poll != nil {
 		kind = "poll"
-		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher)
+		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher, n.usernameMode)
+		mentions = nil
 		for _, answer := range msg.Poll.Answers {
 			if answer.Media == nil || strings.TrimSpace(answer.Media.Text) == "" {
 				return transport.Incoming{}, false
@@ -167,6 +168,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 		PollOptions:         pollOptions,
 		PollSelectableCount: selectableCount,
 		PollDurationHours:   durationHours,
+		Mentions:            mentions,
 		ReplyTo:             replyTo,
 		QuotedText:          quotedText,
 		Timestamp:           msg.Timestamp,
@@ -210,9 +212,16 @@ func discordMessageSupported(msg *discordgo.Message) bool {
 	return strings.TrimSpace(msg.Content) != "" || len(msg.Attachments) > 0
 }
 
-func sanitizeDiscordMentions(content string, mentions []*discordgo.User, hasher *identity.Hasher) string {
-	labels := make(map[string]string, len(mentions))
-	for _, mentioned := range mentions {
+func normalizeDiscordMentions(content string, users []*discordgo.User, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, []transport.Mention) {
+	if hasher == nil {
+		content = discordUserMentionPattern.ReplaceAllString(content, "@user")
+		content = discordRoleMentionPattern.ReplaceAllString(content, "@role")
+		content = discordChannelMentionPattern.ReplaceAllString(content, "#channel")
+		return content, nil
+	}
+
+	byProviderID := make(map[string]transport.Mention, len(users))
+	for _, mentioned := range users {
 		if mentioned == nil {
 			continue
 		}
@@ -220,30 +229,51 @@ func sanitizeDiscordMentions(content string, mentions []*discordgo.User, hasher 
 		if id == "" {
 			continue
 		}
-		label := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " ")
-		if (label == "" || label == id) && hasher != nil {
-			label = hasher.UserID("discord:" + id)
+		opaqueID := hasher.UserID("discord:" + id)
+		name := opaqueID
+		if usernameMode == config.UsernameModePushName {
+			if displayName := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " "); displayName != "" && displayName != id {
+				name = displayName
+			}
 		}
-		if label == "" {
-			label = "user"
-		}
-		labels[id] = "@" + label
+		byProviderID[id] = transport.Mention{RemoteID: opaqueID, Name: name}
 	}
 
+	result := make([]transport.Mention, 0, len(byProviderID))
+	seen := make(map[string]bool, len(byProviderID))
 	content = discordUserMentionPattern.ReplaceAllStringFunc(content, func(raw string) string {
 		matches := discordUserMentionPattern.FindStringSubmatch(raw)
 		if len(matches) != 2 {
 			return "@user"
 		}
-		if label := labels[matches[1]]; label != "" {
-			return label
+		id := strings.TrimSpace(matches[1])
+		mention, ok := byProviderID[id]
+		if !ok {
+			opaqueID := hasher.UserID("discord:" + id)
+			mention = transport.Mention{RemoteID: opaqueID, Name: opaqueID}
 		}
-		if hasher != nil {
-			return "@" + hasher.UserID("discord:"+matches[1])
+		if !seen[mention.RemoteID] {
+			result = append(result, mention)
+			seen[mention.RemoteID] = true
 		}
-		return "@user"
+		return "@" + mention.RemoteID
 	})
 	content = discordRoleMentionPattern.ReplaceAllString(content, "@role")
 	content = discordChannelMentionPattern.ReplaceAllString(content, "#channel")
+	if len(result) == 0 {
+		return content, nil
+	}
+	return content, result
+}
+
+func sanitizeDiscordMentions(content string, users []*discordgo.User, hasher *identity.Hasher, usernameMode config.UsernameMode) string {
+	content, mentions := normalizeDiscordMentions(content, users, hasher, usernameMode)
+	for _, mention := range mentions {
+		name := strings.Join(strings.Fields(mention.Name), " ")
+		if name == "" || name == mention.RemoteID {
+			name = mention.RemoteID
+		}
+		content = strings.ReplaceAll(content, "@"+mention.RemoteID, "@"+name)
+	}
 	return content
 }

@@ -54,6 +54,18 @@ The current default is `childContextDisplayMode=opaque`. This setting controls *
 
 Both modes therefore use the same human-facing syntax and neither mode emits an opaque context preamble. ChildScope IDs remain internal routing metadata only.
 
+## One-way Discord Anonymization (`anonymizeToDiscord`)
+
+When a sync set configures `anonymizeToDiscord=true`, messages forwarded to Discord endpoints are subject to route-aware one-way pseudonymization:
+
+1. **Sender name**: In `push_name` mode, the `<name>` attribution component and Discord webhook display name are replaced with a deterministic pseudonym derived from the sender's HMAC actor ID (e.g. `Silent Falcon Q7M5K`).
+2. **Phone numbers**: Fallback phone numbers are stripped completely for all Discord-bound senders regardless of `usernameMode`; phone numbers never appear in attribution headers or sender fields forwarded to Discord.
+3. **Structured mentions**: Mentions in Discord-bound creates **and edits** have their display names replaced with deterministic pseudonyms (e.g. `@Amber Otter 2PF3R`). Telegram and Discord ingress keep user mentions as privacy-safe HMAC actor tokens plus transient display metadata so normal destinations can still render the usual name while anonymized Discord can substitute a pseudonym. Provider-native mention IDs that still require derivation are keyed under the source transport namespace. Anonymization-enabled routing requires the identity hasher.
+4. **Reply quotes**: Quoted text headers produced by this bridge (the exact `*_<label>_*: <body>` format) are stripped before being forwarded to Discord; other message content that happens to contain `/` is left untouched.
+5. **Reactions**: Reaction fallback text sent to Discord uses the sender's deterministic pseudonym rather than their real name or phone number.
+6. **Multi-destination isolation**: The anonymization is applied strictly per-destination. Other destinations in the same sync set (such as WhatsApp groups or Telegram chats) continue to receive standard attribution and real push names in `push_name` mode.
+7. **Hash mode**: If the service is configured with `usernameMode=hash`, opaque HMAC actor IDs (`u_...`) are used for message body attribution (as in non-anonymized hash mode), but `PhoneNumber` is still cleared before the message is forwarded to Discord.
+
 ## Do-not-regress checklist
 
 Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/forum posts, Telegram topics, reactions, polls, edits, replies, or routing presentation must preserve these rules unless a product change explicitly says otherwise:
@@ -64,6 +76,7 @@ Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/fo
 - display name wins over phone number in `push_name` mode;
 - phone number is only a fallback when display name is absent;
 - hash mode continues to use the opaque sender ID;
+- `anonymizeToDiscord` pseudonyms apply only to Discord destinations and preserve normal push names for other transports;
 - rendered presentation is never parsed as routing identity.
 
 Automated tests should assert the exact rendered forms whenever presentation logic is changed.

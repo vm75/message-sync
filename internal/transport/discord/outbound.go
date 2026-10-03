@@ -601,6 +601,10 @@ func sanitizeOutgoingMentions(content string, mentions []transport.Mention) stri
 			name = "participant"
 		}
 		content = strings.ReplaceAll(content, "@"+remoteID, "@"+name)
+		if atIdx := strings.Index(remoteID, "@"); atIdx > 0 {
+			userPart := remoteID[:atIdx]
+			content = strings.ReplaceAll(content, "@"+userPart, "@"+name)
+		}
 	}
 	return content
 }

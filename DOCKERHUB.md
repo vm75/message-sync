@@ -21,7 +21,7 @@ The release workflow publishes the same multi-architecture `message-sync` image 
 - **Full Message Lifecycle**: Synchronizes text with provenance attribution, transient in-memory media (images, video, audio/voice notes, documents, stickers), native replies with fallback attribution, emoji reactions, edits, and deletions/revocations.
 - **Polls & Live Aggregation**: Native polls with source labels included in cross-endpoint Discord/Telegram poll presentation, aggregate-only live-result companions, and live on-demand aggregate summaries that update with poll changes via configurable reply triggers (e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions/options survive server restarts while remaining outside the PII-free routing database.
 - **Source-Local Message Suppression**: Configurable message prefix filtering (e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before transmission or media loading.
-- **Zero-PII Privacy Architecture**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g. `Silent Falcon Q7M`) exclusively for Discord destinations without storing PII or mapping tables.
 - **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
 - **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
@@ -114,7 +114,7 @@ The service exposes HTTP on the configured port and requires one persistent writ
 - `whatsapp/<connection-id>.db` — isolated sensitive whatsmeow protocol state;
 - `membership-evidence/` — short-lived private membership evidence when the experimental verification feature is used.
 
-Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the current code initializes fresh schemas and does not provide an upgrade migration path for older development databases.
+Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the project does not have a general versioned migration framework, though schema changes may use narrowly scoped idempotent initialization migrations with explicit upgrade tests.
 
 ## Hardening
 

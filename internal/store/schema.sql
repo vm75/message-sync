@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS global_config (
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
 CREATE TABLE IF NOT EXISTS sync_sets (
-    id TEXT PRIMARY KEY
+    id TEXT PRIMARY KEY,
+    anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS endpoints (

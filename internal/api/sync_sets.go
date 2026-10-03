@@ -12,18 +12,21 @@ import (
 )
 
 type SyncSetDTO struct {
-	ID        string   `json:"id"`
-	Endpoints []string `json:"endpoints"`
+	ID                 string   `json:"id"`
+	Endpoints          []string `json:"endpoints"`
+	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
 }
 
 type CreateSyncSetRequest struct {
-	ID        string   `json:"id"`
-	Endpoints []string `json:"endpoints"`
+	ID                 string   `json:"id"`
+	Endpoints          []string `json:"endpoints"`
+	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
 }
 
 type UpdateSyncSetRequest struct {
-	ID        string   `json:"id,omitempty"`
-	Endpoints []string `json:"endpoints"`
+	ID                 string   `json:"id,omitempty"`
+	Endpoints          []string `json:"endpoints"`
+	AnonymizeToDiscord *bool    `json:"anonymizeToDiscord,omitempty"`
 }
 
 func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +35,7 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	setRows, err := s.db.QueryContext(r.Context(), `SELECT id FROM sync_sets ORDER BY id ASC`)
+	setRows, err := s.db.QueryContext(r.Context(), `SELECT id, anonymize_to_discord FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
 		safelog.Error(s.logger, "query sync_sets failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query sync sets")
@@ -40,15 +43,20 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	setIDs := make([]string, 0)
+	setAnonymize := make(map[string]bool)
 	for setRows.Next() {
-		var id string
-		if err := setRows.Scan(&id); err != nil {
+		var (
+			id                 string
+			anonymizeToDiscord bool
+		)
+		if err := setRows.Scan(&id, &anonymizeToDiscord); err != nil {
 			setRows.Close()
 			safelog.Error(s.logger, "scan sync_set failed", "sync_set_api", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read sync set")
 			return
 		}
 		setIDs = append(setIDs, id)
+		setAnonymize[id] = anonymizeToDiscord
 	}
 	if err := setRows.Err(); err != nil {
 		setRows.Close()
@@ -89,8 +97,9 @@ func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 			endpoints = []string{}
 		}
 		syncSets = append(syncSets, SyncSetDTO{
-			ID:        id,
-			Endpoints: endpoints,
+			ID:                 id,
+			Endpoints:          endpoints,
+			AnonymizeToDiscord: setAnonymize[id],
 		})
 	}
 
@@ -109,8 +118,11 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var exists string
-	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id = ?`, id).Scan(&exists)
+	var (
+		exists             string
+		anonymizeToDiscord bool
+	)
+	err := s.db.QueryRowContext(r.Context(), `SELECT id, anonymize_to_discord FROM sync_sets WHERE id = ?`, id).Scan(&exists, &anonymizeToDiscord)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "sync set not found")
 		return
@@ -140,8 +152,9 @@ func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:        id,
-		Endpoints: endpoints,
+		ID:                 id,
+		Endpoints:          endpoints,
+		AnonymizeToDiscord: anonymizeToDiscord,
 	})
 }
 
@@ -187,7 +200,7 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO sync_sets (id) VALUES (?)`, req.ID); err != nil {
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO sync_sets (id, anonymize_to_discord) VALUES (?, ?)`, req.ID, req.AnonymizeToDiscord); err != nil {
 		safelog.Error(s.logger, "insert sync set failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "failed to insert sync set")
 		return
@@ -214,8 +227,9 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		endpoints = []string{}
 	}
 	_ = WriteJSON(w, http.StatusCreated, SyncSetDTO{
-		ID:        req.ID,
-		Endpoints: endpoints,
+		ID:                 req.ID,
+		Endpoints:          endpoints,
+		AnonymizeToDiscord: req.AnonymizeToDiscord,
 	})
 }
 
@@ -266,6 +280,16 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
+	anonymize := false
+	if req.AnonymizeToDiscord != nil {
+		anonymize = *req.AnonymizeToDiscord
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE sync_sets SET anonymize_to_discord = ? WHERE id = ?`, anonymize, id); err != nil {
+		safelog.Error(s.logger, "update sync set anonymize_to_discord failed", "sync_set_api", err)
+		WriteError(w, http.StatusInternalServerError, "database error")
+		return
+	}
+
 	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
 		safelog.Error(s.logger, "clear old sync set memberships failed", "sync_set_api", err)
 		WriteError(w, http.StatusInternalServerError, "database error")
@@ -294,8 +318,9 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 		endpoints = []string{}
 	}
 	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:        id,
-		Endpoints: endpoints,
+		ID:                 id,
+		Endpoints:          endpoints,
+		AnonymizeToDiscord: anonymize,
 	})
 }
 
