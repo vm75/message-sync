@@ -1,6 +1,6 @@
 # message-sync
 
-[![Release images](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/release-images.yml?branch=main&label=release%20images&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions/workflows/release-images.yml)
+[![Release images](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/release-images.yml?label=release%20images&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions/workflows/release-images.yml)
 [![Docker pulls](https://img.shields.io/docker/pulls/vm75/message-sync?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
 [![Go 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)
 [![MIT license](https://img.shields.io/badge/license-MIT-yellow.svg?style=flat-square)](LICENSE)
@@ -200,6 +200,7 @@ The complete automated gate and safe smoke-test procedure are in [TESTING.md](TE
 - [Manual provider testing](docs/TESTING_GUIDE.md)
 - [Telegram Bot API and Phone/MTProto setup](docs/TELEGRAM.md)
 - [Container images](DOCKERHUB.md)
+- [Maintainer release procedure](RELEASING.md)
 - [Feature comparison](docs/FEATURE_COMPARISON.md)
 - [Contributor and coding-agent guide](AGENTS.md)
 - [Release history](CHANGELOG.md)

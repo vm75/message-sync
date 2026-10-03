@@ -8,8 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Tag-driven Semantic Versioning release workflow: annotated `vX.Y.Z` / pre-release tags now verify tag == `VERSION`, run tests/vet, publish immutable multi-architecture images, move `latest` only for stable releases, and create the matching GitHub Release.
+- `RELEASING.md` maintainer procedure covering release PRs, annotated tags, stable/pre-release behavior, release identity, and immutable exact versions.
 - Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on SyncSets. When enabled, sender presentation, structured mentions, reply quotes, and reaction fallbacks forwarded to Discord endpoints are replaced with deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, while non-Discord destinations retain normal push name attribution.
 - Web UI and REST API support for configuring `anonymizeToDiscord` when creating and updating sync sets.
+
+### Changed
+- Ordinary merges to `main`, including `VERSION` edits, no longer publish images; only supported release-tag pushes can start publication.
 
 ### Fixed
 - Edit events forwarded to Discord now pseudonymize `@mention` names and strip bridge-generated quoted attribution headers, matching the privacy guarantees already applied to creates.
@@ -17,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured Telegram and Discord mentions now remain privacy-safe HMAC actor tokens through canonical routing, allowing Discord-bound anonymization to replace real mention display names without broad free-text redaction. Provider-native mention IDs that still require derivation are keyed by source transport, and anonymization-enabled routing requires the identity hasher.
 - Quoted-attribution sanitization now strips the exact formatted bridge wrapper and the plain `endpoint/name: body` form emitted by Telegram only when `endpoint` is a configured alias, avoiding both real-name leakage and broad `/`-based free-text stripping.
 - Pseudonym suffix entropy increased from 3 to 5 characters, reducing the per-group collision probability for large WhatsApp groups.
+
+## Historical release numbering note
+
+The legacy release workflow successfully published `0.2.0` on 2026-09-02 from commit `2c759b8bc517379ac3c4e41c0eb9aa7c9563a817`, before later legacy releases returned to `0.1.x` through `0.1.8`. This non-monotonic published history is preserved; `0.2.0` must not be reused, and the next new release must be greater than `0.2.0`.
 
 ## [0.1.8] - 2026-09-12
 

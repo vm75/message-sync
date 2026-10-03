@@ -79,7 +79,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Core privacy boundary | `sync.db` and application logs contain no PII/PHI; `control.db` is the explicit sensitive exception | Product workflows retain broader identity/contact/member data as operational state | Major architectural divergence. |
 | Web UI packaging | Embedded static SPA compiled into the Go binary | Express serves a static web console | Preserved, simplified for a single deployable artifact. |
 | Container model | Rootless/non-root static runtime, read-only root filesystem, `/data` as the only persistent writable path | Node/PM2/GCP-oriented deployment with local/cloud state options | Reworked for portable Docker/Podman self-hosting. |
-| Release model | Image publication only when `VERSION` changes on `main` | Standard Node application release/deployment flow | Project-specific simplification. |
+| Release model | Explicit annotated SemVer tag matching `VERSION`; verify/test/vet before immutable multi-arch image publication and GitHub Release creation | Standard Node application release/deployment flow | Tag-driven project-specific release gate; ordinary `main` merges do not publish. |
 
 ## Detailed Design Differences
 

@@ -94,8 +94,10 @@ podman compose -f compose.yml config
 
 - The runtime image is non-root, writes persistently only to `/data`, and works with Docker, rootful Podman, and rootless Podman without privileged mode, host namespaces, or extra capabilities.
 - Compose keeps the root filesystem read-only and drops all capabilities.
-- `VERSION` is the release source. Development builds report `development`; release builds inject `VERSION` with linker flags.
-- `.github/workflows/release-images.yml` publishes only when `VERSION` changes on `main`. Do not add other publishing triggers without explicit owner direction.
+- `VERSION` records the repository's expected release version. Feature/fix PRs do not bump it; a dedicated release PR updates `VERSION` and `CHANGELOG.md`.
+- The authoritative release event is an annotated `vX.Y.Z` (or supported pre-release) Git tag whose version exactly matches `VERSION`. Merging a `VERSION` change alone must never publish.
+- `.github/workflows/release-images.yml` is tag-driven: it verifies tag == `VERSION`, runs tests/vet, publishes immutable exact-version multi-architecture images, moves `latest` only for stable releases, and creates the matching GitHub Release.
+- Development builds report `development`; release builds inject the validated `VERSION` through linker flags. Follow `RELEASING.md` for the maintainer procedure.
 
 ## Definition of done
 
@@ -114,5 +116,6 @@ AI agents MUST keep all repository documentation in sync with the implementation
 - `AGENTS.md`: Agent workflow, repository map, definition of done, and mandatory constraints.
 - `docs/MESSAGE_PRESENTATION.md`: Exact sender attribution and child-context presentation syntax; update it whenever rendered bridge headers or identity precedence change.
 - `CHANGELOG.md`: Release notes, notable changes, and version history.
+- `RELEASING.md`: Maintainer-only release preparation, tagging, publication, immutability, and verification procedure.
 - `TESTING.md` / `docs/TESTING_GUIDE.md`: Automated test commands, test coverage, manual provider testing steps, and troubleshooting.
 - `docs/FEATURE_COMPARISON.md`: Capability or architectural comparisons with upstream or alternative designs.

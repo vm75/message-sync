@@ -32,11 +32,12 @@ See the [README](https://github.com/vm75/message-sync#readme) for detailed produ
 
 ## Tags and platforms
 
-- The exact value in [`VERSION`](VERSION) is the immutable release tag.
-- `latest` points to the release most recently published by the workflow.
+- A release tag `vX.Y.Z` must exactly match `VERSION=X.Y.Z` in the tagged commit.
+- The validated version is published as the immutable exact image tag in both registries.
+- Stable releases also move `latest`; pre-releases such as `v0.3.0-rc.1` never move `latest`.
 - Release images target `linux/amd64` and `linux/arm64`.
 
-Development builds use the `development` version string and are not published by the release workflow.
+Development builds use the `development` version string and are not published by the release workflow. Exact release tags/images are never rebuilt from another commit; fix a bad release with a new version.
 
 ## Quick start
 
@@ -134,6 +135,10 @@ docker run --rm \
 
 ## Publishing
 
-`.github/workflows/release-images.yml` runs only when `VERSION` changes on `main`. It validates the version, builds both supported platforms once, and publishes the version and `latest` tags to Docker Hub and GHCR.
+`.github/workflows/release-images.yml` runs only for pushed release tags matching `v*.*.*`. A normal push to `main`, including a commit that changes `VERSION`, does not publish anything. The workflow validates the tag against `VERSION`, runs `go test ./...` and `go vet ./...`, verifies the release-mode binary version, and only then publishes the multi-architecture images.
 
-The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. GHCR authentication uses the workflow `GITHUB_TOKEN` with `contents: read` and `packages: write`; package visibility is managed in repository/package settings. No registry credentials belong in the repository.
+Stable versions publish both the exact version and `latest` to Docker Hub and GHCR. Pre-release versions publish only their exact version. The workflow refuses to overwrite an existing exact-version image, verifies the published GHCR image reports the same version, and creates the matching GitHub Release only after publishing succeeds.
+
+The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. GHCR authentication uses the workflow `GITHUB_TOKEN`; the publish job receives only `contents: read` and `packages: write`, while the final GitHub Release job receives `contents: write`. No registry credentials belong in the repository.
+
+Maintainers should follow [RELEASING.md](RELEASING.md); do not create release tags by editing this document or by rebuilding an old exact version.

@@ -1,44 +1,120 @@
-name: Publish versioned container images
+name: Publish tagged release
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - VERSION
+    tags:
+      - 'v*.*.*'
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
-  prepare:
+  verify:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.release.outputs.version }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      commit: ${{ steps.release.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
-      - id: version
+        with:
+          fetch-depth: 1
+
+      - id: release
+        name: Validate tag and VERSION
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
         shell: bash
         run: |
           set -euo pipefail
+
+          if [[ "$REF_TYPE" != "tag" ]]; then
+            echo "release workflow must run from a Git tag" >&2
+            exit 1
+          fi
+
+          tag="$REF_NAME"
+          if [[ "$tag" != v* ]]; then
+            echo "release tag must begin with exactly one leading v" >&2
+            exit 1
+          fi
+          tag_version="${tag#v}"
+
+          if ! [[ "$tag_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "release tag must be vMAJOR.MINOR.PATCH with an optional pre-release suffix" >&2
+            exit 1
+          fi
+          if [[ "$tag_version" == *-* ]]; then
+            prerelease_part="${tag_version#*-}"
+            IFS='.' read -r -a prerelease_ids <<< "$prerelease_part"
+            for identifier in "${prerelease_ids[@]}"; do
+              if [[ "$identifier" =~ ^[0-9]+$ && "$identifier" != "0" && "$identifier" == 0* ]]; then
+                echo "numeric pre-release identifiers must not contain leading zeroes" >&2
+                exit 1
+              fi
+            done
+          fi
+
           test -f VERSION
           version="$(tr -d '[:space:]' < VERSION)"
           if [[ -z "$version" ]]; then
-            echo "VERSION must contain a semantic version once releases are enabled" >&2
+            echo "VERSION must not be empty" >&2
             exit 1
           fi
-          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "VERSION must be semantic-version-like (for example 0.1.0)" >&2
+          if [[ "$version" != "$tag_version" ]]; then
+            echo "release tag/version mismatch: tag is $tag_version but VERSION is $version" >&2
             exit 1
           fi
+
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+
+          commit="$(git rev-parse HEAD)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Verify release binary version
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/vm75/message-sync/internal/version.Build=$VERSION" \
+            -o /tmp/message-sync-release ./cmd/message-sync
+          reported="$(/tmp/message-sync-release version)"
+          if [[ "$reported" != "$VERSION" ]]; then
+            echo "release binary version mismatch: got $reported, want $VERSION" >&2
+            exit 1
+          fi
 
   publish:
-    needs: prepare
+    needs: verify
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          fetch-depth: 1
+
       - name: Require Docker Hub credentials
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -46,22 +122,73 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$DOCKERHUB_USERNAME"
-          test -n "$DOCKERHUB_TOKEN"
+          if [[ -z "$DOCKERHUB_USERNAME" || -z "$DOCKERHUB_TOKEN" ]]; then
+            echo "DOCKERHUB_USERNAME and DOCKERHUB_TOKEN repository secrets are required" >&2
+            exit 1
+          fi
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Refuse to overwrite exact release images
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          check_image_absent() {
+            local image="$1"
+            local output
+            if output="$(docker buildx imagetools inspect "$image" 2>&1)"; then
+              echo "refusing to overwrite immutable exact release image: $image" >&2
+              exit 1
+            fi
+            if grep -Eqi '(not found|manifest unknown|name unknown)' <<< "$output"; then
+              return 0
+            fi
+            echo "could not safely verify that exact release image is absent: $image" >&2
+            printf '%s\n' "$output" >&2
+            exit 1
+          }
+
+          check_image_absent "ghcr.io/$GITHUB_REPOSITORY:$VERSION"
+          check_image_absent "docker.io/$DOCKERHUB_USERNAME/message-sync:$VERSION"
+
+      - id: tags
+        name: Compute image tags
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo 'tags<<EOF'
+            echo "ghcr.io/$GITHUB_REPOSITORY:$VERSION"
+            echo "docker.io/$DOCKERHUB_USERNAME/message-sync:$VERSION"
+            if [[ "$PRERELEASE" == "false" ]]; then
+              echo "ghcr.io/$GITHUB_REPOSITORY:latest"
+              echo "docker.io/$DOCKERHUB_USERNAME/message-sync:latest"
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push multi-architecture images
         uses: docker/build-push-action@v6
         with:
@@ -70,13 +197,67 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            VERSION=${{ needs.prepare.outputs.version }}
-          tags: |
-            ghcr.io/${{ github.repository }}:${{ needs.prepare.outputs.version }}
-            ghcr.io/${{ github.repository }}:latest
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/message-sync:${{ needs.prepare.outputs.version }}
-            docker.io/${{ secrets.DOCKERHUB_USERNAME }}/message-sync:latest
+            VERSION=${{ needs.verify.outputs.version }}
+          tags: ${{ steps.tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ needs.prepare.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.verify.outputs.commit }}
+            org.opencontainers.image.version=${{ needs.verify.outputs.version }}
+
+      - name: Verify published image version
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="ghcr.io/$GITHUB_REPOSITORY:$VERSION"
+          docker pull "$image"
+          reported="$(docker run --rm "$image" version)"
+          if [[ "$reported" != "$VERSION" ]]; then
+            echo "published image version mismatch: got $reported, want $VERSION" >&2
+            exit 1
+          fi
+
+  github-release:
+    needs:
+      - verify
+      - publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 1
+
+      - name: Require tag to still point at verified commit
+        env:
+          EXPECTED_COMMIT: ${{ needs.verify.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(git rev-parse HEAD)"
+          if [[ "$actual" != "$EXPECTED_COMMIT" ]]; then
+            echo "release tag moved after verification; refusing to create GitHub Release" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            release create "$GITHUB_REF_NAME"
+            --verify-tag
+            --title "$GITHUB_REF_NAME"
+            --generate-notes
+          )
+          if [[ "$PRERELEASE" == "true" ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}"
