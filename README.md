@@ -1,5 +1,6 @@
 # message-sync
 
+[![CI](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/ci.yml?branch=main&label=CI&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions/workflows/ci.yml)
 [![Release images](https://img.shields.io/github/actions/workflow/status/vm75/message-sync/release-images.yml?label=release%20images&style=flat-square&logo=githubactions)](https://github.com/vm75/message-sync/actions/workflows/release-images.yml)
 [![Docker pulls](https://img.shields.io/docker/pulls/vm75/message-sync?style=flat-square&logo=docker)](https://hub.docker.com/r/vm75/message-sync)
 [![Go 1.25+](https://img.shields.io/badge/go-1.25%2B-00ADD8?style=flat-square&logo=go)](https://go.dev/)

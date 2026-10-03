@@ -21,6 +21,8 @@ go build -trimpath -ldflags "-X github.com/vm75/message-sync/internal/version.Bu
 test "$(/tmp/message-sync-release version)" = "$version"
 ```
 
+GitHub Actions also runs `.github/workflows/ci.yml` for every pull request targeting `main`, and for pushes to `main` that update `VERSION` or the CI workflow itself. That workflow checks formatting and whitespace, runs the full test/vet gate plus focused race tests, builds the command, and verifies that the current `VERSION` can be embedded and reported by the release binary.
+
 The actual publication workflow is tag-only and enforces tag == `VERSION` before registry authentication or publishing. See [RELEASING.md](RELEASING.md) for stable, pre-release, mismatch, and immutability scenarios.
 
 `internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, route-aware Discord anonymization and pseudonym canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.

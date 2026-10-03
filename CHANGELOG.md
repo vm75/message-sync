@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.3.0] - 2026-10-03
 
 ### Added
+- Continuous verification workflow for every pull request to `main` and for `VERSION`/CI-workflow updates on `main`, covering gofmt, whitespace, tests, vet, focused race tests, build, and release-version embedding.
 - Tag-driven Semantic Versioning release workflow: annotated `vX.Y.Z` / pre-release tags now verify tag == `VERSION`, run tests/vet, publish immutable multi-architecture images, move `latest` only for stable releases, and create the matching GitHub Release.
 - `RELEASING.md` maintainer procedure covering release PRs, annotated tags, stable/pre-release behavior, release identity, and immutable exact versions.
 - Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on SyncSets. When enabled, sender presentation, structured mentions, reply quotes, and reaction fallbacks forwarded to Discord endpoints are replaced with deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, while non-Discord destinations retain normal push name attribution.
