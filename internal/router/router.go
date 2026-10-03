@@ -1459,7 +1459,7 @@ func (r *Router) presentationForTarget(incoming transport.Incoming, target route
 			text = sanitizeMentionsText(text, mentions)
 		}
 		if quotedText != "" {
-			quotedText = sanitizeQuotedAttribution(quotedText)
+			quotedText = r.sanitizeQuotedAttribution(quotedText)
 			quotedText = sanitizeMentionsText(quotedText, mentions)
 		}
 	}
@@ -1474,6 +1474,9 @@ func (r *Router) mentionPseudonym(sourceEndpoint, remoteID string) string {
 	remoteID = strings.TrimSpace(remoteID)
 	if r.scopeHasher == nil || remoteID == "" {
 		return "Member"
+	}
+	if isOpaqueActorID(remoteID) {
+		return identity.Pseudonym(remoteID)
 	}
 	r.mu.RLock()
 	transportKind := string(r.endpointTransports[transport.EndpointID(sourceEndpoint)])
@@ -1501,6 +1504,46 @@ func sanitizeQuotedAttribution(quotedText string) string {
 		}
 	}
 	return quotedText
+}
+
+func (r *Router) sanitizeQuotedAttribution(quotedText string) string {
+	if stripped := sanitizeQuotedAttribution(quotedText); stripped != quotedText {
+		return stripped
+	}
+
+	trimmed := strings.TrimLeft(quotedText, " \t\r\n")
+	idx := strings.Index(trimmed, ": ")
+	if idx <= 0 {
+		return quotedText
+	}
+	senderPart := trimmed[:idx]
+	slash := strings.Index(senderPart, "/")
+	if slash <= 0 {
+		return quotedText
+	}
+
+	sourceEndpoint := transport.EndpointID(senderPart[:slash])
+	r.mu.RLock()
+	_, configured := r.endpointTransports[sourceEndpoint]
+	r.mu.RUnlock()
+	if !configured {
+		return quotedText
+	}
+	return trimmed[idx+2:]
+}
+
+func isOpaqueActorID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != 12 || !strings.HasPrefix(value, "u_") {
+		return false
+	}
+	for _, r := range value[2:] {
+		if (r >= 'a' && r <= 'z') || (r >= '2' && r <= '7') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func sanitizeMentionsText(content string, mentions []transport.Mention) string {

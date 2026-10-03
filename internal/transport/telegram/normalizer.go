@@ -392,7 +392,10 @@ func normalizeTelegramMentions(content string, entities []models.MessageEntity, 
 			replacements = append(replacements, telegramMentionReplacement{
 				start: start,
 				end:   end,
-				text:  "@" + name,
+				// Keep normalized text keyed to the privacy-safe actor ID. Outbound
+				// adapters restore Name for ordinary destinations, while route-aware
+				// anonymization can replace the same token with a pseudonym.
+				text: "@" + opaqueID,
 			})
 		case models.MessageEntityTypeMention:
 			// Username-only entities carry no stable user ID. Replace the

@@ -2440,3 +2440,125 @@ func TestRouterMentionPseudonymsDomainSeparation(t *testing.T) {
 		t.Fatalf("expected 'Member' fallback for empty remoteID, got %q", got)
 	}
 }
+
+
+func TestPresentationForTargetAnonymizesCanonicalTelegramMention(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionedOpaque := h.UserID("telegram:523456789")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"tg1": config.TransportTelegram,
+			"dc1": config.TransportDiscord,
+		},
+	}
+	incoming := transport.Incoming{
+		Endpoint: "tg1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Telegram",
+			OpaqueID:    h.UserID("telegram:123456789"),
+		},
+		Text: "Hello @" + mentionedOpaque,
+		Mentions: []transport.Mention{{
+			RemoteID: mentionedOpaque,
+			Name:     "Bob Telegram",
+		}},
+	}
+
+	_, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc1", AnonymizeToDiscord: true})
+	wantMention := identity.Pseudonym(mentionedOpaque)
+	if len(mentions) != 1 || mentions[0].Name != wantMention {
+		t.Fatalf("Telegram mention pseudonym = %#v, want %q", mentions, wantMention)
+	}
+	if !strings.Contains(text, "@"+wantMention) {
+		t.Fatalf("Discord-bound Telegram text missing pseudonymous mention: %q", text)
+	}
+	for _, forbidden := range []string{"Bob Telegram", mentionedOpaque} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Discord-bound Telegram text leaked %q: %q", forbidden, text)
+		}
+	}
+}
+
+func TestPresentationForTargetAnonymizesCanonicalDiscordMention(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionedOpaque := h.UserID("discord:523456789012345678")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"dc1": config.TransportDiscord,
+			"dc2": config.TransportDiscord,
+		},
+	}
+	incoming := transport.Incoming{
+		Endpoint: "dc1",
+		Sender: transport.Sender{
+			DisplayName: "Alice Discord",
+			OpaqueID:    h.UserID("discord:323456789012345678"),
+		},
+		Text: "Hello @" + mentionedOpaque,
+		Mentions: []transport.Mention{{
+			RemoteID: mentionedOpaque,
+			Name:     "Bob Discord",
+		}},
+	}
+
+	sender, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc2", AnonymizeToDiscord: true})
+	if sender.DisplayName == "Alice Discord" {
+		t.Fatalf("Discord-to-Discord sender was not anonymized: %#v", sender)
+	}
+	wantMention := identity.Pseudonym(mentionedOpaque)
+	if len(mentions) != 1 || mentions[0].Name != wantMention {
+		t.Fatalf("Discord-to-Discord mention pseudonym = %#v, want %q", mentions, wantMention)
+	}
+	if !strings.Contains(text, "@"+wantMention) {
+		t.Fatalf("Discord-to-Discord text missing pseudonymous mention: %q", text)
+	}
+	for _, forbidden := range []string{"Bob Discord", mentionedOpaque} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("Discord-to-Discord text leaked %q: %q", forbidden, text)
+		}
+	}
+}
+
+func TestRouterSanitizeQuotedAttributionRecognizesConfiguredTelegramPlainHeader(t *testing.T) {
+	r := &Router{
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"wa-family": config.TransportWhatsApp,
+			"tg-family": config.TransportTelegram,
+		},
+	}
+
+	if got := r.sanitizeQuotedAttribution("wa-family/Alice Real: Dinner at 7?"); got != "Dinner at 7?" {
+		t.Fatalf("configured plain bridge quote was not stripped: %q", got)
+	}
+	if got := r.sanitizeQuotedAttribution("unknown/Alice Real: Dinner at 7?"); got != "unknown/Alice Real: Dinner at 7?" {
+		t.Fatalf("unconfigured plain quote was modified: %q", got)
+	}
+	if got := r.sanitizeQuotedAttribution("AC/DC: Thunderstruck"); got != "AC/DC: Thunderstruck" {
+		t.Fatalf("legitimate slash content was modified: %q", got)
+	}
+}
+
+func TestMentionPseudonymUsesExistingOpaqueActorIdentity(t *testing.T) {
+	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	opaqueID := h.UserID("telegram:523456789")
+	r := &Router{
+		scopeHasher: h,
+		endpointTransports: map[transport.EndpointID]config.Transport{
+			"tg1": config.TransportTelegram,
+		},
+	}
+	if got, want := r.mentionPseudonym("tg1", opaqueID), identity.Pseudonym(opaqueID); got != want {
+		t.Fatalf("mention pseudonym %q != sender-compatible pseudonym %q", got, want)
+	}
+}
