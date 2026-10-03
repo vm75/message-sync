@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Edit events forwarded to Discord now pseudonymize `@mention` names and strip bridge-generated quoted attribution headers, matching the privacy guarantees already applied to creates.
 - `PhoneNumber` is now cleared for all Discord-bound senders when `anonymizeToDiscord` is set, regardless of `usernameMode`; previously it was only cleared in `push_name` mode.
-- Mention pseudonyms are now always keyed by the source transport provider namespace (e.g. `mention:whatsapp`) and require a keyed HMAC hasher; without one, a safe `Member` placeholder is used instead of an unkeyed hash of the raw remote ID.
-- `sanitizeQuotedAttribution` now only strips the exact bridge-generated `*_<label>_*: ` wrapper format; it no longer strips arbitrary `/`-containing prefixes, preventing false positives on legitimate message content.
+- Structured Telegram and Discord mentions now remain privacy-safe HMAC actor tokens through canonical routing, allowing Discord-bound anonymization to replace real mention display names without broad free-text redaction. Provider-native mention IDs that still require derivation are keyed by source transport, and anonymization-enabled routing requires the identity hasher.
+- Quoted-attribution sanitization now strips the exact formatted bridge wrapper and the plain `endpoint/name: body` form emitted by Telegram only when `endpoint` is a configured alias, avoiding both real-name leakage and broad `/`-based free-text stripping.
 - Pseudonym suffix entropy increased from 3 to 5 characters, reducing the per-group collision probability for large WhatsApp groups.
 
 ## [0.1.8] - 2026-09-12

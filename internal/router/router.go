@@ -1466,10 +1466,10 @@ func (r *Router) presentationForTarget(incoming transport.Incoming, target route
 	return sender, mentions, text, quotedText
 }
 
-// mentionPseudonym derives a stable pseudonym for a mentioned participant, keyed
-// by the source transport provider and their remote ID. The provider namespace
-// prevents cross-provider collisions. Requires a keyed hasher; if no hasher is
-// configured the caller receives a generic placeholder.
+// mentionPseudonym derives a stable pseudonym for a mentioned participant.
+// Privacy-safe opaque actor IDs from normalizers are used directly so sender and
+// mention aliases stay consistent. Provider-native IDs are first keyed under the
+// source transport namespace. Anonymization-enabled routers require a keyed hasher.
 func (r *Router) mentionPseudonym(sourceEndpoint, remoteID string) string {
 	remoteID = strings.TrimSpace(remoteID)
 	if r.scopeHasher == nil || remoteID == "" {
