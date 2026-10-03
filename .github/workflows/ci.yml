@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(gofmt -l ./cmd ./internal)"
+          if [[ -n "$files" ]]; then
+            echo "These files need gofmt:" >&2
+            printf '%s\n' "$files" >&2
+            exit 1
+          fi
+
+      - name: Check whitespace
+        run: git diff --check
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run race tests
+        run: |
+          go test -race \
+            ./internal/integration \
+            ./internal/connection \
+            ./internal/delivery \
+            ./internal/recovery \
+            ./internal/router \
+            ./internal/api \
+            ./internal/transport/discord \
+            ./internal/transport/telegram \
+            ./internal/transport/whatsapp
+
+      - name: Build
+        run: go build ./cmd/message-sync
+
+      - name: Verify VERSION embedding
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(tr -d '[:space:]' < VERSION)"
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "Invalid VERSION: $version" >&2
+            exit 1
+          fi
+
+          if [[ "$version" == *-* ]]; then
+            prerelease_part="${version#*-}"
+            IFS='.' read -r -a prerelease_ids <<< "$prerelease_part"
+            for identifier in "${prerelease_ids[@]}"; do
+              if [[ "$identifier" =~ ^[0-9]+$ && "$identifier" != "0" && "$identifier" == 0* ]]; then
+                echo "numeric pre-release identifiers must not contain leading zeroes" >&2
+                exit 1
+              fi
+            done
+          fi
+
+          go build -trimpath \
+            -ldflags "-X github.com/vm75/message-sync/internal/version.Build=$version" \
+            -o /tmp/message-sync-release \
+            ./cmd/message-sync
+
+          reported="$(/tmp/message-sync-release version)"
+          if [[ "$reported" != "$version" ]]; then
+            echo "binary reports $reported, expected $version" >&2
+            exit 1
+          fi
