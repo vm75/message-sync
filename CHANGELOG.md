@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-03
+
 ### Added
 - Tag-driven Semantic Versioning release workflow: annotated `vX.Y.Z` / pre-release tags now verify tag == `VERSION`, run tests/vet, publish immutable multi-architecture images, move `latest` only for stable releases, and create the matching GitHub Release.
 - `RELEASING.md` maintainer procedure covering release PRs, annotated tags, stable/pre-release behavior, release identity, and immutable exact versions.
