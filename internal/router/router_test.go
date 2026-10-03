@@ -2441,7 +2441,6 @@ func TestRouterMentionPseudonymsDomainSeparation(t *testing.T) {
 	}
 }
 
-
 func TestPresentationForTargetAnonymizesCanonicalTelegramMention(t *testing.T) {
 	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
