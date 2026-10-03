@@ -11,6 +11,18 @@ GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./intern
 git diff --exit-code VERSION
 ```
 
+For ordinary feature/fix work, `VERSION` should remain unchanged; the `git diff --exit-code VERSION` check is therefore expected to be clean. A dedicated release PR is the explicit exception and should change `VERSION` together with `CHANGELOG.md`.
+
+For release-workflow changes, also verify the release-mode binary identity locally:
+
+```sh
+version="$(tr -d '[:space:]' < VERSION)"
+go build -trimpath -ldflags "-X github.com/vm75/message-sync/internal/version.Build=$version" -o /tmp/message-sync-release ./cmd/message-sync
+test "$(/tmp/message-sync-release version)" = "$version"
+```
+
+The actual publication workflow is tag-only and enforces tag == `VERSION` before registry authentication or publishing. See [RELEASING.md](RELEASING.md) for stable, pre-release, mismatch, and immutability scenarios.
+
 `internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, route-aware Discord anonymization and pseudonym canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.
 
 For a runtime/container smoke test, use a fresh data directory and no provider credentials:

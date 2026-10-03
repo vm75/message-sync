@@ -218,7 +218,9 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 
 The multi-stage `Containerfile` produces a static Go binary in an Alpine runtime. The runtime user is UID/GID 1000, `/data` is the only persistent writable location, and the supplied Compose service uses a read-only root filesystem, a bounded `/tmp` tmpfs, no new privileges, and no Linux capabilities.
 
-Development builds report `development`. `VERSION` is the release source injected through linker flags. The release workflow runs only when `VERSION` changes on `main` and publishes `linux/amd64` and `linux/arm64` images to Docker Hub and GHCR with the version and `latest` tags.
+Development builds report `development`. `VERSION` records the expected release version and is injected through linker flags only for release builds. Normal merges, including a `VERSION` edit, do not publish. An annotated `vX.Y.Z` or supported pre-release tag is the release event; the tag must exactly match `VERSION` at the tagged commit before tests, vet, or publishing can proceed.
+
+The tag-driven workflow verifies a release-mode binary reports the validated version, then publishes `linux/amd64` and `linux/arm64` images to Docker Hub and GHCR. Exact-version image tags are immutable. Stable releases additionally move `latest`; pre-releases do not. A GitHub Release for the same tag is created only after image publication and image-version verification succeed. See [RELEASING.md](RELEASING.md).
 
 ## Extension rules
 
