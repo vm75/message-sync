@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-03
+
 ### Fixed
 - Sync-set Discord anonymization controls remain visible and editable for existing sync sets even when experimental Membership Review is disabled, and the create-sync-set Privacy & Presentation card now has proper internal spacing instead of clipping its heading against the border.
 
