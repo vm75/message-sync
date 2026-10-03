@@ -250,7 +250,7 @@
   function buildPrivacyPanel(item) {
     const id = item.getAttribute('data-id') || '';
     const panel = document.createElement('section');
-    panel.className = 'syncset-privacy-panel syncset-membership-panel';
+    panel.className = 'syncset-privacy-panel syncset-feature-panel';
     panel.innerHTML = `
       <div class="syncset-membership-header">
         <span class="syncset-membership-icon" aria-hidden="true" style="color:var(--discord-color);background:var(--discord-muted);">
@@ -285,7 +285,7 @@
   function buildMembershipPanel(item) {
     const id = item.getAttribute('data-id') || '';
     const panel = document.createElement('section');
-    panel.className = 'syncset-membership-panel';
+    panel.className = 'syncset-membership-panel syncset-feature-panel';
     panel.innerHTML = `
       <div class="syncset-membership-header">
         <span class="syncset-membership-icon" aria-hidden="true">

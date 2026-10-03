@@ -283,8 +283,9 @@
   display: none !important;
 }
 
-/* Membership application */
-.syncset-membership-panel {
+/* Sync-set feature panels. Privacy remains independent from the optional
+   membership-review feature, while both panels share the same card shell. */
+.syncset-feature-panel {
   margin: 0 22px 24px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -497,7 +498,7 @@
     padding: 18px 16px 20px;
   }
 
-  .syncset-membership-panel {
+  .syncset-feature-panel {
     margin: 0 16px 20px;
   }
 
