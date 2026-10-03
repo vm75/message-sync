@@ -177,7 +177,7 @@ Global routing and feature settings are configured in the Web UI Settings tab or
 
 The Web UI Settings tab also includes a browser-local preference to enable the experimental **Membership review** interface (disabled by default).
 
-The current SQLite schemas initialize fresh databases and do not provide an upgrade migration path for older development databases. Back up `/data` before upgrades and consult release notes before reusing existing state.
+The project does not have a general versioned migration framework; schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests. Back up `/data` before upgrades and consult release notes before reusing existing state.
 
 ## CLI and development
 

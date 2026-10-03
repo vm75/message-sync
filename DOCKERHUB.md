@@ -114,7 +114,7 @@ The service exposes HTTP on the configured port and requires one persistent writ
 - `whatsapp/<connection-id>.db` — isolated sensitive whatsmeow protocol state;
 - `membership-evidence/` — short-lived private membership evidence when the experimental verification feature is used.
 
-Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the current code initializes fresh schemas and does not provide an upgrade migration path for older development databases.
+Do not publish, inspect as application data, or expose these files through another service. Back up `/data` before upgrades; the project does not have a general versioned migration framework, though schema changes may use narrowly scoped idempotent initialization migrations with explicit upgrade tests.
 
 ## Hardening
 

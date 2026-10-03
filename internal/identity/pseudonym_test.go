@@ -84,8 +84,8 @@ func TestPseudonymLengthAndSafeCharacters(t *testing.T) {
 
 	for _, f := range fixtures {
 		pseudo := Pseudonym(f)
-		if len(pseudo) > 30 {
-			t.Fatalf("Pseudonym(%q) length %d > 30: %q", f, len(pseudo), pseudo)
+		if len(pseudo) > 35 {
+			t.Fatalf("Pseudonym(%q) length %d > 35: %q", f, len(pseudo), pseudo)
 		}
 		for _, r := range pseudo {
 			if !unicode.IsPrint(r) || r < 0x20 || r > 0x7e {

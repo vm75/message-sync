@@ -92,7 +92,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 
 It must not contain message or quoted text, captions, poll questions/options, media, participant identity, provider display names, raw updates, credentials, external file URLs, or arbitrary error strings. `message_copies` maps `(endpoint, remote message ID)` to a random canonical ID and enforces one copy per canonical message and endpoint.
 
-The store enables foreign keys and uses uniqueness constraints and transactions for duplicate safety. Retention removes old canonical state in bounded batches. The current schema is a fresh-database schema: no schema-version dispatcher or compatibility migration path exists for older development databases.
+The store enables foreign keys and uses uniqueness constraints and transactions for duplicate safety. Retention removes old canonical state in bounded batches. The project does not have a general versioned migration framework; schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests.
 
 ### `control.db`: sensitive application boundary
 

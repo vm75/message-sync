@@ -8,8 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on SyncSets. When enabled, sender presentation, structured mentions, reply quotes, and reaction fallbacks forwarded to Discord endpoints are replaced with deterministic pseudonyms (e.g. `Silent Falcon Q7M`) derived from HMAC actor IDs, while non-Discord destinations retain normal push name attribution.
+- Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on SyncSets. When enabled, sender presentation, structured mentions, reply quotes, and reaction fallbacks forwarded to Discord endpoints are replaced with deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, while non-Discord destinations retain normal push name attribution.
 - Web UI and REST API support for configuring `anonymizeToDiscord` when creating and updating sync sets.
+
+### Fixed
+- Edit events forwarded to Discord now pseudonymize `@mention` names and strip bridge-generated quoted attribution headers, matching the privacy guarantees already applied to creates.
+- `PhoneNumber` is now cleared for all Discord-bound senders when `anonymizeToDiscord` is set, regardless of `usernameMode`; previously it was only cleared in `push_name` mode.
+- Mention pseudonyms are now always keyed by the source transport provider namespace (e.g. `mention:whatsapp`) and require a keyed HMAC hasher; without one, a safe `Member` placeholder is used instead of an unkeyed hash of the raw remote ID.
+- `sanitizeQuotedAttribution` now only strips the exact bridge-generated `*_<label>_*: ` wrapper format; it no longer strips arbitrary `/`-containing prefixes, preventing false positives on legitimate message content.
+- Pseudonym suffix entropy increased from 3 to 5 characters, reducing the per-group collision probability for large WhatsApp groups.
 
 ## [0.1.8] - 2026-09-12
 

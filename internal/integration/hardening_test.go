@@ -1058,7 +1058,11 @@ func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mesh, err := router.New(cfg, syncStore, registry)
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mesh, err := router.NewWithHasher(cfg, syncStore, registry, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

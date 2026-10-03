@@ -47,6 +47,8 @@ func Pseudonym(opaqueID string) string {
 	c1 := suffixAlphabet[digest[4]&31]
 	c2 := suffixAlphabet[digest[5]&31]
 	c3 := suffixAlphabet[digest[6]&31]
+	c4 := suffixAlphabet[digest[7]&31]
+	c5 := suffixAlphabet[digest[8]&31]
 
-	return fmt.Sprintf("%s %s %c%c%c", adjectives[adjIdx], nouns[nounIdx], c1, c2, c3)
+	return fmt.Sprintf("%s %s %c%c%c%c%c", adjectives[adjIdx], nouns[nounIdx], c1, c2, c3, c4, c5)
 }

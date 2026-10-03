@@ -89,6 +89,7 @@ type Router struct {
 	sender             sender
 	lanes              *delivery.Manager
 	routes             map[transport.EndpointID][]routeTarget
+	endpointTransports map[transport.EndpointID]config.Transport
 	usernameMode       config.UsernameMode
 	childContextMode   config.ChildContextDisplayMode
 	aggTrigger         string
@@ -150,10 +151,15 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 
 	routes := make(map[transport.EndpointID][]routeTarget, len(cfg.Endpoints))
 	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
-	for alias := range cfg.Endpoints {
+	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
+	for alias, ep := range cfg.Endpoints {
 		endpoints = append(endpoints, transport.EndpointID(alias))
+		endpointTransports[transport.EndpointID(alias)] = ep.Transport
 	}
 	for _, set := range cfg.SyncSets {
+		if set.AnonymizeToDiscord && hasher == nil {
+			return nil, errors.New("identity hasher is required when anonymizeToDiscord is enabled")
+		}
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
@@ -177,6 +183,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		sender:             transportSender,
 		lanes:              lanes,
 		routes:             routes,
+		endpointTransports: endpointTransports,
 		usernameMode:       cfg.Identity.UsernameMode,
 		childContextMode:   cfg.ChildContextDisplayMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
@@ -201,7 +208,17 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 		return errors.New("username mode must be push_name or hash")
 	}
 
+	for _, set := range cfg.SyncSets {
+		if set.AnonymizeToDiscord && r.scopeHasher == nil {
+			return errors.New("identity hasher is required when anonymizeToDiscord is enabled")
+		}
+	}
+
 	routes := make(map[transport.EndpointID][]routeTarget, len(cfg.Endpoints))
+	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
+	for alias, ep := range cfg.Endpoints {
+		endpointTransports[transport.EndpointID(alias)] = ep.Transport
+	}
 	for _, set := range cfg.SyncSets {
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
@@ -225,6 +242,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	}
 	r.mu.Lock()
 	r.routes = routes
+	r.endpointTransports = endpointTransports
 	r.usernameMode = cfg.Identity.UsernameMode
 	r.childContextMode = cfg.ChildContextDisplayMode
 	r.aggTrigger = cfg.Polls.AggregationTrigger
@@ -475,15 +493,15 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if destination == incoming.Endpoint {
 				continue
 			}
-			targetSender := incoming.Sender
-			if target.AnonymizeToDiscord && r.getUsernameMode() == config.UsernameModePushName {
-				targetSender.DisplayName = identity.Pseudonym(incoming.Sender.OpaqueID)
-				targetSender.PhoneNumber = ""
-			}
-			forwardedText, err := r.forwardedTextFor(ctx, incoming, targetSender)
+			targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+			targetIncoming := incoming
+			targetIncoming.Text = targetText
+			targetIncoming.QuotedText = targetQuotedText
+			forwardedText, err := r.forwardedTextFor(ctx, targetIncoming, targetSender)
 			if err != nil {
 				return err
 			}
+			_ = targetMentions
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
 				key := mutationKey{canonical: targetCanonical, endpoint: destination}
@@ -569,11 +587,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if destination == incoming.Endpoint {
 				continue
 			}
-			targetSender := incoming.Sender
-			if target.AnonymizeToDiscord && r.getUsernameMode() == config.UsernameModePushName {
-				targetSender.DisplayName = identity.Pseudonym(incoming.Sender.OpaqueID)
-				targetSender.PhoneNumber = ""
-			}
+			targetSender, _, _, _ := r.presentationForTarget(incoming, target)
 			username := senderPresentationUsername(targetSender, r.getUsernameMode())
 			fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
 			if emoji != "" {
@@ -762,29 +776,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 
-		targetSender := incoming.Sender
-		targetMentions := incoming.Mentions
-		targetQuotedText := incoming.QuotedText
-		if target.AnonymizeToDiscord {
-			if r.getUsernameMode() == config.UsernameModePushName {
-				targetSender.DisplayName = identity.Pseudonym(incoming.Sender.OpaqueID)
-				targetSender.PhoneNumber = ""
-			}
-			anonymizedMentions := make([]transport.Mention, len(incoming.Mentions))
-			for i, m := range incoming.Mentions {
-				anonymizedMentions[i] = transport.Mention{
-					RemoteID: m.RemoteID,
-					Name:     r.mentionPseudonym(m.RemoteID),
-				}
-			}
-			targetMentions = anonymizedMentions
-			if targetQuotedText != "" {
-				targetQuotedText = sanitizeQuotedAttribution(targetQuotedText)
-				targetQuotedText = sanitizeMentionsText(targetQuotedText, targetMentions)
-			}
-		}
+		targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+		targetIncoming := incoming
+		targetIncoming.Text = targetText
+		targetIncoming.QuotedText = targetQuotedText
 
-		forwardedText, err := r.forwardedTextFor(ctx, incoming, targetSender)
+		forwardedText, err := r.forwardedTextFor(ctx, targetIncoming, targetSender)
 		if err != nil {
 			return err
 		}
@@ -1437,25 +1434,70 @@ func (r *Router) senderLabelFor(ctx context.Context, incoming transport.Incoming
 	return prefix + "/" + username, nil
 }
 
-func (r *Router) mentionPseudonym(remoteID string) string {
-	if r.scopeHasher != nil {
-		actorID := r.scopeHasher.ActorID("mention", remoteID)
-		return identity.Pseudonym(actorID)
+// presentationForTarget applies route-aware anonymization for destinations where
+// AnonymizeToDiscord is active, replacing sender and mention identities with
+// deterministic pseudonyms and clearing phone numbers. For non-anonymized routes,
+// it returns the incoming values unchanged.
+func (r *Router) presentationForTarget(incoming transport.Incoming, target routeTarget) (transport.Sender, []transport.Mention, string, string) {
+	sender := incoming.Sender
+	mentions := incoming.Mentions
+	text := incoming.Text
+	quotedText := incoming.QuotedText
+
+	if target.AnonymizeToDiscord {
+		sender.DisplayName = identity.Pseudonym(incoming.Sender.OpaqueID)
+		sender.PhoneNumber = ""
+		if len(incoming.Mentions) > 0 {
+			anonymizedMentions := make([]transport.Mention, len(incoming.Mentions))
+			for i, m := range incoming.Mentions {
+				anonymizedMentions[i] = transport.Mention{
+					RemoteID: m.RemoteID,
+					Name:     r.mentionPseudonym(string(incoming.Endpoint), m.RemoteID),
+				}
+			}
+			mentions = anonymizedMentions
+			text = sanitizeMentionsText(text, mentions)
+		}
+		if quotedText != "" {
+			quotedText = sanitizeQuotedAttribution(quotedText)
+			quotedText = sanitizeMentionsText(quotedText, mentions)
+		}
 	}
-	return identity.Pseudonym("mention:" + strings.TrimSpace(remoteID))
+	return sender, mentions, text, quotedText
 }
 
+// mentionPseudonym derives a stable pseudonym for a mentioned participant, keyed
+// by the source transport provider and their remote ID. The provider namespace
+// prevents cross-provider collisions. Requires a keyed hasher; if no hasher is
+// configured the caller receives a generic placeholder.
+func (r *Router) mentionPseudonym(sourceEndpoint, remoteID string) string {
+	remoteID = strings.TrimSpace(remoteID)
+	if r.scopeHasher == nil || remoteID == "" {
+		return "Member"
+	}
+	r.mu.RLock()
+	transportKind := string(r.endpointTransports[transport.EndpointID(sourceEndpoint)])
+	r.mu.RUnlock()
+	if transportKind == "" {
+		transportKind = sourceEndpoint
+	}
+	actorID := r.scopeHasher.ActorID("mention:"+transportKind, remoteID)
+	return identity.Pseudonym(actorID)
+}
+
+// sanitizeQuotedAttribution strips the bridge-generated sender header from a
+// quoted message body. It only removes the exact *_<label>_*: wrapper format
+// produced by this bridge. Legitimate message content that happens to contain
+// a "/" is left untouched.
 func sanitizeQuotedAttribution(quotedText string) string {
-	line := strings.TrimSpace(quotedText)
-	if strings.HasPrefix(line, "*_") {
-		inner := strings.TrimPrefix(line, "*_")
+	trimmed := strings.TrimLeft(quotedText, " \t\r\n")
+	if strings.HasPrefix(trimmed, "*_") {
+		inner := strings.TrimPrefix(trimmed, "*_")
 		if idx := strings.Index(inner, "_*: "); idx >= 0 {
 			return inner[idx+4:]
 		}
-	} else if idx := strings.Index(line, ": "); idx > 0 {
-		prefix := line[:idx]
-		if strings.Contains(prefix, "/") {
-			return line[idx+2:]
+		if inner == "_*:" || strings.HasSuffix(inner, "_*:") {
+			return ""
 		}
 	}
 	return quotedText
@@ -1472,6 +1514,10 @@ func sanitizeMentionsText(content string, mentions []transport.Mention) string {
 			name = "participant"
 		}
 		content = strings.ReplaceAll(content, "@"+remoteID, "@"+name)
+		if atIdx := strings.Index(remoteID, "@"); atIdx > 0 {
+			userPart := remoteID[:atIdx]
+			content = strings.ReplaceAll(content, "@"+userPart, "@"+name)
+		}
 	}
 	return content
 }

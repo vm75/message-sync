@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/vm75/message-sync/internal/transport"
@@ -647,5 +648,103 @@ func TestDiscordStickerUsesWebPAttachmentFallback(t *testing.T) {
 	}
 	if got.Username != "Alice" {
 		t.Fatalf("sticker sender username = %q", got.Username)
+	}
+}
+
+func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	api := &fakeDiscordAPI{}
+	adapter := newOutboundTestAdapter(webhook, api)
+
+	senderPseudonym := "Silent Falcon Q7M4PK"
+	mentionPseudonym := "Brave Badger X8K2P"
+	rawRemoteID := "15559876543@s.whatsapp.net"
+	rawPhone := "+15551234567"
+	realSenderName := "Alice Real"
+
+	outgoing := transport.Outgoing{
+		Endpoint:       "discord",
+		OriginEndpoint: "wa1",
+		Sender: transport.Sender{
+			DisplayName: senderPseudonym,
+			PhoneNumber: "", // Anonymized route clears phone
+			OpaqueID:    "u_abcdefghij",
+		},
+		SenderLabel:   "wa1/thread/" + senderPseudonym,
+		RenderedText:  "*_wa1/thread/" + senderPseudonym + "_*: Hello @" + rawRemoteID + ", see my quote",
+		Text:          "Hello @" + rawRemoteID + ", see my quote",
+		Kind:          "text",
+		ReplyFallback: true,
+		QuotedText:    "legitimate quote content from previous message",
+		Mentions: []transport.Mention{{
+			RemoteID: rawRemoteID,
+			Name:     mentionPseudonym,
+		}},
+	}
+
+	_, err := adapter.Send(context.Background(), outgoing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(webhook.executed) == 0 {
+		t.Fatal("expected webhook message executed")
+	}
+	exec := webhook.executed[len(webhook.executed)-1]
+
+	// 1. Sender: anonymized Sender.DisplayName becomes webhook username; real name/phone cannot appear
+	if !strings.Contains(exec.Username, senderPseudonym) {
+		t.Errorf("webhook username must contain pseudonym %q, got: %q", senderPseudonym, exec.Username)
+	}
+	if strings.Contains(exec.Username, realSenderName) || strings.Contains(exec.Username, rawPhone) {
+		t.Errorf("webhook username leaked real sender info: %q", exec.Username)
+	}
+	if strings.Contains(exec.Content, realSenderName) || strings.Contains(exec.Content, rawPhone) {
+		t.Errorf("webhook content leaked real sender info: %q", exec.Content)
+	}
+
+	// 2. Mentions: pseudonymous Mention.Name is rendered; raw Mention.RemoteID is not visible
+	if !strings.Contains(exec.Content, "@"+mentionPseudonym) {
+		t.Errorf("webhook content must contain pseudonymous mention @%s, got: %q", mentionPseudonym, exec.Content)
+	}
+	if strings.Contains(exec.Content, rawRemoteID) || strings.Contains(exec.Content, "15559876543") {
+		t.Errorf("webhook content leaked raw mention remote ID: %q", exec.Content)
+	}
+
+	// 3. Replies: fallback quote rendering preserves user content and does not leak attribution
+	if !strings.Contains(exec.Content, "legitimate quote content from previous message") {
+		t.Errorf("webhook content must preserve quote body, got: %q", exec.Content)
+	}
+
+	// 4. Username length <= 80 runes
+	if utf8.RuneCountInString(exec.Username) > 80 {
+		t.Errorf("webhook username length %d > 80 runes: %q", utf8.RuneCountInString(exec.Username), exec.Username)
+	}
+
+	// 5. Test native poll allowed mentions protection
+	nativePollOutgoing := transport.Outgoing{
+		Endpoint:       "discord",
+		OriginEndpoint: "wa1",
+		Sender: transport.Sender{
+			DisplayName: senderPseudonym,
+			OpaqueID:    "u_abcdefghij",
+		},
+		SenderLabel:         "wa1/" + senderPseudonym,
+		SourceText:          "Poll with @everyone attempt",
+		Kind:                "poll",
+		PollOptions:         []string{"Option 1", "Option 2"},
+		PollSelectableCount: 1,
+		PollAttribution:     "*_wa1/" + senderPseudonym + "_*: Poll with @everyone attempt",
+	}
+	_, err = adapter.Send(context.Background(), nativePollOutgoing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.pollSends) == 0 {
+		t.Fatal("expected native poll send recorded")
+	}
+	lastPoll := api.pollSends[len(api.pollSends)-1]
+	if lastPoll.AllowedMentions == nil || len(lastPoll.AllowedMentions.Parse) != 0 {
+		t.Errorf("native poll allowed mentions must be empty/disabled, got: %#v", lastPoll.AllowedMentions)
 	}
 }

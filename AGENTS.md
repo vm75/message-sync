@@ -84,7 +84,7 @@ podman compose -f compose.yml config
 ## SQLite and Go conventions
 
 - Enable foreign keys, use committed schemas, transactions for related canonical/copy updates, uniqueness for duplicate safety, and bounded retention.
-- The current schemas initialize fresh databases; there is no upgrade migration path. Do not claim compatibility with older development databases.
+- The project does not have a general versioned migration framework. Schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests. Do not claim compatibility with older development databases.
 - Pass `context.Context` through blocking, network, and database operations.
 - Prefer concrete types until an interface represents a real boundary.
 - Validate inputs at configuration and transport edges. Wrap errors with operation context but never sensitive values.
