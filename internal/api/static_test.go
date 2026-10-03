@@ -215,6 +215,62 @@ func TestStaticHandler(t *testing.T) {
 		}
 	})
 
+	t.Run("Sync-set privacy UI stays independent from membership visibility", func(t *testing.T) {
+		resp, err := client.Get(ts.URL + "/js/app.js")
+		if err != nil {
+			t.Fatalf("GET /js/app.js failed: %v", err)
+		}
+		appBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		appJS := string(appBytes)
+
+		if strings.Contains(appJS, "syncset-privacy-panel syncset-membership-panel") {
+			t.Fatal("privacy panel still inherits the membership visibility class")
+		}
+		for _, expected := range []string{
+			"syncset-privacy-panel syncset-feature-panel",
+			"syncset-membership-panel syncset-feature-panel",
+		} {
+			if !strings.Contains(appJS, expected) {
+				t.Fatalf("Admin JS missing sync-set feature panel class %q", expected)
+			}
+		}
+
+		resp, err = client.Get(ts.URL + "/js/membership-feature.js")
+		if err != nil {
+			t.Fatalf("GET /js/membership-feature.js failed: %v", err)
+		}
+		membershipBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		membershipJS := string(membershipBytes)
+		if !strings.Contains(membershipJS, "html.membership-review-disabled #view-sync-sets .syncset-membership-panel") {
+			t.Fatal("membership feature no longer scopes disabled-state hiding to the membership panel")
+		}
+		if strings.Contains(membershipJS, "html.membership-review-disabled #view-sync-sets .syncset-feature-panel") {
+			t.Fatal("membership feature hides shared sync-set feature panels")
+		}
+
+		resp, err = client.Get(ts.URL + "/css/syncset-polish.css")
+		if err != nil {
+			t.Fatalf("GET /css/syncset-polish.css failed: %v", err)
+		}
+		cssBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(cssBytes), ".syncset-feature-panel {") {
+			t.Fatal("sync-set feature panel shell styling is missing")
+		}
+
+		resp, err = client.Get(ts.URL + "/")
+		if err != nil {
+			t.Fatalf("GET / failed: %v", err)
+		}
+		htmlBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(htmlBytes), `class="settings-card syncset-section" id="syncset-privacy-card"`) {
+			t.Fatal("create-sync-set privacy card is missing padded sync-set section styling")
+		}
+	})
+
 	t.Run("Serves js scripts", func(t *testing.T) {
 		scripts := []string{"/js/qrcode.js", "/js/api.js", "/js/router.js", "/js/app.js"}
 		for _, s := range scripts {
