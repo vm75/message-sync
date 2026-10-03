@@ -264,11 +264,12 @@ You should see logs indicating that the HTTP API is listening on port 8080. Prov
 1. Navigate to the **Sync Sets** view.
 2. Click **Create Sync Set**.
 3. Name the sync set (e.g., `test_sync_set`).
-4. Select the configured endpoints:
+4. (Optional) Check **Anonymize sender presentation when forwarding to Discord** to pseudonymize sender identities, phone numbers, and mentions forwarded to Discord.
+5. Select the configured endpoints:
    - `wa_test` (WhatsApp)
    - `dc_test` (Discord)
    - `tg_test` (Telegram)
-5. Save the sync set.
+6. Save the sync set.
 
 All platforms in the sync set are now synchronized! No server restart is required when adding or reconfiguring connections.
 
@@ -408,6 +409,17 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
 - [ ] Query `sync.db`: Verify `SELECT * FROM message_copies` and `canonical_messages` contain zero bot tokens, participant phone numbers, push names, or message bodies.
 - [ ] Query `control.db`: Verify `transport_connections` stores only AES-256-GCM ciphertext and nonces; no plaintext token appears anywhere in database strings.
 - [ ] Check application logs: Verify zero tokens or raw protocol update dumps appear in stdout.
+
+### Scenario 14: Route-Aware Discord Anonymization (`anonymizeToDiscord`)
+- [ ] In the **Sync Sets** view, edit your sync set to enable **Anonymize sender presentation when forwarding to Discord** and save.
+- [ ] Send a message from WhatsApp: `Hello from WhatsApp!`.
+  - **Verify Discord**: The message attribution uses a deterministic pseudonym (e.g., `*_wa_test/Silent Falcon Q7M_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
+  - **Verify Telegram**: The message attribution retains the real WhatsApp push name (e.g., `*_wa_test/Alice_*: Hello from WhatsApp!`).
+- [ ] Send a message from WhatsApp containing a mention and reply quote.
+  - **Verify Discord**: Mentions are pseudonymized, and quoted text has real sender names stripped.
+  - **Verify Telegram**: Mentions and quote headers retain normal names.
+- [ ] Add a reaction to a bridged message in WhatsApp.
+  - **Verify Discord**: The fallback attribution or reaction uses the pseudonym without leaking the WhatsApp user's name or phone number.
 
 ---
 

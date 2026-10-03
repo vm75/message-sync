@@ -303,3 +303,191 @@ func TestSyncSetRejectsLegacyGroupsField(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncSetsAnonymizeToDiscordAPI(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authHeader := "Bearer " + token
+
+	_, err = db.Exec(`
+		INSERT INTO endpoints (alias, transport, connection_id, remote_id) VALUES
+			('e1', 'whatsapp', 'conn-wa-1', '1@g.us'),
+			('e2', 'discord', 'conn-dc-1', '123456789012345678'),
+			('e3', 'telegram', 'conn-tg-1', '-1001234567890')
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Create with omitted anonymizeToDiscord => false
+	{
+		body := `{"id":"s_omitted","endpoints":["e1","e2"]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("POST s_omitted status = %d, want 201: %s", rec.Code, rec.Body.String())
+		}
+		var created SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+			t.Fatal(err)
+		}
+		if created.AnonymizeToDiscord {
+			t.Fatal("expected AnonymizeToDiscord to be false when omitted")
+		}
+
+		// GET verification
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/sync-sets/s_omitted", nil)
+		reqGet.Header.Set("Authorization", authHeader)
+		recGet := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recGet, reqGet)
+		var got SyncSetDTO
+		if err := json.NewDecoder(recGet.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got.AnonymizeToDiscord {
+			t.Fatal("expected GET s_omitted AnonymizeToDiscord to be false")
+		}
+	}
+
+	// 2. Update with explicit true => true
+	{
+		body := `{"endpoints":["e1","e2"],"anonymizeToDiscord":true}`
+		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/s_omitted", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT s_omitted status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var updated SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatal(err)
+		}
+		if !updated.AnonymizeToDiscord {
+			t.Fatal("expected updated AnonymizeToDiscord to be true")
+		}
+
+		// GET verification
+		reqGet := httptest.NewRequest(http.MethodGet, "/api/sync-sets/s_omitted", nil)
+		reqGet.Header.Set("Authorization", authHeader)
+		recGet := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recGet, reqGet)
+		var got SyncSetDTO
+		if err := json.NewDecoder(recGet.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		if !got.AnonymizeToDiscord {
+			t.Fatal("expected GET s_omitted AnonymizeToDiscord to be true after update")
+		}
+	}
+
+	// 3. Update with explicit false => false
+	{
+		body := `{"endpoints":["e1","e2"],"anonymizeToDiscord":false}`
+		req := httptest.NewRequest(http.MethodPut, "/api/sync-sets/s_omitted", bytes.NewReader([]byte(body)))
+		req.Header.Set("Authorization", authHeader)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT s_omitted false status = %d, want 200", rec.Code)
+		}
+		var updated SyncSetDTO
+		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
+			t.Fatal(err)
+		}
+		if updated.AnonymizeToDiscord {
+			t.Fatal("expected updated AnonymizeToDiscord to be false")
+		}
+	}
+
+	// 4. Update with omitted anonymizeToDiscord => false
+	{
+		// Set to true first
+		bodyTrue := `{"endpoints":["e1","e2"],"anonymizeToDiscord":true}`
+		reqTrue := httptest.NewRequest(http.MethodPut, "/api/sync-sets/s_omitted", bytes.NewReader([]byte(bodyTrue)))
+		reqTrue.Header.Set("Authorization", authHeader)
+		recTrue := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recTrue, reqTrue)
+		if recTrue.Code != http.StatusOK {
+			t.Fatalf("PUT true status = %d", recTrue.Code)
+		}
+
+		// Now update with omitted field => defaults to false
+		bodyOmitted := `{"endpoints":["e1","e2"]}`
+		reqOmitted := httptest.NewRequest(http.MethodPut, "/api/sync-sets/s_omitted", bytes.NewReader([]byte(bodyOmitted)))
+		reqOmitted.Header.Set("Authorization", authHeader)
+		recOmitted := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recOmitted, reqOmitted)
+		if recOmitted.Code != http.StatusOK {
+			t.Fatalf("PUT omitted status = %d", recOmitted.Code)
+		}
+		var updated SyncSetDTO
+		if err := json.NewDecoder(recOmitted.Body).Decode(&updated); err != nil {
+			t.Fatal(err)
+		}
+		if updated.AnonymizeToDiscord {
+			t.Fatal("expected omitted AnonymizeToDiscord to default to false")
+		}
+	}
+
+	// 5. Delete s_omitted
+	{
+		reqDel := httptest.NewRequest(http.MethodDelete, "/api/sync-sets/s_omitted", nil)
+		reqDel.Header.Set("Authorization", authHeader)
+		recDel := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recDel, reqDel)
+		if recDel.Code != http.StatusOK {
+			t.Fatalf("DELETE status = %d", recDel.Code)
+		}
+	}
+
+	// 6. Create with explicit true and explicit false
+	{
+		_, err = db.Exec(`
+			INSERT INTO endpoints (alias, transport, connection_id, remote_id) VALUES
+				('e4', 'whatsapp', 'conn-wa-1', '4@g.us'),
+				('e5', 'discord', 'conn-dc-1', '456789012345678901')
+		`)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		bodyTrue := `{"id":"s_true","endpoints":["e4","e5"],"anonymizeToDiscord":true}`
+		reqTrue := httptest.NewRequest(http.MethodPost, "/api/sync-sets", bytes.NewReader([]byte(bodyTrue)))
+		reqTrue.Header.Set("Authorization", authHeader)
+		recTrue := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recTrue, reqTrue)
+		if recTrue.Code != http.StatusCreated {
+			t.Fatalf("POST s_true status = %d: %s", recTrue.Code, recTrue.Body.String())
+		}
+		var createdTrue SyncSetDTO
+		if err := json.NewDecoder(recTrue.Body).Decode(&createdTrue); err != nil {
+			t.Fatal(err)
+		}
+		if !createdTrue.AnonymizeToDiscord {
+			t.Fatal("expected created s_true AnonymizeToDiscord to be true")
+		}
+
+		// List all sets and verify
+		reqList := httptest.NewRequest(http.MethodGet, "/api/sync-sets", nil)
+		reqList.Header.Set("Authorization", authHeader)
+		recList := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(recList, reqList)
+		if recList.Code != http.StatusOK {
+			t.Fatalf("GET /api/sync-sets status = %d", recList.Code)
+		}
+		var sets []SyncSetDTO
+		if err := json.NewDecoder(recList.Body).Decode(&sets); err != nil {
+			t.Fatal(err)
+		}
+		if len(sets) != 1 || !sets[0].AnonymizeToDiscord {
+			t.Fatalf("expected 1 set with AnonymizeToDiscord=true, got %+v", sets)
+		}
+	}
+}

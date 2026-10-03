@@ -247,6 +247,41 @@
     syncMembershipProxyToSource(panel);
   }
 
+  function buildPrivacyPanel(item) {
+    const id = item.getAttribute('data-id') || '';
+    const panel = document.createElement('section');
+    panel.className = 'syncset-privacy-panel syncset-membership-panel';
+    panel.innerHTML = `
+      <div class="syncset-membership-header">
+        <span class="syncset-membership-icon" aria-hidden="true" style="color:var(--discord-color);background:var(--discord-muted);">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+        </span>
+        <div class="syncset-membership-heading">
+          <div class="syncset-membership-title">Privacy &amp; Presentation</div>
+          <div class="syncset-membership-subtitle">Optionally replace sensitive participant identities with deterministic pseudonyms for Discord destinations.</div>
+        </div>
+      </div>
+      <div class="syncset-membership-body" style="grid-template-columns:1fr;">
+        <label class="syncset-evidence-row" style="cursor:pointer;">
+          <input type="checkbox" data-syncset-field="anonymizeToDiscord">
+          <span>
+            <span class="syncset-evidence-title">Anonymize sender presentation when forwarding to Discord</span>
+            <span class="syncset-evidence-help">Replaces sender display names, phone numbers, and structured mentions with deterministic pseudonyms (e.g. <code>Silent Falcon Q7M</code>) when forwarding to Discord channels in this sync set. WhatsApp and Telegram retain standard attribution.</span>
+          </span>
+        </label>
+      </div>`;
+
+    const checkbox = panel.querySelector('[data-syncset-field="anonymizeToDiscord"]');
+    const sourceCheckbox = document.getElementById('syncset-anonymize-to-discord');
+    if (checkbox && sourceCheckbox) {
+      checkbox.checked = sourceCheckbox.checked;
+      checkbox.addEventListener('change', () => {
+        sourceCheckbox.checked = checkbox.checked;
+      });
+    }
+    return panel;
+  }
+
   function buildMembershipPanel(item) {
     const id = item.getAttribute('data-id') || '';
     const panel = document.createElement('section');
@@ -353,6 +388,12 @@
         event.stopPropagation();
         controllerActions?.querySelector('.syncset-add-btn')?.click();
       });
+    }
+
+    if (!body.querySelector('.syncset-privacy-panel')) {
+      const privacy = buildPrivacyPanel(item);
+      if (controllerActions) controllerActions.before(privacy);
+      else body.appendChild(privacy);
     }
 
     if (!body.querySelector('.syncset-membership-panel')) {
@@ -522,8 +563,10 @@
     if (!create || !add || !editor) return;
 
     const idField = document.getElementById('syncset-id-field');
+    const privacyField = document.getElementById('syncset-privacy-card');
     const addSection = editor.querySelector('.syncset-add-section') || editor.querySelector('.add-endpoint-form')?.parentElement;
     if (idField) document.getElementById('create-sync-set-body').appendChild(idField);
+    if (privacyField) document.getElementById('create-sync-set-body').appendChild(privacyField);
     if (addSection) document.getElementById('add-conversation-body').appendChild(addSection);
     editor.classList.add('syncset-controller-host');
 

@@ -20,7 +20,8 @@
 - **Source-Local Message Suppression**: Configurable prefix filtering (supports multiple prefixes, e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before canonicalization, transmission, or media loading; edits, reactions, and deletes for suppressed messages also remain local.
 - **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints. Forwarded child messages use `<group-alias>/<thread-or-topic>/<username>`; opaque provider child IDs never appear in message text. `opaque` (default) keeps names transient, while `friendly` may persist bounded labels for restart/replay presentation.
 - **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
-- **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration, and live runtime configuration reload without process restarts.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Routing database (`sync.db`) and application logs contain no message bodies, media, phone numbers, or user IDs. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g., `Silent Falcon Q7M`) exclusively for Discord destinations while WhatsApp and Telegram retain standard push names.
+- **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration with Discord anonymization controls, and live runtime configuration reload without process restarts.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
 - **Membership Intake & Verification Pipeline (Experimental)**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
 - **Automated WhatsApp Chat Cleanup**: Scheduled AppState background cleanup to prune old messages on the sync account according to configurable retention rules.
@@ -34,6 +35,7 @@ The core routing boundary is deliberately content-free at rest:
 
 - `/data/sync.db` and application logs contain no message bodies, media, participant identities, human-readable provider names, credentials, or raw provider objects/errors.
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
+- One-way Discord anonymization derives stable pseudonyms from HMAC actor IDs purely on the fly; no PII-to-pseudonym map or plaintext participant names are ever stored in `sync.db`.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
 - `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord bot/webhook credentials, encrypted Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. Discord webhook URLs and bot tokens are never returned through read APIs; Telegram OTPs and 2FA passwords are never persisted.
@@ -69,7 +71,7 @@ Podman users can run `podman compose up -d --build`. Open `http://localhost:8080
 
 1. Connections — authenticate one or more provider accounts or bots.
 2. Endpoints — assign safe aliases to discovered parent conversations.
-3. Sync sets — group two or more endpoint aliases for all-to-all synchronization.
+3. Sync sets — group two or more endpoint aliases for all-to-all synchronization, with optional one-way Discord anonymization (`anonymizeToDiscord`).
 
 For a published-image Compose example and tag policy, see [Docker Hub](DOCKERHUB.md).
 

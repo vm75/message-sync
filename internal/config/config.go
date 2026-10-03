@@ -189,8 +189,9 @@ type Endpoint struct {
 }
 
 type SyncSet struct {
-	ID        string   `json:"id"`
-	Endpoints []string `json:"endpoints"`
+	ID                 string   `json:"id"`
+	Endpoints          []string `json:"endpoints"`
+	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
 }
 
 type Identity struct {
@@ -300,15 +301,18 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	}
 	endpointRows.Close()
 
-	setRows, err := db.QueryContext(ctx, `SELECT id FROM sync_sets ORDER BY id ASC`)
+	setRows, err := db.QueryContext(ctx, `SELECT id, anonymize_to_discord FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sync_sets: %w", err)
 	}
 	defer setRows.Close()
 
 	for setRows.Next() {
-		var id string
-		if err := setRows.Scan(&id); err != nil {
+		var (
+			id                 string
+			anonymizeToDiscord bool
+		)
+		if err := setRows.Scan(&id, &anonymizeToDiscord); err != nil {
 			return nil, fmt.Errorf("scan sync_set: %w", err)
 		}
 		endpoints := syncSetMap[id]
@@ -316,8 +320,9 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 			endpoints = []string{}
 		}
 		cfg.SyncSets = append(cfg.SyncSets, SyncSet{
-			ID:        id,
-			Endpoints: endpoints,
+			ID:                 id,
+			Endpoints:          endpoints,
+			AnonymizeToDiscord: anonymizeToDiscord,
 		})
 	}
 	if err := setRows.Err(); err != nil {
@@ -497,7 +502,7 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	}
 
 	for _, set := range cfg.SyncSets {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sync_sets (id) VALUES (?)`, set.ID); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sync_sets (id, anonymize_to_discord) VALUES (?, ?)`, set.ID, set.AnonymizeToDiscord); err != nil {
 			return fmt.Errorf("insert sync_set %q: %w", set.ID, err)
 		}
 	}

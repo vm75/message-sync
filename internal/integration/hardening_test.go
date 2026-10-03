@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1021,4 +1022,104 @@ func filepathJoin(elem ...string) string {
 		}
 	}
 	return res
+}
+
+func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+
+	wa := newRecordingAdapter("wa-fam", "conn-wa-1")
+	dc := newRecordingAdapter("dc-fam", "conn-dc-1")
+	tg := newRecordingAdapter("tg-fam", "conn-tg-1")
+
+	cfg := &config.Config{
+		Endpoints: map[string]config.Endpoint{
+			"wa-fam": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "wa@g.us"},
+			"dc-fam": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "dc-chan-1"},
+			"tg-fam": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-100123"},
+		},
+		SyncSets: []config.SyncSet{{
+			ID:                 "fam-sync",
+			Endpoints:          []string{"wa-fam", "dc-fam", "tg-fam"},
+			AnonymizeToDiscord: true,
+		}},
+		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+	}
+
+	registry, err := router.NewAdapterRegistry(cfg, map[string]router.OutboundAdapter{
+		"conn-wa-1": wa,
+		"conn-dc-1": dc,
+		"conn-tg-1": tg,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mesh, err := router.New(cfg, syncStore, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mesh.Close()
+
+	canaryRealName := "Alice Canarisen"
+	canaryPhone := "+15551234567"
+	canaryMentionName := "Bob Mentioncanary"
+	canaryMentionID := "15557654321"
+
+	inc := transport.Incoming{
+		Endpoint: "wa-fam",
+		RemoteID: "wa-msg-canary-1",
+		Sender: transport.Sender{
+			DisplayName: canaryRealName,
+			PhoneNumber: canaryPhone,
+			OpaqueID:    "u_abcdefghij",
+		},
+		Kind: "text",
+		Text: "Hello @15557654321, can you hear this?",
+		Mentions: []transport.Mention{{
+			RemoteID: canaryMentionID,
+			Name:     canaryMentionName,
+		}},
+		QuotedText: "*_wa-fam/" + canaryMentionName + "_*: previous conversation",
+		Timestamp:  time.Now().UTC(),
+	}
+
+	if err := mesh.Handle(ctx, inc); err != nil {
+		t.Fatal(err)
+	}
+
+	tgSent := tg.waitForSent(t, 1)
+	dcSent := dc.waitForSent(t, 1)
+
+	// Non-Discord destination (Telegram) preserves push names
+	if !strings.Contains(tgSent[0].Text, canaryRealName) {
+		t.Errorf("tg text expected real push name %q, got: %s", canaryRealName, tgSent[0].Text)
+	}
+	if tgSent[0].Sender.DisplayName != canaryRealName {
+		t.Errorf("tg sender expected real push name, got: %s", tgSent[0].Sender.DisplayName)
+	}
+
+	// Discord destination must NOT contain canary PII in any user-facing field
+	pseudonym := identity.Pseudonym("u_abcdefghij")
+	dcMsg := dcSent[0]
+	for _, forbidden := range []string{canaryRealName, canaryPhone, "15551234567", canaryMentionName} {
+		if strings.Contains(dcMsg.Text, forbidden) {
+			t.Fatalf("Discord outbound Text leaked canary PII %q: %s", forbidden, dcMsg.Text)
+		}
+		if strings.Contains(dcMsg.QuotedText, forbidden) {
+			t.Fatalf("Discord outbound QuotedText leaked canary PII %q: %s", forbidden, dcMsg.QuotedText)
+		}
+	}
+	if dcMsg.Sender.DisplayName != pseudonym {
+		t.Errorf("Discord outbound Sender.DisplayName = %q, want %q", dcMsg.Sender.DisplayName, pseudonym)
+	}
+	if dcMsg.Sender.PhoneNumber != "" {
+		t.Errorf("Discord outbound Sender.PhoneNumber must be empty, got: %q", dcMsg.Sender.PhoneNumber)
+	}
+	if len(dcMsg.Mentions) == 0 || dcMsg.Mentions[0].Name == canaryMentionName {
+		t.Errorf("Discord outbound Mentions must be pseudonymized, got: %#v", dcMsg.Mentions)
+	}
 }

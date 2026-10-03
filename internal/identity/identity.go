@@ -33,6 +33,12 @@ func (h *Hasher) ScopeToken(scopeID string) string {
 	return h.derive("child-scope", scopeID, "s_")
 }
 
+// ActorID creates a stable, domain-separated actor identifier without exposing
+// the underlying provider user ID or address.
+func (h *Hasher) ActorID(domain, value string) string {
+	return h.derive(domain, value, "u_")
+}
+
 func (h *Hasher) derive(domain, value, prefix string) string {
 	mac := hmac.New(sha256.New, h.secret)
 	_, _ = mac.Write([]byte(domain + "\x00" + strings.TrimSpace(value)))

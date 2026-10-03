@@ -408,6 +408,17 @@
                   <p class="form-hint">Alphanumeric, dashes, underscores. 1–64 chars. Cannot be changed after creation.</p>
                 </div>
 
+                <div class="settings-card" id="syncset-privacy-card" style="margin:16px 0;">
+                  <div class="section-label">Privacy &amp; Presentation</div>
+                  <label class="form-check" style="margin-top:8px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="syncset-anonymize-to-discord">
+                    <span>
+                      <span style="font-weight:500;display:block;">Anonymize sender presentation when forwarding to Discord</span>
+                      <span class="form-hint" style="margin-top:2px;display:block;">Replaces sender display names, phone numbers, and structured mentions with deterministic pseudonyms (e.g. <code>Silent Falcon Q7M</code>) when forwarding to Discord in this sync set. WhatsApp and Telegram retain standard attribution.</span>
+                    </span>
+                  </label>
+                </div>
+
                 <div class="settings-card" style="margin:16px 0;">
                   <div class="section-label">Membership application <span class="badge badge-warning" style="margin-left:6px;font-size:.68rem;vertical-align:middle;">Experimental</span></div>
                   <p class="form-hint">Optional experimental review intake shared by pipelines targeting this sync set. Custom fields use a bounded JSON array of key, label, type, required, and maxLength values.</p>

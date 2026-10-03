@@ -204,6 +204,7 @@
   const syncsetEditorIdDisplay = document.getElementById('syncset-editor-id-display');
   const inputSyncsetId      = document.getElementById('input-syncset-id');
   const syncsetIdField      = document.getElementById('syncset-id-field');
+  const syncsetAnonymizeToDiscord = document.getElementById('syncset-anonymize-to-discord');
   const endpointChips       = document.getElementById('endpoint-chips');
   const btnDeleteSyncSet    = document.getElementById('btn-delete-sync-set');
   const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
@@ -2008,9 +2009,10 @@
     syncsetList.innerHTML = cachedSyncSets.map(set => {
       const count = Array.isArray(set.endpoints) ? set.endpoints.length : 0;
       const isActive = set.id === editingSyncSetId;
+      const anonBadge = set.anonymizeToDiscord ? `<span class="badge badge-discord" title="Anonymize to Discord" style="font-size:0.68rem;margin-left:6px;">anon</span>` : '';
       return `<div class="syncset-list-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(set.id)}">
         <button type="button" class="syncset-card-toggle" aria-expanded="${isActive}">
-          <span class="syncset-item-id">${escapeHtml(set.id)}</span>
+          <span class="syncset-item-id">${escapeHtml(set.id)}${anonBadge}</span>
           <span class="syncset-item-count">${count} ep</span><span class="syncset-chevron" aria-hidden="true"></span>
         </button>
         <button class="syncset-delete-btn" data-id="${escapeHtml(set.id)}" title="Delete">
@@ -2101,6 +2103,7 @@
 
     // Reset add-endpoint form
     resetAddEndpointForm();
+    if (syncsetAnonymizeToDiscord) syncsetAnonymizeToDiscord.checked = !!(set && set.anonymizeToDiscord);
 		if (membershipInstructions) membershipInstructions.value = '';
 		if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
 		if (membershipEvidenceRequired) membershipEvidenceRequired.checked = false;
@@ -2620,6 +2623,7 @@
 				evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
 				customFields
 			};
+			const anonymizeToDiscord = !!(syncsetAnonymizeToDiscord && syncsetAnonymizeToDiscord.checked);
         if (editingSyncSetId) {
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
@@ -2632,12 +2636,12 @@
               await window.API.createEndpoint({ ...ep, syncSetId: editingSyncSetId });
             }
           }
-          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases });
+          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, anonymizeToDiscord });
 			await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
           showToast(`Sync set '${editingSyncSetId}' saved.`, 'success');
         } else {
           // Create set first
-          await window.API.createSyncSet({ id, endpoints: [] });
+          await window.API.createSyncSet({ id, endpoints: [], anonymizeToDiscord });
           editingSyncSetId = id;
           // Now create or update all pending endpoints
           for (const ep of editorEndpoints) {
@@ -2649,7 +2653,7 @@
             }
           }
           // Update the sync set with endpoint aliases
-          await window.API.updateSyncSet(id, { endpoints: aliases });
+          await window.API.updateSyncSet(id, { endpoints: aliases, anonymizeToDiscord });
 			await window.API.updateMembershipConfig(id, membershipConfig);
           showToast(`Sync set '${id}' created.`, 'success');
         }
