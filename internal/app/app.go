@@ -352,6 +352,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("create canonical router: %w", err)
 	}
 	defer mesh.Close()
+	mesh.SetLogger(logger)
 	recoveryCoordinator, err := recovery.NewCoordinator(syncStore, mesh)
 	if err != nil {
 		return fmt.Errorf("create recovery coordinator: %w", err)

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -107,6 +108,7 @@ type Router struct {
 	pollResultMu       sync.Mutex
 	scopeHasher        *identity.Hasher
 	presentationStore  PollPresentationStore
+	logger             *slog.Logger
 }
 
 type Outcome struct {
@@ -198,6 +200,10 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		scopeHasher:        hasher,
 		presentationStore:  presentationStore,
 	}, nil
+}
+
+func (r *Router) SetLogger(l *slog.Logger) {
+	r.logger = l
 }
 
 func (r *Router) UpdateConfig(cfg *config.Config) error {
@@ -309,7 +315,11 @@ func (r *Router) HandleEvent(ctx context.Context, incoming transport.Incoming) (
 	if incoming.Kind == "other" {
 		return Outcome{Accepted: true, NoOp: true, SafeToAdvance: true}, nil
 	}
-	pending, err := r.store.PendingDeliveryForRemote(ctx, string(incoming.Endpoint), incoming.RemoteID)
+	pendingRemoteID := incoming.RemoteID
+	if incoming.Kind == "edit" && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+		pendingRemoteID = incoming.ReplyTo.RemoteMessageID
+	}
+	pending, err := r.store.PendingDeliveryForRemote(ctx, string(incoming.Endpoint), pendingRemoteID)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -338,6 +348,13 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		return fmt.Errorf("check local message suppression: %w", err)
 	} else if suppressed {
 		return nil
+	}
+	if incoming.Kind == "edit" && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
+		if suppressed, err := r.store.IsSuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID); err != nil {
+			return fmt.Errorf("check local message suppression: %w", err)
+		} else if suppressed {
+			return nil
+		}
 	}
 	r.mu.RLock()
 	localPrefix := r.localPrefix
@@ -470,11 +487,23 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 
 	if incoming.Kind == "edit" {
 		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID == "" {
+			if r.logger != nil {
+				r.logger.Warn("edit dropped: missing target message reference",
+					"event", "edit_target_missing",
+					"endpoint", string(incoming.Endpoint),
+				)
+			}
 			return nil
 		}
 		targetCanonical, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.ReplyTo.RemoteMessageID)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
+				if r.logger != nil {
+					r.logger.Debug("edit dropped: target message not found in canonical store",
+						"event", "edit_target_unresolved",
+						"endpoint", string(incoming.Endpoint),
+					)
+				}
 				return nil // Target unknown
 			}
 			return fmt.Errorf("resolve edit target: %w", err)
@@ -485,6 +514,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return fmt.Errorf("check edit target tombstone: %w", err)
 		}
 		if isTombstoned {
+			if r.logger != nil {
+				r.logger.Debug("edit dropped: target message tombstoned",
+					"event", "edit_target_tombstoned",
+					"endpoint", string(incoming.Endpoint),
+				)
+			}
 			return nil // Cannot edit a deleted message
 		}
 
@@ -527,6 +562,12 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				}
 				r.mu.Unlock()
 			}); err != nil {
+				if r.logger != nil {
+					r.logger.Warn("failed to enqueue destination edit",
+						"event", "edit_enqueue_failed",
+						"endpoint", string(destination),
+					)
+				}
 				return fmt.Errorf("send destination edit: %w", err)
 			}
 		}

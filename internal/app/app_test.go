@@ -237,7 +237,7 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	syncPath := filepath.Join(dataDir, SyncDBName)
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 500; i++ {
 		fake.mu.Lock()
 		sentCount := len(fake.sent)
 		fake.mu.Unlock()

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Service version REST API endpoint (`GET /api/version`) and current version badge display on the Web UI Dashboard.
 
+### Fixed
+- WhatsApp-originated message edits, including live linked-account phone edits, now update existing Discord, WhatsApp, and Telegram copies. Secret-encrypted text edits are decrypted transiently through whatsmeow; history edits are recognized even when its parser unwraps the body without setting the edit flag. WhatsApp edits no longer reuse create recovery checkpoints, while other transports retain ordered update checkpoint handling.
+- WhatsApp text edits work with media synchronization disabled, preserve original target IDs and nested mentions, and report fixed privacy-safe diagnostics when edits cannot be decrypted or resolved. Regression tests exercise real provider event shapes through adapter ingress, recovery, and target delivery, including linked-account edits and bridge echo suppression.
+
 ## [0.3.1] - 2026-10-03
 
 ### Fixed

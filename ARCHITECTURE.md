@@ -155,6 +155,8 @@ Reaction state keys use canonical message, source endpoint, and HMAC actor ident
 
 WhatsApp bridge lifecycle echoes use bounded, expiring, one-shot in-memory markers. An unmatched linked-device `FromSelf` mutation continues through normal routing.
 
+WhatsApp ingress recognizes edit envelopes retained in the raw event even when whatsmeow's history parser replaces the parsed message with the edited body. Secret-encrypted `MESSAGE_EDIT` payloads are decrypted through the client using its isolated protocol-owned secrets; decrypted bodies remain transient. Normalization preserves the original target key, and text edits do not require media synchronization. Live and history edits carry no timestamp-based recovery checkpoint because their timestamp may equal the original message's already accepted position. Providers with ordered update IDs retain their normal checkpoint processing for edits.
+
 ### Polls
 
 Poll questions and option labels are retained only in encrypted control-plane storage. The routing store retains canonical option positions, opaque hashes or provider references where required, aggregate counts, and bridge-owned result-companion IDs—never voters or labels or poll presentation text.

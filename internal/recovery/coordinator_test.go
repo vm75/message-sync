@@ -147,6 +147,71 @@ func TestCoordinatorAdvancesAcceptedCheckpointAndDeduplicatesReplay(t *testing.T
 	}
 }
 
+func TestCoordinatorDeduplicatesOrderedEditCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syncStore.Close()
+	sender := &recoverySender{}
+	canonicalRouter, err := router.New(recoveryConfig(), syncStore, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer canonicalRouter.Close()
+	coordinator, err := NewCoordinator(syncStore, canonicalRouter)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	orig := recoveryEvent(10, "orig-msg")
+	if _, err := coordinator.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := coordinator.Handle(ctx, orig); err != nil {
+		t.Fatal(err)
+	}
+
+	edit := transport.Incoming{
+		Endpoint: "one",
+		RemoteID: "edit-1",
+		Kind:     "edit",
+		Text:     "edited content",
+		Sender:   transport.Sender{OpaqueID: "u_abcdefghij"},
+		ReplyTo: &transport.MessageRef{
+			Endpoint:        "one",
+			RemoteMessageID: "orig-msg",
+		},
+		Timestamp: orig.Timestamp,
+		Checkpoint: transport.Checkpoint{
+			StreamKey:      "one",
+			Position:       10,
+			EventTimestamp: orig.Timestamp,
+			Valid:          true,
+		},
+	}
+	outcome, err := coordinator.Handle(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !outcome.NoOp {
+		t.Fatalf("ordered edit at an accepted checkpoint was not deduplicated: %+v", outcome)
+	}
+	// Providers with ordered update IDs (such as Telegram) must also advance
+	// their checkpoint for accepted edits. WhatsApp edits have no checkpoint.
+	edit.Checkpoint.Position = 11
+	edit.ReplyTo.RemoteMessageID = "unknown-target"
+	if _, err := coordinator.Handle(ctx, edit); err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := syncStore.RecoveryCursor(ctx, "one")
+	if err != nil || cursor.Position != 11 {
+		t.Fatalf("ordered edit cursor = %+v, err = %v", cursor, err)
+	}
+}
+
 func TestCoordinatorDoesNotAdvanceCheckpointForIgnoredEvent(t *testing.T) {
 	ctx := context.Background()
 	syncStore, err := store.Open(ctx, t.TempDir()+"/sync.db")
