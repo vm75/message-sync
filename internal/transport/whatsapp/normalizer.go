@@ -63,8 +63,22 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		displayName = strings.TrimSpace(evt.Info.PushName)
 	}
 	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)
+	if kind == "other" && evt.RawMessage != nil {
+		if k, t, d, l := normalizedPayload(evt.RawMessage); k != "other" {
+			kind, text, downloadable, fileLength = k, t, d, l
+		}
+	}
+	// whatsmeow may unwrap edits before delivering the event (for example,
+	// when parsing history). In that case Message contains only the new body,
+	// not the MESSAGE_EDIT protocol wrapper that normalizedPayload recognizes.
+	if isWhatsAppEdit(evt) {
+		switch kind {
+		case "text", "image", "video", "document":
+			kind = "edit"
+		}
+	}
 
-	if kind != "text" && kind != "other" && kind != "reaction" && kind != "poll" && kind != "poll_vote" {
+	if downloadable != nil || (kind != "text" && kind != "other" && kind != "reaction" && kind != "poll" && kind != "poll_vote" && kind != "edit") {
 		if !mediaEnabled {
 			return transport.Incoming{}, false
 		}
@@ -89,6 +103,9 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	var extractedMentions []transport.Mention
 
 	contextInfo := getContextInfo(evt.Message)
+	if contextInfo == nil && evt.RawMessage != nil {
+		contextInfo = getContextInfo(evt.RawMessage)
+	}
 	if contextInfo != nil && len(contextInfo.GetMentionedJID()) > 0 {
 		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter, resolver)
 	}
@@ -138,12 +155,9 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 			RemoteMessageID: targetID,
 		}
 	} else if kind == "edit" {
-		var targetID string
-		if protoMsg := evt.Message.GetProtocolMessage(); protoMsg != nil && protoMsg.GetKey() != nil {
-			targetID = protoMsg.GetKey().GetID()
-		}
+		targetID := whatsappEditTargetID(evt)
 		if targetID == "" {
-			targetID = string(evt.Info.ID)
+			return transport.Incoming{}, false
 		}
 		replyTo = &transport.MessageRef{
 			Endpoint:        endpoint,
@@ -221,6 +235,62 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	}, true
 }
 
+func isWhatsAppEdit(evt *events.Message) bool {
+	if evt == nil {
+		return false
+	}
+	if evt.IsEdit || evt.Info.Edit == types.EditAttributeMessageEdit ||
+		(evt.Info.MsgBotInfo.EditType != "" && evt.Info.MsgBotInfo.EditType != types.EditTypeFirst) {
+		return true
+	}
+	// ParseWebMessage can replace Message with the edited body without setting
+	// IsEdit. RawMessage still carries the protocol envelope in that case.
+	for _, message := range []*waE2E.Message{evt.Message, evt.RawMessage} {
+		if encrypted := message.GetSecretEncryptedMessage(); encrypted != nil && encrypted.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			return true
+		}
+		kind, _, _, _ := normalizedPayload(message)
+		if kind == "edit" {
+			return true
+		}
+	}
+	return false
+}
+
+// whatsappEditTargetID resolves the original message rather than the ID of
+// the edit notification. Live events may carry a protocol message while
+// parsed history events may already have been unwrapped by whatsmeow.
+func whatsappEditTargetID(evt *events.Message) string {
+	if evt == nil {
+		return ""
+	}
+	for _, message := range []*waE2E.Message{evt.Message, evt.RawMessage} {
+		for depth := 0; depth < 5 && message != nil; depth++ {
+			if protocol := message.GetProtocolMessage(); protocol != nil &&
+				protocol.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT &&
+				protocol.GetKey().GetID() != "" {
+				return protocol.GetKey().GetID()
+			}
+			if nested := message.GetEditedMessage().GetMessage(); nested != nil {
+				message = nested
+			} else if nested := message.GetDeviceSentMessage().GetMessage(); nested != nil {
+				message = nested
+			} else if nested := message.GetEphemeralMessage().GetMessage(); nested != nil {
+				message = nested
+			} else {
+				break
+			}
+		}
+	}
+	if evt.Info.MsgMetaInfo.TargetID != "" {
+		return string(evt.Info.MsgMetaInfo.TargetID)
+	}
+	if evt.Info.MsgBotInfo.EditTargetID != "" {
+		return string(evt.Info.MsgBotInfo.EditTargetID)
+	}
+	return string(evt.Info.ID)
+}
+
 func extractMentions(mentions []string, contactGetter ContactGetter, resolver JIDResolver) []transport.Mention {
 	if len(mentions) == 0 {
 		return nil
@@ -282,6 +352,16 @@ func getContextInfo(msg *waE2E.Message) *waE2E.ContextInfo {
 	}
 	if msg.StickerMessage != nil {
 		return msg.StickerMessage.ContextInfo
+	}
+	if protoMsg := msg.GetProtocolMessage(); protoMsg != nil {
+		if edited := protoMsg.GetEditedMessage(); edited != nil {
+			return getContextInfo(edited)
+		}
+	}
+	if editedMsg := msg.GetEditedMessage(); editedMsg != nil {
+		if inner := editedMsg.GetMessage(); inner != nil {
+			return getContextInfo(inner)
+		}
 	}
 	return nil
 }

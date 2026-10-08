@@ -342,7 +342,12 @@ func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
 	}()
 
 	wa := &fakeWhatsAppTransport{events: make(chan transport.Incoming)}
+	openedWhatsApp := make(chan struct{}, 1)
 	openWhatsApp = func(context.Context, whatsapp.Options) (whatsappTransport, error) {
+		select {
+		case openedWhatsApp <- struct{}{}:
+		default:
+		}
 		return wa, nil
 	}
 	openTelegram = func(context.Context, telegram.Options) (telegramTransport, error) {
@@ -363,7 +368,12 @@ func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&safeBuffer{}, nil))
 	errCh := make(chan error, 1)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-openedWhatsApp:
+	case <-time.After(5 * time.Second):
+		cancel()
+		t.Fatal("timed out waiting for WhatsApp transport to open")
+	}
 	cancel()
 	if err := <-errCh; err != nil {
 		t.Fatalf("Telegram-disabled deployment failed: %v", err)

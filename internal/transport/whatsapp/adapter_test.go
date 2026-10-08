@@ -3,6 +3,7 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -15,9 +16,12 @@ import (
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 type lockedBuffer struct {
@@ -114,6 +118,209 @@ func TestWhatsAppCheckpointUsesEndpointAndMessageTimestamp(t *testing.T) {
 	}
 	if got := whatsappCheckpoint("wa-team", time.Time{}); got.Valid {
 		t.Fatalf("zero timestamp unexpectedly produced checkpoint: %#v", got)
+	}
+}
+
+func TestWhatsAppAdapterLiveEditEventDoesNotSetRecoveryCheckpoint(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Adapter{
+		normalizer:   normalizer,
+		mediaEnabled: true,
+		client:       &whatsmeow.Client{},
+		events:       make(chan transport.Incoming, 10),
+		pcache:       newParticipantCache(10),
+		lifecycle:    newLifecycleSuppression(),
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	body := "updated text"
+	origID := "original-message-id"
+	editID := "edit-notification-id"
+	origTimestamp := time.Unix(1_700_000_100, 0)
+
+	protocolMsg := &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{
+			Key: &waCommon.MessageKey{
+				ID: proto.String(origID),
+			},
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{Conversation: proto.String(body)},
+			TimestampMS:   proto.Int64(1_700_000_160_000),
+		},
+	}
+	rawMsg := &waE2E.Message{
+		EditedMessage: &waE2E.FutureProofMessage{Message: protocolMsg},
+	}
+	editEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("15551234567", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:        types.MessageID(editID),
+			Edit:      types.EditAttributeMessageEdit,
+			Timestamp: origTimestamp,
+		},
+		RawMessage: rawMsg,
+	}
+	editEvt.UnwrapRaw()
+
+	adapter.handleEvent(editEvt)
+	select {
+	case incoming := <-adapter.events:
+		if incoming.Kind != "edit" {
+			t.Fatalf("kind = %q, want edit", incoming.Kind)
+		}
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != origID {
+			t.Fatalf("target = %+v, want %s", incoming.ReplyTo, origID)
+		}
+		if incoming.Checkpoint.Valid {
+			t.Fatalf("edit event unexpectedly set recovery checkpoint: %#v", incoming.Checkpoint)
+		}
+	default:
+		t.Fatal("no event emitted")
+	}
+}
+
+func TestWhatsAppAdapterSelfOriginatedEditEmitted(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Adapter{
+		normalizer:   normalizer,
+		mediaEnabled: true,
+		client:       &whatsmeow.Client{},
+		events:       make(chan transport.Incoming, 10),
+		pcache:       newParticipantCache(10),
+		lifecycle:    newLifecycleSuppression(),
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	body := "self-originated edit"
+	origID := "self-orig-msg-id"
+	editID := "self-edit-notif-id"
+	origTimestamp := time.Unix(1_700_000_200, 0)
+
+	protocolMsg := &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{
+			Key: &waCommon.MessageKey{
+				ID: proto.String(origID),
+			},
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{Conversation: proto.String(body)},
+			TimestampMS:   proto.Int64(1_700_000_260_000),
+		},
+	}
+	rawMsg := &waE2E.Message{
+		EditedMessage: &waE2E.FutureProofMessage{Message: protocolMsg},
+	}
+	editEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("123456789", types.GroupServer),
+				Sender:   types.NewJID("15551234567", types.DefaultUserServer),
+				IsFromMe: true,
+				IsGroup:  true,
+			},
+			ID:        types.MessageID(editID),
+			Edit:      types.EditAttributeMessageEdit,
+			Timestamp: origTimestamp,
+		},
+		RawMessage: rawMsg,
+	}
+	editEvt.UnwrapRaw()
+
+	adapter.handleEvent(editEvt)
+	select {
+	case incoming := <-adapter.events:
+		if incoming.Kind != "edit" {
+			t.Fatalf("kind = %q, want edit", incoming.Kind)
+		}
+		if !incoming.FromSelf {
+			t.Fatal("expected incoming.FromSelf to be true")
+		}
+		if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != origID {
+			t.Fatalf("target = %+v, want %s", incoming.ReplyTo, origID)
+		}
+	default:
+		t.Fatal("expected self-originated edit to be emitted, but was suppressed")
+	}
+}
+
+func TestWhatsAppAdapterBridgeEditEchoSuppressed(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &Adapter{
+		normalizer:   normalizer,
+		mediaEnabled: true,
+		client:       &whatsmeow.Client{},
+		events:       make(chan transport.Incoming, 10),
+		pcache:       newParticipantCache(10),
+		lifecycle:    newLifecycleSuppression(),
+		logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+
+	origID := "bridge-orig-msg-id"
+	editID := "bridge-edit-notif-id"
+	origTimestamp := time.Unix(1_700_000_300, 0)
+
+	// Simulate bridge marking the edit in lifecycle
+	adapter.lifecycle.mark("c1g1", origID, "edit", "", time.Now().UTC())
+
+	protocolMsg := &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{
+			Key: &waCommon.MessageKey{
+				ID: proto.String(origID),
+			},
+			Type:          waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+			EditedMessage: &waE2E.Message{Conversation: proto.String("bridge edited body")},
+			TimestampMS:   proto.Int64(1_700_000_360_000),
+		},
+	}
+	rawMsg := &waE2E.Message{
+		EditedMessage: &waE2E.FutureProofMessage{Message: protocolMsg},
+	}
+	editEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:     types.NewJID("123456789", types.GroupServer),
+				Sender:   types.NewJID("15551234567", types.DefaultUserServer),
+				IsFromMe: true,
+				IsGroup:  true,
+			},
+			ID:        types.MessageID(editID),
+			Edit:      types.EditAttributeMessageEdit,
+			Timestamp: origTimestamp,
+		},
+		RawMessage: rawMsg,
+	}
+	editEvt.UnwrapRaw()
+
+	adapter.handleEvent(editEvt)
+	select {
+	case incoming := <-adapter.events:
+		t.Fatalf("bridge edit echo was unexpectedly emitted: %+v", incoming)
+	default:
+		// Succeeded: echo was suppressed by lifecycle
 	}
 }
 

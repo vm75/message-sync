@@ -705,6 +705,65 @@ func TestEditPropagationToDestinationCopies(t *testing.T) {
 
 }
 
+type blockedEditSender struct {
+	*fakeSender
+	release <-chan struct{}
+}
+
+func (s *blockedEditSender) Edit(ctx context.Context, ref transport.MessageRef, text string) error {
+	select {
+	case <-s.release:
+		return s.fakeSender.Edit(ctx, ref, text)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestEditOutcomeUsesOriginalMessageDeliveryState(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	release := make(chan struct{})
+	sender := &blockedEditSender{fakeSender: &fakeSender{}, release: release}
+	mesh, err := New(testConfig(config.UsernameModePushName), db, sender)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mesh.Close()
+	defer close(release)
+	original := testIncoming("c1g1", "original")
+	if _, err := mesh.HandleEvent(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		outcome, err := mesh.HandleEvent(ctx, original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if outcome.SafeToAdvance {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("original did not finish delivery")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	edit := original
+	edit.Kind, edit.RemoteID, edit.Text = "edit", "separate-edit-notification", "updated text"
+	edit.ReplyTo = &transport.MessageRef{Endpoint: original.Endpoint, RemoteMessageID: original.RemoteID}
+	outcome, err := mesh.HandleEvent(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.SafeToAdvance || !outcome.Pending {
+		t.Fatalf("undelivered edit was marked safe to forget: %+v", outcome)
+	}
+}
+
 func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	ctx := context.Background()
 	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)

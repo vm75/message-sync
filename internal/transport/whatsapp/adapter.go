@@ -508,6 +508,13 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 	target, ok := a.targets[ref.Endpoint]
 	a.mu.Unlock()
 	if !ok {
+		if a.logger != nil {
+			a.logger.Warn("WhatsApp outbound edit failed",
+				"event", "whatsapp_edit_failed",
+				"endpoint", string(ref.Endpoint),
+				"reason", "unknown_endpoint",
+			)
+		}
 		return fmt.Errorf("unknown WhatsApp endpoint %q", ref.Endpoint)
 	}
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
@@ -526,6 +533,13 @@ func (a *Adapter) Edit(ctx context.Context, ref transport.MessageRef, text strin
 		failure := classifyWhatsAppFailure(fmt.Errorf("send WhatsApp edit: %w", err))
 		if transport.Classify(failure).Certainty == transport.SendDefinitelyNotSent {
 			a.lifecycle.cancel(ref.Endpoint, ref.RemoteMessageID, "edit", "")
+		}
+		if a.logger != nil {
+			a.logger.Warn("WhatsApp outbound edit failed",
+				"event", "whatsapp_edit_failed",
+				"endpoint", string(ref.Endpoint),
+				"reason", "send_failed",
+			)
 		}
 		return failure
 	}
@@ -1099,6 +1113,39 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	return nil
 }
 
+// decryptMessageEdit uses only the client's protocol-owned message secrets.
+// The decrypted body remains transient and takes the same normalization path
+// as a protocol MESSAGE_EDIT; no retry/event plaintext store is enabled.
+func (a *Adapter) decryptMessageEdit(client *whatsmeow.Client, evt *events.Message) (*events.Message, bool) {
+	encrypted := evt.Message.GetSecretEncryptedMessage()
+	if encrypted == nil || encrypted.GetSecretEncType() != waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+		return evt, true
+	}
+	if client == nil || client.Store == nil || client.Store.MsgSecrets == nil || encrypted.GetTargetMessageKey().GetID() == "" {
+		if a.logger != nil {
+			a.logger.Warn("WhatsApp edit dropped", "event", "whatsapp_edit_dropped", "reason", "edit_decryption_unavailable")
+		}
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	body, err := client.DecryptSecretEncryptedMessage(ctx, evt)
+	if err != nil || body == nil {
+		if a.logger != nil {
+			a.logger.Warn("WhatsApp edit dropped", "event", "whatsapp_edit_dropped", "reason", "edit_decryption_failed")
+		}
+		return nil, false
+	}
+	// Preserve the provider event and the original target key. In particular,
+	// the notification ID must never become the target message ID.
+	decrypted := *evt
+	decrypted.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), Key: encrypted.GetTargetMessageKey(), EditedMessage: body,
+	}}
+	decrypted.IsEdit = true
+	return &decrypted, true
+}
+
 func (a *Adapter) handleEvent(raw any) {
 	switch evt := raw.(type) {
 	case *events.Message:
@@ -1112,10 +1159,25 @@ func (a *Adapter) handleEvent(raw any) {
 		client := a.client
 		a.mu.Unlock()
 
+		isEditEvent := isWhatsAppEdit(evt)
 		if recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > recoveryMaxAge {
+			if a.logger != nil && isEditEvent {
+				a.logger.Warn("WhatsApp edit dropped",
+					"event", "whatsapp_edit_dropped",
+					"reason", "max_age_exceeded",
+				)
+			}
 			return
 		}
 		if normalizer == nil || client == nil {
+			return
+		}
+		if _, configured := normalizer.endpoints[evt.Info.Chat.ToNonAD().String()]; !configured {
+			return
+		}
+		var decrypted bool
+		evt, decrypted = a.decryptMessageEdit(client, evt)
+		if !decrypted {
 			return
 		}
 		if !evt.Info.MessageSource.Sender.IsEmpty() {
@@ -1123,12 +1185,28 @@ func (a *Adapter) handleEvent(raw any) {
 		}
 		incoming, ok := normalizer.NormalizeMessage(evt, mediaEnabled, mediaMaxBytes, client.Download, client.DecryptPollVote, a.getContactInfo, a.resolveAltJID)
 		if !ok {
+			if a.logger != nil && isEditEvent {
+				a.logger.Warn("WhatsApp edit dropped",
+					"event", "whatsapp_edit_dropped",
+					"reason", "normalization_failed",
+				)
+			}
 			return
 		}
 		if incoming.FromSelf && a.suppressLifecycleEcho(incoming) {
+			if a.logger != nil && incoming.Kind == "edit" {
+				a.logger.Debug("WhatsApp edit echo suppressed",
+					"event", "whatsapp_edit_echo_suppressed",
+					"endpoint", string(incoming.Endpoint),
+				)
+			}
 			return
 		}
-		incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
+		// Edit timestamps can be the original message's timestamp, including
+		// on history replay. They are not a new recovery position.
+		if incoming.Kind != "edit" {
+			incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
+		}
 		select {
 		case a.events <- incoming:
 		default:
@@ -1185,6 +1263,10 @@ func (a *Adapter) handleEvent(raw any) {
 					break
 				}
 				parsed := history.message
+				parsed, decrypted := a.decryptMessageEdit(client, parsed)
+				if !decrypted {
+					continue
+				}
 				if !parsed.Info.MessageSource.Sender.IsEmpty() {
 					a.pcache.Add(parsed.Info.ID, parsed.Info.MessageSource.Sender.ToNonAD().String())
 				}
@@ -1192,7 +1274,9 @@ func (a *Adapter) handleEvent(raw any) {
 				if !ok {
 					continue
 				}
-				incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
+				if incoming.Kind != "edit" {
+					incoming.Checkpoint = whatsappCheckpoint(incoming.Endpoint, incoming.Timestamp)
+				}
 				select {
 				case a.events <- incoming:
 					count++

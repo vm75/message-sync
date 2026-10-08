@@ -345,10 +345,17 @@ In the authenticated Web UI, check **Delivery Health** after inducing a slow or 
   - **Verify WhatsApp & Telegram**: Reaction is removed on the remote messages.
 
 ### Scenario 5: Message Edits
+- [ ] With the service connected, send plain text from the linked WhatsApp account's phone and edit it on that phone.
+  - **Verify Discord, Telegram, and other WhatsApp endpoints**: The existing copies update in place, keeping attribution; no duplicate message is created.
+- [ ] Repeat with another WhatsApp group participant and with media synchronization disabled.
+- [ ] Reconnect and, when WhatsApp supplies edit events in HistorySync, verify they update known copies rather than being discarded at the original message's recovery timestamp.
+- [ ] Edit a Discord message and verify the existing WhatsApp and Telegram copies still update.
 - [ ] Send a message from Telegram: `Testing an edit`.
 - [ ] Edit the message in Telegram to: `Testing an edit (UPDATED)`.
 - [ ] **Verify Discord**: The corresponding message text updates to the edited content.
 - [ ] **Verify WhatsApp**: The WhatsApp message updates to the edited content.
+
+If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dropped` (including `edit_decryption_failed` or `edit_decryption_unavailable`), `edit_target_missing`, and `edit_enqueue_failed`. Debug logging also exposes `edit_target_unresolved`, `edit_target_tombstoned`, and `whatsapp_edit_echo_suppressed`. Unknown targets cannot be updated if the original message was never synchronized. Diagnostics contain no message bodies, identities, or arbitrary provider errors.
 
 ### Scenario 6: Message Deletions
 - [ ] Send a message from Discord: `Temporary message to delete`.

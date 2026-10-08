@@ -55,4 +55,6 @@ Recovery tests assert that queued, retrying, and awaiting-replay delivery keeps 
 
 WhatsApp transport tests cover one-shot lifecycle-marker consumption, stale-marker expiry, and the bounded in-memory marker set. Matching bridge echoes are suppressed while unmatched linked-device `FromSelf` mutations continue through normal routing.
 
+`TestWhatsAppPlainTextEditPipeline` feeds protocol, wrapped, and secret-encrypted edits through the real live and HistorySync adapter paths, then the recovery coordinator and router. It checks in-place updates to Discord, WhatsApp, and Telegram copies for participant and linked-account events at the original message timestamp, with media synchronization disabled. Encrypted-edit failure tests verify safe diagnostics without provider data or content, and coordinator tests preserve ordered edit checkpoint deduplication and advancement for other providers.
+
 The integration gate combines the three transports with deterministic fake outcomes for all-to-all duplicate handling, ambiguous create, retry/replay, partial fan-out, and lifecycle ordering. Provider-specific exact-once creation remains deliberately unasserted where the provider cannot supply it.

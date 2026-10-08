@@ -174,6 +174,113 @@ func TestNormalizeEditMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeEditMessage_MediaDisabled(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newText := "edited text content"
+	editEvt := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat:    types.NewJID("123456789", types.GroupServer),
+				Sender:  types.NewJID("15551234567", types.DefaultUserServer),
+				IsGroup: true,
+			},
+			ID:        "edit-msg-id",
+			PushName:  "Alice",
+			Timestamp: time.Unix(1_700_000_100, 0),
+		},
+		Message: &waE2E.Message{
+			ProtocolMessage: &waE2E.ProtocolMessage{
+				Key: &waCommon.MessageKey{
+					ID: protoPtr("original-target-id"),
+				},
+				Type: protoEnum(waE2E.ProtocolMessage_MESSAGE_EDIT),
+				EditedMessage: &waE2E.Message{
+					Conversation: &newText,
+				},
+			},
+		},
+	}
+
+	incoming, ok := normalizer.NormalizeMessage(editEvt, false, 100*1024*1024, nil, nil, nil, nil)
+	if !ok {
+		t.Fatal("text-only edit message was ignored when media is disabled")
+	}
+	if incoming.Kind != "edit" {
+		t.Fatalf("incoming.Kind = %q, want edit", incoming.Kind)
+	}
+	if incoming.Text != newText {
+		t.Fatalf("incoming.Text = %q, want %q", incoming.Text, newText)
+	}
+}
+
+func TestNormalizeUnwrappedEditMessage(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	body := "updated source text"
+	protocol := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type:          protoEnum(waE2E.ProtocolMessage_MESSAGE_EDIT),
+		Key:           &waCommon.MessageKey{ID: protoPtr("original-message")},
+		EditedMessage: &waE2E.Message{Conversation: &body},
+	}}
+	cases := []struct {
+		name     string
+		isEdit   bool
+		editAttr types.EditAttribute
+		id       types.MessageID
+		targetID types.MessageID
+		raw      *waE2E.Message
+	}{
+		{name: "parsed history edit", isEdit: true, id: "original-message"},
+		{name: "edit attribute and metadata target", editAttr: types.EditAttributeMessageEdit, id: "edit-notification", targetID: "original-message"},
+		{name: "unwrapped event with original protocol key", isEdit: true, id: "edit-notification",
+			raw: &waE2E.Message{EditedMessage: &waE2E.FutureProofMessage{Message: protocol}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			event := &events.Message{
+				Info: types.MessageInfo{
+					MessageSource: types.MessageSource{
+						Chat:    types.NewJID("123456789", types.GroupServer),
+						Sender:  types.NewJID("15551234567", types.DefaultUserServer),
+						IsGroup: true,
+					},
+					ID:          tc.id,
+					Edit:        tc.editAttr,
+					MsgMetaInfo: types.MsgMetaInfo{TargetID: tc.targetID},
+				},
+				Message:    &waE2E.Message{Conversation: &body},
+				RawMessage: tc.raw,
+				IsEdit:     tc.isEdit,
+			}
+			incoming, ok := normalizer.NormalizeMessage(event, true, 100*1024*1024, nil, nil, nil, nil)
+			if !ok {
+				t.Fatal("edit event was ignored")
+			}
+			if incoming.Kind != "edit" || incoming.Text != body {
+				t.Fatalf("normalized edit = %+v", incoming)
+			}
+			if incoming.ReplyTo == nil || incoming.ReplyTo.RemoteMessageID != "original-message" {
+				t.Fatalf("edit target = %+v, want original-message", incoming.ReplyTo)
+			}
+		})
+	}
+}
+
 func TestNormalizeDeleteMessage(t *testing.T) {
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
