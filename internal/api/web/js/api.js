@@ -74,10 +74,13 @@
     },
 
     /**
-     * Auth Endpoints
+     * Auth & System Endpoints
      */
     async getAuthStatus() {
       return this.request('/api/auth/status');
+    },
+    async getVersion() {
+      return this.request('/api/version');
     },
     async getCurrentUser() { return this.request('/api/auth/me'); },
 

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Service version REST API endpoint (`GET /api/version`) and current version badge display on the Web UI Dashboard.
+
 ## [0.3.1] - 2026-10-03
 
 ### Fixed

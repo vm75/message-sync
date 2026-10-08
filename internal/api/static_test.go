@@ -138,6 +138,9 @@ func TestStaticHandler(t *testing.T) {
 				t.Fatalf("dashboard still contains removed control or column %q", removed)
 			}
 		}
+		if !strings.Contains(dashboardHTML, `id="dashboard-version"`) {
+			t.Fatal("dashboard HTML missing dashboard-version element")
+		}
 
 		// Verify token forms are password type with autocomplete="new-password"
 		for _, expected := range []string{
@@ -203,7 +206,7 @@ func TestStaticHandler(t *testing.T) {
 		baseBytes, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		baseJS := string(baseBytes)
-		for _, expected := range []string{"selectAddDiscordMode", "selectAddTelegramMode", "openTelegramMTProto", "setupTelegramMTProto", "submitTelegramMTProtoCode", "submitTelegramMTProtoPassword", "backfillTelegramMTProto", "caps.historyRecovery", "caps.topicDiscovery"} {
+		for _, expected := range []string{"selectAddDiscordMode", "selectAddTelegramMode", "openTelegramMTProto", "setupTelegramMTProto", "submitTelegramMTProtoCode", "submitTelegramMTProtoPassword", "backfillTelegramMTProto", "caps.historyRecovery", "caps.topicDiscovery", "renderDashboardVersion"} {
 			if !strings.Contains(baseJS, expected) {
 				t.Fatalf("Admin base JS missing Telegram dual-mode symbol %q", expected)
 			}
@@ -290,6 +293,16 @@ func TestStaticHandler(t *testing.T) {
 				t.Errorf("expected javascript content-type for %s, got %s", s, ct)
 			}
 			resp.Body.Close()
+		}
+
+		resp, err := client.Get(ts.URL + "/js/api.js")
+		if err != nil {
+			t.Fatalf("GET /js/api.js failed: %v", err)
+		}
+		apiBytes, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(apiBytes), "getVersion") {
+			t.Fatal("Admin API client missing getVersion")
 		}
 	})
 

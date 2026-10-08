@@ -709,12 +709,25 @@
   // Dashboard
   // ══════════════════════════════════════════════════════════════
 
+  let cachedVersion = null;
+
+  function renderDashboardVersion(ver) {
+    const el = document.getElementById('dashboard-version');
+    if (!el || !ver) return;
+    el.dataset.version = ver;
+    const display = ver.startsWith('v') || !/^\d/.test(ver) ? ver : `v${ver}`;
+    el.textContent = display;
+    el.title = `Message Sync ${display}`;
+    el.classList.remove('hidden');
+  }
+
   async function loadDashboard() {
     try {
-      const [connsRes, endpointsRes, syncSetsRes] = await Promise.allSettled([
+      const [connsRes, endpointsRes, syncSetsRes, versionRes] = await Promise.allSettled([
         window.API.listConnections(),
         window.API.getEndpoints(),
         window.API.getSyncSets(),
+        cachedVersion ? Promise.resolve({ version: cachedVersion }) : window.API.getVersion(),
       ]);
       if (connsRes.status === 'fulfilled' && Array.isArray(connsRes.value)) {
         cachedConnections = connsRes.value;
@@ -724,6 +737,10 @@
       }
       if (syncSetsRes.status === 'fulfilled' && Array.isArray(syncSetsRes.value)) {
         cachedSyncSets = syncSetsRes.value;
+      }
+      if (versionRes.status === 'fulfilled' && versionRes.value && versionRes.value.version) {
+        cachedVersion = versionRes.value.version;
+        renderDashboardVersion(cachedVersion);
       }
       await refreshDashboardPlatformStatuses();
     } catch (e) {}
@@ -3330,6 +3347,12 @@
     setupModalListeners();
     wireEvents();
     setupRouter();
+    window.API.getVersion().then((res) => {
+      if (res && res.version) {
+        cachedVersion = res.version;
+        renderDashboardVersion(res.version);
+      }
+    }).catch(() => {});
   }
 
   init();

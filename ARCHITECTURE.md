@@ -190,6 +190,7 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | Route | Methods | Access | Purpose |
 |---|---|---|---|
 | `/health` | `GET` | Public | Process health probe (`{"status":"ok"}`). |
+| `/api/version` | `GET` | Public | Reports service build version (`{"version":"..."}`). |
 | `/api/auth/status` | `GET` | Public | Reports whether initial admin setup is required. |
 | `/api/auth/setup` | `POST` | Public (first run) | Creates first admin account with bcrypt password in `control.db`. |
 | `/api/auth/login`, `/logout` | `POST` | Public / Auth | Establishes or terminates server-side session cookie / bearer token. |

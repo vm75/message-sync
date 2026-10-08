@@ -16,6 +16,7 @@ import (
 	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/safelog"
 	"github.com/vm75/message-sync/internal/verification"
+	"github.com/vm75/message-sync/internal/version"
 )
 
 type WhatsAppStatus struct {
@@ -172,6 +173,7 @@ func NewServer(opts Options) *Server {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /health", s.handleHealth)
+	s.mux.HandleFunc("GET /api/version", s.handleVersion)
 	s.mux.HandleFunc("GET /api/auth/status", s.handleAuthStatus)
 	s.mux.HandleFunc("POST /api/auth/setup", s.handleAuthSetup)
 	s.mux.HandleFunc("POST /api/auth/login", s.handleAuthLogin)
@@ -253,6 +255,10 @@ func (s *Server) notifyConfigChange(ctx context.Context) error {
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	_ = WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
+	_ = WriteJSON(w, http.StatusOK, map[string]string{"version": version.Build})
 }
 
 func (s *Server) Handler() http.Handler {

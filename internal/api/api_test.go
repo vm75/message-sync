@@ -40,6 +40,34 @@ func TestHealthEndpoint(t *testing.T) {
 	}
 }
 
+func TestVersionEndpoint(t *testing.T) {
+	srv := NewServer(Options{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/version", nil)
+	rec := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", rec.Code)
+	}
+
+	contentType := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(contentType, "application/json") {
+		t.Fatalf("expected Content-Type application/json, got %s", contentType)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response body: %v", err)
+	}
+	if resp["version"] == "" {
+		t.Fatalf("expected non-empty version, got %q", resp["version"])
+	}
+}
+
 func TestWriteJSONAndWriteError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	WriteError(rec, http.StatusBadRequest, "invalid parameter")
