@@ -735,22 +735,20 @@ func TestEditOutcomeUsesOriginalMessageDeliveryState(t *testing.T) {
 	defer mesh.Close()
 	defer close(release)
 	original := testIncoming("c1g1", "original")
-	if _, err := mesh.HandleEvent(ctx, original); err != nil {
+	// This regression exercises edit acknowledgement, not create delivery.
+	// Seed the already-delivered copies so setup has no scheduling deadline.
+	const canonicalID = "canonical-edit"
+	if err := db.CreateCanonical(ctx, canonicalID, original.Timestamp); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		outcome, err := mesh.HandleEvent(ctx, original)
-		if err != nil {
+	for _, endpoint := range []string{"c1g1", "c1g2", "c1g3"} {
+		remoteID := endpoint + "-copy"
+		if endpoint == "c1g1" {
+			remoteID = original.RemoteID
+		}
+		if err := db.AddMessageCopy(ctx, store.MessageCopy{CanonicalID: canonicalID, EndpointID: endpoint, RemoteMessageID: remoteID, CreatedAt: original.Timestamp}); err != nil {
 			t.Fatal(err)
 		}
-		if outcome.SafeToAdvance {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("original did not finish delivery")
-		}
-		time.Sleep(time.Millisecond)
 	}
 	edit := original
 	edit.Kind, edit.RemoteID, edit.Text = "edit", "separate-edit-notification", "updated text"
