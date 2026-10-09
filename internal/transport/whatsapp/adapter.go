@@ -1,12 +1,19 @@
 package whatsapp
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/gif"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -685,17 +692,138 @@ func getMediaType(kind string) (whatsmeow.MediaType, error) {
 	}
 }
 
+func generateThumbnail(src image.Image, maxDim int) []byte {
+	bounds := src.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+
+	targetW, targetH := w, h
+	if targetW > maxDim || targetH > maxDim {
+		if targetW > targetH {
+			targetH = targetH * maxDim / targetW
+			targetW = maxDim
+		} else {
+			targetW = targetW * maxDim / targetH
+			targetH = maxDim
+		}
+	}
+	if targetW <= 0 {
+		targetW = 1
+	}
+	if targetH <= 0 {
+		targetH = 1
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, targetW, targetH))
+	for y := 0; y < targetH; y++ {
+		srcY := bounds.Min.Y + (y * h / targetH)
+		for x := 0; x < targetW; x++ {
+			srcX := bounds.Min.X + (x * w / targetW)
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: 50}); err != nil {
+		return nil
+	}
+	return buf.Bytes()
+}
+
+func getImageDimensions(data []byte) (uint32, uint32) {
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil && cfg.Width > 0 && cfg.Height > 0 {
+		return uint32(cfg.Width), uint32(cfg.Height)
+	}
+	if len(data) >= 30 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP" {
+		switch string(data[12:16]) {
+		case "VP8 ":
+			if len(data) >= 30 && data[23] == 0x9d && data[24] == 0x01 && data[25] == 0x2a {
+				w := uint32(data[26]) | (uint32(data[27]&0x3f) << 8)
+				h := uint32(data[28]) | (uint32(data[29]&0x3f) << 8)
+				return w, h
+			}
+		case "VP8L":
+			if len(data) >= 25 && data[20] == 0x2f {
+				b0, b1, b2, b3 := uint32(data[21]), uint32(data[22]), uint32(data[23]), uint32(data[24])
+				w := 1 + (b0 | ((b1 & 0x3f) << 8))
+				h := 1 + ((b1 >> 6) | (b2 << 2) | ((b3 & 0x0f) << 10))
+				return w, h
+			}
+		case "VP8X":
+			if len(data) >= 30 {
+				w := 1 + (uint32(data[24]) | (uint32(data[25]) << 8) | (uint32(data[26]) << 16))
+				h := 1 + (uint32(data[27]) | (uint32(data[28]) << 8) | (uint32(data[29]) << 16))
+				return w, h
+			}
+		}
+	}
+	return 0, 0
+}
+
+func isOggOpus(data []byte) bool {
+	return len(data) >= 4 && string(data[:4]) == "OggS"
+}
+
+func getOggOpusDuration(data []byte) uint32 {
+	if len(data) < 28 || string(data[:4]) != "OggS" {
+		return 0
+	}
+	searchStart := len(data) - 4
+	if searchStart < 0 {
+		return 0
+	}
+	limit := 0
+	if searchStart > 65536 {
+		limit = searchStart - 65536
+	}
+	for i := searchStart; i >= limit; i-- {
+		if string(data[i:i+4]) == "OggS" && i+14 <= len(data) {
+			granule := binary.LittleEndian.Uint64(data[i+6 : i+14])
+			if granule > 0 && granule != ^uint64(0) {
+				sec := granule / 48000
+				return uint32(sec)
+			}
+		}
+	}
+	return 0
+}
+
 func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploadResp whatsmeow.UploadResponse, contextInfo *waE2E.ContextInfo) error {
 	var caption *string
 	if outgoing.Text != "" {
-		caption = proto.String(outgoing.Text)
+		caption = proto.String(formatWhatsAppText(outgoing.Text))
 	}
 
 	switch outgoing.Kind {
 	case "image":
+		mimetype := "image/jpeg"
+		if len(outgoing.MediaBytes) > 0 {
+			detected := http.DetectContentType(outgoing.MediaBytes)
+			if strings.HasPrefix(detected, "image/") {
+				mimetype = detected
+			} else if len(outgoing.MediaBytes) >= 12 && string(outgoing.MediaBytes[:4]) == "RIFF" && string(outgoing.MediaBytes[8:12]) == "WEBP" {
+				mimetype = "image/webp"
+			}
+		}
+
+		var width, height uint32
+		var jpegThumbnail []byte
+		if len(outgoing.MediaBytes) > 0 {
+			if img, _, err := image.Decode(bytes.NewReader(outgoing.MediaBytes)); err == nil {
+				bounds := img.Bounds()
+				width = uint32(bounds.Dx())
+				height = uint32(bounds.Dy())
+				jpegThumbnail = generateThumbnail(img, 72)
+			} else {
+				width, height = getImageDimensions(outgoing.MediaBytes)
+			}
+		}
+
 		msg.ImageMessage = &waE2E.ImageMessage{
 			Caption:       caption,
-			Mimetype:      proto.String("image/jpeg"), // Best-effort fallback; real mime depends on content, but whatsmeow often infers it internally or clients ignore it.
+			Mimetype:      proto.String(mimetype),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -704,10 +832,28 @@ func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploa
 			FileLength:    &uploadResp.FileLength,
 			ContextInfo:   contextInfo,
 		}
+		if width > 0 {
+			msg.ImageMessage.Width = proto.Uint32(width)
+		}
+		if height > 0 {
+			msg.ImageMessage.Height = proto.Uint32(height)
+		}
+		if len(jpegThumbnail) > 0 {
+			msg.ImageMessage.JPEGThumbnail = jpegThumbnail
+		}
+
 	case "video":
+		mimetype := "video/mp4"
+		if len(outgoing.MediaBytes) > 0 {
+			detected := http.DetectContentType(outgoing.MediaBytes)
+			if strings.HasPrefix(detected, "video/") {
+				mimetype = detected
+			}
+		}
+
 		msg.VideoMessage = &waE2E.VideoMessage{
 			Caption:       caption,
-			Mimetype:      proto.String("video/mp4"),
+			Mimetype:      proto.String(mimetype),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -716,11 +862,24 @@ func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploa
 			FileLength:    &uploadResp.FileLength,
 			ContextInfo:   contextInfo,
 		}
+
 	case "document":
+		mimetype := "application/octet-stream"
+		if len(outgoing.MediaBytes) > 0 {
+			detected := http.DetectContentType(outgoing.MediaBytes)
+			if detected != "" {
+				mimetype = detected
+			}
+		}
+		fileName := "document"
+		if outgoing.SourceText != "" && !strings.Contains(outgoing.SourceText, "\n") {
+			fileName = outgoing.SourceText
+		}
+
 		msg.DocumentMessage = &waE2E.DocumentMessage{
 			Caption:       caption,
-			Mimetype:      proto.String("application/octet-stream"),
-			FileName:      proto.String("document"),
+			Mimetype:      proto.String(mimetype),
+			FileName:      proto.String(fileName),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -729,9 +888,23 @@ func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploa
 			FileLength:    &uploadResp.FileLength,
 			ContextInfo:   contextInfo,
 		}
+
 	case "audio":
+		mimetype := "audio/ogg; codecs=opus"
+		isPTT := false
+		var seconds uint32
+		if isOggOpus(outgoing.MediaBytes) {
+			isPTT = true
+			seconds = getOggOpusDuration(outgoing.MediaBytes)
+		} else if len(outgoing.MediaBytes) > 0 {
+			detected := http.DetectContentType(outgoing.MediaBytes)
+			if strings.HasPrefix(detected, "audio/") {
+				mimetype = detected
+			}
+		}
+
 		msg.AudioMessage = &waE2E.AudioMessage{
-			Mimetype:      proto.String("audio/ogg; codecs=opus"),
+			Mimetype:      proto.String(mimetype),
 			URL:           &uploadResp.URL,
 			DirectPath:    &uploadResp.DirectPath,
 			MediaKey:      uploadResp.MediaKey,
@@ -740,6 +913,13 @@ func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploa
 			FileLength:    &uploadResp.FileLength,
 			ContextInfo:   contextInfo,
 		}
+		if isPTT {
+			msg.AudioMessage.PTT = proto.Bool(true)
+		}
+		if seconds > 0 {
+			msg.AudioMessage.Seconds = proto.Uint32(seconds)
+		}
+
 	case "sticker":
 		msg.StickerMessage = &waE2E.StickerMessage{
 			Mimetype:      proto.String("image/webp"),
@@ -751,6 +931,7 @@ func populateMediaMessage(msg *waE2E.Message, outgoing transport.Outgoing, uploa
 			FileLength:    &uploadResp.FileLength,
 			ContextInfo:   contextInfo,
 		}
+
 	default:
 		return fmt.Errorf("unsupported media population for kind: %s", outgoing.Kind)
 	}

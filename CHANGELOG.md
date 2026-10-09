@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-09
+
+### Fixed
+- WhatsApp media forwarding for images and audio to WhatsApp destination groups now displays correctly in WhatsApp clients. Outbound image messages now populate image width/height dimensions, generate embedded JPEG thumbnails, dynamically detect image MIME types, and apply WhatsApp text formatting to captions. Outbound audio messages now set Push-to-Talk (PTT) flags for Ogg Opus voice notes with calculated durations, and dynamically detect audio MIME types.
+
 ## [0.3.2] - 2026-10-08
 
 ### Added

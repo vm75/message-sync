@@ -3,6 +3,10 @@ package whatsapp
 import (
 	"bytes"
 	"context"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"log/slog"
 	"os"
@@ -716,5 +720,187 @@ func TestFilterAndFormatJoinedGroups_ExcludesCommunitiesAndAnnouncements(t *test
 			t.Errorf("result[%d] = {JID: %s, Name: %s}, want {JID: %s, Name: %s}",
 				i, result[i].JID, result[i].Name, exp.jid, exp.name)
 		}
+	}
+}
+
+func TestPopulateMediaMessage_Image(t *testing.T) {
+	// Create an in-memory 100x50 PNG
+	img := image.NewRGBA(image.Rect(0, 0, 100, 50))
+	for y := 0; y < 50; y++ {
+		for x := 0; x < 100; x++ {
+			img.Set(x, y, color.RGBA{R: 200, G: 100, B: 50, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("failed to encode PNG: %v", err)
+	}
+	pngBytes := buf.Bytes()
+
+	uploadResp := whatsmeow.UploadResponse{
+		URL:           "https://mmg.whatsapp.net/d/f/test.enc",
+		DirectPath:    "/v/t62.7118-24/test.enc",
+		MediaKey:      []byte("12345678901234567890123456789012"),
+		FileEncSHA256: []byte("encsha256bytes"),
+		FileSHA256:    []byte("sha256bytes"),
+		FileLength:    uint64(len(pngBytes)),
+	}
+
+	outgoing := transport.Outgoing{
+		Kind:       "image",
+		Text:       "*_group/Alice_*: Check out this photo",
+		MediaBytes: pngBytes,
+	}
+
+	var msg waE2E.Message
+	if err := populateMediaMessage(&msg, outgoing, uploadResp, nil); err != nil {
+		t.Fatalf("populateMediaMessage failed: %v", err)
+	}
+
+	im := msg.ImageMessage
+	if im == nil {
+		t.Fatal("expected ImageMessage to be populated")
+	}
+	if im.GetWidth() != 100 {
+		t.Errorf("expected width 100, got %d", im.GetWidth())
+	}
+	if im.GetHeight() != 50 {
+		t.Errorf("expected height 50, got %d", im.GetHeight())
+	}
+	if im.GetMimetype() != "image/png" {
+		t.Errorf("expected mimetype image/png, got %s", im.GetMimetype())
+	}
+	if len(im.GetJPEGThumbnail()) == 0 {
+		t.Fatal("expected JPEGThumbnail to be generated")
+	}
+	// Verify thumbnail is a valid JPEG
+	thumb, err := jpeg.Decode(bytes.NewReader(im.GetJPEGThumbnail()))
+	if err != nil {
+		t.Fatalf("JPEGThumbnail is not valid JPEG: %v", err)
+	}
+	if thumb.Bounds().Dx() > 72 || thumb.Bounds().Dy() > 72 {
+		t.Errorf("thumbnail dimensions %dx%d exceed 72px limit", thumb.Bounds().Dx(), thumb.Bounds().Dy())
+	}
+	if im.GetCaption() != "*_group/Alice_*: Check out this photo" {
+		t.Errorf("expected caption %q, got %q", "*_group/Alice_*: Check out this photo", im.GetCaption())
+	}
+	if im.GetURL() != uploadResp.URL {
+		t.Errorf("expected URL %q, got %q", uploadResp.URL, im.GetURL())
+	}
+}
+
+func TestPopulateMediaMessage_Audio_OggOpus(t *testing.T) {
+	// Construct minimal dummy Ogg packet with granule position for duration calculation
+	// 48000 samples/sec * 3 sec = 144000 samples (0x00023280)
+	dummyOgg := make([]byte, 64)
+	copy(dummyOgg[0:4], "OggS")
+	dummyOgg[5] = 0x04 // end of stream flag
+	// Granule position at offset 6 (8 bytes, little endian)
+	dummyOgg[6] = 0x80
+	dummyOgg[7] = 0x32
+	dummyOgg[8] = 0x02
+	dummyOgg[9] = 0x00
+
+	uploadResp := whatsmeow.UploadResponse{
+		URL:           "https://mmg.whatsapp.net/d/f/audio.enc",
+		DirectPath:    "/v/t62.7118-24/audio.enc",
+		MediaKey:      []byte("12345678901234567890123456789012"),
+		FileEncSHA256: []byte("encsha256bytes"),
+		FileSHA256:    []byte("sha256bytes"),
+		FileLength:    uint64(len(dummyOgg)),
+	}
+
+	outgoing := transport.Outgoing{
+		Kind:       "audio",
+		MediaBytes: dummyOgg,
+	}
+
+	var msg waE2E.Message
+	if err := populateMediaMessage(&msg, outgoing, uploadResp, nil); err != nil {
+		t.Fatalf("populateMediaMessage failed: %v", err)
+	}
+
+	am := msg.AudioMessage
+	if am == nil {
+		t.Fatal("expected AudioMessage to be populated")
+	}
+	if !am.GetPTT() {
+		t.Error("expected PTT to be true for Ogg Opus voice note")
+	}
+	if am.GetMimetype() != "audio/ogg; codecs=opus" {
+		t.Errorf("expected mimetype audio/ogg; codecs=opus, got %s", am.GetMimetype())
+	}
+	if am.GetSeconds() != 3 {
+		t.Errorf("expected 3 seconds duration, got %d", am.GetSeconds())
+	}
+}
+
+func TestPopulateMediaMessage_Audio_Generic(t *testing.T) {
+	// Generic non-ogg audio (e.g. dummy MP3 starting with ID3)
+	genericAudio := []byte("ID3\x03\x00\x00\x00\x00\x00\x00dummy-mp3-content")
+
+	uploadResp := whatsmeow.UploadResponse{
+		URL:        "https://mmg.whatsapp.net/d/f/music.enc",
+		FileLength: uint64(len(genericAudio)),
+	}
+
+	outgoing := transport.Outgoing{
+		Kind:       "audio",
+		MediaBytes: genericAudio,
+	}
+
+	var msg waE2E.Message
+	if err := populateMediaMessage(&msg, outgoing, uploadResp, nil); err != nil {
+		t.Fatalf("populateMediaMessage failed: %v", err)
+	}
+
+	am := msg.AudioMessage
+	if am == nil {
+		t.Fatal("expected AudioMessage to be populated")
+	}
+	if am.GetPTT() {
+		t.Error("expected PTT to be false for non-ogg audio")
+	}
+}
+
+func TestPopulateMediaMessage_VideoAndDocument(t *testing.T) {
+	uploadResp := whatsmeow.UploadResponse{
+		URL:        "https://mmg.whatsapp.net/d/f/file.enc",
+		FileLength: 100,
+	}
+
+	// Video
+	var videoMsg waE2E.Message
+	err := populateMediaMessage(&videoMsg, transport.Outgoing{
+		Kind:       "video",
+		Text:       "Video caption",
+		MediaBytes: []byte("dummy-video"),
+	}, uploadResp, nil)
+	if err != nil {
+		t.Fatalf("populateMediaMessage for video failed: %v", err)
+	}
+	if videoMsg.VideoMessage == nil || videoMsg.VideoMessage.GetCaption() != "Video caption" {
+		t.Errorf("expected video message with caption, got %+v", videoMsg.VideoMessage)
+	}
+
+	// Document
+	var docMsg waE2E.Message
+	err = populateMediaMessage(&docMsg, transport.Outgoing{
+		Kind:       "document",
+		SourceText: "report.pdf",
+		Text:       "Document caption",
+		MediaBytes: []byte("%PDF-1.4 dummy-pdf"),
+	}, uploadResp, nil)
+	if err != nil {
+		t.Fatalf("populateMediaMessage for document failed: %v", err)
+	}
+	if docMsg.DocumentMessage == nil {
+		t.Fatal("expected document message to be populated")
+	}
+	if docMsg.DocumentMessage.GetFileName() != "report.pdf" {
+		t.Errorf("expected fileName 'report.pdf', got %q", docMsg.DocumentMessage.GetFileName())
+	}
+	if docMsg.DocumentMessage.GetCaption() != "Document caption" {
+		t.Errorf("expected caption 'Document caption', got %q", docMsg.DocumentMessage.GetCaption())
 	}
 }
