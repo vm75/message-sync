@@ -57,11 +57,12 @@ func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
 			if got != tc.want {
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
-			if tc.native && notifications != 1 {
-				t.Fatalf("native references triggered %d notifications, want 1", notifications)
+			wantNotifications := 0
+			if tc.want == "Hi @native" {
+				wantNotifications = 1
 			}
-			if !tc.native && notifications != 0 {
-				t.Fatal("unexpected native notification")
+			if notifications != wantNotifications {
+				t.Fatalf("native references triggered %d notifications, want %d", notifications, wantNotifications)
 			}
 		})
 	}
