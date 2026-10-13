@@ -365,11 +365,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 		return nil
 	}
-	// Address registration is best-effort: invalid or unconfigured test actors
-	// must never interrupt forwarding, and only opaque HMAC IDs are stored.
-	if len(incoming.Sender.OpaqueID) == 12 && strings.HasPrefix(incoming.Sender.OpaqueID, "u_") {
-		_, _ = r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
-	}
 	if incoming.Kind == "poll_snapshot" {
 		canonicalID, err := r.store.PollCanonicalForProviderRef(ctx, string(incoming.Endpoint), incoming.PollProvider, incoming.PollProviderReference)
 		if err != nil {
@@ -701,6 +696,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	if incoming.FromSelf && !created {
 		return nil
+	}
+	// Allocate addresses only for accepted message creates, never votes,
+	// reactions, lifecycle mutations, local commands, or bridge echoes.
+	if len(incoming.Sender.OpaqueID) == 12 && strings.HasPrefix(incoming.Sender.OpaqueID, "u_") {
+		_, _ = r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
 	}
 
 	if incoming.Kind == "poll" {
