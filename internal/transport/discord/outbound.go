@@ -178,9 +178,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	webhookMessage := WebhookMessage{
-		Username: username,
-		Content:  content,
-		File:     file,
+		Username:       username,
+		Content:        content,
+		File:           file,
 		AllowedUserIDs: allowedUserIDs,
 	}
 	var (
