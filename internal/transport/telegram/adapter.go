@@ -66,7 +66,7 @@ type Adapter struct {
 	resolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
 	observeChildScopeLabel transport.ChildScopeLabelObserver
 	messageKinds           map[messageKindKey]string
-	observedParticipants  map[transport.EndpointID]map[string]int64 // transient actor->user
+	observedParticipants   map[transport.EndpointID]map[string]int64 // transient actor->user
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
