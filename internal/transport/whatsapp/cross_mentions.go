@@ -9,47 +9,88 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
-// nativeCrossReferences resolves actor IDs against current destination group
-// membership. It never treats a displayed name or LID's numeric component as
-// a phone number, and never sends a PN-based mention that can expose a number.
-// On any uncertainty the explicit textual reference remains intact.
+// nativeCrossReferences resolves actor IDs against current group membership.
+// LID-only native notification protects phone numbers. Other WhatsApp groups
+// on the same connection may display a transient contact name, but it is never
+// stored or used as routing identity. Unresolvable handles stay literal.
 func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, outgoing transport.Outgoing, info *waE2E.ContextInfo) (string, *waE2E.ContextInfo) {
 	if len(outgoing.References) == 0 || a == nil || a.client == nil {
 		return outgoing.Text, info
 	}
-	a.mu.Lock()
-	var hasher = a.normalizer
-	a.mu.Unlock()
-	if hasher == nil || hasher.hasher == nil {
+	a.mu.RLock()
+	normalizer := a.normalizer
+	a.mu.RUnlock()
+	if normalizer == nil || normalizer.hasher == nil {
 		return outgoing.Text, info
 	}
-	group, err := a.client.GetGroupInfo(ctx, target)
-	if err != nil || group == nil {
-		return outgoing.Text, info
-	}
-	resolved := make(map[string]types.JID)
-	for _, p := range group.Participants {
-		identity, _ := CanonicalSenderIdentity(ctx, p.JID, p.LID, a.resolveAltJID)
-		if identity.IsEmpty() || identity.Server != types.HiddenUserServer {
-			continue
+
+	// Per-delivery lookup, never persistent native identity mapping.
+	byEndpoint := make(map[transport.EndpointID]map[string]types.JID)
+	resolveGroup := func(endpoint transport.EndpointID, jid types.JID) map[string]types.JID {
+		if known, ok := byEndpoint[endpoint]; ok {
+			return known
 		}
-		resolved[hasher.hasher.UserID(identity.String())] = identity
+		known := make(map[string]types.JID)
+		byEndpoint[endpoint] = known
+		group, err := a.client.GetGroupInfo(ctx, jid)
+		if err != nil || group == nil {
+			return known
+		}
+		for _, participant := range group.Participants {
+			identity, _ := CanonicalSenderIdentity(ctx, participant.JID, participant.LID, a.resolveAltJID)
+			if !identity.IsEmpty() {
+				known[normalizer.hasher.UserID(identity.String())] = identity
+			}
+		}
+		return known
 	}
+	destinationMembers := resolveGroup(outgoing.Endpoint, target)
 	seen := make(map[string]bool)
 	text := transport.RewriteCrossReferences(outgoing.Text, outgoing.References, func(ref transport.CrossReference) (string, bool) {
-		jid, ok := resolved[ref.ActorID]
-		if !ok || jid.IsEmpty() {
+		handle := strings.TrimPrefix(strings.TrimSuffix(ref.Token, "}"), "@{"+string(ref.Endpoint)+"/")
+		identity, exists := destinationMembers[ref.ActorID]
+		if exists && identity.Server == types.HiddenUserServer {
+			if info == nil {
+				info = &waE2E.ContextInfo{}
+			}
+			if !seen[identity.String()] {
+				info.MentionedJID = append(info.MentionedJID, identity.String())
+				seen[identity.String()] = true
+			}
+			return "@" + handle, true
+		}
+
+		// Non-native fallback may show a current contact label in a different,
+		// non-anonymized WhatsApp group, but cannot infer cross-connection users.
+		a.mu.RLock()
+		sourceGroup, owned := a.targets[ref.Endpoint]
+		a.mu.RUnlock()
+		if !owned {
 			return "", false
 		}
-		if info == nil {
-			info = &waE2E.ContextInfo{}
+		sourceIdentity := resolveGroup(ref.Endpoint, sourceGroup)[ref.ActorID]
+		if sourceIdentity.IsEmpty() {
+			return "", false
 		}
-		if !seen[jid.String()] {
-			info.MentionedJID = append(info.MentionedJID, jid.String())
-			seen[jid.String()] = true
+		contact := a.getContactInfo(sourceIdentity)
+		name := strings.Join(strings.Fields(contact.PushName), " ")
+		if name == "" {
+			name = strings.Join(strings.Fields(contact.FullName), " ")
 		}
-		// Handles, not phone numbers, are visible in message text.
-		return "@" + strings.TrimPrefix(strings.TrimSuffix(ref.Token, "}"), "@{"+string(ref.Endpoint)+"/"), true
+		if name == "" {
+			name = strings.Join(strings.Fields(contact.BusinessName), " ")
+		}
+		if name == "" || strings.Trim(name, "+0123456789 -()") == "" {
+			return "", false
+		}
+		runes := []rune(name)
+		if len(runes) > 64 {
+			name = string(runes[:64])
+		}
+		// Keep the label clearly textual, and prevent names from introducing
+		// another structured bridge reference.
+		name = strings.NewReplacer("{", "(", "}", ")", "@", "").Replace(name)
+		return "@{" + string(ref.Endpoint) + "/" + name + "}", true
 	})
 	return text, info
 }
