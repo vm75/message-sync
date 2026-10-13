@@ -76,7 +76,7 @@ func TestCrossReferenceParserRejectsEscapesAndUnconfiguredTargets(t *testing.T) 
 	if _, err := db.ObserveParticipant(ctx, "other", "u_234567abcd"); err != nil {
 		t.Fatal(err)
 	}
-	refs, err := r.crossReferences(ctx, "c1g1", `\\@{c1g2/P1} @{c1g2/P9} @{other/P1} @{c1g2/P1}`)
+	refs, err := r.crossReferences(ctx, "c1g1", `\@{c1g2/P1} @{c1g2/P9} @{other/P1} @{c1g2/P1}`)
 	if err != nil {
 		t.Fatal(err)
 	}
