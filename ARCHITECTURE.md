@@ -251,8 +251,11 @@ only explicit `@{endpoint/Pn}` tokens within the source sync set. It passes
 transient, resolved `CrossReference` values to outbound creates; they never
 enter a persistent delivery ledger or recovery cursor. Adapters verify
 destination membership and attempt native user mentions without exposing native
-provider IDs to the router. Failing native notification verification normally leaves the literal
-reference. Same-connection WhatsApp routes may optionally substitute a live
+provider IDs to the router. Failing native notification verification still produces a normalized
+plain-text `@endpoint/label` reference; raw `@{endpoint/label}` is strictly
+an input syntax and is not forwarded unless escaped. The router holds an
+optional in-memory per-endpoint name index for unambiguous display-name and
+pseudonym resolution; stable handle/actor bindings alone are persisted. Same-connection WhatsApp routes may optionally substitute a live
 contact label for non-native display; this is transient, never parsed as
 addressing identity and never persisted.
 Bridge syntax is not parsed from forwarded attribution headers. Cross-group
