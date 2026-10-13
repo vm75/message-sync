@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -82,5 +83,53 @@ func TestCrossReferenceParserRejectsEscapesAndUnconfiguredTargets(t *testing.T) 
 	}
 	if len(refs) != 1 || refs[0].Token != "@{c1g2/P1}" {
 		t.Fatalf("unexpected resolutions: %+v", refs)
+	}
+}
+
+func TestNamedAndPseudonymousCrossGroupAddresses(t *testing.T) {
+	ctx := context.Background()
+	r, db, _ := newTestRouter(t, config.UsernameModePushName)
+	_, err := db.DB().ExecContext(ctx, `
+		INSERT INTO sync_sets(id) VALUES('mesh');
+		INSERT INTO endpoints(alias,transport,connection_id,remote_id,sync_set_id)
+		VALUES ('c1g1','whatsapp','wa','111@g.us','mesh'),
+		       ('c1g2','whatsapp','wa','222@g.us','mesh');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1 := "u_abcdefghij"
+	a2 := "u_234567abcd"
+	if _, err := db.ObserveParticipant(ctx, "c1g1", a1); err != nil {
+		t.Fatal(err)
+	}
+	r.observeReferenceName("c1g1", a1, "Alice Smith")
+	for _, input := range []string{
+		"Hi @{c1g1/P1}",
+		"Hi @{c1g1/Alice Smith}",
+		"Hi @{c1g1/" + identity.Pseudonym(a1) + "}",
+	} {
+		refs, err := r.crossReferences(ctx, "c1g2", input)
+		if err != nil || len(refs) != 1 || refs[0].ActorID != a1 ||
+			refs[0].Handle != "P1" || refs[0].Name != "Alice Smith" {
+			t.Fatalf("resolve %q: %+v (err=%v)", input, refs, err)
+		}
+		if got := transport.FormatCrossReferences(input, refs, true, nil); got != "Hi @c1g1/P1" {
+			t.Fatalf("anonymized rendering of %q: %q", input, got)
+		}
+		if got := transport.FormatCrossReferences(input, refs, false, nil); got != "Hi @c1g1/Alice Smith" {
+			t.Fatalf("nonanonymized rendering of %q: %q", input, got)
+		}
+	}
+	if _, err := db.ObserveParticipant(ctx, "c1g1", a2); err != nil {
+		t.Fatal(err)
+	}
+	r.observeReferenceName("c1g1", a2, "Alice Smith")
+	refs, err := r.crossReferences(ctx, "c1g2", "Hello @{c1g1/Alice Smith}")
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("ambiguous aliases must not resolve: %+v (%v)", refs, err)
+	}
+	refs, err = r.crossReferences(ctx, "c1g2", "Hello @{c1g1/P1}")
+	if err != nil || len(refs) != 1 || refs[0].ActorID != a1 {
+		t.Fatalf("stable handles must still resolve: %+v (%v)", refs, err)
 	}
 }
