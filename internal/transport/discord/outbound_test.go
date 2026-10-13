@@ -748,3 +748,33 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 		t.Errorf("native poll allowed mentions must be empty/disabled, got: %#v", lastPoll.AllowedMentions)
 	}
 }
+
+
+func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		anonymized bool
+		want string
+	}{
+		{name: "anonymized", anonymized: true, want: "Hi @g1/P1"},
+		{name: "non-anonymized", anonymized: false, want: "Hi @g1/Alice"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			webhook := &fakeChannelWebhook{}
+			adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint: "discord", OriginEndpoint: "other", Kind: "text",
+				Sender: transport.Sender{DisplayName: "Sender"},
+				SourceText: "Hi @{g1/P1}", Text: "*_other/Sender_*: Hi @{g1/P1}",
+				References: []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
+				ReferenceAnonymized: tc.anonymized,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := webhook.executed[0]; got.Content != tc.want || len(got.AllowedUserIDs) != 0 {
+				t.Fatalf("webhook sent %+v, want content %q without native mentions", got, tc.want)
+			}
+		})
+	}
+}
