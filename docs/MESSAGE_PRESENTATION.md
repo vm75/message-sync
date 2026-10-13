@@ -80,3 +80,46 @@ Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/fo
 - rendered presentation is never parsed as routing identity.
 
 Automated tests should assert the exact rendered forms whenever presentation logic is changed.
+
+
+## Cross-group participant references
+
+The bridge recognizes explicit `@{endpoint-alias/Pn}` references in user-authored
+message bodies (e.g. `Hi @{group2/P1}`). The closing brace and exact `P`
+number distinguish this from WhatsApp, Discord, and Telegram's native mention
+syntax. Prefix the token with a backslash to display it literally without a
+notification attempt. Native `@someone` behavior is unchanged.
+
+The address is made of a configured endpoint alias and a durable per-endpoint
+participant handle, allocated when a participant's HMAC actor identity is first
+observed on an accepted inbound event. It is **not** a username, a globally
+unique person name, or a group-member list position. `group1/P1` and
+`group2/P1` are distinct addresses. Group alias renames cascade through
+the registry; the old textual address does not automatically redirect.
+
+On Discord endpoints with `anonymizeToDiscord` enabled, observed senders in
+`push_name` mode are shown as `group/P1`, `group/P2`, etc. Existing
+word-based pseudonyms remain the fallback if a stable handle is unavailable.
+Other recipients retain the existing sender-display presentation. In hash mode,
+the existing opaque actor presentation is preserved.
+
+A reference resolves only when its group belongs to the sender's configured
+sync set and that group/handle was previously observed. Unknown, unauthorized,
+or escaped tokens remain readable text. The router never parses forwarded
+attribution headers or guesses from a display name.
+
+For an authorized reference, only destinations that verify a suitable native
+identity and membership may generate a provider mention: WhatsApp requires a
+known LID to avoid leaking phone numbers; Discord uses a transient observed
+user ID and a current guild-member lookup with an explicit allowed-user
+allowlist; Telegram Bot API uses transient observed user IDs with GetChatMember
+and a safe inline mention. Telegram MTProto does not yet emit native cross-group
+mentions and retains the literal reference. Other destinations see
+`@{group/P1}` as plain text. A native notification is best effort and is
+never guaranteed by the bridge.
+
+Incoming native provider mentions still follow their existing separate
+normalization/presentation path. Cross references are not persisted with
+message content or native IDs; existing edit APIs forward reference text but
+cannot yet add new native mentions on edit.
+
