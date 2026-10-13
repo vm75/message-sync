@@ -1394,17 +1394,26 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Handle post-trigger vote error: %v", err)
 	}
-	waitForMutations(t, fake, 6, 0, 0)
-	fake.mu.Lock()
-	defer fake.mu.Unlock()
-	updated := 0
-	for _, edit := range fake.edited {
-		if strings.Contains(edit.text, "○ *Pizza* — 3 votes") {
-			updated++
+	// The edit lanes are asynchronous. Earlier aggregation revisions can
+	// satisfy a raw edit-count threshold before the new revision finishes.
+	deadline := time.After(time.Second)
+	for {
+		fake.mu.Lock()
+		updated := 0
+		for _, edit := range fake.edited {
+			if strings.Contains(edit.text, "○ *Pizza* — 3 votes") {
+				updated++
+			}
 		}
-	}
-	if updated != 6 {
-		t.Fatalf("post-trigger updated results = %d, want 6 companion and trigger messages", updated)
+		fake.mu.Unlock()
+		if updated == 6 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("post-trigger updated results = %d, want 6 companion and trigger messages", updated)
+		case <-time.After(time.Millisecond):
+		}
 	}
 }
 
