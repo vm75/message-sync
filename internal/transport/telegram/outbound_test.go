@@ -670,7 +670,7 @@ func TestTelegramPresentationConvertsCanonicalAggregateHeading(t *testing.T) {
 func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 	for _, tc := range []struct {
 		anonymized bool
-		want string
+		want       string
 	}{
 		{anonymized: true, want: "other/Sender: Hi @g1/P1"},
 		{anonymized: false, want: "other/Sender: Hi @g1/Alice"},
