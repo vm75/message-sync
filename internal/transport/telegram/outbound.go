@@ -146,6 +146,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	case "text":
 		content = truncateTelegramText(content, telegramTextLimit)
 		content, parseMode = telegramPresentation(content)
+		content, parseMode = a.renderCrossMentions(ctx, api, chatID, outgoing, content, parseMode)
 		if strings.TrimSpace(content) == "" {
 			return transport.MessageRef{}, errors.New("outgoing Telegram text is required")
 		}
@@ -176,6 +177,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		}
 		content = truncateTelegramText(content, telegramCaptionLimit)
 		content, parseMode = telegramPresentation(content)
+		content, parseMode = a.renderCrossMentions(ctx, api, chatID, outgoing, content, parseMode)
 		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, content, parseMode, reply, threadID)
 		if err != nil {
 			return transport.MessageRef{}, err
