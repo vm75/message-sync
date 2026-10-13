@@ -78,6 +78,8 @@ type CrossReference struct {
 	Token    string
 	Endpoint EndpointID
 	ActorID  string
+	Handle   string // stable endpoint-local handle, e.g. P1
+	Name     string // transient observed display name; never persist
 }
 
 type Incoming struct {
@@ -127,6 +129,7 @@ type Outgoing struct {
 	PollAttribution     string
 	Mentions            []Mention
 	References          []CrossReference
+	ReferenceAnonymized bool // suppress display-name references on anonymized routes
 	ReplyTo             *MessageRef
 	ChildScope          *ChildScope
 	QuotedText          string
