@@ -114,8 +114,9 @@ For an authorized reference, only destinations that verify a suitable native
 identity and membership may generate a provider mention: WhatsApp requires a
 known LID to avoid leaking phone numbers; Discord uses a transient observed
 user ID and a current guild-member lookup with an explicit allowed-user
-allowlist; Telegram Bot API uses transient observed user IDs with GetChatMember
-and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
+allowlist, but never emits identity-revealing native pings in an
+anonymized Discord destination; Telegram Bot API uses transient observed user
+IDs with GetChatMember and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
 a non-notifying textual reference. **Every destination formats braced input**:
 with anonymization enabled for that destination, `Hi @{group2/Alice Smith}`
 becomes `Hi @group2/P1` when resolved; with anonymization disabled it becomes
