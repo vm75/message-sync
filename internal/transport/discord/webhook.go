@@ -13,9 +13,9 @@ type WebhookFile struct {
 // WebhookMessage is transient outbound rendering data. Username and Content may
 // contain source-platform user/message data and must never be persisted or logged.
 type WebhookMessage struct {
-	Username string
-	Content  string
-	File     *WebhookFile
+	Username       string
+	Content        string
+	File           *WebhookFile
 	AllowedUserIDs []string // allowlist; never allow roles or everyone
 }
 
