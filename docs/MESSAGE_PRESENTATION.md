@@ -84,10 +84,10 @@ Automated tests should assert the exact rendered forms whenever presentation log
 
 ## Cross-group participant references
 
-The bridge recognizes explicit `@{endpoint-alias/Pn}` references in user-authored
-message bodies (e.g. `Hi @{group2/P1}`). The closing brace and exact `P`
-number distinguish this from WhatsApp, Discord, and Telegram's native mention
-syntax. Prefix the token with a backslash to display it literally without a
+The bridge recognizes explicit `@{endpoint-alias/label}` references in user-authored
+message bodies, such as `Hi @{group2/P1}`, `Hi @{group2/Alice Smith}`, or
+`Hi @{group2/Silent Falcon Q7M5K}`. The braced syntax, not a bare `@name`,
+identifies bridge addressing without colliding with provider-native mentions. Prefix the token with a backslash to display it literally without a
 notification attempt. Native `@someone` behavior is unchanged.
 
 The address is made of a configured endpoint alias and a durable per-endpoint
@@ -103,23 +103,29 @@ word-based pseudonyms remain the fallback if a stable handle is unavailable.
 Other recipients retain the existing sender-display presentation. In hash mode,
 the existing opaque actor presentation is preserved.
 
-A reference resolves only when its group belongs to the sender's configured
-sync set and that group/handle was previously observed. Unknown, unauthorized,
-or escaped tokens remain readable text. The router never parses forwarded
-attribution headers or guesses from a display name.
+A reference resolves only for an observed participant in an endpoint within
+the sender's sync set. Stable `Pn` handles work across restarts. Transient
+name/alias/pseudonym lookup is accepted when there is exactly one match in
+the referenced group; duplicate names never trigger a tag. On restart names
+must be re-observed before name-based lookup works. The router never parses
+forwarded attribution headers or guesses a native identity.
 
 For an authorized reference, only destinations that verify a suitable native
 identity and membership may generate a provider mention: WhatsApp requires a
 known LID to avoid leaking phone numbers; Discord uses a transient observed
 user ID and a current guild-member lookup with an explicit allowed-user
 allowlist; Telegram Bot API uses transient observed user IDs with GetChatMember
-and a safe inline mention. Telegram MTProto does not yet emit native cross-group
-mentions and retains the literal reference. Non-target destinations usually see `@{group/P1}` as plain text. When a
-non-anonymized WhatsApp destination shares a connection with the referenced
-WhatsApp group, it may transiently resolve a contact name and display
-`@{group/Name}` instead; that name is presentation only, never a routable
-handle. A native notification is best effort and is
-never guaranteed by the bridge.
+and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
+a non-notifying textual reference. **Every destination formats braced input**:
+with anonymization enabled for that destination, `Hi @{group2/Alice Smith}`
+becomes `Hi @group2/P1` when resolved; with anonymization disabled it becomes
+`Hi @group2/Alice Smith` when the observed name is available, otherwise
+`Hi @group2/P1`. An unrecognized `Pn` remains a textual `@group/Pn` without
+any notification; unresolved names on anonymized destinations are masked as
+`@group/unknown`. Textual references do not contain braces. A non-anonymized
+WhatsApp destination may use a live contact name when the referenced group is
+on the same connection. Native notification remains best effort and is never
+guaranteed by the bridge.
 
 Incoming native provider mentions still follow their existing separate
 normalization/presentation path. Cross references are not persisted with
