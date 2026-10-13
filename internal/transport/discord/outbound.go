@@ -127,6 +127,11 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	// become native mentions; all other tokens remain literal and unpinged.
 	allowedUserIDs := make([]string, 0)
 	content = transport.FormatCrossReferences(content, outgoing.References, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
+		// An @mention exposes the Discord member account to the destination.
+		// A pseudonymized destination must never de-anonymize through tagging.
+		if outgoing.ReferenceAnonymized {
+			return "", false
+		}
 		userID, ok := a.nativeCrossMention(ctx, ref, outgoing.Endpoint, nativeChannelID)
 		if !ok {
 			return "", false
