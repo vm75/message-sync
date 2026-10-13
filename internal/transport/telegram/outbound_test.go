@@ -680,9 +680,9 @@ func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 			adapter := newOutboundTestAdapter(t, api)
 			_, err := adapter.Send(context.Background(), transport.Outgoing{
 				Endpoint: "tg", OriginEndpoint: "other", Kind: "text",
-				Sender: transport.Sender{DisplayName: "Sender"},
-				SourceText: "Hi @{g1/P1}",
-				References: []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
+				Sender:              transport.Sender{DisplayName: "Sender"},
+				SourceText:          "Hi @{g1/P1}",
+				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
 				ReferenceAnonymized: tc.anonymized,
 			})
 			if err != nil {
