@@ -27,11 +27,11 @@ func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
 	refs := []CrossReference{{Token: "@{g1/Alice Smith}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice Smith"}}
 	cases := []struct {
-		name string
-		input string
-		anon bool
+		name   string
+		input  string
+		anon   bool
 		native bool
-		want string
+		want   string
 	}{
 		{"nonanonymized other group", "Hi @{g1/Alice Smith}", false, false, "Hi @g1/Alice Smith"},
 		{"anonymized other group", "Hi @{g1/Alice Smith}", true, false, "Hi @g1/P1"},
