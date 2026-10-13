@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -68,4 +69,20 @@ func hasCrossReference(refs []transport.CrossReference, token string, endpoint t
 
 func bridgeHandleFromLabel(label string) string {
 	return strings.TrimSpace(label)
+}
+
+// addressedSender makes compact address handles available in anonymized
+// destinations without exposing an identity or depending on a display name.
+// Existing pseudonym handling remains the fallback when the actor has not
+// been observed or the presentation mode is opaque/hash-based.
+func (r *Router) addressedSender(ctx context.Context, incoming transport.Incoming, target routeTarget, sender transport.Sender) transport.Sender {
+	if !target.AnonymizeToDiscord || r.getUsernameMode() != config.UsernameModePushName {
+		return sender
+	}
+	address, err := r.store.ParticipantByActor(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
+	if err == nil {
+		sender.DisplayName = address.Handle
+		sender.PhoneNumber = ""
+	}
+	return sender
 }
