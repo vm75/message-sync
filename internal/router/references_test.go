@@ -18,10 +18,14 @@ func TestCrossGroupReferencesAddressKnownActorOnly(t *testing.T) {
 		VALUES ('c1g1','whatsapp','wa','111@g.us','mesh'),
 		       ('c1g2','whatsapp','wa','222@g.us','mesh'),
 		       ('c1g3','whatsapp','wa','333@g.us','mesh');`)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	first := testIncoming("c1g2", "first")
 	first.Sender.OpaqueID = "u_abcdefghij"
-	if err := r.Handle(ctx, first); err != nil { t.Fatal(err) }
+	if err := r.Handle(ctx, first); err != nil {
+		t.Fatal(err)
+	}
 	waitForSent(t, sender, 2)
 	observed, err := db.ParticipantByActor(ctx, "c1g2", first.Sender.OpaqueID)
 	if err != nil || observed.Handle != "P1" {
@@ -30,7 +34,9 @@ func TestCrossGroupReferencesAddressKnownActorOnly(t *testing.T) {
 	reply := testIncoming("c1g3", "second")
 	reply.Sender.OpaqueID = "u_234567abcd"
 	reply.Text = "Hello @{c1g2/P1}, I can help"
-	if err := r.Handle(ctx, reply); err != nil { t.Fatal(err) }
+	if err := r.Handle(ctx, reply); err != nil {
+		t.Fatal(err)
+	}
 	waitForSent(t, sender, 4)
 	sender.mu.Lock()
 	defer sender.mu.Unlock()
@@ -48,7 +54,9 @@ func TestCrossGroupReferencesAddressKnownActorOnly(t *testing.T) {
 			t.Fatalf("text lost reference: %q", item.outgoing.Text)
 		}
 	}
-	if !found { t.Fatal("message to addressed group was not delivered") }
+	if !found {
+		t.Fatal("message to addressed group was not delivered")
+	}
 }
 
 func TestCrossReferenceParserRejectsEscapesAndUnconfiguredTargets(t *testing.T) {
@@ -59,11 +67,19 @@ func TestCrossReferenceParserRejectsEscapesAndUnconfiguredTargets(t *testing.T) 
 		INSERT INTO endpoints(alias,transport,connection_id,remote_id,sync_set_id)
 		VALUES ('c1g2','whatsapp','wa','222@g.us','mesh'),
 		       ('other','discord','dc','987654','mesh');`)
-	if err != nil { t.Fatal(err) }
-	if _, err := db.ObserveParticipant(ctx, "c1g2", "u_abcdefghij"); err != nil { t.Fatal(err) }
-	if _, err := db.ObserveParticipant(ctx, "other", "u_234567abcd"); err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ObserveParticipant(ctx, "c1g2", "u_abcdefghij"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ObserveParticipant(ctx, "other", "u_234567abcd"); err != nil {
+		t.Fatal(err)
+	}
 	refs, err := r.crossReferences(ctx, "c1g1", `\\@{c1g2/P1} @{c1g2/P9} @{other/P1} @{c1g2/P1}`)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(refs) != 1 || refs[0].Token != "@{c1g2/P1}" {
 		t.Fatalf("unexpected resolutions: %+v", refs)
 	}
