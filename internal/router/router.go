@@ -365,6 +365,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 		return nil
 	}
+	// Address registration is best-effort: invalid or unconfigured test actors
+	// must never interrupt forwarding, and only opaque HMAC IDs are stored.
+	if len(incoming.Sender.OpaqueID) == 12 && strings.HasPrefix(incoming.Sender.OpaqueID, "u_") {
+		_, _ = r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
+	}
 	if incoming.Kind == "poll_snapshot" {
 		canonicalID, err := r.store.PollCanonicalForProviderRef(ctx, string(incoming.Endpoint), incoming.PollProvider, incoming.PollProviderReference)
 		if err != nil {
@@ -529,6 +534,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				continue
 			}
 			targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+			targetSender = r.addressedSender(ctx, incoming, target, targetSender)
 			targetIncoming := incoming
 			targetIncoming.Text = targetText
 			targetIncoming.QuotedText = targetQuotedText
@@ -818,6 +824,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+		targetSender = r.addressedSender(ctx, incoming, target, targetSender)
 		targetIncoming := incoming
 		targetIncoming.Text = targetText
 		targetIncoming.QuotedText = targetQuotedText
@@ -834,7 +841,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return fmt.Errorf("load presentation child scopes: %w", err)
 		}
 
-		if err := r.enqueueCreate(ctx, canonicalID, incoming, target, targetSender, targetMentions, targetQuotedText, destinationText, outgoingReplyTo, childScope, mediaBytes); err != nil {
+		references, _ := r.crossReferences(ctx, incoming.Endpoint, incoming.Text)
+		if err := r.enqueueCreate(ctx, canonicalID, incoming, target, targetSender, targetMentions, references, targetQuotedText, destinationText, outgoingReplyTo, childScope, mediaBytes); err != nil {
 			return err
 		}
 	}
@@ -908,7 +916,7 @@ func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonical
 	}, nil)
 }
 
-func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, target routeTarget, targetSender transport.Sender, targetMentions []transport.Mention, targetQuotedText string, destinationText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
+func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, target routeTarget, targetSender transport.Sender, targetMentions []transport.Mention, references []transport.CrossReference, targetQuotedText string, destinationText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
 	destination := target.Endpoint
 	senderLabel, err := r.senderLabelFor(ctx, incoming, targetSender)
 	if err != nil {
@@ -1016,7 +1024,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: targetSender,
 				SenderLabel: senderLabel,
 				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
-				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions,
+				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references,
 				RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
 				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
