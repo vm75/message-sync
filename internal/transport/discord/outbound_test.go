@@ -764,9 +764,9 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 			adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
 			_, err := adapter.Send(context.Background(), transport.Outgoing{
 				Endpoint: "discord", OriginEndpoint: "other", Kind: "text",
-				Sender: transport.Sender{DisplayName: "Sender"},
+				Sender:     transport.Sender{DisplayName: "Sender"},
 				SourceText: "Hi @{g1/P1}", Text: "*_other/Sender_*: Hi @{g1/P1}",
-				References: []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
+				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
 				ReferenceAnonymized: tc.anonymized,
 			})
 			if err != nil {
