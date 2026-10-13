@@ -126,7 +126,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	// Only resolved references with a currently verified destination member
 	// become native mentions; all other tokens remain literal and unpinged.
 	allowedUserIDs := make([]string, 0)
-	content = transport.RewriteCrossReferences(content, outgoing.References, func(ref transport.CrossReference) (string, bool) {
+	content = transport.FormatCrossReferences(content, outgoing.References, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
 		userID, ok := a.nativeCrossMention(ctx, ref, outgoing.Endpoint, nativeChannelID)
 		if !ok {
 			return "", false
