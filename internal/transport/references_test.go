@@ -5,7 +5,9 @@ import "testing"
 func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 	refs := []CrossReference{{Token: "@{g2/P1}", Endpoint: "g2", ActorID: "u_abcdefghij"}}
 	render := func(ref CrossReference) (string, bool) {
-		if ref.Endpoint != "g2" { return "", false }
+		if ref.Endpoint != "g2" {
+			return "", false
+		}
 		return "@native", true
 	}
 	cases := []struct{ source, want string }{
