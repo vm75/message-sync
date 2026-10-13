@@ -189,7 +189,7 @@ func (c *explicitWebhookClient) requireChannel(channelID string) error {
 }
 
 func explicitWebhookParams(message WebhookMessage) *discordgo.WebhookParams {
-	params := &discordgo.WebhookParams{Content: message.Content, Username: message.Username, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+	params := &discordgo.WebhookParams{Content: message.Content, Username: message.Username, AllowedMentions: &discordgo.MessageAllowedMentions{Users: message.AllowedUserIDs}}
 	if message.File != nil {
 		params.Files = []*discordgo.File{{Name: message.File.Name, ContentType: message.File.ContentType, Reader: bytes.NewReader(message.File.Data)}}
 	}
