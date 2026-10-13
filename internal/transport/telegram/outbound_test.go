@@ -666,7 +666,6 @@ func TestTelegramPresentationConvertsCanonicalAggregateHeading(t *testing.T) {
 	}
 }
 
-
 func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 	for _, tc := range []struct {
 		anonymized bool
