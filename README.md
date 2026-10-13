@@ -226,7 +226,9 @@ revealing their name. Plain `@name` provider mentions remain unchanged.
 The bridge attempts a native mention only when the destination adapter can
 verify the referenced member: privacy-safe LID membership for WhatsApp,
 current guild membership for Discord, and Bot API membership for Telegram.
-Otherwise the reference stays readable plain text. Member addresses are
+Otherwise the reference stays readable text; non-anonymized WhatsApp groups
+sharing a connection with the referenced group may show a live contact name
+in place of the handle (the stable address is unchanged). Member addresses are
 learned from accepted messages, not by enumerating all members; unknown
 participants cannot be addressed until observed. Telegram MTProto presently
 uses textual references only; message edits do not generate new native pings.
