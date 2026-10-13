@@ -570,3 +570,19 @@ All logs produced by `message-sync` are strictly zero-PII/PHI:
 docker compose logs -f message-sync
 ```
 You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_test`), and canonical message IDs without exposing message bodies, phone numbers, or tokens.
+
+
+### Cross-group address manual test
+
+Have participant A post an ordinary message in WhatsApp group2; in an
+anonymized Discord destination note the `group2/P1` author address.
+From another configured group in the same sync set send
+`Hi @{group2/P1}, I can help`. Check WhatsApp group2: if A has a
+resolvable LID, it should carry native mention metadata and display a
+handle without a phone number. In other groups the literal reference
+remains text. Repeat for a Discord or Telegram Bot API member who has
+posted since process start. Verify that unknown/escaped/out-of-sync-set
+references cannot trigger native notifications and that no phone number
+or native ID appears in logs or sync.db. Telegram MTProto destinations
+currently keep text-only references.
+
