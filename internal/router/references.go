@@ -34,7 +34,11 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 		if len(references) >= maxCrossReferences {
 			break
 		}
-		if loc[0] > 0 && body[loc[0]-1] == '\\' {
+		backslashes := 0
+		for j := loc[0] - 1; j >= 0 && body[j] == '\\'; j-- {
+			backslashes++
+		}
+		if backslashes%2 == 1 {
 			continue
 		}
 		endpoint := body[loc[2]:loc[3]]
