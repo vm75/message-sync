@@ -53,20 +53,32 @@ func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, cha
 	}
 	// This inline mention refers to a verified user without exposing the
 	// raw Telegram identifier as visible text.
-	handle := strings.TrimPrefix(strings.TrimSuffix(ref.Token, "}"), "@{"+string(ref.Endpoint)+"/")
-	return "<a href=\"tg://user?id=" + strconv.FormatInt(userID, 10) + "\">" + html.EscapeString(handle) + "</a>", true
+	label := ref.Handle
+	if strings.TrimSpace(ref.Name) != "" {
+		label = ref.Name
+	}
+	// Label is HTML-escaped by renderCrossMentions before this callback.
+	return "<a href=\"tg://user?id=" + strconv.FormatInt(userID, 10) + "\">@" + label + "</a>", true
 }
 
 func (a *Adapter) renderCrossMentions(ctx context.Context, api telegramAPI, chatID int64, outgoing transport.Outgoing, content string, mode models.ParseMode) (string, models.ParseMode) {
-	if len(outgoing.References) == 0 {
+	if !strings.Contains(content, "@{") {
 		return content, mode
 	}
-	// HTML markup may be inserted only after escaping the provider text.
+	// The text may already be formatted HTML, otherwise escape it before
+	// introducing verified native HTML links. Escaping also applies to the
+	// transient reference labels: names must never become markup.
 	escaped := content
 	if mode != models.ParseModeHTML {
 		escaped = html.EscapeString(content)
 	}
-	rendered := transport.RewriteCrossReferences(escaped, outgoing.References, func(ref transport.CrossReference) (string, bool) {
+	refs := make([]transport.CrossReference, len(outgoing.References))
+	copy(refs, outgoing.References)
+	for i := range refs {
+		refs[i].Token = html.EscapeString(refs[i].Token)
+		refs[i].Name = html.EscapeString(refs[i].Name)
+	}
+	rendered := transport.FormatCrossReferences(escaped, refs, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
 		return a.verifiedCrossMention(ctx, api, chatID, ref, outgoing.Endpoint)
 	})
 	if rendered == escaped {
