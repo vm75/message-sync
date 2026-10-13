@@ -49,7 +49,7 @@ func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, o
 	text := transport.RewriteCrossReferences(outgoing.Text, outgoing.References, func(ref transport.CrossReference) (string, bool) {
 		handle := strings.TrimPrefix(strings.TrimSuffix(ref.Token, "}"), "@{"+string(ref.Endpoint)+"/")
 		identity, exists := destinationMembers[ref.ActorID]
-		if exists && identity.Server == types.HiddenUserServer {
+		if ref.Endpoint == outgoing.Endpoint && exists && identity.Server == types.HiddenUserServer {
 			if info == nil {
 				info = &waE2E.ContextInfo{}
 			}
