@@ -335,7 +335,7 @@ func (m *managedWebhookClient) editOnce(ctx context.Context, credential managedW
 		messageID,
 		&discordgo.WebhookEdit{
 			Content:         &content,
-			AllowedMentions: &discordgo.MessageAllowedMentions{Users: message.AllowedUserIDs},
+			AllowedMentions: &discordgo.MessageAllowedMentions{},
 		},
 		discordgo.WithContext(ctx),
 		discordgo.WithRetryOnRatelimit(true),
