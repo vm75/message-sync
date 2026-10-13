@@ -114,8 +114,11 @@ known LID to avoid leaking phone numbers; Discord uses a transient observed
 user ID and a current guild-member lookup with an explicit allowed-user
 allowlist; Telegram Bot API uses transient observed user IDs with GetChatMember
 and a safe inline mention. Telegram MTProto does not yet emit native cross-group
-mentions and retains the literal reference. Other destinations see
-`@{group/P1}` as plain text. A native notification is best effort and is
+mentions and retains the literal reference. Non-target destinations usually see `@{group/P1}` as plain text. When a
+non-anonymized WhatsApp destination shares a connection with the referenced
+WhatsApp group, it may transiently resolve a contact name and display
+`@{group/Name}` instead; that name is presentation only, never a routable
+handle. A native notification is best effort and is
 never guaranteed by the bridge.
 
 Incoming native provider mentions still follow their existing separate
