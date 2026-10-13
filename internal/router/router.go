@@ -91,6 +91,7 @@ type Router struct {
 	lanes              *delivery.Manager
 	routes             map[transport.EndpointID][]routeTarget
 	endpointTransports map[transport.EndpointID]config.Transport
+	referenceNames      map[transport.EndpointID]map[string]string // volatile per-group names only
 	usernameMode       config.UsernameMode
 	childContextMode   config.ChildContextDisplayMode
 	aggTrigger         string
@@ -186,6 +187,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		lanes:              lanes,
 		routes:             routes,
 		endpointTransports: endpointTransports,
+		referenceNames:      make(map[transport.EndpointID]map[string]string),
 		usernameMode:       cfg.Identity.UsernameMode,
 		childContextMode:   cfg.ChildContextDisplayMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
@@ -530,6 +532,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 			targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
 			targetSender = r.addressedSender(ctx, incoming, target, targetSender)
+			_ = targetMentions
+			_ = targetQuotedText
 			targetIncoming := incoming
 			targetIncoming.Text = targetText
 			targetIncoming.QuotedText = targetQuotedText
@@ -537,7 +541,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if err != nil {
 				return err
 			}
-			_ = targetMentions
+			references, _ := r.crossReferences(ctx, incoming.Endpoint, targetText)
+			forwardedText = transport.FormatCrossReferences(forwardedText, references, target.AnonymizeToDiscord, nil)
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
 				key := mutationKey{canonical: targetCanonical, endpoint: destination}
@@ -700,7 +705,9 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	// Allocate addresses only for accepted message creates, never votes,
 	// reactions, lifecycle mutations, local commands, or bridge echoes.
 	if len(incoming.Sender.OpaqueID) == 12 && strings.HasPrefix(incoming.Sender.OpaqueID, "u_") {
-		_, _ = r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
+		if _, err := r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID); err == nil {
+			r.observeReferenceName(incoming.Endpoint, incoming.Sender.OpaqueID, incoming.Sender.DisplayName)
+		}
 	}
 
 	if incoming.Kind == "poll" {
@@ -1024,7 +1031,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: targetSender,
 				SenderLabel: senderLabel,
 				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
-				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references,
+				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references, ReferenceAnonymized: target.AnonymizeToDiscord,
 				RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
 				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
