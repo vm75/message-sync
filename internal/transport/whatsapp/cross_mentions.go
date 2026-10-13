@@ -17,9 +17,9 @@ func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, o
 	if len(outgoing.References) == 0 || a == nil || a.client == nil {
 		return outgoing.Text, info
 	}
-	a.mu.RLock()
+	a.mu.Lock()
 	normalizer := a.normalizer
-	a.mu.RUnlock()
+	a.mu.Unlock()
 	if normalizer == nil || normalizer.hasher == nil {
 		return outgoing.Text, info
 	}
@@ -62,9 +62,9 @@ func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, o
 
 		// Non-native fallback may show a current contact label in a different,
 		// non-anonymized WhatsApp group, but cannot infer cross-connection users.
-		a.mu.RLock()
+		a.mu.Lock()
 		sourceGroup, owned := a.targets[ref.Endpoint]
-		a.mu.RUnlock()
+		a.mu.Unlock()
 		if !owned {
 			return "", false
 		}
