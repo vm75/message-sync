@@ -213,3 +213,22 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 ## License
 
 [MIT](LICENSE)
+
+
+### Cross-group participant references
+
+Messages may refer to an observed member of another endpoint in the same sync
+set using `@{group2/P1}`. The `P1` handle is stable within that endpoint and
+is not a person's display name or globally unique identity. In anonymized
+Discord destinations, observed authors appear as `group2/P1` instead of
+revealing their name. Plain `@name` provider mentions remain unchanged.
+
+The bridge attempts a native mention only when the destination adapter can
+verify the referenced member: privacy-safe LID membership for WhatsApp,
+current guild membership for Discord, and Bot API membership for Telegram.
+Otherwise the reference stays readable plain text. Member addresses are
+learned from accepted messages, not by enumerating all members; unknown
+participants cannot be addressed until observed. Telegram MTProto presently
+uses textual references only; message edits do not generate new native pings.
+Use `\\@{group2/P1}` to send a literal reference without requesting a mention.
+
