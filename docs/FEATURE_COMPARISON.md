@@ -191,3 +191,7 @@ Their absence should not be interpreted as an implementation queue. New scope sh
 This file is a comparison snapshot, not a backlog.
 
 Update it when an implemented feature materially changes the comparison, when an existing implementation is removed, or when an architectural decision changes why the two projects differ. Product scope remains authoritative in `README.md`; architecture and privacy invariants remain authoritative in `ARCHITECTURE.md` and `AGENTS.md`.
+
+
+| Cross-group participant addressing | Explicit `@{endpoint/Pn}` handles registered from observed HMAC actors, scoped to a sync set; per-destination native best-effort only with verified membership (WhatsApp LID, Discord, Telegram Bot API) and literal fallback; MTProto/text edits only | No equivalent cross-provider identity addressing guarantee | New bridge-level addressing is separate from provider-native @mentions and avoids persistent PII. |
+
