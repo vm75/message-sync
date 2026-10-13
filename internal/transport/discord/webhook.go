@@ -16,6 +16,7 @@ type WebhookMessage struct {
 	Username string
 	Content  string
 	File     *WebhookFile
+	AllowedUserIDs []string // allowlist; never allow roles or everyone
 }
 
 // ChannelWebhook is the narrow boundary for one bridge-managed webhook per
