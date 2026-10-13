@@ -752,9 +752,9 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 
 func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name       string
 		anonymized bool
-		want string
+		want       string
 	}{
 		{name: "anonymized", anonymized: true, want: "Hi @g1/P1"},
 		{name: "non-anonymized", anonymized: false, want: "Hi @g1/Alice"},
