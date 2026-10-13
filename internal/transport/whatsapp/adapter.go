@@ -396,7 +396,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	// Bridge references become native mentions only after live LID membership
 	// verification. Unresolvable references stay readable and never leak PN IDs.
-	if len(outgoing.References) > 0 && outgoing.Kind == "text" {
+	if strings.Contains(outgoing.Text, "@{") {
 		outgoing.Text, contextInfo = a.nativeCrossReferences(ctx, target, outgoing, contextInfo)
 	}
 	var msg *waE2E.Message
