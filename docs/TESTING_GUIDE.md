@@ -579,8 +579,10 @@ anonymized Discord destination note the `group2/P1` author address.
 From another configured group in the same sync set send
 `Hi @{group2/P1}, I can help`. Check WhatsApp group2: if A has a
 resolvable LID, it should carry native mention metadata and display a
-handle without a phone number. In other groups the literal reference
-remains text. Repeat for a Discord or Telegram Bot API member who has
+handle without a phone number. In other groups the reference must **not**
+retain braces: anonymized output shows `@group2/P1`; non-anonymized output
+shows `@group2/<observed name>` or `@group2/P1` when unavailable. Also send
+`@{group2/<observed name>}` and verify the same resolved identity. Repeat for a Discord or Telegram Bot API member who has
 posted since process start. Verify that unknown/escaped/out-of-sync-set
 references cannot trigger native notifications and that no phone number
 or native ID appears in logs or sync.db. Telegram MTProto destinations
