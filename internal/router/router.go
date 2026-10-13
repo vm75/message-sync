@@ -91,7 +91,7 @@ type Router struct {
 	lanes              *delivery.Manager
 	routes             map[transport.EndpointID][]routeTarget
 	endpointTransports map[transport.EndpointID]config.Transport
-	referenceNames      map[transport.EndpointID]map[string]string // volatile per-group names only
+	referenceNames     map[transport.EndpointID]map[string]string // volatile per-group names only
 	usernameMode       config.UsernameMode
 	childContextMode   config.ChildContextDisplayMode
 	aggTrigger         string
@@ -187,7 +187,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		lanes:              lanes,
 		routes:             routes,
 		endpointTransports: endpointTransports,
-		referenceNames:      make(map[transport.EndpointID]map[string]string),
+		referenceNames:     make(map[transport.EndpointID]map[string]string),
 		usernameMode:       cfg.Identity.UsernameMode,
 		childContextMode:   cfg.ChildContextDisplayMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
@@ -530,10 +530,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if destination == incoming.Endpoint {
 				continue
 			}
-			targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+			targetSender, _, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
 			targetSender = r.addressedSender(ctx, incoming, target, targetSender)
-			_ = targetMentions
-			_ = targetQuotedText
 			targetIncoming := incoming
 			targetIncoming.Text = targetText
 			targetIncoming.QuotedText = targetQuotedText
@@ -1031,12 +1029,12 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: targetSender,
 				SenderLabel: senderLabel,
 				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
-				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references, ReferenceAnonymized: target.AnonymizeToDiscord,
+				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references,
 				RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
 				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
-				PollDurationHours: incoming.PollDurationHours,
+				PollDurationHours: incoming.PollDurationHours, ReferenceAnonymized: target.AnonymizeToDiscord,
 			})
 			if err != nil {
 				if transport.Classify(err).Certainty == transport.SendUnknown {
