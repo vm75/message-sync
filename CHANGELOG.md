@@ -1,5 +1,18 @@
 # Changelog
 
+
+### Unreleased — cross-group participant addressing
+
+- Add persistent per-endpoint HMAC-backed `P1`, `P2` reference handles and
+  explicit `@{endpoint/Pn}` syntax with escaping and sync-set isolation.
+- Render compact handles for observed authors on anonymized Discord
+  destinations; preserve existing pseudonym fallback and hash-mode behavior.
+- Add native-mention attempts with safe fallback on WhatsApp (LID-only),
+  Discord (guild-member verified and allowlisted), and Telegram Bot API
+  (membership verified); retain text-only behavior on MTProto and edits.
+- Add privacy and routing regression tests. No release version change.
+
+
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
