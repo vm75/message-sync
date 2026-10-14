@@ -25,7 +25,7 @@ func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 }
 
 func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
-	refs := []CrossReference{{Token: "@{g1/Alice Smith}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice Smith"}}
+	refs := []CrossReference{{Token: "@{g1/Alice Smith}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice Smith", Pseudonym: "Rust Ocean Q7M5K"}}
 	cases := []struct {
 		name   string
 		input  string
@@ -34,7 +34,7 @@ func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
 		want   string
 	}{
 		{"nonanonymized other group", "Hi @{g1/Alice Smith}", false, false, "Hi @g1/Alice Smith"},
-		{"anonymized other group", "Hi @{g1/Alice Smith}", true, false, "Hi @g1/P1"},
+		{"anonymized other group", "Hi @{g1/Alice Smith}", true, false, "Hi @g1/Rust Ocean Q7M5K"},
 		{"native addressed group", "Hi @{g1/Alice Smith}", false, true, "Hi @native"},
 		{"unknown stable handle", "Hi @{g1/P7}", true, false, "Hi @g1/P7"},
 		{"unknown name suppressed on anon", "Hi @{g1/Bob Private}", true, false, "Hi @g1/unknown"},
@@ -42,7 +42,7 @@ func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
 		{"escaped reference", "Hi \\@{g1/Alice Smith}", true, false, "Hi \\@{g1/Alice Smith}"},
 		{"unrelated native name", "Hi @Alice", true, false, "Hi @Alice"},
 		{"literal reference does not tag", "Hi @g1/Alice Smith", false, true, "Hi @g1/Alice Smith"},
-		{"repeated references", "@{g1/Alice Smith}, @{g1/Alice Smith}", true, false, "@g1/P1, @g1/P1"},
+		{"repeated references", "@{g1/Alice Smith}, @{g1/Alice Smith}", true, false, "@g1/Rust Ocean Q7M5K, @g1/Rust Ocean Q7M5K"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -65,5 +65,30 @@ func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
 				t.Fatalf("native references triggered %d notifications, want %d", notifications, wantNotifications)
 			}
 		})
+	}
+}
+
+func TestReferenceDisplayLabelUsesPseudonymBeforeHandle(t *testing.T) {
+	ref := CrossReference{
+		Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij",
+		Handle: "P1", Name: "Alice Smith", Pseudonym: "Rust Ocean Q7M5K",
+	}
+	for _, tc := range []struct {
+		anon bool
+		want string
+	}{
+		{true, "Rust Ocean Q7M5K"},
+		{false, "Alice Smith"},
+	} {
+		if got := ReferenceDisplayLabel(ref, tc.anon); got != tc.want {
+			t.Fatalf("alias with anonymized=%t: got %q want %q", tc.anon, got, tc.want)
+		}
+		if got := FormatCrossReferences("Hi @{g1/P1}", []CrossReference{ref}, tc.anon, nil); got != "Hi @g1/"+tc.want {
+			t.Fatalf("formatted alias with anonymized=%t: %q", tc.anon, got)
+		}
+	}
+	ref.Pseudonym = ""
+	if got := ReferenceDisplayLabel(ref, true); got != "P1" {
+		t.Fatalf("missing pseudonym should fall back to stable handle, got %q", got)
 	}
 }
