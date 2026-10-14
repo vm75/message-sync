@@ -8,6 +8,16 @@ import (
 // CrossReferences are explicit bridge syntax, not arbitrary @words. Rewriting
 // is limited to references already authorized by the canonical router.
 var crossReferenceTokenPattern = regexp.MustCompile(`@\{([A-Za-z0-9][A-Za-z0-9_-]{0,63})/([^{}\r\n]{1,96})\}`)
+var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*package transport
+
+import (
+	"regexp"
+	"strings"
+)
+
+// CrossReferences are explicit bridge syntax, not arbitrary @words. Rewriting
+// is limited to references already authorized by the canonical router.
+)
 
 // RewriteCrossReferences preserves unresolved tokens and escaped literals.
 // Callbacks may return a provider-native mention label only after verifying
@@ -57,6 +67,22 @@ func RewriteCrossReferences(text string, refs []CrossReference, native func(Cros
 // destination text whether or not a provider can notify the participant.
 // Existing native @mentions are never parsed. Only a resolved, authorized
 // CrossReference may be passed to the native callback.
+// ReferenceDisplayLabel selects a destination-safe label without changing the
+// addressed identity. A configured pseudonym is preferred in anonymized output;
+// numeric handles are a fallback, never the primary anonymization scheme.
+func ReferenceDisplayLabel(ref CrossReference, anonymized bool) string {
+	if anonymized && strings.TrimSpace(ref.Pseudonym) != "" {
+		return ref.Pseudonym
+	}
+	if !anonymized && strings.TrimSpace(ref.Name) != "" {
+		return ref.Name
+	}
+	if strings.TrimSpace(ref.Handle) != "" {
+		return ref.Handle
+	}
+	return "unknown"
+}
+
 func FormatCrossReferences(content string, refs []CrossReference, anonymized bool, native func(CrossReference) (string, bool)) string {
 	authorized := make(map[string]CrossReference, len(refs))
 	for _, ref := range refs {
@@ -80,11 +106,8 @@ func FormatCrossReferences(content string, refs []CrossReference, anonymized boo
 		ref, resolved := authorized[token]
 		label := rawLabel
 		if resolved {
-			label = ref.Handle
-			if !anonymized && strings.TrimSpace(ref.Name) != "" {
-				label = ref.Name
-			}
-		} else if anonymized && !regexp.MustCompile(`^P[1-9][0-9]*$`).MatchString(rawLabel) {
+			label = ReferenceDisplayLabel(ref, anonymized)
+		} else if anonymized && !stableReferenceHandle.MatchString(rawLabel) {
 			// An unresolved real name must never be copied into an
 			// anonymization-enabled Discord destination as a reference.
 			label = "unknown"
