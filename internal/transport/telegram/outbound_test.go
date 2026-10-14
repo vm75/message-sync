@@ -665,3 +665,31 @@ func TestTelegramPresentationConvertsCanonicalAggregateHeading(t *testing.T) {
 		t.Fatalf("aggregate presentation = %q, %q; want %q, HTML", got, mode, want)
 	}
 }
+
+func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
+	for _, tc := range []struct {
+		anonymized bool
+		want       string
+	}{
+		{anonymized: true, want: "other/Sender: Hi @g1/Rust Ocean Q7M5K"},
+		{anonymized: false, want: "other/Sender: Hi @g1/Alice"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			api := &fakeTelegramAPI{}
+			adapter := newOutboundTestAdapter(t, api)
+			_, err := adapter.Send(context.Background(), transport.Outgoing{
+				Endpoint: "tg", OriginEndpoint: "other", Kind: "text",
+				Sender:              transport.Sender{DisplayName: "Sender"},
+				SourceText:          "Hi @{g1/P1}",
+				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice", Pseudonym: "Rust Ocean Q7M5K"}},
+				ReferenceAnonymized: tc.anonymized,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(api.texts) != 1 || api.texts[0] != tc.want || api.textParseMode != models.ParseModeHTML {
+				t.Fatalf("Telegram text = %#v, parse mode = %q; want %q and HTML", api.texts, api.textParseMode, tc.want)
+			}
+		})
+	}
+}

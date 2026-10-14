@@ -236,3 +236,40 @@ The tag-driven workflow verifies a release-mode binary reports the validated ver
 ## Verification
 
 Package and integration tests cover configuration validation, HMAC stability, schema constraints, canonical lookup, duplicate/loop prevention, partial fan-out and replay, lifecycle propagation, media bounds, recovery gaps, dynamic connections, and privacy canaries. Run the commands in [TESTING.md](TESTING.md) before release-relevant changes.
+
+
+## Cross-group participant addressing
+
+The `participant_addresses` table stores exactly an endpoint alias, a HMAC
+actor ID, and a monotonically allocated endpoint-local ordinal. Its stable
+`Pn` handles survive restarts and are deleted with endpoints. No raw provider
+identities, display names, usernames, message bodies, or phone numbers are stored.
+The table is created idempotently on startup for existing databases.
+
+The canonical router observes sender IDs from accepted events and resolves
+only explicit `@{endpoint/label}` tokens within the source sync set,
+including stable handles, deterministic pseudonyms and unique observed names.
+It passes
+transient, resolved `CrossReference` values to outbound creates; they never
+enter a persistent delivery ledger or recovery cursor. Adapters verify
+destination membership and attempt native user mentions without exposing native
+provider IDs to the router. Failing native notification verification still produces a normalized
+plain-text `@endpoint/label` reference; raw `@{endpoint/label}` is strictly
+an input syntax and is not forwarded unless escaped. The router holds an
+optional in-memory per-endpoint real-name index for unambiguous display-name
+resolution. Full pseudonyms (and unambiguous two-word stems) are derived from
+persisted endpoint-scoped HMAC actors, so they survive restarts without storing
+real names. A deterministic pseudonym is preferred over `Pn` for anonymized
+display; only stable handle/actor bindings are persisted. Same-connection WhatsApp routes may optionally substitute a live
+contact label for non-native display; this is transient, never parsed as
+addressing identity and never persisted.
+Bridge syntax is not parsed from forwarded attribution headers. Cross-group
+addresses identify endpoint memberships, not user identities across platforms.
+
+Discord and Telegram Bot API keep observed native user IDs only in process
+memory; after restart, those adapters fall back to textual references until
+users are re-observed. WhatsApp can resolve LID identities from live group
+membership after restart. No native cross-group mention support is currently
+provided on Telegram MTProto. Edit propagation uses existing text-only adapter
+semantics and does not produce new native mention notifications.
+

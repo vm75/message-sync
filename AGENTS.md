@@ -119,3 +119,19 @@ AI agents MUST keep all repository documentation in sync with the implementation
 - `RELEASING.md`: Maintainer-only release preparation, tagging, publication, immutability, and verification procedure.
 - `TESTING.md` / `docs/TESTING_GUIDE.md`: Automated test commands, test coverage, manual provider testing steps, and troubleshooting.
 - `docs/FEATURE_COMPARISON.md`: Capability or architectural comparisons with upstream or alternative designs.
+
+
+## Cross-group reference invariants
+
+Cross-group participant syntax is an explicit `@{endpoint/Pn}` namespace, not
+provider-native `@user`. The Pn ordinal belongs to one endpoint, not to
+a global person identity or a display name. Only resolve inside the sender's
+configured sync set. Use the durable `participant_addresses` table, which
+contains only endpoint aliases and HMAC actor IDs; never insert display names,
+phone numbers, raw provider identities, or message content. Native identity
+lookup is owned by each destination adapter, and falls back to literal text
+without guessing when unavailable or unsafe. WhatsApp mentions must not expose
+a PN. Discord and Telegram Bot API hold observed IDs in volatile memory only,
+and must check destination membership before pinging. Edits and MTProto use
+text-only fallback until native support is deliberately implemented and tested.
+

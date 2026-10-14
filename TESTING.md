@@ -58,3 +58,19 @@ WhatsApp transport tests cover one-shot lifecycle-marker consumption, stale-mark
 `TestWhatsAppPlainTextEditPipeline` feeds protocol, wrapped, and secret-encrypted edits through the real live and HistorySync adapter paths, then the recovery coordinator and router. It checks in-place updates to Discord, WhatsApp, and Telegram copies for participant and linked-account events at the original message timestamp, with media synchronization disabled. Encrypted-edit failure tests verify safe diagnostics without provider data or content, and coordinator tests preserve ordered edit checkpoint deduplication and advancement for other providers.
 
 The integration gate combines the three transports with deterministic fake outcomes for all-to-all duplicate handling, ambiguous create, retry/replay, partial fan-out, and lifecycle ordering. Provider-specific exact-once creation remains deliberately unasserted where the provider cannot supply it.
+
+
+## Cross-group references regression gate
+
+`go test ./internal/store ./internal/router ./internal/transport/...`
+includes participant handle stability/isolation, pseudonym display and
+post-restart resolution, two-word alias ambiguity rejection, explicit bridge
+reference parsing/escaping, and unconditional display fallback in anonymized
+and non-anonymized destinations. Before enabling native mentions in production, perform
+real-provider checks: WhatsApp LID-only native mention without phone exposure;
+Discord guild membership and explicit allowed-user allowlisting; Telegram
+Bot API membership and clickable inline native mentions; and fallback for
+unknown/departed/unauthorized members. Test edit and delete propagation,
+reconnection and restart (where Discord/Telegram native-ID caches are
+transient), and escaped `\\@{group/P1}` literals.
+

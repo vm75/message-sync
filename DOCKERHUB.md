@@ -142,3 +142,11 @@ Stable versions publish both the exact version and `latest` to Docker Hub and GH
 The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. GHCR authentication uses the workflow `GITHUB_TOKEN`; the publish job receives only `contents: read` and `packages: write`, while the final GitHub Release job receives `contents: write`. No registry credentials belong in the repository.
 
 Maintainers should follow [RELEASING.md](RELEASING.md); do not create release tags by editing this document or by rebuilding an old exact version.
+
+
+- **Cross-group references**: Explicit `@{group/P1}` identifiers route
+  references to previously observed participants in the same sync set, with
+  durable PII-free handles, native mention best-effort on WhatsApp LID,
+  Discord, and Telegram Bot API, and literal-text fallback when unavailable.
+  Telegram MTProto and edits currently use non-notifying reference text.
+

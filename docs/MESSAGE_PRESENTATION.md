@@ -80,3 +80,62 @@ Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/fo
 - rendered presentation is never parsed as routing identity.
 
 Automated tests should assert the exact rendered forms whenever presentation logic is changed.
+
+
+## Cross-group participant references
+
+The bridge recognizes explicit `@{endpoint-alias/label}` references in user-authored
+message bodies, such as `Hi @{group2/P1}`, `Hi @{group2/Alice Smith}`, or
+`Hi @{group2/Silent Falcon Q7M5K}`. The braced syntax, not a bare `@name`,
+identifies bridge addressing without colliding with provider-native mentions. Prefix the token with a backslash to display it literally without a
+notification attempt. Native `@someone` behavior is unchanged.
+
+The address is made of a configured endpoint alias and a durable per-endpoint
+participant handle, allocated when a participant's HMAC actor identity is first
+observed on an accepted inbound event. It is **not** a username, a globally
+unique person name, or a group-member list position. `group1/P1` and
+`group2/P1` are distinct addresses. Group alias renames cascade through
+the registry; the old textual address does not automatically redirect.
+
+On Discord endpoints with `anonymizeToDiscord` enabled, senders retain the
+existing deterministic, word-based aliases (e.g. `group/Rust Ocean Q7M5K`)
+in `push_name` mode. Stable `Pn` handles remain available as optional
+fallback addresses; they must not replace the visible pseudonym. Other
+recipients retain normal sender-display presentation. In hash mode, the
+existing opaque actor presentation remains unchanged.
+
+A reference resolves only for an observed participant in an endpoint within
+the sender's sync set. Stable `Pn` handles and full deterministic pseudonyms
+both work across restarts because they use persisted HMAC actor records, not
+personal data. A two-word alias stem (e.g. `Rust Ocean`) is also accepted
+only when unique within that group. Real-name lookup uses transient observed
+names and requires re-observation after restart. Ambiguous names or alias
+stems never trigger a native tag. The router never parses forwarded
+attribution headers or guesses a native identity.
+
+For an authorized reference, only destinations that verify a suitable native
+identity and membership may generate a provider mention: WhatsApp requires a
+known LID to avoid leaking phone numbers; Discord uses a transient observed
+user ID and a current guild-member lookup with an explicit allowed-user
+allowlist, but never emits identity-revealing native pings in an
+anonymized Discord destination; Telegram Bot API uses transient observed user
+IDs with GetChatMember and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
+a non-notifying textual reference. **Every destination formats braced input**:
+with anonymization enabled for that destination, `Hi @{group2/Alice Smith}`
+becomes `Hi @group2/Rust Ocean Q7M5K` when resolved, using the participant's
+existing deterministic pseudonym. Input `@{group2/P1}` produces the same
+anonymized display; it does not overwrite sender pseudonyms. With
+anonymization disabled the reference becomes `Hi @group2/Alice Smith` when
+the observed real name is available, otherwise `Hi @group2/P1`. An
+unrecognized `Pn` remains a textual `@group/Pn` without
+any notification; unresolved names on anonymized destinations are masked as
+`@group/unknown`. Textual references do not contain braces. A non-anonymized
+WhatsApp destination may use a live contact name when the referenced group is
+on the same connection. Native notification remains best effort and is never
+guaranteed by the bridge.
+
+Incoming native provider mentions still follow their existing separate
+normalization/presentation path. Cross references are not persisted with
+message content or native IDs; existing edit APIs forward reference text but
+cannot yet add new native mentions on edit.
+

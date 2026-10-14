@@ -1394,17 +1394,26 @@ func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Handle post-trigger vote error: %v", err)
 	}
-	waitForMutations(t, fake, 6, 0, 0)
-	fake.mu.Lock()
-	defer fake.mu.Unlock()
-	updated := 0
-	for _, edit := range fake.edited {
-		if strings.Contains(edit.text, "○ *Pizza* — 3 votes") {
-			updated++
+	// The edit lanes are asynchronous. Earlier aggregation revisions can
+	// satisfy a raw edit-count threshold before the new revision finishes.
+	deadline := time.After(time.Second)
+	for {
+		fake.mu.Lock()
+		updated := 0
+		for _, edit := range fake.edited {
+			if strings.Contains(edit.text, "○ *Pizza* — 3 votes") {
+				updated++
+			}
 		}
-	}
-	if updated != 6 {
-		t.Fatalf("post-trigger updated results = %d, want 6 companion and trigger messages", updated)
+		fake.mu.Unlock()
+		if updated == 6 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("post-trigger updated results = %d, want 6 companion and trigger messages", updated)
+		case <-time.After(time.Millisecond):
+		}
 	}
 }
 
@@ -1650,6 +1659,10 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 	if err := r.Handle(ctx, pollInc); err != nil {
 		t.Fatalf("Handle poll creation error: %v", err)
 	}
+	// A queued poll create must complete before clearing fake.sent. Otherwise
+	// the background destination send can arrive during the next trigger and
+	// make this otherwise synchronous summary assertion flaky.
+	waitForSent(t, fake, 1)
 
 	// Test each configured trigger
 	triggers := []string{"aggregate-response", "/poll-results", "#agg"}

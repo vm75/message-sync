@@ -213,3 +213,32 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 ## License
 
 [MIT](LICENSE)
+
+
+### Cross-group participant references
+
+Messages may refer to an observed member of another endpoint in the same sync
+set using `@{group2/Rust Ocean Q7M5K}`, `@{group2/Alice Smith}`,
+or the stable fallback `@{group2/P1}`. Group aliases are the configured
+endpoint aliases. In anonymized Discord destinations, observed authors retain
+their deterministic pseudonyms, such as `group2/Rust Ocean Q7M5K`, rather
+than being replaced by P-numbers. An unambiguous two-word pseudonym stem,
+such as `Rust Ocean`, is also accepted. Plain `@name` provider mentions
+remain unchanged.
+
+The bridge attempts a native mention only when the destination adapter can
+verify the referenced member: privacy-safe LID membership for WhatsApp,
+current guild membership for Discord, and Bot API membership for Telegram.
+Regardless of native mention support, destination messages render input
+`@{group2/P1}` as `@group2/Rust Ocean Q7M5K` in anonymized
+destinations or as `@group2/Alice Smith` in non-anonymized destinations
+when a transient name is known. P-numbers remain the fallback if an alias
+cannot be derived. Unresolved real names are masked in anonymized routes.
+Pseudonyms and handles can resolve after restart from HMAC-only participant
+records; real-name lookup requires a fresh observed message. Native
+notifications are attempted only within the addressed group. Member addresses are
+learned from accepted messages, not by enumerating all members; unknown
+participants cannot be addressed until observed. Telegram MTProto presently
+uses textual references only; message edits do not generate new native pings.
+Use `\\@{group2/P1}` to send a literal reference without requesting a mention.
+

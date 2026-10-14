@@ -71,6 +71,18 @@ type Mention struct {
 	Name     string
 }
 
+// CrossReference is a resolved bridge-only address. ActorID is a HMAC actor
+// identity; no native provider ID is persisted or passed through the router.
+// Only the addressed endpoint may attempt a native notification.
+type CrossReference struct {
+	Token     string
+	Endpoint  EndpointID
+	ActorID   string
+	Handle    string // stable endpoint-local handle, e.g. P1
+	Name      string // transient observed display name; never persist
+	Pseudonym string // derived from the HMAC actor ID; no provider identity
+}
+
 type Incoming struct {
 	Endpoint              EndpointID
 	Checkpoint            Checkpoint
@@ -117,6 +129,8 @@ type Outgoing struct {
 	// the question/options as structured fields.
 	PollAttribution     string
 	Mentions            []Mention
+	References          []CrossReference
+	ReferenceAnonymized bool // suppress display-name references on anonymized routes
 	ReplyTo             *MessageRef
 	ChildScope          *ChildScope
 	QuotedText          string

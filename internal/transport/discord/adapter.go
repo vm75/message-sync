@@ -48,6 +48,7 @@ type Adapter struct {
 	reactionState     map[reactionKey]string
 	suppressedDeletes map[string]struct{}
 	pollSelections    map[pollActorKey]map[int]struct{}
+	observedMembers   map[transport.EndpointID]map[string]string // transient actor -> native ID
 
 	mu              sync.RWMutex
 	connected       bool
@@ -379,6 +380,9 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routedMessage}, botUserID, webhooks)
 	if !ok {
 		return
+	}
+	if evt.Message.Author != nil {
+		a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, evt.Message.Author.ID)
 	}
 	incoming.ChildScope = discordChildScope(session, evt.Message.ChannelID, routeChannelID)
 	incoming, ok = a.withDiscordMedia(incoming, evt.Message)

@@ -188,3 +188,13 @@ CREATE TABLE IF NOT EXISTS delivery_create_steps (
     PRIMARY KEY (canonical_id, endpoint_id, operation_revision, step_kind)
 );
 CREATE INDEX IF NOT EXISTS idx_delivery_create_steps_state ON delivery_create_steps(state, updated_at);
+
+-- Stable, group-local reference handles. The actor is an irreversible HMAC ID;
+-- raw provider identities, names, and message bodies are intentionally absent.
+CREATE TABLE IF NOT EXISTS participant_addresses (
+    endpoint_id TEXT NOT NULL REFERENCES endpoints(alias) ON DELETE CASCADE ON UPDATE CASCADE,
+    actor_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    PRIMARY KEY (endpoint_id, actor_id),
+    UNIQUE (endpoint_id, ordinal)
+);

@@ -66,6 +66,7 @@ type Adapter struct {
 	resolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
 	observeChildScopeLabel transport.ChildScopeLabelObserver
 	messageKinds           map[messageKindKey]string
+	observedParticipants   map[transport.EndpointID]map[string]int64 // transient actor->user
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
@@ -302,6 +303,9 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		}
 		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
 		if ok {
+			if update.Message.From != nil {
+				a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, update.Message.From.ID)
+			}
 			incoming = a.withObservedTopicLabel(update.Message, incoming)
 			incoming, ok = a.withTelegramMedia(incoming, update.Message)
 		} else {

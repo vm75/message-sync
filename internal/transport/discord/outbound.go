@@ -123,6 +123,27 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
 	content = sanitizeOutgoingMentions(content, outgoing.Mentions)
+	// Only resolved references with a currently verified destination member
+	// become native mentions; all other tokens remain literal and unpinged.
+	allowedUserIDs := make([]string, 0)
+	content = transport.FormatCrossReferences(content, outgoing.References, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
+		// An @mention exposes the Discord member account to the destination.
+		// A pseudonymized destination must never de-anonymize through tagging.
+		if outgoing.ReferenceAnonymized {
+			return "", false
+		}
+		userID, ok := a.nativeCrossMention(ctx, ref, outgoing.Endpoint, nativeChannelID)
+		if !ok {
+			return "", false
+		}
+		for _, existing := range allowedUserIDs {
+			if existing == userID {
+				return "<@" + userID + ">", true
+			}
+		}
+		allowedUserIDs = append(allowedUserIDs, userID)
+		return "<@" + userID + ">", true
+	})
 	content = discordPresentation(content)
 	if outgoing.Kind == "poll" {
 		var err error
@@ -162,9 +183,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	webhookMessage := WebhookMessage{
-		Username: username,
-		Content:  content,
-		File:     file,
+		Username:       username,
+		Content:        content,
+		File:           file,
+		AllowedUserIDs: allowedUserIDs,
 	}
 	var (
 		remoteID string
