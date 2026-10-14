@@ -139,4 +139,3 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 	}
 	return references, nil
 }
-
