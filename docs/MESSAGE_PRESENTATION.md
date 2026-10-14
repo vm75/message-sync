@@ -97,18 +97,21 @@ unique person name, or a group-member list position. `group1/P1` and
 `group2/P1` are distinct addresses. Group alias renames cascade through
 the registry; the old textual address does not automatically redirect.
 
-On Discord endpoints with `anonymizeToDiscord` enabled, observed senders in
-`push_name` mode are shown as `group/P1`, `group/P2`, etc. Existing
-word-based pseudonyms remain the fallback if a stable handle is unavailable.
-Other recipients retain the existing sender-display presentation. In hash mode,
-the existing opaque actor presentation is preserved.
+On Discord endpoints with `anonymizeToDiscord` enabled, senders retain the
+existing deterministic, word-based aliases (e.g. `group/Rust Ocean Q7M5K`)
+in `push_name` mode. Stable `Pn` handles remain available as optional
+fallback addresses; they must not replace the visible pseudonym. Other
+recipients retain normal sender-display presentation. In hash mode, the
+existing opaque actor presentation remains unchanged.
 
 A reference resolves only for an observed participant in an endpoint within
-the sender's sync set. Stable `Pn` handles work across restarts. Transient
-name/alias/pseudonym lookup is accepted when there is exactly one match in
-the referenced group; duplicate names never trigger a tag. On restart names
-must be re-observed before name-based lookup works. The router never parses
-forwarded attribution headers or guesses a native identity.
+the sender's sync set. Stable `Pn` handles and full deterministic pseudonyms
+both work across restarts because they use persisted HMAC actor records, not
+personal data. A two-word alias stem (e.g. `Rust Ocean`) is also accepted
+only when unique within that group. Real-name lookup uses transient observed
+names and requires re-observation after restart. Ambiguous names or alias
+stems never trigger a native tag. The router never parses forwarded
+attribution headers or guesses a native identity.
 
 For an authorized reference, only destinations that verify a suitable native
 identity and membership may generate a provider mention: WhatsApp requires a
@@ -119,9 +122,12 @@ anonymized Discord destination; Telegram Bot API uses transient observed user
 IDs with GetChatMember and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
 a non-notifying textual reference. **Every destination formats braced input**:
 with anonymization enabled for that destination, `Hi @{group2/Alice Smith}`
-becomes `Hi @group2/P1` when resolved; with anonymization disabled it becomes
-`Hi @group2/Alice Smith` when the observed name is available, otherwise
-`Hi @group2/P1`. An unrecognized `Pn` remains a textual `@group/Pn` without
+becomes `Hi @group2/Rust Ocean Q7M5K` when resolved, using the participant's
+existing deterministic pseudonym. Input `@{group2/P1}` produces the same
+anonymized display; it does not overwrite sender pseudonyms. With
+anonymization disabled the reference becomes `Hi @group2/Alice Smith` when
+the observed real name is available, otherwise `Hi @group2/P1`. An
+unrecognized `Pn` remains a textual `@group/Pn` without
 any notification; unresolved names on anonymized destinations are masked as
 `@group/unknown`. Textual references do not contain braces. A non-anonymized
 WhatsApp destination may use a live contact name when the referenced group is
