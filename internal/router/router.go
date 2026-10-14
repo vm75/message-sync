@@ -531,7 +531,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 				continue
 			}
 			targetSender, _, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
-			targetSender = r.addressedSender(ctx, incoming, target, targetSender)
 			targetIncoming := incoming
 			targetIncoming.Text = targetText
 			targetIncoming.QuotedText = targetQuotedText
@@ -829,7 +828,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 
 		targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
-		targetSender = r.addressedSender(ctx, incoming, target, targetSender)
 		targetIncoming := incoming
 		targetIncoming.Text = targetText
 		targetIncoming.QuotedText = targetQuotedText
