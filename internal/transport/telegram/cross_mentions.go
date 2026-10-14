@@ -28,7 +28,7 @@ func (a *Adapter) rememberCrossMentionParticipant(endpoint transport.EndpointID,
 	a.observedParticipants[endpoint][actorID] = userID
 }
 
-func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, chatID int64, ref transport.CrossReference, endpoint transport.EndpointID) (string, bool) {
+func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, chatID int64, ref transport.CrossReference, endpoint transport.EndpointID, anonymized bool) (string, bool) {
 	if a == nil || ref.Endpoint != endpoint {
 		return "", false
 	}
@@ -53,11 +53,9 @@ func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, cha
 	}
 	// This inline mention refers to a verified user without exposing the
 	// raw Telegram identifier as visible text.
-	label := ref.Handle
-	if strings.TrimSpace(ref.Name) != "" {
-		label = ref.Name
-	}
-	// Label is HTML-escaped by renderCrossMentions before this callback.
+	// Transient names are HTML-escaped by renderCrossMentions. The generated
+	// pseudonym is ASCII-safe and remains private across destinations.
+	label := transport.ReferenceDisplayLabel(ref, anonymized)
 	return "<a href=\"tg://user?id=" + strconv.FormatInt(userID, 10) + "\">@" + label + "</a>", true
 }
 
@@ -79,7 +77,7 @@ func (a *Adapter) renderCrossMentions(ctx context.Context, api telegramAPI, chat
 		refs[i].Name = html.EscapeString(refs[i].Name)
 	}
 	rendered := transport.FormatCrossReferences(escaped, refs, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
-		return a.verifiedCrossMention(ctx, api, chatID, ref, outgoing.Endpoint)
+		return a.verifiedCrossMention(ctx, api, chatID, ref, outgoing.Endpoint, outgoing.ReferenceAnonymized)
 	})
 	if rendered == escaped {
 		return content, mode
