@@ -103,17 +103,20 @@ func TestNamedAndPseudonymousCrossGroupAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.observeReferenceName("c1g1", a1, "Alice Smith")
+	pseudonym := identity.Pseudonym(a1)
+	shortPseudonym := strings.Join(strings.Fields(pseudonym)[:2], " ")
 	for _, input := range []string{
 		"Hi @{c1g1/P1}",
 		"Hi @{c1g1/Alice Smith}",
-		"Hi @{c1g1/" + identity.Pseudonym(a1) + "}",
+		"Hi @{c1g1/" + pseudonym + "}",
+		"Hi @{c1g1/" + shortPseudonym + "}",
 	} {
 		refs, err := r.crossReferences(ctx, "c1g2", input)
 		if err != nil || len(refs) != 1 || refs[0].ActorID != a1 ||
-			refs[0].Handle != "P1" || refs[0].Name != "Alice Smith" {
+			refs[0].Handle != "P1" || refs[0].Name != "Alice Smith" || refs[0].Pseudonym != pseudonym {
 			t.Fatalf("resolve %q: %+v (err=%v)", input, refs, err)
 		}
-		if got := transport.FormatCrossReferences(input, refs, true, nil); got != "Hi @c1g1/P1" {
+		if got := transport.FormatCrossReferences(input, refs, true, nil); got != "Hi @c1g1/"+pseudonym {
 			t.Fatalf("anonymized rendering of %q: %q", input, got)
 		}
 		if got := transport.FormatCrossReferences(input, refs, false, nil); got != "Hi @c1g1/Alice Smith" {
@@ -131,5 +134,26 @@ func TestNamedAndPseudonymousCrossGroupAddresses(t *testing.T) {
 	refs, err = r.crossReferences(ctx, "c1g2", "Hello @{c1g1/P1}")
 	if err != nil || len(refs) != 1 || refs[0].ActorID != a1 {
 		t.Fatalf("stable handles must still resolve: %+v (%v)", refs, err)
+	}
+
+	// Deterministic pseudonyms, including their stable suffixes, can be
+	// resolved after restart using persisted HMAC identities alone.
+	r.mu.Lock()
+	r.referenceNames = nil
+	r.mu.Unlock()
+	refs, err = r.crossReferences(ctx, "c1g2", "Hello @{c1g1/"+pseudonym+"}")
+	if err != nil || len(refs) != 1 || refs[0].ActorID != a1 ||
+		refs[0].Name != "" || refs[0].Pseudonym != pseudonym {
+		t.Fatalf("pseudonym after restart: %+v (%v)", refs, err)
+	}
+	if got := transport.FormatCrossReferences("Hello @{c1g1/"+pseudonym+"}", refs, true, nil); got != "Hello @c1g1/"+pseudonym {
+		t.Fatalf("pseudonym render after restart: %q", got)
+	}
+	if got := transport.FormatCrossReferences("Hello @{c1g1/"+pseudonym+"}", refs, false, nil); got != "Hello @c1g1/P1" {
+		t.Fatalf("no transient real name should fall back to stable handle, got %q", got)
+	}
+	refs, err = r.crossReferences(ctx, "c1g2", "Hello @{c1g1/Alice Smith}")
+	if err != nil || len(refs) != 0 {
+		t.Fatalf("real name unexpectedly survived restart: %+v (%v)", refs, err)
 	}
 }
