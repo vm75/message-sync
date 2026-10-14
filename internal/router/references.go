@@ -133,7 +133,7 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 		references = append(references, transport.CrossReference{
 			Token: body[loc[0]:loc[1]], Endpoint: transport.EndpointID(endpoint),
 			ActorID: addressActor, Handle: addressHandle,
-			Name: r.observedReferenceName(transport.EndpointID(endpoint), addressActor),
+			Name:      r.observedReferenceName(transport.EndpointID(endpoint), addressActor),
 			Pseudonym: identity.Pseudonym(addressActor),
 		})
 	}
