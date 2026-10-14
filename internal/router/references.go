@@ -5,7 +5,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -49,24 +48,41 @@ func (r *Router) observedReferenceName(endpoint transport.EndpointID, actor stri
 	return r.referenceNames[endpoint][actor]
 }
 
-func (r *Router) observedReferenceActor(endpoint transport.EndpointID, label string) string {
+// observedReferenceActor scans the persisted, per-endpoint HMAC identities,
+// making deterministic pseudonym addressing work across server restarts.
+// Real names are transient; they never enter the participant registry.
+// The two-word stem (for example "Rust Ocean") is accepted only when unique.
+func (r *Router) observedReferenceActor(ctx context.Context, endpoint transport.EndpointID, label string) (string, error) {
 	normalized := normalizedReferenceName(label)
 	if normalized == "" {
-		return ""
+		return "", nil
+	}
+	addresses, err := r.store.ParticipantsForEndpoint(ctx, string(endpoint))
+	if err != nil {
+		return "", err
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var matched string
-	for actor, name := range r.referenceNames[endpoint] {
-		if normalized != normalizedReferenceName(name) && normalized != normalizedReferenceName(identity.Pseudonym(actor)) && normalized != strings.ToLower(actor) {
+	for _, address := range addresses {
+		alias := identity.Pseudonym(address.ActorID)
+		words := strings.Fields(alias)
+		shortAlias := alias
+		if len(words) > 2 {
+			shortAlias = strings.Join(words[:len(words)-1], " ")
+		}
+		if normalized != normalizedReferenceName(r.referenceNames[endpoint][address.ActorID]) &&
+			normalized != normalizedReferenceName(alias) &&
+			normalized != normalizedReferenceName(shortAlias) &&
+			normalized != strings.ToLower(address.ActorID) {
 			continue
 		}
-		if matched != "" && matched != actor {
-			return "" // ambiguity: never guess a native recipient
+		if matched != "" && matched != address.ActorID {
+			return "", nil // ambiguous: never guess the native recipient
 		}
-		matched = actor
+		matched = address.ActorID
 	}
-	return matched
+	return matched, nil
 }
 
 // crossReferences resolves identities only from the sender's sync set.
@@ -106,7 +122,7 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 			if address, err := r.store.ParticipantByHandle(ctx, endpoint, label); err == nil {
 				addressActor, addressHandle = address.ActorID, address.Handle
 			}
-		} else if actor := r.observedReferenceActor(transport.EndpointID(endpoint), label); actor != "" {
+		} else if actor, err := r.observedReferenceActor(ctx, transport.EndpointID(endpoint), label); err == nil && actor != "" {
 			if address, err := r.store.ParticipantByActor(ctx, endpoint, actor); err == nil {
 				addressActor, addressHandle = address.ActorID, address.Handle
 			}
@@ -118,22 +134,9 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 			Token: body[loc[0]:loc[1]], Endpoint: transport.EndpointID(endpoint),
 			ActorID: addressActor, Handle: addressHandle,
 			Name: r.observedReferenceName(transport.EndpointID(endpoint), addressActor),
+			Pseudonym: identity.Pseudonym(addressActor),
 		})
 	}
 	return references, nil
 }
 
-// addressedSender keeps the stable compact handle available to recipients in
-// an anonymized Discord destination. The original sender identity and native
-// notification target remain distinct from its visible label.
-func (r *Router) addressedSender(ctx context.Context, incoming transport.Incoming, target routeTarget, sender transport.Sender) transport.Sender {
-	if !target.AnonymizeToDiscord || r.getUsernameMode() != config.UsernameModePushName {
-		return sender
-	}
-	address, err := r.store.ParticipantByActor(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID)
-	if err == nil {
-		sender.DisplayName = address.Handle
-		sender.PhoneNumber = ""
-	}
-	return sender
-}
