@@ -8,16 +8,7 @@ import (
 // CrossReferences are explicit bridge syntax, not arbitrary @words. Rewriting
 // is limited to references already authorized by the canonical router.
 var crossReferenceTokenPattern = regexp.MustCompile(`@\{([A-Za-z0-9][A-Za-z0-9_-]{0,63})/([^{}\r\n]{1,96})\}`)
-var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*package transport
-
-import (
-	"regexp"
-	"strings"
-)
-
-// CrossReferences are explicit bridge syntax, not arbitrary @words. Rewriting
-// is limited to references already authorized by the canonical router.
-)
+var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*$`)
 
 // RewriteCrossReferences preserves unresolved tokens and escaped literals.
 // Callbacks may return a provider-native mention label only after verifying
