@@ -59,11 +59,7 @@ func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, o
 					info.MentionedJID = append(info.MentionedJID, identity.String())
 					seen[identity.String()] = true
 				}
-				name := ref.Handle
-				if !outgoing.ReferenceAnonymized && strings.TrimSpace(ref.Name) != "" {
-					name = ref.Name
-				}
-				return "@" + name, true
+				return "@" + transport.ReferenceDisplayLabel(ref, outgoing.ReferenceAnonymized), true
 			}
 			return "", false
 		}
