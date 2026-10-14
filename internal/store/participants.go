@@ -93,3 +93,36 @@ func (s *Store) ParticipantByActor(ctx context.Context, endpoint, actorID string
 	}
 	return ParticipantAddress{Endpoint: endpoint, Handle: "P" + strconv.FormatInt(ordinal, 10), ActorID: actorID}, nil
 }
+
+// ParticipantsForEndpoint returns privacy-safe observed identities for one
+// configured endpoint. Display names, phone numbers and provider IDs remain
+// unavailable; callers may derive presentation pseudonyms from HMAC actors.
+func (s *Store) ParticipantsForEndpoint(ctx context.Context, endpoint string) ([]ParticipantAddress, error) {
+	if s == nil || s.db == nil {
+		return nil, errors.New("sync store is required")
+	}
+	if !endpointPattern.MatchString(endpoint) {
+		return nil, errors.New("invalid participant endpoint")
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT actor_id, ordinal FROM participant_addresses WHERE endpoint_id=? ORDER BY ordinal`, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("list participant addresses: %w", err)
+	}
+	defer rows.Close()
+	var addresses []ParticipantAddress
+	for rows.Next() {
+		var actor string
+		var ordinal int64
+		if err := rows.Scan(&actor, &ordinal); err != nil {
+			return nil, fmt.Errorf("scan participant address: %w", err)
+		}
+		addresses = append(addresses, ParticipantAddress{
+			Endpoint: endpoint, Handle: "P" + strconv.FormatInt(ordinal, 10), ActorID: actor,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list participant addresses: %w", err)
+	}
+	return addresses, nil
+}
