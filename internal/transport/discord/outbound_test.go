@@ -755,7 +755,7 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{name: "anonymized", anonymized: true, want: "Hi @g1/P1"},
+		{name: "anonymized", anonymized: true, want: "Hi @g1/Rust Ocean Q7M5K"},
 		{name: "non-anonymized", anonymized: false, want: "Hi @g1/Alice"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -765,7 +765,7 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 				Endpoint: "discord", OriginEndpoint: "other", Kind: "text",
 				Sender:     transport.Sender{DisplayName: "Sender"},
 				SourceText: "Hi @{g1/P1}", Text: "*_other/Sender_*: Hi @{g1/P1}",
-				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
+				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice", Pseudonym: "Rust Ocean Q7M5K"}},
 				ReferenceAnonymized: tc.anonymized,
 			})
 			if err != nil {
