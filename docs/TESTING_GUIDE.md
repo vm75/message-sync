@@ -575,14 +575,18 @@ You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_
 ### Cross-group address manual test
 
 Have participant A post an ordinary message in WhatsApp group2; in an
-anonymized Discord destination note the `group2/P1` author address.
+anonymized Discord destination note the word-based author pseudonym,
+such as `group2/Rust Ocean Q7M5K`.
 From another configured group in the same sync set send
-`Hi @{group2/P1}, I can help`. Check WhatsApp group2: if A has a
-resolvable LID, it should carry native mention metadata and display a
-handle without a phone number. In other groups the reference must **not**
-retain braces: anonymized output shows `@group2/P1`; non-anonymized output
-shows `@group2/<observed name>` or `@group2/P1` when unavailable. Also send
-`@{group2/<observed name>}` and verify the same resolved identity. Repeat for a Discord or Telegram Bot API member who has
+`Hi @{group2/Rust Ocean Q7M5K}, I can help` and then `Hi @{group2/P1}`.
+Check WhatsApp group2: if A has a resolvable LID, it should carry native
+mention metadata without exposing a phone number. In other groups the
+reference must **not** retain braces: anonymized output shows
+`@group2/Rust Ocean Q7M5K` for both inputs; non-anonymized output shows
+`@group2/<observed name>` or `@group2/P1` when unavailable. Also send
+`@{group2/Rust Ocean}` (only resolves if unambiguous) and
+`@{group2/<observed name>}`. Restart the server: verify that the full
+pseudonym and stable handle still resolve without storing real names. Repeat for a Discord or Telegram Bot API member who has
 posted since process start. Verify that unknown/escaped/out-of-sync-set
 references cannot trigger native notifications and that no phone number
 or native ID appears in logs or sync.db. Telegram MTProto destinations
