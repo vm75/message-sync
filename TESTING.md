@@ -63,9 +63,10 @@ The integration gate combines the three transports with deterministic fake outco
 ## Cross-group references regression gate
 
 `go test ./internal/store ./internal/router ./internal/transport/...`
-includes participant handle stability/isolation, alias ambiguity rejection,
-explicit bridge reference parsing/escaping, and unconditional display fallback
-in anonymized and non-anonymized destinations. Before enabling native mentions in production, perform
+includes participant handle stability/isolation, pseudonym display and
+post-restart resolution, two-word alias ambiguity rejection, explicit bridge
+reference parsing/escaping, and unconditional display fallback in anonymized
+and non-anonymized destinations. Before enabling native mentions in production, perform
 real-provider checks: WhatsApp LID-only native mention without phone exposure;
 Discord guild membership and explicit allowed-user allowlisting; Telegram
 Bot API membership and clickable inline native mentions; and fallback for
