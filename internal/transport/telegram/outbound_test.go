@@ -671,8 +671,8 @@ func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{anonymized: true, want: "other/Sender: Hi @g1/Rust Ocean Q7M5K"},
-		{anonymized: false, want: "other/Sender: Hi @g1/Alice"},
+		{anonymized: true, want: "other/Sender: Hi @{g1/P1}"},
+		{anonymized: false, want: "other/Sender: Hi @{g1/P1}"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			api := &fakeTelegramAPI{}
@@ -687,7 +687,7 @@ func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(api.texts) != 1 || api.texts[0] != tc.want || api.textParseMode != models.ParseModeHTML {
+			if len(api.texts) != 1 || api.texts[0] != tc.want || api.textParseMode != "" {
 				t.Fatalf("Telegram text = %#v, parse mode = %q; want %q and HTML", api.texts, api.textParseMode, tc.want)
 			}
 		})

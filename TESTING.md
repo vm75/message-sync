@@ -63,14 +63,33 @@ The integration gate combines the three transports with deterministic fake outco
 ## Cross-group references regression gate
 
 `go test ./internal/store ./internal/router ./internal/transport/...`
-includes participant handle stability/isolation, pseudonym display and
-post-restart resolution, two-word alias ambiguity rejection, explicit bridge
-reference parsing/escaping, and unconditional display fallback in anonymized
-and non-anonymized destinations. Before enabling native mentions in production, perform
-real-provider checks: WhatsApp LID-only native mention without phone exposure;
-Discord guild membership and explicit allowed-user allowlisting; Telegram
-Bot API membership and clickable inline native mentions; and fallback for
-unknown/departed/unauthorized members. Test edit and delete propagation,
-reconnection and restart (where Discord/Telegram native-ID caches are
-transient), and escaped `\\@{group/P1}` literals.
+includes participant handle stability/isolation, name and pseudonym resolution,
+post-restart pseudonym lookup, alias ambiguity rejection, and exact literal
+fallback. Positive adapter tests assert WhatsApp LID token/mention metadata in
+text and media captions, reference propagation to audio/sticker text companions,
+Discord mention text and explicit user allowlisting, and Telegram HTML inline
+mentions for members shared across groups. Rejection tests cover absent or
+unknown members, failed lookups, PN-only WhatsApp identities, revoked Discord
+channel access/private-thread membership, and departed/restricted Telegram
+members. Discord tests cover native mention payloads on anonymized routes,
+including pseudonym input, and IDs restored by channel/thread history recovery.
+Full-path restart tests observe a Discord `dg1/vm` or WhatsApp sender, verify
+the forwarded attribution, recreate the router/adapter, then address the name
+from that older message. They check real names, full pseudonyms, short aliases
+and `Pn` with anonymization both on and off, final native payloads, and literal
+text in nonmember destinations. Provider-lookup tests reject ambiguous names
+and actors outside the referenced group's registry.
+Cold-cache tests cover HMAC-only guild-roster matching, pagination, missing
+roster permission, nonadvancing pages, channel-access rejection and rejection
+of identities from another provider.
+HTML-escaped names, duplicate tokens and escaped literals are covered.
 
+For client rendering and notifications, perform real-provider checks:
+WhatsApp LID-only mention chips without phone exposure; Discord channel and
+private-thread membership with explicit allowed-user allowlisting; Telegram
+Bot API clickable inline mentions. References must stay exactly as posted in
+groups without verified membership. Test edit/delete propagation, reconnection,
+restart (Discord/Telegram native-ID caches are transient), and escaped
+`\@{group/P1}` literals. MTProto and edits keep literal references. Explicit
+Discord references may tag verified local members on anonymized routes while
+sender and ordinary provider-mention anonymization remain unchanged.

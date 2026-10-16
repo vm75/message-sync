@@ -126,12 +126,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	// Only resolved references with a currently verified destination member
 	// become native mentions; all other tokens remain literal and unpinged.
 	allowedUserIDs := make([]string, 0)
-	content = transport.FormatCrossReferences(content, outgoing.References, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
-		// An @mention exposes the Discord member account to the destination.
-		// A pseudonymized destination must never de-anonymize through tagging.
-		if outgoing.ReferenceAnonymized {
-			return "", false
-		}
+	content = transport.RewriteCrossReferences(content, outgoing.References, func(ref transport.CrossReference) (string, bool) {
+		// Explicit bridge addressing may mention a verified local Discord
+		// member. Sender and ordinary provider mentions remain anonymized.
 		userID, ok := a.nativeCrossMention(ctx, ref, outgoing.Endpoint, nativeChannelID)
 		if !ok {
 			return "", false

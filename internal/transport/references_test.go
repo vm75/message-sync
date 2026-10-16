@@ -15,7 +15,10 @@ func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 		{"Hi \\@{g2/P1}", "Hi \\@{g2/P1}"},
 		{"Hi @{g2/P2}", "Hi @{g2/P2}"},
 		{"Hi @{g2/P1} and @{g2/P1}", "Hi @native and @native"},
+		{`\@{g2/P1} @{g2/P1}`, `\@{g2/P1} @native`},
+		{`\\@{g2/P1}`, `\\@native`},
 		{"Hi @{g1/P1}", "Hi @{g1/P1}"},
+		{"@{unfinished Hi @{g2/P1}", "@{unfinished Hi @native"},
 	}
 	for _, tc := range cases {
 		if got := RewriteCrossReferences(tc.source, refs, render); got != tc.want {
@@ -24,30 +27,27 @@ func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 	}
 }
 
-func TestFormatCrossReferencesFallbackAnonymizationAndNative(t *testing.T) {
+func TestCrossReferencesPreservePostedTextUnlessNative(t *testing.T) {
 	refs := []CrossReference{{Token: "@{g1/Alice Smith}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice Smith", Pseudonym: "Rust Ocean Q7M5K"}}
 	cases := []struct {
 		name   string
 		input  string
-		anon   bool
 		native bool
 		want   string
 	}{
-		{"nonanonymized other group", "Hi @{g1/Alice Smith}", false, false, "Hi @g1/Alice Smith"},
-		{"anonymized other group", "Hi @{g1/Alice Smith}", true, false, "Hi @g1/Rust Ocean Q7M5K"},
-		{"native addressed group", "Hi @{g1/Alice Smith}", false, true, "Hi @native"},
-		{"unknown stable handle", "Hi @{g1/P7}", true, false, "Hi @g1/P7"},
-		{"unknown name suppressed on anon", "Hi @{g1/Bob Private}", true, false, "Hi @g1/unknown"},
-		{"unknown name nonanon", "Hi @{g1/Bob Private}", false, false, "Hi @g1/Bob Private"},
-		{"escaped reference", "Hi \\@{g1/Alice Smith}", true, false, "Hi \\@{g1/Alice Smith}"},
-		{"unrelated native name", "Hi @Alice", true, false, "Hi @Alice"},
-		{"literal reference does not tag", "Hi @g1/Alice Smith", false, true, "Hi @g1/Alice Smith"},
-		{"repeated references", "@{g1/Alice Smith}, @{g1/Alice Smith}", true, false, "@g1/Rust Ocean Q7M5K, @g1/Rust Ocean Q7M5K"},
+		{"known reference fallback", "Hi @{g1/Alice Smith}", false, "Hi @{g1/Alice Smith}"},
+		{"native addressed group", "Hi @{g1/Alice Smith}", true, "Hi @native"},
+		{"unknown stable handle", "Hi @{g1/P7}", false, "Hi @{g1/P7}"},
+		{"unknown name", "Hi @{g1/Bob Private}", false, "Hi @{g1/Bob Private}"},
+		{"escaped reference", "Hi \\@{g1/Alice Smith}", false, "Hi \\@{g1/Alice Smith}"},
+		{"unrelated native name", "Hi @Alice", false, "Hi @Alice"},
+		{"literal reference does not tag", "Hi @g1/Alice Smith", true, "Hi @g1/Alice Smith"},
+		{"repeated references", "@{g1/Alice Smith}, @{g1/Alice Smith}", false, "@{g1/Alice Smith}, @{g1/Alice Smith}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			notifications := 0
-			got := FormatCrossReferences(tc.input, refs, tc.anon, func(ref CrossReference) (string, bool) {
+			got := RewriteCrossReferences(tc.input, refs, func(ref CrossReference) (string, bool) {
 				if !tc.native {
 					return "", false
 				}
@@ -83,7 +83,7 @@ func TestReferenceDisplayLabelUsesPseudonymBeforeHandle(t *testing.T) {
 		if got := ReferenceDisplayLabel(ref, tc.anon); got != tc.want {
 			t.Fatalf("alias with anonymized=%t: got %q want %q", tc.anon, got, tc.want)
 		}
-		if got := FormatCrossReferences("Hi @{g1/P1}", []CrossReference{ref}, tc.anon, nil); got != "Hi @g1/"+tc.want {
+		if got := RewriteCrossReferences("Hi @{g1/P1}", []CrossReference{ref}, nil); got != "Hi @{g1/P1}" {
 			t.Fatalf("formatted alias with anonymized=%t: %q", tc.anon, got)
 		}
 	}

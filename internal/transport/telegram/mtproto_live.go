@@ -1113,7 +1113,6 @@ func (a *MTProtoAdapter) sendMTProto(ctx context.Context, outgoing transport.Out
 	}
 	// MTProto has no native cross-reference capability yet, but recipients
 	// must see the same readable reference syntax as all other destinations.
-	content = transport.FormatCrossReferences(content, outgoing.References, outgoing.ReferenceAnonymized, nil)
 	var id int
 	switch kind {
 	case "text":

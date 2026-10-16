@@ -538,8 +538,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if err != nil {
 				return err
 			}
-			references, _ := r.crossReferences(ctx, incoming.Endpoint, targetText)
-			forwardedText = transport.FormatCrossReferences(forwardedText, references, target.AnonymizeToDiscord, nil)
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
 				key := mutationKey{canonical: targetCanonical, endpoint: destination}
@@ -998,6 +996,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					SenderLabel: senderLabel,
 					SourceText:  incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: destinationText,
+					References: references, ReferenceAnonymized: target.AnonymizeToDiscord,
 					RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
 					PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
 					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: targetQuotedText,

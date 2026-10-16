@@ -95,6 +95,9 @@ func (f *e2eDiscordAPI) WebhookExecute(_ string, _ string, _ bool, data *discord
 	f.executeCalls++
 	f.nextMessage++
 	message := WebhookMessage{Username: data.Username, Content: data.Content}
+	if data.AllowedMentions != nil {
+		message.AllowedUserIDs = append([]string(nil), data.AllowedMentions.Users...)
+	}
 	if len(data.Files) > 0 && data.Files[0] != nil {
 		message.File = &WebhookFile{Name: data.Files[0].Name, ContentType: data.Files[0].ContentType}
 	}

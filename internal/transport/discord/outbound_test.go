@@ -755,8 +755,8 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{name: "anonymized", anonymized: true, want: "Hi @g1/Rust Ocean Q7M5K"},
-		{name: "non-anonymized", anonymized: false, want: "Hi @g1/Alice"},
+		{name: "anonymized", anonymized: true, want: "Hi @{g1/P1}"},
+		{name: "non-anonymized", anonymized: false, want: "Hi @{g1/P1}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			webhook := &fakeChannelWebhook{}

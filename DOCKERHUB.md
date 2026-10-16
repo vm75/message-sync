@@ -144,9 +144,17 @@ The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` se
 Maintainers should follow [RELEASING.md](RELEASING.md); do not create release tags by editing this document or by rebuilding an old exact version.
 
 
-- **Cross-group references**: Explicit `@{group/P1}` identifiers route
+- **Cross-group references**: Explicit `@{group/name-or-alias}` references (with `Pn` fallback) route
   references to previously observed participants in the same sync set, with
   durable PII-free handles, native mention best-effort on WhatsApp LID,
-  Discord, and Telegram Bot API, and literal-text fallback when unavailable.
-  Telegram MTProto and edits currently use non-notifying reference text.
+  Discord, and Telegram Bot API wherever destination membership is verified.
+  Other groups preserve the posted reference exactly, including its braces.
+  Explicit references may tag verified Discord members on anonymized routes;
+  sender and ordinary provider-mention anonymization remain unchanged.
+  Optional Server Members Intent enables HMAC-based Discord roster lookup
+  after restart when no live/history native-ID observation is cached.
+  WhatsApp/Discord can rebuild real-name references from older forwarded
+  messages through source-group provider metadata; readable names remain
+  transient. Full pseudonyms are stable with the same identity secret and
+  provider identity. Telegram MTProto and edits use non-notifying reference text.
 

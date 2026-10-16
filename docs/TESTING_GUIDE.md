@@ -60,7 +60,12 @@ On the same **Bot** page, scroll down to the **Privileged Gateway Intents** sect
 2. Toggle **Message Content Intent** to ON.
    > [!IMPORTANT]
    > **Message Content Intent** is mandatory. If this intent is disabled, Discord will hide all message text and attachments from the bridge bot, preventing messages from being relayed.
-3. Click **Save Changes** at the bottom of the page.
+3. Optionally enable **Server Members Intent** for native cross-group mentions
+   immediately after restart. This permits the REST guild-roster lookup when
+   the temporary native-ID cache is empty; live/history message observations
+   work without this optional lookup. The bridge does not request this intent
+   on its gateway connection.
+4. Click **Save Changes** at the bottom of the page.
 
 ### Step 2.4: Invite the Bot to Your Discord Server
 1. In the left menu of the Developer Portal, click **Installation** (or **OAuth2** &rarr; **URL Generator**).
@@ -579,16 +584,34 @@ anonymized Discord destination note the word-based author pseudonym,
 such as `group2/Rust Ocean Q7M5K`.
 From another configured group in the same sync set send
 `Hi @{group2/Rust Ocean Q7M5K}, I can help` and then `Hi @{group2/P1}`.
-Check WhatsApp group2: if A has a resolvable LID, it should carry native
-mention metadata without exposing a phone number. In other groups the
-reference must **not** retain braces: anonymized output shows
-`@group2/Rust Ocean Q7M5K` for both inputs; non-anonymized output shows
-`@group2/<observed name>` or `@group2/P1` when unavailable. Also send
-`@{group2/Rust Ocean}` (only resolves if unambiguous) and
-`@{group2/<observed name>}`. Restart the server: verify that the full
-pseudonym and stable handle still resolve without storing real names. Repeat for a Discord or Telegram Bot API member who has
-posted since process start. Verify that unknown/escaped/out-of-sync-set
-references cannot trigger native notifications and that no phone number
-or native ID appears in logs or sync.db. Telegram MTProto destinations
-currently keep text-only references.
+Check WhatsApp group2 and another bridged WhatsApp group containing A: both
+should show native mention chips when A has a resolvable LID, without exposing
+a phone number. In a bridged group without A, the reference must remain exactly
+as posted, including its braces and the chosen alias or handle. Also send
+`@{group2/Rust Ocean}` (resolves only if unambiguous) and
+`@{group2/<observed name>}`. Confirm repeated references all render, while a
+backslash-escaped occurrence stays literal and does not ping.
 
+Restart the server and verify that full pseudonyms and stable handles still
+resolve without storing real names. Repeat with a Discord or Telegram Bot API
+member who has posted since process start; check both the addressed group and
+another destination containing that same provider account. Revoke Discord
+channel access or private-thread membership, or remove the Telegram member:
+subsequent references must stay literal and unpinged. With Discord
+anonymization enabled, explicit braced references should still produce chips
+for verified local Discord members, including when addressed by pseudonym.
+Sender and ordinary provider mentions must retain their anonymization. Restart
+and recover channel/thread history, then verify that recovered members can be
+tagged without posting another live message. With an empty native-ID cache
+and Server Members Intent enabled, verify pseudonym/handle references resolve
+from the guild roster. Also address a real Discord name from an older
+forwarded message, such as `@{dg1/vm}`, without a new live post: member search
+should restore the unique registered participant and the destination should
+render a chip. Repeat for a WhatsApp name whose contact metadata is available
+to the source adapter. Repeat both with anonymization on and off. Disable
+provider lookup permission or make the name ambiguous and verify exact literal
+fallback. Full pseudonyms should remain unchanged across restarts while the
+identity secret and provider identity remain unchanged. Unknown, ambiguous, escaped
+and out-of-sync-set references cannot trigger notifications. Verify that no
+phone number, native user ID or authored message content appears in logs or
+sync.db. MTProto and edits keep literal reference text.

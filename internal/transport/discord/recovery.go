@@ -135,6 +135,9 @@ func (a *Adapter) Recover(ctx context.Context, request transport.RecoveryRequest
 			if !ok {
 				continue
 			}
+			if message.Author != nil {
+				a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, message.Author.ID)
+			}
 			incoming, ok = a.withDiscordMedia(incoming, message)
 			if !ok {
 				continue
@@ -201,6 +204,9 @@ func (a *Adapter) Recover(ctx context.Context, request transport.RecoveryRequest
 						incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routed}, discordBotUserID(a.session), webhooks)
 						if !ok {
 							continue
+						}
+						if message.Author != nil {
+							a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, message.Author.ID)
 						}
 						incoming.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: thread.ID, Label: strings.TrimSpace(thread.Name)}
 						incoming, ok = a.withDiscordMedia(incoming, message)

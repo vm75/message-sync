@@ -24,6 +24,7 @@ func TestCrossGroupReferencesAddressKnownActorOnly(t *testing.T) {
 	}
 	first := testIncoming("c1g2", "first")
 	first.Sender.OpaqueID = "u_abcdefghij"
+	first.Sender.DisplayName = "Alice Smith"
 	if err := r.Handle(ctx, first); err != nil {
 		t.Fatal(err)
 	}
@@ -32,31 +33,59 @@ func TestCrossGroupReferencesAddressKnownActorOnly(t *testing.T) {
 	if err != nil || observed.Handle != "P1" {
 		t.Fatalf("observed = %+v, err=%v", observed, err)
 	}
-	reply := testIncoming("c1g3", "second")
-	reply.Sender.OpaqueID = "u_234567abcd"
-	reply.Text = "Hello @{c1g2/P1}, I can help"
-	if err := r.Handle(ctx, reply); err != nil {
+	pseudonym := identity.Pseudonym(first.Sender.OpaqueID)
+	for index, label := range []string{"P1", "Alice Smith", pseudonym, strings.Join(strings.Fields(pseudonym)[:2], " ")} {
+		reply := testIncoming("c1g3", label)
+		reply.Sender.OpaqueID = "u_234567abcd"
+		token := "@{c1g2/" + label + "}"
+		reply.Text = "Hello " + token + ", I can help"
+		if err := r.Handle(ctx, reply); err != nil {
+			t.Fatal(err)
+		}
+		waitForSent(t, sender, 4+index*2)
+		sender.mu.Lock()
+		found := 0
+		for _, item := range sender.sent {
+			if item.outgoing.OriginEndpoint != "c1g3" || item.outgoing.SourceText != reply.Text {
+				continue
+			}
+			found++
+			refs := item.outgoing.References
+			if len(refs) != 1 || refs[0].ActorID != first.Sender.OpaqueID || refs[0].Endpoint != transport.EndpointID("c1g2") || refs[0].Name != "Alice Smith" {
+				t.Errorf("resolved reference for %q at %s = %+v", label, item.outgoing.Endpoint, refs)
+			}
+			if !strings.Contains(item.outgoing.Text, token) {
+				t.Errorf("text lost posted reference: %q", item.outgoing.Text)
+			}
+		}
+		sender.mu.Unlock()
+		if found != 2 {
+			t.Fatalf("reference %q reached %d destinations, want 2", label, found)
+		}
+	}
+	// Audio/sticker attribution is a separate text send on WhatsApp, and
+	// must carry the same authorized references as a caption or text post.
+	media := testIncoming("c1g3", "audio-reference")
+	media.Kind = "audio"
+	media.Text = "Hi @{c1g2/Alice Smith}"
+	media.MediaLoader = func(context.Context) ([]byte, error) { return []byte("media"), nil }
+	if err := r.Handle(ctx, media); err != nil {
 		t.Fatal(err)
 	}
-	waitForSent(t, sender, 4)
+	waitForSent(t, sender, 14)
 	sender.mu.Lock()
 	defer sender.mu.Unlock()
-	found := false
-	for _, item := range sender.sent {
-		if item.outgoing.OriginEndpoint != "c1g3" || item.outgoing.Endpoint != "c1g2" {
-			continue
+	companions := 0
+	for _, item := range sender.sent[10:] {
+		if len(item.outgoing.References) != 1 || item.outgoing.References[0].ActorID != first.Sender.OpaqueID {
+			t.Errorf("media reference lost on %s (companion=%t): %+v", item.outgoing.Endpoint, item.outgoing.AttributionOnly, item.outgoing.References)
 		}
-		found = true
-		refs := item.outgoing.References
-		if len(refs) != 1 || refs[0].ActorID != first.Sender.OpaqueID || refs[0].Endpoint != transport.EndpointID("c1g2") {
-			t.Fatalf("resolved reference = %+v", refs)
-		}
-		if !strings.Contains(item.outgoing.Text, "@{c1g2/P1}") {
-			t.Fatalf("text lost reference: %q", item.outgoing.Text)
+		if item.outgoing.AttributionOnly {
+			companions++
 		}
 	}
-	if !found {
-		t.Fatal("message to addressed group was not delivered")
+	if companions != 2 {
+		t.Fatalf("reference reached %d media companions, want 2", companions)
 	}
 }
 
@@ -116,11 +145,8 @@ func TestNamedAndPseudonymousCrossGroupAddresses(t *testing.T) {
 			refs[0].Handle != "P1" || refs[0].Name != "Alice Smith" || refs[0].Pseudonym != pseudonym {
 			t.Fatalf("resolve %q: %+v (err=%v)", input, refs, err)
 		}
-		if got := transport.FormatCrossReferences(input, refs, true, nil); got != "Hi @c1g1/"+pseudonym {
-			t.Fatalf("anonymized rendering of %q: %q", input, got)
-		}
-		if got := transport.FormatCrossReferences(input, refs, false, nil); got != "Hi @c1g1/Alice Smith" {
-			t.Fatalf("nonanonymized rendering of %q: %q", input, got)
+		if got := transport.RewriteCrossReferences(input, refs, nil); got != input {
+			t.Fatalf("fallback changed posted text %q: %q", input, got)
 		}
 	}
 	if _, err := db.ObserveParticipant(ctx, "c1g1", a2); err != nil {
@@ -146,14 +172,50 @@ func TestNamedAndPseudonymousCrossGroupAddresses(t *testing.T) {
 		refs[0].Name != "" || refs[0].Pseudonym != pseudonym {
 		t.Fatalf("pseudonym after restart: %+v (%v)", refs, err)
 	}
-	if got := transport.FormatCrossReferences("Hello @{c1g1/"+pseudonym+"}", refs, true, nil); got != "Hello @c1g1/"+pseudonym {
+	if got := transport.RewriteCrossReferences("Hello @{c1g1/"+pseudonym+"}", refs, nil); got != "Hello @{c1g1/"+pseudonym+"}" {
 		t.Fatalf("pseudonym render after restart: %q", got)
-	}
-	if got := transport.FormatCrossReferences("Hello @{c1g1/"+pseudonym+"}", refs, false, nil); got != "Hello @c1g1/P1" {
-		t.Fatalf("no transient real name should fall back to stable handle, got %q", got)
 	}
 	refs, err = r.crossReferences(ctx, "c1g2", "Hello @{c1g1/Alice Smith}")
 	if err != nil || len(refs) != 0 {
 		t.Fatalf("real name unexpectedly survived restart: %+v (%v)", refs, err)
+	}
+}
+
+type referenceResolverSender struct {
+	*fakeSender
+	actor string
+	calls int
+}
+
+func (s *referenceResolverSender) ResolveParticipant(_ context.Context, _ transport.EndpointID, _ string, _ []string) (string, bool) {
+	s.calls++
+	return s.actor, s.actor != ""
+}
+
+func TestProviderNameResolutionCannotEscapeRegisteredGroupActors(t *testing.T) {
+	ctx := context.Background()
+	r, db, sender := newTestRouter(t, config.UsernameModePushName)
+	if _, err := db.DB().ExecContext(ctx, `INSERT INTO sync_sets(id) VALUES('mesh'); INSERT INTO endpoints(alias,transport,connection_id,remote_id,sync_set_id) VALUES ('c1g1','whatsapp','wa','111@g.us','mesh'), ('c1g2','whatsapp','wa','222@g.us','mesh')`); err != nil {
+		t.Fatal(err)
+	}
+	actor := "u_abcdefghij"
+	if _, err := db.ObserveParticipant(ctx, "c1g1", actor); err != nil {
+		t.Fatal(err)
+	}
+	resolver := &referenceResolverSender{fakeSender: sender, actor: "u_234567abcd"}
+	r.sender = resolver
+	refs, err := r.crossReferences(ctx, "c1g2", "Hi @{c1g1/vm}")
+	if err != nil || len(refs) != 0 || resolver.calls != 1 {
+		t.Fatalf("out-of-group identity resolved: %+v, %v (calls=%d)", refs, err, resolver.calls)
+	}
+	resolver.actor = actor
+	refs, err = r.crossReferences(ctx, "c1g2", "Hi @{c1g1/vm}")
+	if err != nil || len(refs) != 1 || refs[0].ActorID != actor {
+		t.Fatalf("registered provider lookup failed: %+v, %v", refs, err)
+	}
+	calls := resolver.calls
+	refs, err = r.crossReferences(ctx, "c1g2", "Hi @{outside/vm}")
+	if err != nil || len(refs) != 0 || resolver.calls != calls {
+		t.Fatalf("unconfigured group reached provider lookup: %+v, %v", refs, err)
 	}
 }

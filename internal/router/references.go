@@ -18,7 +18,7 @@ var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*$`)
 const maxCrossReferences = 32
 
 func normalizedReferenceName(name string) string {
-	return strings.ToLower(strings.Join(strings.Fields(name), " "))
+	return transport.NormalizeParticipantLabel(name)
 }
 
 // observeReferenceName retains at most one transient display name per known
@@ -62,7 +62,6 @@ func (r *Router) observedReferenceActor(ctx context.Context, endpoint transport.
 		return "", err
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	var matched string
 	for _, address := range addresses {
 		alias := identity.Pseudonym(address.ActorID)
@@ -78,16 +77,39 @@ func (r *Router) observedReferenceActor(ctx context.Context, endpoint transport.
 			continue
 		}
 		if matched != "" && matched != address.ActorID {
+			r.mu.RUnlock()
 			return "", nil // ambiguous: never guess the native recipient
 		}
 		matched = address.ActorID
 	}
-	return matched, nil
+	r.mu.RUnlock()
+	if matched != "" || len(addresses) == 0 {
+		return matched, nil
+	}
+	resolver, ok := r.sender.(transport.ParticipantResolver)
+	if !ok {
+		return "", nil
+	}
+	actors := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		actors = append(actors, address.ActorID)
+	}
+	actor, found := resolver.ResolveParticipant(ctx, endpoint, label, actors)
+	if !found {
+		return "", nil
+	}
+	for _, known := range actors {
+		if actor == known {
+			r.observeReferenceName(endpoint, actor, label)
+			return actor, nil
+		}
+	}
+	return "", nil
 }
 
 // crossReferences resolves identities only from the sender's sync set.
-// It does not edit the original text. Every provider renders references,
-// including unresolved ones, to a safe non-notifying textual fallback.
+// It does not edit the original text. Providers preserve each token unless
+// they can verify destination membership and render a native mention.
 func (r *Router) crossReferences(ctx context.Context, source transport.EndpointID, body string) ([]transport.CrossReference, error) {
 	if len(body) == 0 {
 		return nil, nil

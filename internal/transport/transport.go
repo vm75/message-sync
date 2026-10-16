@@ -73,7 +73,7 @@ type Mention struct {
 
 // CrossReference is a resolved bridge-only address. ActorID is a HMAC actor
 // identity; no native provider ID is persisted or passed through the router.
-// Only the addressed endpoint may attempt a native notification.
+// Each destination independently verifies membership before notifying.
 type CrossReference struct {
 	Token     string
 	Endpoint  EndpointID
@@ -81,6 +81,13 @@ type CrossReference struct {
 	Handle    string // stable endpoint-local handle, e.g. P1
 	Name      string // transient observed display name; never persist
 	Pseudonym string // derived from the HMAC actor ID; no provider identity
+}
+
+// ParticipantResolver resolves a name in one configured source group against
+// already registered HMAC actors. Provider IDs and names remain adapter-owned
+// transient data; the returned identity must be one of the supplied actors.
+type ParticipantResolver interface {
+	ResolveParticipant(context.Context, EndpointID, string, []string) (string, bool)
 }
 
 type Incoming struct {

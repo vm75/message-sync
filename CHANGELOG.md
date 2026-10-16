@@ -3,15 +3,27 @@
 
 ### Unreleased — cross-group participant addressing
 
-- Add persistent per-endpoint HMAC-backed `P1`, `P2` reference handles and
-  explicit `@{endpoint/Pn}` syntax with escaping and sync-set isolation.
-- Render compact handles for observed authors on anonymized Discord
-  destinations; preserve existing pseudonym fallback and hash-mode behavior.
-- Add native-mention attempts with safe fallback on WhatsApp (LID-only),
-  Discord (guild-member verified and allowlisted), and Telegram Bot API
-  (membership verified); retain text-only behavior on MTProto and edits.
-- Add privacy and routing regression tests. No release version change.
-
+- Add persistent per-endpoint HMAC-backed `Pn` handles and explicit
+  `@{endpoint/name-or-alias}` references, including observed display names,
+  deterministic pseudonyms and unique alias stems, with sync-set isolation.
+- Fix native mentions in every verified member destination, including shared
+  groups beyond the group named in the reference. WhatsApp uses matching LID
+  token text and metadata in text and captions; Discord verifies channel/private-thread access and
+  allowlists users; Telegram Bot API verifies current membership.
+- Preserve references exactly as posted when native rendering is unavailable.
+  MTProto and edits retain literal reference text. Explicit braced references
+  can tag verified native Discord members even on anonymized routes, preserving
+  sender and ordinary provider-mention anonymization.
+- Restore Discord native-ID observations from accepted channel/thread history
+  recovery so recovered members can be mentioned without a new live post.
+  Add bounded HMAC-based guild-roster resolution on a cold native-ID cache
+  when Server Members Intent permits it; denied lookups stay literal.
+- Fix old real-name references after restart: resolve a missing name through
+  the referenced WhatsApp/Discord adapter against registered HMAC actors and
+  verified provider metadata, before native destination rendering. Keep names
+  transient and preserve literal fallback for unavailable or ambiguous data.
+- Add successful native payload, membership rejection, escaping, name/alias
+  routing and privacy regression tests. No release version change.
 
 All notable changes to this project will be documented in this file.
 

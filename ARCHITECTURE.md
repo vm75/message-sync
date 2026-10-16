@@ -253,23 +253,43 @@ It passes
 transient, resolved `CrossReference` values to outbound creates; they never
 enter a persistent delivery ledger or recovery cursor. Adapters verify
 destination membership and attempt native user mentions without exposing native
-provider IDs to the router. Failing native notification verification still produces a normalized
-plain-text `@endpoint/label` reference; raw `@{endpoint/label}` is strictly
-an input syntax and is not forwarded unless escaped. The router holds an
-optional in-memory per-endpoint real-name index for unambiguous display-name
-resolution. Full pseudonyms (and unambiguous two-word stems) are derived from
-persisted endpoint-scoped HMAC actors, so they survive restarts without storing
-real names. A deterministic pseudonym is preferred over `Pn` for anonymized
-display; only stable handle/actor bindings are persisted. Same-connection WhatsApp routes may optionally substitute a live
-contact label for non-native display; this is transient, never parsed as
-addressing identity and never persisted.
+provider IDs to the router. Each destination independently checks the addressed
+actor's membership, including destinations other than the referenced endpoint.
+When no safe native mention is available, the original token is forwarded
+unchanged, including its braces and authored label, even on anonymized routes.
+The router holds an optional in-memory per-endpoint real-name index for
+unambiguous display-name resolution. On a missing name, `ParticipantResolver`
+on the adapter registry dispatches to the referenced endpoint's owning
+adapter, passing only its registered HMAC actors. Discord checks exact
+username/nickname/display-name matches from guild member search and verifies
+source-channel access; WhatsApp checks its source-group roster and existing
+provider-owned contact metadata through the adapter API. Only a unique
+registered HMAC actor can be returned. Names and native IDs never enter the
+routing database, and no direct protocol-database query is added. This lookup
+precedes destination rendering, so old real-name references can resolve after
+a restart. Unavailable or ambiguous metadata preserves literal text. Full pseudonyms (and unambiguous two-word
+stems) derive from persisted endpoint-scoped HMAC actors and survive restarts
+without storing real names. Only stable handle/actor bindings are persisted.
+WhatsApp emits matching LID address text and mention metadata for text,
+image/video/document captions and audio/sticker text companions, never a PN.
+Discord verifies fresh guild membership and destination channel permissions,
+plus membership for private threads, and allowlists only verified native IDs.
+Explicit braced references may tag verified local Discord accounts even on
+anonymized routes. Sender and ordinary provider-native mention anonymization
+remain unchanged.
 Bridge syntax is not parsed from forwarded attribution headers. Cross-group
 addresses identify endpoint memberships, not user identities across platforms.
 
 Discord and Telegram Bot API keep observed native user IDs only in process
 memory; after restart, those adapters fall back to textual references until
-users are re-observed. WhatsApp can resolve LID identities from live group
-membership after restart. No native cross-group mention support is currently
+users are re-observed. Discord restores these observations from live ingress
+and accepted channel/thread history recovery. On a missing binding, it also
+compares the authorized HMAC actor with paginated current guild members,
+under a five-second lookup timeout, and caches only the matched binding.
+This REST lookup requires Server Members Intent in the Developer Portal;
+it does not change gateway intents. Missing permission, cancellation and
+unmatched identities retain literal text. WhatsApp can resolve LID identities
+from live group membership after restart. No native cross-group mention support is currently
 provided on Telegram MTProto. Edit propagation uses existing text-only adapter
 semantics and does not produce new native mention notifications.
 

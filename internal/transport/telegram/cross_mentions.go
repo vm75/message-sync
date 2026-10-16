@@ -29,11 +29,18 @@ func (a *Adapter) rememberCrossMentionParticipant(endpoint transport.EndpointID,
 }
 
 func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, chatID int64, ref transport.CrossReference, endpoint transport.EndpointID, anonymized bool) (string, bool) {
-	if a == nil || ref.Endpoint != endpoint {
+	if a == nil {
 		return "", false
 	}
 	a.mu.RLock()
 	userID := a.observedParticipants[endpoint][ref.ActorID]
+	if userID <= 0 {
+		for _, participants := range a.observedParticipants {
+			if userID = participants[ref.ActorID]; userID > 0 {
+				break
+			}
+		}
+	}
 	a.mu.RUnlock()
 	if userID <= 0 {
 		return "", false
@@ -45,10 +52,21 @@ func (a *Adapter) verifiedCrossMention(ctx context.Context, api telegramAPI, cha
 		return "", false
 	}
 	member, err := checker.GetChatMember(ctx, &telegrambot.GetChatMemberParams{ChatID: chatID, UserID: userID})
-	if err != nil || member == nil || member.Left != nil || member.Banned != nil {
+	if err != nil || member == nil {
 		return "", false
 	}
-	if member.Restricted != nil && !member.Restricted.IsMember {
+	var memberUser *models.User
+	switch {
+	case member.Owner != nil:
+		memberUser = member.Owner.User
+	case member.Administrator != nil:
+		memberUser = &member.Administrator.User
+	case member.Member != nil:
+		memberUser = member.Member.User
+	case member.Restricted != nil && member.Restricted.IsMember:
+		memberUser = member.Restricted.User
+	}
+	if memberUser == nil || memberUser.ID != userID {
 		return "", false
 	}
 	// This inline mention refers to a verified user without exposing the
@@ -76,7 +94,7 @@ func (a *Adapter) renderCrossMentions(ctx context.Context, api telegramAPI, chat
 		refs[i].Token = html.EscapeString(refs[i].Token)
 		refs[i].Name = html.EscapeString(refs[i].Name)
 	}
-	rendered := transport.FormatCrossReferences(escaped, refs, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
+	rendered := transport.RewriteCrossReferences(escaped, refs, func(ref transport.CrossReference) (string, bool) {
 		return a.verifiedCrossMention(ctx, api, chatID, ref, outgoing.Endpoint, outgoing.ReferenceAnonymized)
 	})
 	if rendered == escaped {

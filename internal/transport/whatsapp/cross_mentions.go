@@ -2,94 +2,156 @@ package whatsapp
 
 import (
 	"context"
-	"strings"
+	"time"
 
 	"github.com/vm75/message-sync/internal/transport"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 )
 
-// nativeCrossReferences ALWAYS renders readable cross-group references, even
-// if the native mention is unavailable. Only an explicitly addressed group
-// may receive native metadata, and only for a live participant LID.
-func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, outgoing transport.Outgoing, info *waE2E.ContextInfo) (string, *waE2E.ContextInfo) {
-	fallback := func() (string, *waE2E.ContextInfo) {
-		return transport.FormatCrossReferences(outgoing.Text, outgoing.References, outgoing.ReferenceAnonymized, nil), info
+// nativeCrossReferences replaces references only for verified destination
+// members. The wire text and mention metadata must address the same LID.
+func (a *Adapter) nativeCrossReferences(ctx context.Context, target types.JID, outgoing transport.Outgoing, info *waE2E.ContextInfo, getGroupInfo func(context.Context, types.JID) (*types.GroupInfo, error)) (string, *waE2E.ContextInfo) {
+	if a == nil || getGroupInfo == nil || len(outgoing.References) == 0 {
+		return outgoing.Text, info
 	}
-	if a == nil || a.client == nil || len(outgoing.References) == 0 || outgoing.Kind != "text" {
-		return fallback()
+	switch outgoing.Kind {
+	case "text", "other", "image", "video", "document":
+	default:
+		return outgoing.Text, info
 	}
 	a.mu.Lock()
 	normalizer := a.normalizer
 	a.mu.Unlock()
 	if normalizer == nil || normalizer.hasher == nil {
-		return fallback()
+		return outgoing.Text, info
 	}
-
-	byEndpoint := make(map[transport.EndpointID]map[string]types.JID)
-	resolveGroup := func(endpoint transport.EndpointID, jid types.JID) map[string]types.JID {
-		if known, ok := byEndpoint[endpoint]; ok {
-			return known
+	group, err := getGroupInfo(ctx, target)
+	if err != nil || group == nil {
+		return outgoing.Text, info
+	}
+	destinationMembers := make(map[string]types.JID)
+	for _, participant := range group.Participants {
+		canonical, _ := CanonicalSenderIdentity(ctx, participant.JID, participant.LID, a.resolveAltJID)
+		if canonical.Server != types.HiddenUserServer || canonical.User == "" {
+			continue
 		}
-		known := make(map[string]types.JID)
-		byEndpoint[endpoint] = known
-		group, err := a.client.GetGroupInfo(ctx, jid)
-		if err != nil || group == nil {
-			return known
-		}
-		for _, participant := range group.Participants {
-			canonical, _ := CanonicalSenderIdentity(ctx, participant.JID, participant.LID, a.resolveAltJID)
-			if !canonical.IsEmpty() {
-				known[normalizer.hasher.UserID(canonical.String())] = canonical
+		// An actor may have first been observed before its LID was available.
+		// Match trusted roster identities, but emit only the verified LID.
+		for _, jid := range []types.JID{canonical, participant.JID, participant.LID, participant.PhoneNumber} {
+			jid = normalizeWhatsAppIdentityJID(jid)
+			if !jid.IsEmpty() {
+				destinationMembers[normalizer.hasher.UserID(jid.String())] = canonical
 			}
 		}
-		return known
 	}
-	// The destination roster is used only to verify a real native mention.
-	destinationMembers := resolveGroup(outgoing.Endpoint, target)
 	seen := make(map[string]bool)
-	text := transport.FormatCrossReferences(outgoing.Text, outgoing.References, outgoing.ReferenceAnonymized, func(ref transport.CrossReference) (string, bool) {
-		if ref.Endpoint == outgoing.Endpoint {
-			identity, exists := destinationMembers[ref.ActorID]
-			if exists && identity.Server == types.HiddenUserServer {
-				if info == nil {
-					info = &waE2E.ContextInfo{}
-				}
-				if !seen[identity.String()] {
-					info.MentionedJID = append(info.MentionedJID, identity.String())
-					seen[identity.String()] = true
-				}
-				return "@" + transport.ReferenceDisplayLabel(ref, outgoing.ReferenceAnonymized), true
-			}
+	for _, jid := range info.GetMentionedJID() {
+		seen[jid] = true
+	}
+	text := transport.RewriteCrossReferences(outgoing.Text, outgoing.References, func(ref transport.CrossReference) (string, bool) {
+		identity, exists := destinationMembers[ref.ActorID]
+		if !exists {
 			return "", false
 		}
-		// A WhatsApp contact name may be used only for non-native display
-		// in another group on the same connection. It never selects a user.
-		if outgoing.ReferenceAnonymized || strings.TrimSpace(ref.Name) != "" {
-			return "", false
+		if info == nil {
+			info = &waE2E.ContextInfo{}
 		}
-		a.mu.Lock()
-		sourceGroup, owned := a.targets[ref.Endpoint]
-		a.mu.Unlock()
-		if !owned {
-			return "", false
+		if !seen[identity.String()] {
+			info.MentionedJID = append(info.MentionedJID, identity.String())
+			seen[identity.String()] = true
 		}
-		sourceIdentity := resolveGroup(ref.Endpoint, sourceGroup)[ref.ActorID]
-		if sourceIdentity.IsEmpty() {
-			return "", false
-		}
-		contact := a.getContactInfo(sourceIdentity)
-		name := strings.Join(strings.Fields(contact.PushName), " ")
-		if name == "" {
-			name = strings.Join(strings.Fields(contact.FullName), " ")
-		}
-		if name == "" {
-			name = strings.Join(strings.Fields(contact.BusinessName), " ")
-		}
-		if name == "" || len([]rune(name)) > 96 || strings.ContainsAny(name, "@{}<>\r\n") {
-			return "", false
-		}
-		return "@" + string(ref.Endpoint) + "/" + name, true
+		return "@" + identity.User, true
 	})
 	return text, info
+}
+
+// ResolveParticipant rebuilds a name lookup using provider-owned contact
+// metadata and the referenced group's current roster. It never reads the
+// protocol database directly or persists the returned contact names.
+func (a *Adapter) ResolveParticipant(ctx context.Context, endpoint transport.EndpointID, label string, actors []string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	a.mu.Lock()
+	client := a.client
+	target, owned := a.targets[endpoint]
+	a.mu.Unlock()
+	if client == nil || !owned {
+		return "", false
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return a.resolveParticipantName(lookupCtx, target, label, actors, client.GetGroupInfo, func(jid types.JID) types.ContactInfo {
+		if client.Store == nil || client.Store.Contacts == nil {
+			return types.ContactInfo{}
+		}
+		if contact, err := client.Store.Contacts.GetContact(lookupCtx, jid); err == nil && contact.Found {
+			return contact
+		}
+		if alt, err := client.Store.GetAltJID(lookupCtx, jid); err == nil && !alt.IsEmpty() {
+			if contact, err := client.Store.Contacts.GetContact(lookupCtx, alt); err == nil {
+				return contact
+			}
+		}
+		return types.ContactInfo{}
+	})
+}
+
+func (a *Adapter) resolveParticipantName(ctx context.Context, groupID types.JID, label string, actors []string, getGroupInfo func(context.Context, types.JID) (*types.GroupInfo, error), getContact ContactGetter) (string, bool) {
+	a.mu.Lock()
+	normalizer := a.normalizer
+	a.mu.Unlock()
+	if normalizer == nil || normalizer.hasher == nil || getGroupInfo == nil || getContact == nil || len(actors) == 0 {
+		return "", false
+	}
+	group, err := getGroupInfo(ctx, groupID)
+	if err != nil || group == nil {
+		return "", false
+	}
+	known := make(map[string]bool, len(actors))
+	for _, actor := range actors {
+		known[actor] = true
+	}
+	label = transport.NormalizeParticipantLabel(label)
+	if label == "" {
+		return "", false
+	}
+	matched := ""
+	for _, participant := range group.Participants {
+		canonical, _ := CanonicalSenderIdentity(ctx, participant.JID, participant.LID, a.resolveAltJID)
+		var actor string
+		for _, jid := range []types.JID{canonical, participant.JID, participant.LID, participant.PhoneNumber} {
+			if jid = normalizeWhatsAppIdentityJID(jid); jid.IsEmpty() {
+				continue
+			}
+			if candidate := normalizer.hasher.UserID(jid.String()); known[candidate] {
+				actor = candidate
+				break
+			}
+		}
+		if actor == "" {
+			continue
+		}
+		matches := false
+		for _, jid := range []types.JID{canonical, participant.JID, participant.PhoneNumber} {
+			if jid.IsEmpty() {
+				continue
+			}
+			contact := getContact(jid)
+			for _, name := range []string{contact.PushName, contact.FullName, contact.BusinessName} {
+				if transport.NormalizeParticipantLabel(name) == label {
+					matches = true
+				}
+			}
+		}
+		if !matches {
+			continue
+		}
+		if matched != "" && matched != actor {
+			return "", false
+		}
+		matched = actor
+	}
+	return matched, matched != ""
 }

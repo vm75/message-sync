@@ -86,6 +86,11 @@ Create a WhatsApp connection, start pairing, then scan the QR code from **Linked
 
 Discord always uses a **bot token** for inbound Gateway events and native Discord operations. Enable the privileged **Message Content** intent in the Discord Developer Portal, install the bot in the target server, and grant the permissions required by the features you use. At minimum for normal bidirectional message sync, grant **View Channel**, **Read Message History**, and **Send Messages**; grant **Add Reactions** for reaction sync and the appropriate thread/poll permissions for those features.
 
+For native cross-group mentions immediately after restart, optionally enable
+**Server Members Intent** in the Developer Portal. It permits an on-demand
+guild-roster lookup when the temporary native-ID cache is empty. Live or
+recovered participant messages also populate this cache.
+
 `message-sync` supports two outbound webhook setups. Choose one when creating the Discord connection.
 
 #### Option A — managed webhook (default)
@@ -226,19 +231,33 @@ than being replaced by P-numbers. An unambiguous two-word pseudonym stem,
 such as `Rust Ocean`, is also accepted. Plain `@name` provider mentions
 remain unchanged.
 
-The bridge attempts a native mention only when the destination adapter can
-verify the referenced member: privacy-safe LID membership for WhatsApp,
-current guild membership for Discord, and Bot API membership for Telegram.
-Regardless of native mention support, destination messages render input
-`@{group2/P1}` as `@group2/Rust Ocean Q7M5K` in anonymized
-destinations or as `@group2/Alice Smith` in non-anonymized destinations
-when a transient name is known. P-numbers remain the fallback if an alias
-cannot be derived. Unresolved real names are masked in anonymized routes.
-Pseudonyms and handles can resolve after restart from HMAC-only participant
-records; real-name lookup requires a fresh observed message. Native
-notifications are attempted only within the addressed group. Member addresses are
-learned from accepted messages, not by enumerating all members; unknown
-participants cannot be addressed until observed. Telegram MTProto presently
-uses textual references only; message edits do not generate new native pings.
-Use `\\@{group2/P1}` to send a literal reference without requesting a mention.
+Each destination independently attempts a native mention when the adapter can
+verify the addressed person's membership there, including groups other than
+the group named in the reference. WhatsApp text and image/video/document
+captions use a live LID-only roster; Discord checks current guild membership, channel access and private-thread
+membership with an explicit allowed-user list; Telegram Bot API checks chat
+membership. References stay exactly as posted, including braces and the
+chosen name or alias, wherever a native mention is unavailable. Explicit
+braced references may tag verified local Discord members even with
+`anonymizeToDiscord` enabled; the native chip identifies that Discord account.
+Sender and ordinary provider-native mention anonymization remain unchanged;
+user-authored braced references are not automatically redacted.
+
+Pseudonyms and handles resolve after restart from HMAC-only participant records;
+full pseudonyms stay stable while `IDENTITY_SECRET` and the provider identity
+stay unchanged. Real names are kept only in memory. After restart, WhatsApp
+and Discord can rebuild a missing name lookup through the referenced group's
+adapter, limited to that group's registered HMAC actors and unique matching
+provider metadata. This allows references copied from older forwarded
+messages to work without another post when that metadata is available.
+Addresses are learned from accepted messages, rather than a member picker or
+roster autocomplete.
+Discord and Telegram need an observed native identity in the destination
+adapter's memory. Discord learns IDs from live messages, accepted history
+recovery, or a bounded on-demand guild-roster lookup matched by HMAC when
+**Server Members Intent** is available. Failed lookups retain literal text.
+Identities are never linked across providers by name.
+Telegram MTProto and message edits retain literal references without creating
+native mentions.
+Use `\@{group2/P1}` to send a literal reference without requesting a mention.
 

@@ -108,34 +108,56 @@ A reference resolves only for an observed participant in an endpoint within
 the sender's sync set. Stable `Pn` handles and full deterministic pseudonyms
 both work across restarts because they use persisted HMAC actor records, not
 personal data. A two-word alias stem (e.g. `Rust Ocean`) is also accepted
-only when unique within that group. Real-name lookup uses transient observed
-names and requires re-observation after restart. Ambiguous names or alias
-stems never trigger a native tag. The router never parses forwarded
+only when unique within that group. Full pseudonyms remain stable when
+`IDENTITY_SECRET` and the provider identity stay the same. Real-name lookup
+first uses transient observed names. On a cache miss after restart, WhatsApp
+and Discord ask the referenced group's adapter for a unique exact name/alias
+match among that group's registered HMAC actors. WhatsApp uses its live source
+roster and existing provider-owned contact metadata; Discord searches current
+guild members and verifies access to the referenced source channel. Readable
+names remain transient and native IDs stay inside the adapters. If metadata
+is unavailable, the reference stays literal. Ambiguous names or alias stems
+never trigger a native tag. The router never parses forwarded
 attribution headers or guesses a native identity.
 
-For an authorized reference, only destinations that verify a suitable native
-identity and membership may generate a provider mention: WhatsApp requires a
-known LID to avoid leaking phone numbers; Discord uses a transient observed
-user ID and a current guild-member lookup with an explicit allowed-user
-allowlist, but never emits identity-revealing native pings in an
-anonymized Discord destination; Telegram Bot API uses transient observed user
-IDs with GetChatMember and a safe inline mention. Telegram MTProto does not yet emit native cross-group mentions, but renders
-a non-notifying textual reference. **Every destination formats braced input**:
-with anonymization enabled for that destination, `Hi @{group2/Alice Smith}`
-becomes `Hi @group2/Rust Ocean Q7M5K` when resolved, using the participant's
-existing deterministic pseudonym. Input `@{group2/P1}` produces the same
-anonymized display; it does not overwrite sender pseudonyms. With
-anonymization disabled the reference becomes `Hi @group2/Alice Smith` when
-the observed real name is available, otherwise `Hi @group2/P1`. An
-unrecognized `Pn` remains a textual `@group/Pn` without
-any notification; unresolved names on anonymized destinations are masked as
-`@group/unknown`. Textual references do not contain braces. A non-anonymized
-WhatsApp destination may use a live contact name when the referenced group is
-on the same connection. Native notification remains best effort and is never
-guaranteed by the bridge.
+For an authorized reference, each destination independently verifies the
+addressed person's native identity and current membership. The group in the
+address selects the participant; it does not limit which destination groups
+can mention them. WhatsApp requires a known LID and writes both the native
+`@<LID user component>` token and matching `MentionedJID` metadata, without
+exposing a phone number. This also applies to image/video/document captions
+and audio/sticker text companions. Discord uses an observed native ID, current guild
+membership and channel access checks, plus private-thread membership where
+applicable, and an explicit allowed-user list. An explicit braced reference
+may tag a verified local Discord member even on an anonymized route; the chip
+identifies that native Discord account. Sender and ordinary provider-native
+mention anonymization remain unchanged. Telegram Bot API checks `GetChatMember`
+and emits an HTML inline mention only for a current member.
 
-Incoming native provider mentions still follow their existing separate
+Every other destination keeps the reference exactly as posted. For example,
+`Hi @{group2/Alice Smith}` stays `Hi @{group2/Alice Smith}` when Alice is
+absent or cannot be safely resolved there. Pseudonym and `Pn` inputs likewise
+retain their original spelling and braces. Unknown, ambiguous, unauthorized,
+and escaped references never trigger a mention. Anonymized routes also retain
+literal user-authored braced references; they do not substitute pseudonyms or
+mask names in those literals. Existing sender and structured provider-native
+mention anonymization remains unchanged.
+
+Discord and Telegram Bot API hold native IDs only in adapter memory, so a
+native identity must be observed by that adapter after restart. Discord
+restores this lookup from live messages and accepted channel/thread history
+recovery. It can also resolve a cold cache by matching HMAC actors against
+paginated live guild identities under a five-second timeout, when Server
+Members Intent permits that roster REST lookup. Real-name lookup can instead
+rebuild a binding through the referenced group's member search, restricted to
+registered HMAC actors and verified source-channel members. Display names
+never link identities across providers. Lookup failures preserve literal text. No identities
+are linked across providers by matching names. WhatsApp can verify identity
+from its live destination roster. Native notification remains best effort.
+Telegram MTProto and edits keep literal reference text and do not create new
+native mentions. Autocomplete and a participant picker are outside this
+experiment's scope.
+
+Incoming native provider mentions follow their existing separate
 normalization/presentation path. Cross references are not persisted with
-message content or native IDs; existing edit APIs forward reference text but
-cannot yet add new native mentions on edit.
-
+message content or native IDs.

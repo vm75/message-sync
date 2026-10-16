@@ -123,15 +123,33 @@ AI agents MUST keep all repository documentation in sync with the implementation
 
 ## Cross-group reference invariants
 
-Cross-group participant syntax is an explicit `@{endpoint/Pn}` namespace, not
-provider-native `@user`. The Pn ordinal belongs to one endpoint, not to
-a global person identity or a display name. Only resolve inside the sender's
-configured sync set. Use the durable `participant_addresses` table, which
-contains only endpoint aliases and HMAC actor IDs; never insert display names,
-phone numbers, raw provider identities, or message content. Native identity
-lookup is owned by each destination adapter, and falls back to literal text
-without guessing when unavailable or unsafe. WhatsApp mentions must not expose
-a PN. Discord and Telegram Bot API hold observed IDs in volatile memory only,
-and must check destination membership before pinging. Edits and MTProto use
-text-only fallback until native support is deliberately implemented and tested.
-
+Cross-group participant syntax is an explicit `@{endpoint/name-or-alias}`
+namespace, separate from provider-native `@user`. Accept unambiguous observed
+names, deterministic pseudonyms and unique pseudonym stems, plus durable `Pn`
+fallback handles. The Pn ordinal belongs to one endpoint, not a global person
+identity or display name. Resolve only inside the sender's configured sync set.
+Use `participant_addresses` for endpoint aliases and HMAC actor IDs; never
+persist names, phone numbers, raw provider identities or message content.
+Each destination independently verifies membership before rendering a native
+mention, including destinations other than the one named in the reference.
+Preserve the original authored token whenever native rendering is unavailable;
+this includes literal references on anonymized routes. Native identity lookup
+belongs to destination adapters, without cross-provider identity guessing.
+When a real-name cache is empty, the registry may ask the referenced group's
+adapter to resolve the label against registered HMAC actors and provider-owned
+metadata. Require an exact unique name/alias match within that group and
+source-membership verification. Keep names transient, do not query protocol
+SQLite directly, and reject any returned actor outside the supplied registry.
+WhatsApp requires matching LID token text and metadata and must not expose a
+PN. Discord and Telegram Bot API keep observed IDs in volatile memory only.
+Discord must verify channel access and private-thread membership and use an
+explicit user allowlist. Explicit braced references may tag verified local
+Discord members on anonymized routes; sender and ordinary provider-mention
+anonymization remain unchanged. Live ingress and accepted history recovery
+both restore Discord native-ID observations without persistence. On a cache
+miss, Discord may compare the authorized HMAC actor against paginated current
+guild identities with a bounded timeout; never select by display name.
+Roster lookup requires Server Members Intent and falls back to literal text
+when unavailable. Do not add a privileged gateway intent as a side effect.
+Edits and MTProto use literal text until native support is deliberately
+implemented and tested. Autocomplete and participant pickers are out of scope.
