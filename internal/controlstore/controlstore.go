@@ -182,6 +182,11 @@ func Open(ctx context.Context, path string) (*Store, error) {
 			return nil, fmt.Errorf("initialize control schema: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE transport_connections ADD COLUMN whatsapp_device_name TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return nil, fmt.Errorf("migrate WhatsApp device name: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("commit control schema initialization: %w", err)

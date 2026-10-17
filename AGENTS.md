@@ -78,7 +78,9 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
-- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. When `anonymizeToDiscord` is enabled on a sync set, Discord destinations use deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, strip phone numbers, and pseudonymize mentions and quotes, while non-Discord destinations retain normal push names. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. When `anonymizeToDiscord` is enabled on a sync set, Discord destinations use deterministic pseudonyms (e.g. `Silent Falcon`) derived from HMAC actor IDs, strip phone numbers, and pseudonymize mentions and quotes, while non-Discord destinations retain normal push names. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Discriminators are derived for every actor independently of anonymization. Per-sync-set `showDiscriminator` defaults to false. `codeLength` accepts 5–10 characters (8 for new sets; upgrades preserve 5). Enabling display appends the selected code across that set’s forwarded sender presentation. Keep full historical pseudonyms valid for addressing, preserve actor IDs, and reserve suffix space in Discord webhook truncation.
+- Sync-set settings use a shared create/edit modal. `membershipReviewEnabled` is a persisted per-set UI flag, not a browser preference or authorization boundary. Save tracks actual draft differences; preserve existing membership processing and private control-store data.
 - Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
 ## SQLite and Go conventions
@@ -125,8 +127,11 @@ AI agents MUST keep all repository documentation in sync with the implementation
 
 Cross-group participant syntax is an explicit `@{endpoint/name-or-alias}`
 namespace, separate from provider-native `@user`. Accept unambiguous observed
-names, deterministic pseudonyms and unique pseudonym stems, plus durable `Pn`
-fallback handles. The Pn ordinal belongs to one endpoint, not a global person
+names, deterministic pseudonyms and unique pseudonym stems, case-insensitive
+discriminator-only labels, plus durable `Pn`
+fallback handles. Code/name/handle collisions must remain literal; never let
+display settings gate addressing. Do not persist discriminator lookup tables.
+The Pn ordinal belongs to one endpoint, not a global person
 identity or display name. Resolve only inside the sender's configured sync set.
 Use `participant_addresses` for endpoint aliases and HMAC actor IDs; never
 persist names, phone numbers, raw provider identities or message content.

@@ -102,7 +102,8 @@ type mtprotoLiveClient interface {
 }
 
 type mtprotoLiveState struct {
-	mu sync.RWMutex
+	endpointSettings map[string]config.SyncSetSettings
+	mu               sync.RWMutex
 
 	connectionID  string
 	hasher        *identity.Hasher
@@ -125,6 +126,7 @@ type mtprotoLiveState struct {
 func newMTProtoLiveState(opts Options) (*mtprotoLiveState, error) {
 	l := &mtprotoLiveState{
 		connectionID:     strings.TrimSpace(opts.ConnectionID),
+		endpointSettings: opts.EndpointSettings,
 		hasher:           opts.Hasher,
 		usernameMode:     opts.UsernameMode,
 		mediaEnabled:     opts.MediaEnabled,
@@ -143,7 +145,7 @@ func newMTProtoLiveState(opts Options) (*mtprotoLiveState, error) {
 		if !opts.UsernameMode.IsValid() {
 			return nil, errors.New("username mode must be push_name or hash")
 		}
-		normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID)
+		normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID, opts.EndpointSettings)
 		if err != nil {
 			return nil, err
 		}
@@ -171,13 +173,14 @@ func (l *mtprotoLiveState) updateConfig(cfg *config.Config, connectionID string)
 	var normalizer *Normalizer
 	var err error
 	if l.hasher != nil {
-		normalizer, err = NewNormalizerWithConnection(chatIDs, l.hasher, cfg.Identity.UsernameMode, connectionID)
+		normalizer, err = NewNormalizerWithConnection(chatIDs, l.hasher, cfg.LegacySettings().UsernameMode, connectionID, cfg.EndpointSettings(connectionID))
 		if err != nil {
 			return err
 		}
 	}
 	l.mu.Lock()
 	l.normalizer = normalizer
+	l.endpointSettings = cfg.EndpointSettings(connectionID)
 	l.usernameMode = cfg.Identity.UsernameMode
 	l.mediaEnabled = cfg.Media.Enabled
 	l.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
@@ -739,6 +742,10 @@ func (a *MTProtoAdapter) normalizeMTProtoMessage(ctx context.Context, entities t
 	if !ok {
 		return
 	}
+	if policy, ok := normalizer.endpointSettings[string(incoming.Endpoint)]; ok {
+		mediaEnabled = policy.Media.Enabled
+		mediaMax = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	incoming.FromSelf = msg.Out
 	topicID, _ := mtprotoTopicAndReply(msg)
 	if incoming.ChildScope != nil && topicID > 0 {
@@ -942,7 +949,13 @@ func (a *MTProtoAdapter) handleMTProtoReactionUpdate(ctx context.Context, update
 			child = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(topicID), Label: a.live.topicLabel(strconv.FormatInt(remote, 10), topicID)}
 		}
 		displayName := ""
-		if a.live.usernameMode == config.UsernameModePushName {
+		a.live.mu.RLock()
+		mode := a.live.usernameMode
+		if policy, ok := a.live.endpointSettings[string(endpoint)]; ok {
+			mode = policy.UsernameMode
+		}
+		a.live.mu.RUnlock()
+		if mode == config.UsernameModePushName {
 			displayName = event.DisplayName
 		}
 		a.emitMTProto(transport.Incoming{
@@ -1130,6 +1143,10 @@ func (a *MTProtoAdapter) sendMTProto(ctx context.Context, outgoing transport.Out
 	case "image", "video", "audio", "document", "sticker":
 		a.live.mu.RLock()
 		enabled, maxBytes := a.live.mediaEnabled, a.live.mediaMaxBytes
+		if policy, ok := a.live.endpointSettings[string(outgoing.Endpoint)]; ok {
+			enabled = policy.Media.Enabled
+			maxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+		}
 		a.live.mu.RUnlock()
 		if !enabled {
 			return transport.MessageRef{}, errors.New("Telegram media forwarding is disabled")

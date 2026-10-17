@@ -407,3 +407,22 @@ func TestNormalizeIgnoresContactsLocationsAndVenuesEvenWithText(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizerIsolatesSyncSetUsernamePolicies(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, hash := config.DefaultSyncSetSettings(), config.DefaultSyncSetSettings()
+	hash.UsernameMode = config.UsernameModeHash
+	normalizer, err := NewNormalizer(map[string]string{"push": strconv.FormatInt(testGroupID, 10), "hash": strconv.FormatInt(testSupergroupID, 10)}, hasher, config.UsernameModePushName, map[string]config.SyncSetSettings{"push": push, "hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chat := range []int64{testGroupID, testSupergroupID, testGroupID} {
+		incoming, ok := normalizer.NormalizeMessage(testMessage(chat, models.ChatTypeSupergroup), testBotUserID)
+		if !ok || (incoming.Sender.DisplayName != "") != (chat == testGroupID) {
+			t.Fatalf("policy leaked for %d: %+v", chat, incoming)
+		}
+	}
+}

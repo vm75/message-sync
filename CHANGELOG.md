@@ -3,6 +3,30 @@
 
 ### Unreleased — cross-group participant addressing
 
+- Hide discriminator suffixes by default, including anonymized Discord names.
+  Add per-sync-set `showDiscriminator`, default false,
+  to show the stable suffix across forwarded attribution.
+  Preserve full historical pseudonyms and actor identities.
+- Move routing/runtime policies into sync-set settings, with live reload and
+  independent media, recovery, retention, polls, local-prefix and child-label
+  policies. Preserve existing settings during initialization; retire the global
+  runtime `/api/config` endpoint with HTTP 410.
+- Add per-sync-set discriminator `codeLength` (5–10; 8 for new sets, preserve 5
+  on upgrade). Keep historical supported-length addresses working.
+- Move WhatsApp linked-device names to connections, with one-time import and
+  editing for existing connections. Keep accounts and admin security global.
+- Move runtime, privacy and membership settings into an **Edit settings** modal
+  with consistent section spacing. Enable Save only for changed drafts, disable
+  it on revert/save, and show saving/saved/error feedback without clean-state banners.
+- Make membership review visibility a saved per-sync-set setting; replace the
+  browser-only switch and scope review requests/pipelines to the selected set.
+- Preserve chip removal/paste tracking and report runtime reload failures.
+- Enable case-insensitive `@{group/discriminator}` addressing independently of
+  anonymization and display, using existing HMAC participant records after
+  restart. Reject ambiguous code/name/handle matches without guessing.
+- Upgrade the display setting idempotently without storing new participant
+  identity data; cover API persistence, reload, native payloads and collisions.
+
 - Add persistent per-endpoint HMAC-backed `Pn` handles and explicit
   `@{endpoint/name-or-alias}` references, including observed display names,
   deterministic pseudonyms and unique alias stems, with sync-set isolation.

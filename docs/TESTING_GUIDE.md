@@ -382,7 +382,7 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 
 ### Scenario 8: Source-local Messages
 
-- [ ] In authenticated Settings, set a global Local-only message prefix (for example `//local `); leave it empty to disable.
+- [ ] In a sync set’s settings, set a Local-only message prefix (for example `//local `); leave it empty to disable.
 - [ ] Send a new text, captioned media message, and representable poll beginning exactly with the prefix from each configured parent and, where available, a Discord thread/forum post and Telegram topic.
   - **Verify**: each remains only in its source conversation, no destination delivery is queued, and captioned media is not downloaded.
 - [ ] Restart/replay the service, edit a suppressed message to remove the prefix, and exercise delete/reaction.
@@ -425,7 +425,7 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 ### Scenario 14: Route-Aware Discord Anonymization (`anonymizeToDiscord`)
 - [ ] In the **Sync Sets** view, edit your sync set to enable **Anonymize sender presentation when forwarding to Discord** and save.
 - [ ] Send a message from WhatsApp: `Hello from WhatsApp!`.
-  - **Verify Discord**: The message attribution uses a deterministic pseudonym (e.g., `*_wa_test/Silent Falcon Q7M_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
+  - **Verify Discord**: The message attribution uses a deterministic pseudonym (e.g., `*_wa_test/Silent Falcon_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
   - **Verify Telegram**: The message attribution retains the real WhatsApp push name (e.g., `*_wa_test/Alice_*: Hello from WhatsApp!`).
 - [ ] Send a message from WhatsApp containing a mention and reply quote.
   - **Verify Discord**: Mentions are pseudonymized, and quoted text has real sender names stripped.
@@ -475,7 +475,7 @@ The analyzer is disabled unless `OPENROUTER_ALLOW_TRAINING` is exactly `false`. 
 
 ### Configure the test application
 
-1. In **Settings**, enable the browser-local **Membership review** preference (marked as Experimental) so the Membership navigation and sync-set application controls are visible.
+1. Open the relevant sync set, choose **Edit settings**, enable **Membership review for this sync set** (Experimental), and save. Its application controls appear in the same modal; **Review membership** opens its requests and pipelines. The setting persists across browsers.
 2. Create a dedicated sync set with a configured WhatsApp or Discord endpoint.
 3. Open that sync set's **Membership Application** controls, require evidence, and configure bounded instructions. For example:
 
@@ -581,7 +581,15 @@ You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_
 
 Have participant A post an ordinary message in WhatsApp group2; in an
 anonymized Discord destination note the word-based author pseudonym,
-such as `group2/Rust Ocean Q7M5K`.
+such as `group2/Rust Ocean`. Verify the discriminator is hidden by default.
+Enable **Sync Sets → select set → Edit settings → Show participant discriminator in this sync set**
+and have A post again: normal destinations should show `group2/Alice Q7M5K`
+and anonymized Discord should show `group2/Rust Ocean Q7M5K` (use the actual
+names/code). The toggle also accepts `PUT /api/sync-sets/{id}` with
+`{"settings":{"showDiscriminator":true}}` or `{"settings":{"showDiscriminator":false}}`. It must persist
+through restart. With display enabled, check media captions/companions,
+thread/topic attribution, polls, edits and reaction fallback names as well.
+Long Discord webhook names must retain the complete discriminator.
 From another configured group in the same sync set send
 `Hi @{group2/Rust Ocean Q7M5K}, I can help` and then `Hi @{group2/P1}`.
 Check WhatsApp group2 and another bridged WhatsApp group containing A: both
@@ -589,10 +597,14 @@ should show native mention chips when A has a resolvable LID, without exposing
 a phone number. In a bridged group without A, the reference must remain exactly
 as posted, including its braces and the chosen alias or handle. Also send
 `@{group2/Rust Ocean}` (resolves only if unambiguous) and
-`@{group2/<observed name>}`. Confirm repeated references all render, while a
+`@{group2/<observed name>}`. Also address `@{group2/Q7M5K}` and its lowercase
+form using the observed code. Turn display off and repeat the code reference;
+addressing must work in either state with anonymization both on and off. The
+setting affects new bridge attribution, not provider nicknames, native mention
+labels or literal reference text. Confirm repeated references all render, while a
 backslash-escaped occurrence stays literal and does not ping.
 
-Restart the server and verify that full pseudonyms and stable handles still
+Restart the server and verify that discriminators, full pseudonyms and stable handles still
 resolve without storing real names. Repeat with a Discord or Telegram Bot API
 member who has posted since process start; check both the addressed group and
 another destination containing that same provider account. Revoke Discord
@@ -615,3 +627,35 @@ identity secret and provider identity remain unchanged. Unknown, ambiguous, esca
 and out-of-sync-set references cannot trigger notifications. Verify that no
 phone number, native user ID or authored message content appears in logs or
 sync.db. MTProto and edits keep literal reference text.
+
+### Scoped settings and save feedback
+
+- Create two sync sets sharing one connection, with different code lengths,
+  media/recovery/retention policies, poll triggers and local prefixes. Save,
+  reload the page and restart the bridge; verify each set retains its policies.
+- New sets default to code length 8 and hidden codes. Existing sets preserve
+  former policies and length 5 on upgrade. Enable display and change length;
+  verify the earlier code still addresses the same member if unambiguous.
+- Edit settings, privacy and membership fields; remove a poll/local-prefix chip
+  and paste multiple tokens. Each change must enable Save without a clean-state or unsaved-state banner. Reverting all changes must disable Save. Save must
+  show “Saving changes…” then a saved confirmation; a failed request must show
+  an error while preserving pending edits for retry.
+- Create a WhatsApp connection and edit an existing connection's Device name.
+  Confirm one name is shared by its sync sets and retained after restart; the
+  linked-device display changes when linking. Global Settings contains account
+  security. Membership review is enabled per sync set in its settings modal. `/api/config` must return HTTP 410.
+- Increase a set's retention and verify the next periodic prune uses the saved
+  value without restart. Move an endpoint: old canonical history retains its
+  original set's policy. Deleted-endpoint suppression markers expire at 90 days.
+
+- Verify every sync-set runtime/privacy/membership setting appears only in the
+  **Edit settings** modal, with consistent card gaps and interior padding. Check
+  at desktop and mobile widths: body scrolls while the Save footer stays usable.
+- Initially Save is disabled. Change and revert text, numbers, checkboxes and
+  chips; Save tracks the actual draft. After save it is disabled again. No
+  “No unsaved changes” banner should appear.
+- Enable membership review for one set and leave another disabled. Reload and
+  restart: only the enabled set offers Review membership. Enable the second,
+  switch the review selector, and confirm each list contains only that set’s
+  requests/pipelines. Test status filters together with set filtering; switch
+  while a request is loading and ensure stale responses do not replace the list.

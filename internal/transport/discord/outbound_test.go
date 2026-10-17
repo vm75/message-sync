@@ -777,3 +777,47 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 		})
 	}
 }
+
+func TestWebhookNamePreservesDiscriminatorOnLongAttribution(t *testing.T) {
+	for _, name := range []string{strings.Repeat("x", 100), strings.Repeat("界", 100)} {
+		got := sanitizeWebhookUsernameWithDiscriminator("group/"+name, "7WCUX")
+		if len([]rune(got)) != maxWebhookUsernameRunes || !strings.HasSuffix(got, " 7WCUX") || !strings.HasPrefix(got, "group/") {
+			t.Fatalf("truncated attribution = %q", got)
+		}
+	}
+}
+
+func TestPollAttributionKeepsDiscriminatorAndFallbackName(t *testing.T) {
+	for _, name := range []string{"Alice", strings.Repeat("界", 100), ""} {
+		sender := transport.Sender{DisplayName: name, OpaqueID: "u_abcdefghij", Discriminator: "7WCUX"}
+		label := "group/" + name
+		if name == "" {
+			label = "group/" + sender.OpaqueID
+		}
+		got := discordPollAttribution(transport.Outgoing{OriginEndpoint: "group", Endpoint: "destination", Sender: sender, SenderLabel: label + " 7WCUX"})
+		if !strings.HasSuffix(got, " 7WCUX:") || strings.Count(got, "7WCUX") != 1 || len([]rune(got)) > maxWebhookUsernameRunes+1 {
+			t.Fatalf("poll attribution = %q", got)
+		}
+		if name == "" && !strings.Contains(got, sender.OpaqueID) {
+			t.Fatalf("lost fallback identity: %q", got)
+		}
+	}
+}
+
+func TestDiscriminatorPreservesWebhookNameFallback(t *testing.T) {
+	for _, code := range []string{"", "7WCUX"} {
+		webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+		adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+		_, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "discord", OriginEndpoint: "source", Sender: transport.Sender{DisplayName: "\x00", OpaqueID: "u_abcdefghij", Discriminator: code}, Kind: "text", SourceText: "hello"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "source/u_abcdefghij"
+		if code != "" {
+			want += " " + code
+		}
+		if got := webhook.executed[0].Username; got != want {
+			t.Fatalf("fallback name = %q, want %q", got, want)
+		}
+	}
+}

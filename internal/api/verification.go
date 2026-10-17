@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/vm75/message-sync/internal/verification"
 	"io"
 	"net/http"
 	"net/mail"
@@ -18,6 +17,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/verification"
 )
 
 var verificationPhonePattern = regexp.MustCompile(`^\+?[0-9]{7,20}$`)
@@ -63,7 +65,24 @@ func (s *Server) validatePipeline(r *http.Request, in PipelineInput) error {
 }
 
 func (s *Server) handleListPipelines(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.controlDB.QueryContext(r.Context(), `SELECT id,public_token,label,target_transport,endpoint_alias,COALESCE(discord_role_id,''),enabled FROM verification_pipelines ORDER BY created_at`)
+	syncSetID := r.URL.Query().Get("syncSetId")
+	if syncSetID != "" {
+		if err := config.ValidateSyncSetID(syncSetID); err != nil {
+			WriteError(w, 400, "invalid sync set filter")
+			return
+		}
+	}
+	condition, args, err := s.membershipPipelineScope(r.Context(), syncSetID)
+	if err != nil {
+		WriteError(w, 500, "failed to read sync set scope")
+		return
+	}
+	query := `SELECT id,public_token,label,target_transport,endpoint_alias,COALESCE(discord_role_id,''),enabled FROM verification_pipelines`
+	if condition != "" {
+		query += " WHERE " + condition
+	}
+	query += " ORDER BY created_at"
+	rows, err := s.controlDB.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		WriteError(w, 500, "failed to list pipelines")
 		return
@@ -674,6 +693,22 @@ type MembershipRequestView struct {
 func (s *Server) handleListMembershipRequests(w http.ResponseWriter, r *http.Request) {
 	query := `SELECT id,pipeline_id,status,applicant_work_email,COALESCE(applicant_whatsapp_phone,''),COALESCE(applicant_discord_user_id,''),COALESCE(linkedin_url,''),COALESCE(evidence_reference,''),verification_state,fulfillment_state,COALESCE(fulfillment_failure_class,''),created_at FROM membership_requests WHERE 1=1`
 	args := []any{}
+	syncSetID := r.URL.Query().Get("syncSetId")
+	if syncSetID != "" {
+		if err := config.ValidateSyncSetID(syncSetID); err != nil {
+			WriteError(w, 400, "invalid sync set filter")
+			return
+		}
+	}
+	condition, scopeArgs, err := s.membershipPipelineScope(r.Context(), syncSetID)
+	if err != nil {
+		WriteError(w, 500, "failed to read sync set scope")
+		return
+	}
+	if condition != "" {
+		query += " AND pipeline_id IN (SELECT id FROM verification_pipelines WHERE " + condition + ")"
+		args = append(args, scopeArgs...)
+	}
 	if pipeline := r.URL.Query().Get("pipeline"); pipeline != "" {
 		query += " AND pipeline_id=?"
 		args = append(args, pipeline)

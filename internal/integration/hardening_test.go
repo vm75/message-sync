@@ -1107,7 +1107,7 @@ func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
 	}
 
 	// Discord destination must NOT contain canary PII in any user-facing field
-	pseudonym := identity.Pseudonym("u_abcdefghij")
+	pseudonym := identity.PseudonymName("u_abcdefghij")
 	dcMsg := dcSent[0]
 	for _, forbidden := range []string{canaryRealName, canaryPhone, "15551234567", canaryMentionName} {
 		if strings.Contains(dcMsg.Text, forbidden) {

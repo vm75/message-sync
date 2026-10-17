@@ -533,3 +533,63 @@ func TestSyncSetAnonymizeToDiscordPersistenceAndDefaults(t *testing.T) {
 		t.Fatal("expected loaded AnonymizeToDiscord to be false")
 	}
 }
+
+func TestSaveDiscriminatorSetting(t *testing.T) {
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg, err := LoadRaw(ctx, db.DB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShowDiscriminator {
+		t.Fatal("discriminator must default to hidden")
+	}
+	valid := validConfig()
+	cfg = &valid
+	for _, show := range []bool{true, false} {
+		cfg.ShowDiscriminator = show
+		if err := Save(ctx, db.DB(), cfg); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err = LoadRaw(ctx, db.DB())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.ShowDiscriminator != show {
+			t.Fatalf("round-trip show=%t, want %t", cfg.ShowDiscriminator, show)
+		}
+	}
+}
+
+func TestSavePreservesOnlyPerSetFriendlyLabels(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	cfg := validConfig()
+	friendly, opaque := DefaultSyncSetSettings(), DefaultSyncSetSettings()
+	friendly.ChildContextDisplayMode = ChildContextDisplayFriendly
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "3@g.us"}
+	cfg.Endpoints["d"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "4@g.us"}
+	cfg.SyncSets = []SyncSet{{ID: "work", Endpoints: []string{"a", "c"}, Settings: &friendly}, {ID: "family", Endpoints: []string{"b", "d"}, Settings: &opaque}}
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, ep := range []string{"a", "b"} {
+		if err := st.UpsertChildScopeLabel(ctx, ep, "discord_thread", "thread-1", "Synthetic"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.DB().QueryRow(`SELECT count(*) FROM child_scope_labels WHERE endpoint_id='a'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("friendly labels=%d err=%v", count, err)
+	}
+	if err := st.DB().QueryRow(`SELECT count(*) FROM child_scope_labels WHERE endpoint_id='b'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("opaque labels=%d err=%v", count, err)
+	}
+}

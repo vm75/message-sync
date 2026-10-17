@@ -61,9 +61,18 @@ type ChildScope struct {
 type ChildScopeLabelObserver func(context.Context, EndpointID, ChildScope)
 
 type Sender struct {
-	DisplayName string // transient only; never persist
-	PhoneNumber string // transient only; never persist
-	OpaqueID    string // HMAC-derived application identity
+	Discriminator string // derived presentation suffix; empty when hidden
+	DisplayName   string // transient only; never persist
+	PhoneNumber   string // transient only; never persist
+	OpaqueID      string // HMAC-derived application identity
+}
+
+// NameWithDiscriminator formats a presentation name without changing identity.
+func (s Sender) NameWithDiscriminator(name string) string {
+	if name == "" || s.Discriminator == "" {
+		return name
+	}
+	return name + " " + s.Discriminator
 }
 
 type Mention struct {
@@ -165,4 +174,9 @@ type Adapter interface {
 	Edit(context.Context, MessageRef, string) error
 	Delete(context.Context, MessageRef) error
 	Close() error
+}
+
+// RecoveryPolicyProvider supplies the policy owned by a recovery stream's sync set.
+type RecoveryPolicyProvider interface {
+	RecoveryPolicy(string) (bool, int, time.Duration)
 }

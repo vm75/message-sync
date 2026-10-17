@@ -71,7 +71,7 @@ func (a *Adapter) Recover(ctx context.Context, request transport.RecoveryRequest
 	if maxEvents <= 0 {
 		return nil
 	}
-	if maxEvents > 200 {
+	if maxEvents > 200 && len(normalizer.endpointSettings) == 0 {
 		maxEvents = 200
 	}
 	limit := maxEvents
@@ -271,4 +271,13 @@ func (a *Adapter) setHistoryStatus(alias string, status HistoryStatus) {
 	}
 	a.historyStatus[alias] = status
 	a.mu.Unlock()
+}
+
+func (a *Adapter) RecoveryPolicy(stream string) (bool, int, time.Duration) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if policy, ok := a.endpointSettings[stream]; ok {
+		return policy.Recovery.Enabled, policy.Recovery.MaxMessagesPerGroup, time.Duration(policy.Recovery.MaxAgeHours) * time.Hour
+	}
+	return true, 200, 24 * time.Hour
 }

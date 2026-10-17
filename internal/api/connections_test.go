@@ -652,3 +652,41 @@ func TestConnections_DiscordExplicitWebhookRequiresURLAndChannel(t *testing.T) {
 		}
 	}
 }
+
+func TestConnectionDeviceNamesDefaultValidateAndUpdate(t *testing.T) {
+	srv, _, _, admin, _ := setupConnectionsTestEnv(t)
+	for _, tc := range []struct {
+		body   string
+		status int
+	}{
+		{`{"id":"wa-new","transport":"whatsapp","label":"Synthetic"}`, 201},
+		{`{"id":"wa-invalid","transport":"whatsapp","label":"Synthetic","whatsappDeviceName":"bad\nname"}`, 400},
+		{`{"id":"dc-invalid","transport":"discord","label":"Synthetic","token":"fake","whatsappDeviceName":"custom"}`, 400},
+	} {
+		rec := request(t, srv, "POST", "/api/connections", json.RawMessage(tc.body), admin)
+		if rec.Code != tc.status {
+			t.Fatalf("create status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		if tc.status == 201 {
+			var dto ConnectionDTO
+			if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+				t.Fatal(err)
+			}
+			if dto.WhatsAppDeviceName != "message-sync" {
+				t.Fatalf("default name=%q", dto.WhatsAppDeviceName)
+			}
+		}
+	}
+	rec := request(t, srv, "PUT", "/api/connections/wa-new", json.RawMessage(`{"whatsappDeviceName":"Shared linked name"}`), admin)
+	if rec.Code != 200 {
+		t.Fatalf("update=%d %s", rec.Code, rec.Body.String())
+	}
+	rec = request(t, srv, "GET", "/api/connections/wa-new", nil, admin)
+	var dto ConnectionDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+		t.Fatal(err)
+	}
+	if dto.WhatsAppDeviceName != "Shared linked name" {
+		t.Fatalf("name not persisted: %+v", dto)
+	}
+}

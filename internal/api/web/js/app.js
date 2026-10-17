@@ -210,157 +210,6 @@
     if (saveText) saveText.textContent = 'Save changes';
   }
 
-  function membershipSourceFields() {
-    return {
-      instructions: document.getElementById('membership-applicant-instructions'),
-      guidance: document.getElementById('membership-reviewer-guidance'),
-      evidence: document.getElementById('membership-evidence-required'),
-      customFields: document.getElementById('membership-custom-fields'),
-    };
-  }
-
-  function syncMembershipProxyToSource(panel) {
-    if (!panel) return;
-    const source = membershipSourceFields();
-    const instructions = panel.querySelector('[data-membership-field="instructions"]');
-    const guidance = panel.querySelector('[data-membership-field="guidance"]');
-    const evidence = panel.querySelector('[data-membership-field="evidence"]');
-    const customFields = panel.querySelector('[data-membership-field="customFields"]');
-
-    if (source.instructions && instructions) source.instructions.value = instructions.value;
-    if (source.guidance && guidance) source.guidance.value = guidance.value;
-    if (source.evidence && evidence) source.evidence.checked = evidence.checked;
-    if (source.customFields && customFields) source.customFields.value = customFields.value;
-  }
-
-  function populateMembershipProxy(panel, cfg) {
-    if (!panel) return;
-    const instructions = panel.querySelector('[data-membership-field="instructions"]');
-    const guidance = panel.querySelector('[data-membership-field="guidance"]');
-    const evidence = panel.querySelector('[data-membership-field="evidence"]');
-    const customFields = panel.querySelector('[data-membership-field="customFields"]');
-
-    if (instructions) instructions.value = cfg?.applicantInstructions || '';
-    if (guidance) guidance.value = cfg?.reviewerGuidance || '';
-    if (evidence) evidence.checked = !!cfg?.evidenceRequired;
-    if (customFields) customFields.value = JSON.stringify(cfg?.customFields || [], null, 2);
-    syncMembershipProxyToSource(panel);
-  }
-
-  function buildPrivacyPanel(item) {
-    const id = item.getAttribute('data-id') || '';
-    const panel = document.createElement('section');
-    panel.className = 'syncset-privacy-panel syncset-feature-panel';
-    panel.innerHTML = `
-      <div class="syncset-membership-header">
-        <span class="syncset-membership-icon" aria-hidden="true" style="color:var(--discord-color);background:var(--discord-muted);">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-        </span>
-        <div class="syncset-membership-heading">
-          <div class="syncset-membership-title">Privacy &amp; Presentation</div>
-          <div class="syncset-membership-subtitle">Optionally replace sensitive participant identities with deterministic pseudonyms for Discord destinations.</div>
-        </div>
-      </div>
-      <div class="syncset-membership-body" style="grid-template-columns:1fr;">
-        <label class="syncset-evidence-row" style="cursor:pointer;">
-          <input type="checkbox" data-syncset-field="anonymizeToDiscord">
-          <span>
-            <span class="syncset-evidence-title">Anonymize sender presentation when forwarding to Discord</span>
-            <span class="syncset-evidence-help">Replaces sender display names, phone numbers, and structured mentions with deterministic pseudonyms (e.g. <code>Silent Falcon Q7M</code>) when forwarding to Discord channels in this sync set. WhatsApp and Telegram retain standard attribution.</span>
-          </span>
-        </label>
-      </div>`;
-
-    const checkbox = panel.querySelector('[data-syncset-field="anonymizeToDiscord"]');
-    const sourceCheckbox = document.getElementById('syncset-anonymize-to-discord');
-    if (checkbox && sourceCheckbox) {
-      checkbox.checked = sourceCheckbox.checked;
-      checkbox.addEventListener('change', () => {
-        sourceCheckbox.checked = checkbox.checked;
-      });
-    }
-    return panel;
-  }
-
-  function buildMembershipPanel(item) {
-    const id = item.getAttribute('data-id') || '';
-    const panel = document.createElement('section');
-    panel.className = 'syncset-membership-panel syncset-feature-panel';
-    panel.innerHTML = `
-      <div class="syncset-membership-header">
-        <span class="syncset-membership-icon" aria-hidden="true">
-          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
-        </span>
-        <div class="syncset-membership-heading">
-          <div class="syncset-membership-title">Membership application <span class="badge badge-warning" style="margin-left:6px;font-size:.68rem;vertical-align:middle;">Experimental</span></div>
-          <div class="syncset-membership-subtitle">Optional experimental intake and reviewer guidance shared by membership pipelines targeting this sync set.</div>
-        </div>
-      </div>
-      <div class="syncset-membership-body">
-        <div class="syncset-membership-field">
-          <div class="syncset-membership-label-row">
-            <label class="syncset-membership-label">Applicant instructions</label>
-            <span class="syncset-membership-optional">Optional</span>
-          </div>
-          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="instructions" aria-label="Applicant instructions" placeholder="Tell applicants what to include in their request."></textarea>
-        </div>
-        <div class="syncset-membership-field">
-          <div class="syncset-membership-label-row">
-            <label class="syncset-membership-label">Reviewer guidance</label>
-            <span class="syncset-membership-optional">Optional</span>
-          </div>
-          <textarea class="form-input" rows="3" maxlength="4000" data-membership-field="guidance" aria-label="Reviewer guidance" placeholder="Add private guidance for reviewers evaluating requests."></textarea>
-        </div>
-        <label class="syncset-evidence-row">
-          <input type="checkbox" data-membership-field="evidence">
-          <span>
-            <span class="syncset-evidence-title">Require evidence upload</span>
-            <span class="syncset-evidence-help">Applicants must attach supporting evidence before their request can be reviewed.</span>
-          </span>
-        </label>
-        <div class="syncset-membership-field full">
-          <div class="syncset-membership-label-row">
-            <label class="syncset-membership-label">Custom fields</label>
-            <span class="syncset-membership-optional">Advanced · JSON</span>
-          </div>
-          <textarea class="form-input syncset-membership-json" rows="4" data-membership-field="customFields" aria-label="Custom fields JSON" placeholder='[{"key":"company","label":"Company","type":"text","required":true,"maxLength":120}]'></textarea>
-          <div class="syncset-membership-hint">Optional bounded JSON array of field definitions: key, label, type, required, and maxLength.</div>
-        </div>
-      </div>`;
-
-    const source = membershipSourceFields();
-    populateMembershipProxy(panel, {
-      applicantInstructions: source.instructions?.value || '',
-      reviewerGuidance: source.guidance?.value || '',
-      evidenceRequired: !!source.evidence?.checked,
-      customFields: (() => {
-        try { return JSON.parse(source.customFields?.value || '[]'); } catch (_) { return []; }
-      })(),
-    });
-
-    panel.addEventListener('input', () => {
-      panel.dataset.dirty = 'true';
-      syncMembershipProxyToSource(panel);
-    });
-    panel.addEventListener('change', () => {
-      panel.dataset.dirty = 'true';
-      syncMembershipProxyToSource(panel);
-    });
-
-    if (id && window.API?.getMembershipConfig) {
-      window.API.getMembershipConfig(id).then((cfg) => {
-        if (!panel.isConnected || panel.dataset.dirty === 'true') return;
-        const activeItem = panel.closest('.syncset-list-item.active');
-        if (!activeItem || activeItem.getAttribute('data-id') !== id) return;
-        populateMembershipProxy(panel, cfg || {});
-      }).catch(() => {
-        // The preserved controller already surfaces membership-load failures.
-      });
-    }
-
-    return panel;
-  }
-
   function enhanceActiveSyncSetCard() {
     const item = document.querySelector('#syncset-list .syncset-list-item.active');
     if (!item) return;
@@ -390,18 +239,6 @@
       });
     }
 
-    if (!body.querySelector('.syncset-privacy-panel')) {
-      const privacy = buildPrivacyPanel(item);
-      if (controllerActions) controllerActions.before(privacy);
-      else body.appendChild(privacy);
-    }
-
-    if (!body.querySelector('.syncset-membership-panel')) {
-      const membership = buildMembershipPanel(item);
-      if (controllerActions) controllerActions.before(membership);
-      else body.appendChild(membership);
-    }
-
     if (!body.querySelector('.syncset-polished-footer')) {
       const footer = document.createElement('div');
       footer.className = 'syncset-polished-footer';
@@ -411,11 +248,19 @@
           Delete sync set
         </button>
         <div class="syncset-polished-footer-main">
+          <button type="button" class="btn btn-ghost syncset-edit-settings">Edit settings</button>
+          <button type="button" class="btn btn-ghost syncset-review-membership" hidden>Review membership</button>
           <button type="button" class="btn btn-ghost syncset-polished-cancel">Cancel</button>
-          <button type="button" class="btn btn-primary syncset-polished-save">Save changes</button>
+          <button type="button" class="btn btn-primary syncset-polished-save" disabled>Save changes</button>
         </div>`;
+      const feedback = body.querySelector('[data-syncset-save-status]');
+      if (feedback) footer.prepend(feedback.cloneNode(true));
       body.appendChild(footer);
 
+      footer.querySelector('.syncset-edit-settings').addEventListener('click', () => {
+        document.dispatchEvent(new CustomEvent('syncset:edit-settings', {detail: {id: item.dataset.id}}));
+      });
+      footer.querySelector('.syncset-review-membership').addEventListener('click', () => window.App.openMembership(item.dataset.id));
       footer.querySelector('.syncset-polished-delete')?.addEventListener('click', (event) => {
         event.stopPropagation();
         item.querySelector(':scope > .syncset-delete-btn')?.click();
@@ -426,10 +271,16 @@
       });
       footer.querySelector('.syncset-polished-save')?.addEventListener('click', (event) => {
         event.stopPropagation();
-        syncMembershipProxyToSource(body.querySelector('.syncset-membership-panel'));
         controllerActions?.querySelector('.syncset-save-btn')?.click();
       });
     }
+    const save = body.querySelector('.syncset-polished-save');
+    const sourceSave = document.getElementById('btn-save-sync-set');
+    if (save && sourceSave && save.disabled !== sourceSave.disabled) save.disabled = sourceSave.disabled;
+    const review = body.querySelector('.syncset-review-membership');
+    const enabled = window.App?.membershipEnabled(item.dataset.id) === true;
+    if (review && review.hidden === enabled) review.hidden = !enabled;
+
   }
 
   function enhanceSyncSetListItems() {
@@ -563,19 +414,32 @@
     if (!create || !add || !editor) return;
 
     const idField = document.getElementById('syncset-id-field');
-    const privacyField = document.getElementById('syncset-privacy-card');
     const addSection = editor.querySelector('.syncset-add-section') || editor.querySelector('.add-endpoint-form')?.parentElement;
     if (idField) document.getElementById('create-sync-set-body').appendChild(idField);
-    if (privacyField) document.getElementById('create-sync-set-body').appendChild(privacyField);
     if (addSection) document.getElementById('add-conversation-body').appendChild(addSection);
     editor.classList.add('syncset-controller-host');
 
+    const settingsModal = document.getElementById('modal-sync-set-settings');
+    const panel = document.getElementById('syncset-settings-panel');
+    if (panel) document.getElementById('sync-set-settings-body').appendChild(panel);
+
     const show = (modal) => { modal.classList.remove('hidden'); document.body.style.overflow = 'hidden'; };
-    document.addEventListener('syncset:create', () => show(create));
+    document.addEventListener('syncset:create', () => {
+      const body = document.getElementById('create-sync-set-body');
+      const settings = document.getElementById('syncset-settings-panel');
+      if (settings) body.appendChild(settings);
+      show(create);
+    });
+    document.addEventListener('syncset:edit-settings', event => {
+      if (panel) document.getElementById('sync-set-settings-body').appendChild(panel);
+      document.getElementById('sync-set-settings-title').textContent = 'Settings · ' + event.detail.id;
+      show(settingsModal);
+    });
+    document.getElementById('modal-sync-set-settings-save').addEventListener('click', () => document.getElementById('btn-save-sync-set')?.click());
     document.addEventListener('syncset:add-conversation', () => show(add));
     document.addEventListener('syncset:saved', () => {
       create.classList.add('hidden');
-      document.body.style.overflow = '';
+      document.body.style.overflow = settingsModal.classList.contains('hidden') ? '' : 'hidden';
     });
     document.getElementById('modal-create-sync-set-save')?.addEventListener('click', () => document.getElementById('btn-save-sync-set')?.click());
     document.getElementById('modal-add-conversation-submit')?.addEventListener('click', () => document.getElementById('btn-add-endpoint')?.click());
@@ -596,7 +460,7 @@
   document.getElementById('add-conn-id')?.closest('.form-group')?.classList.add('hidden');
 
   const controller = document.createElement('script');
-  controller.src = '/js/app-base.js?v=8';
+  controller.src = '/js/app-base.js?v=10';
   controller.async = false;
   controller.addEventListener('load', () => {
     installWhatsAppPairCompletion();

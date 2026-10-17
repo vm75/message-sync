@@ -54,13 +54,42 @@ The current default is `childContextDisplayMode=opaque`. This setting controls *
 
 Both modes therefore use the same human-facing syntax and neither mode emits an opaque context preamble. ChildScope IDs remain internal routing metadata only.
 
+## Participant discriminator display (`showDiscriminator`)
+
+Every sender's discriminator (5–10 characters, selected by the sync set's `codeLength`) is derived from the existing HMAC
+actor identity, independently of anonymization. It remains stable while the
+provider actor identity and `IDENTITY_SECRET` stay unchanged. It does not link
+identities across providers or require another identity mapping table.
+
+The per-sync-set `showDiscriminator` setting defaults to `false`. New sets use eight-character codes; existing sets retain five-character codes on upgrade.
+It changes new bridge-generated presentation across all destination transports in that set
+without changing identity or reference resolution:
+
+| Mode | Hidden (default) | Shown |
+|---|---|---|
+| Ordinary sender | `group/Alice` | `group/Alice Q7M5K` |
+| Anonymized Discord sender | `group/Silent Falcon` | `group/Silent Falcon Q7M5K` |
+| Child attribution | `group/Travel/Alice` | `group/Travel/Alice Q7M5K` |
+| Hash attribution | `group/u_abcdefghij` | `group/u_abcdefghij Q7M5K` |
+
+The suffix applies to bridge sender headers, webhook names, media attribution,
+polls, edits, reaction fallbacks, and generated anonymized mention names. It is
+appended once. Discord webhook truncation reserves space for the suffix.
+Provider account names, native mention-chip labels, authored message bodies and
+literal cross-group tokens are not renamed or stripped. Existing messages are
+not rewritten when the setting changes; subsequent creates/edits use the current
+setting. Discriminator addressing remains enabled with either display value.
+With display hidden, use a previously known code or enable display to learn it.
+Using the same code with real and anonymized names makes those presentations
+linkable to someone who sees both.
+
 ## One-way Discord Anonymization (`anonymizeToDiscord`)
 
 When a sync set configures `anonymizeToDiscord=true`, messages forwarded to Discord endpoints are subject to route-aware one-way pseudonymization:
 
-1. **Sender name**: In `push_name` mode, the `<name>` attribution component and Discord webhook display name are replaced with a deterministic pseudonym derived from the sender's HMAC actor ID (e.g. `Silent Falcon Q7M5K`).
+1. **Sender name**: In `push_name` mode, the `<name>` attribution component and Discord webhook display name are replaced with a deterministic pseudonym derived from the sender's HMAC actor ID (e.g. `Silent Falcon`, or `Silent Falcon Q7M5K` when discriminator display is enabled).
 2. **Phone numbers**: Fallback phone numbers are stripped completely for all Discord-bound senders regardless of `usernameMode`; phone numbers never appear in attribution headers or sender fields forwarded to Discord.
-3. **Structured mentions**: Mentions in Discord-bound creates **and edits** have their display names replaced with deterministic pseudonyms (e.g. `@Amber Otter 2PF3R`). Telegram and Discord ingress keep user mentions as privacy-safe HMAC actor tokens plus transient display metadata so normal destinations can still render the usual name while anonymized Discord can substitute a pseudonym. Provider-native mention IDs that still require derivation are keyed under the source transport namespace. Anonymization-enabled routing requires the identity hasher.
+3. **Structured mentions**: Mentions in Discord-bound creates **and edits** have their display names replaced with deterministic pseudonyms (e.g. `@Amber Otter`, with ` 2PF3R` appended when discriminator display is enabled). Telegram and Discord ingress keep user mentions as privacy-safe HMAC actor tokens plus transient display metadata so normal destinations can still render the usual name while anonymized Discord can substitute a pseudonym. Provider-native mention IDs that still require derivation are keyed under the source transport namespace. Anonymization-enabled routing requires the identity hasher.
 4. **Reply quotes**: Quoted text headers produced by this bridge (the exact `*_<label>_*: <body>` format) are stripped before being forwarded to Discord; other message content that happens to contain `/` is left untouched.
 5. **Reactions**: Reaction fallback text sent to Discord uses the sender's deterministic pseudonym rather than their real name or phone number.
 6. **Multi-destination isolation**: The anonymization is applied strictly per-destination. Other destinations in the same sync set (such as WhatsApp groups or Telegram chats) continue to receive standard attribution and real push names in `push_name` mode.
@@ -85,8 +114,8 @@ Automated tests should assert the exact rendered forms whenever presentation log
 ## Cross-group participant references
 
 The bridge recognizes explicit `@{endpoint-alias/label}` references in user-authored
-message bodies, such as `Hi @{group2/P1}`, `Hi @{group2/Alice Smith}`, or
-`Hi @{group2/Silent Falcon Q7M5K}`. The braced syntax, not a bare `@name`,
+message bodies, such as `Hi @{group2/P1}`, `Hi @{group2/Alice Smith}`,
+`Hi @{group2/Silent Falcon Q7M5K}`, or `Hi @{group2/Q7M5K}`. The braced syntax, not a bare `@name`,
 identifies bridge addressing without colliding with provider-native mentions. Prefix the token with a backslash to display it literally without a
 notification attempt. Native `@someone` behavior is unchanged.
 
@@ -98,17 +127,24 @@ unique person name, or a group-member list position. `group1/P1` and
 the registry; the old textual address does not automatically redirect.
 
 On Discord endpoints with `anonymizeToDiscord` enabled, senders retain the
-existing deterministic, word-based aliases (e.g. `group/Rust Ocean Q7M5K`)
+deterministic, word-based aliases (e.g. `group/Rust Ocean`, with
+` Q7M5K` shown only when `showDiscriminator=true`)
 in `push_name` mode. Stable `Pn` handles remain available as optional
 fallback addresses; they must not replace the visible pseudonym. Other
 recipients retain normal sender-display presentation. In hash mode, the
-existing opaque actor presentation remains unchanged.
+opaque actor identity is retained, with the same optional discriminator display.
 
 A reference resolves only for an observed participant in an endpoint within
-the sender's sync set. Stable `Pn` handles and full deterministic pseudonyms
-both work across restarts because they use persisted HMAC actor records, not
+the sender's sync set. Stable `Pn` handles, discriminators and full deterministic
+pseudonyms all work across restarts because they use persisted HMAC actor records, not
 personal data. A two-word alias stem (e.g. `Rust Ocean`) is also accepted
-only when unique within that group. Full pseudonyms remain stable when
+only when unique within that group. Discriminators are case-insensitive and
+must likewise match exactly one registered actor in that group. A code colliding
+with another code, observed name or `Pn` handle stays literal, without provider
+lookup overriding an ambiguous local result. Full historical pseudonyms with
+the suffix remain valid regardless of the display setting; ordinary real names
+remain separate from their optional displayed suffix (name-plus-code is not a
+new reference form). Full pseudonyms remain stable when
 `IDENTITY_SECRET` and the provider identity stay the same. Real-name lookup
 first uses transient observed names. On a cache miss after restart, WhatsApp
 and Discord ask the referenced group's adapter for a unique exact name/alias
@@ -161,3 +197,11 @@ experiment's scope.
 Incoming native provider mentions follow their existing separate
 normalization/presentation path. Cross references are not persisted with
 message content or native IDs.
+
+Changing `codeLength` changes the displayed code length without changing actor
+identity. Supported historical lengths (5–10 characters), full historical
+pseudonyms, unique word stems and `Pn` handles continue to resolve within the
+same sync set. Shorter ambiguous codes remain literal, even if a longer code
+would distinguish the actors. Display and addressing are independent of
+anonymization. Settings are saved through `PUT /api/sync-sets/{id}` under
+`settings`, not the retired global runtime API.

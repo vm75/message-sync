@@ -41,7 +41,7 @@ podman build -f Containerfile -t message-sync:dev .
 timeout 4s podman run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m -v "$tmpdir:/data:Z" -e DATA_DIR=/data -e API_ADDR=127.0.0.1:0 -e IDENTITY_SECRET=0123456789abcdef0123456789abcdef message-sync:dev run
 ```
 
-The data directory is disposable because the current SQLite schema is a fresh-database schema; no migration or compatibility path is supported before the first release. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
+Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover the discriminator-display setting and Discord anonymization flag. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
 
 The control-plane retention test verifies bounded deletion of expired auth
 artifacts and terminal membership requests while returning only opaque evidence
@@ -93,3 +93,29 @@ restart (Discord/Telegram native-ID caches are transient), and escaped
 `\@{group/P1}` literals. MTProto and edits keep literal references. Explicit
 Discord references may tag verified local members on anonymized routes while
 sender and ordinary provider-mention anonymization remain unchanged.
+
+Discriminator regressions cover hidden defaults, enabled display across sender,
+child, hash, poll and reaction attribution, live display reload, and immutable
+legacy aliases. Upgrade tests open the previous schema, check the false default
+and preservation of existing settings, enable the setting and reopen the DB.
+API tests preserve explicit false and omitted partial-update fields. Router
+collision fixtures reject duplicate five-character codes and name/handle
+conflicts, retaining exact authored tokens. Full-path WhatsApp/Discord restart
+tests exercise discriminator-only labels with anonymization and display on/off;
+Telegram Bot API tests verify cold router lookup plus native and unavailable
+native-cache payloads. Long Discord webhook names retain their full suffix.
+
+Scoped-policy tests cover independent settings/partial updates, code-length
+validation and historical-length addressing, transport username isolation,
+WhatsApp media isolation, scoped friendly-label preservation, live retention
+reload, original retention ownership and orphan suppression cleanup. Upgrade
+fixtures remove the new sync-set settings/retention and connection-name columns,
+import nondefault policies, and reopen to prove idempotence and independence.
+API tests require HTTP 410 for retired global settings and visible failure when
+saved settings cannot reload into the runtime. Browser smoke checks exercise
+creation/editing modals, dirty-only Save enablement (including reverted fields),
+saving/saved/error states, chip removal/paste, independent set values, section
+spacing at desktop/mobile sizes, and existing WhatsApp connection names.
+Membership list tests assert sync-set filtering before the request limit and
+independent persisted review flags. Browser checks cover enabling membership
+review per set, conditional fields, scoped navigation and list selection.

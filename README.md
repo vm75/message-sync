@@ -21,7 +21,7 @@
 - **Source-Local Message Suppression**: Configurable prefix filtering (supports multiple prefixes, e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before canonicalization, transmission, or media loading; edits, reactions, and deletes for suppressed messages also remain local.
 - **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints. Forwarded child messages use `<group-alias>/<thread-or-topic>/<username>`; opaque provider child IDs never appear in message text. `opaque` (default) keeps names transient, while `friendly` may persist bounded labels for restart/replay presentation.
 - **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
-- **Zero-PII Privacy & Route-Aware Anonymization**: Routing database (`sync.db`) and application logs contain no message bodies, media, phone numbers, or user IDs. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g., `Silent Falcon Q7M`) exclusively for Discord destinations while WhatsApp and Telegram retain standard push names.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Routing database (`sync.db`) and application logs contain no message bodies, media, phone numbers, or user IDs. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g., `Silent Falcon`) exclusively for Discord destinations while WhatsApp and Telegram retain standard push names.
 - **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration with Discord anonymization controls, and live runtime configuration reload without process restarts.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
 - **Membership Intake & Verification Pipeline (Experimental)**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
@@ -165,23 +165,27 @@ Discord bot tokens, optional explicit Discord webhook URLs, Telegram Bot API tok
 
 ### Runtime settings
 
-Global routing and feature settings are configured in the Web UI Settings tab or via `PUT /api/config`, taking effect immediately without restarting the service:
+Routing and feature settings belong to each sync set. Open a sync set and choose **Edit settings** to open its settings modal, or use `PUT /api/sync-sets/{id}` with a nested `settings` object. Omitted fields retain their current values, including nested fields and `anonymizeToDiscord`. Changes reload without restarting the service. Save is enabled only while the draft differs from the saved settings; saving, success and failure feedback appears beside the button. Reverting a change disables Save again.
 
-| Setting | Default | Description |
+| Setting inside `settings` | New-set default | Description |
 |---|---|---|
-| `username_mode` | `push_name` | Attribution display mode: `push_name` (transient provider name) or `hash` (anonymized HMAC actor ID). |
-| `media.max_size_mb` | `16` | Maximum allowed in-memory size (MB) for forwarded media (images, videos, audio, documents). |
-| `recovery.max_age_hours` | `72` | Bounded lookback window in hours for offline message recovery. |
-| `recovery.max_messages_per_group` | `1000` | Maximum messages recovered per conversation after downtime. |
-| `storage.message_retention_days` | `90` | Retention duration in days for content-free routing metadata and message copies. |
-| `polls.aggregation_trigger` | `aggregate-response` | Space-separated triggers to request an on-demand poll aggregate summary (e.g. `aggregate-response /poll-results #agg`). |
-| `local_prefix` | `""` (disabled) | Space-separated prefix strings to suppress messages from syncing (e.g. `!local #local // [local]`). |
-| `whatsapp_cleanup.enabled` | `false` | Enables scheduled AppState chat pruning for old messages on the WhatsApp sync account. |
-| `whatsapp_cleanup.retention_days` | `30` | Minimum message age in days before WhatsApp AppState chat cleanup prunes messages. |
-| `whatsapp_device_name` | `message-sync` | Companion device name shown in WhatsApp Linked Devices. |
-| `child_scope_mode` | `opaque` | Child-conversation presentation mode: `opaque` (privacy default) or `friendly` (presentation thread/topic labels). |
+| `membershipReviewEnabled` | `false` | Enable the experimental membership review UI for this set, shared across browsers. |
+| `showDiscriminator` | `false` | Append the stable discriminator to forwarded names across this sync set. Addressing works even when hidden or anonymization is disabled. |
+| `codeLength` | `8` | Discriminator length, from 5 to 10 characters. Existing sets retain 5 on upgrade; historical supported-length codes remain valid addresses. |
+| `usernameMode` | `push_name` | Use transient provider names or HMAC actor IDs (`hash`). |
+| `media.enabled`, `media.maxSizeMB` | `true`, `100` | Forward media with an in-memory size limit in MB; provider limits still apply. |
+| `recovery.enabled`, `recovery.maxAgeHours`, `recovery.maxMessagesPerGroup` | `true`, `24`, `200` | Automatic recovery bounds for conversations in this set; provider availability and limits still apply. |
+| `storage.messageRetentionDays` | `90` | Retain content-free routing metadata for the configured days. |
+| `polls.aggregationTrigger` | `aggregate-response` | Space-separated triggers for poll aggregate summaries. |
+| `localPrefix` | `""` | Space-separated prefixes that suppress messages from syncing. |
+| `whatsappCleanup.enabled`, `whatsappCleanup.retentionDays` | `false`, `30` | Scheduled WhatsApp AppState cleanup for this set's chats. |
+| `childContextDisplayMode` | `opaque` | `opaque` uses transient child labels; `friendly` also persists observed thread/topic labels for restart/replay. |
 
-The Web UI Settings tab also includes a browser-local preference to enable the experimental **Membership review** interface (disabled by default).
+For example, `{"settings":{"codeLength":8,"showDiscriminator":true}}` updates one set's display while preserving its other settings. Upgrade initialization copies existing routing policies into each existing sync set once. Subsequent changes are independent. Retention follows the original sync set of each canonical message, even after an endpoint moves; orphan history and suppression markers expire after 90 days.
+
+The WhatsApp linked-device name belongs to its connection, shared by every set using that connection. Set `whatsappDeviceName` when creating a WhatsApp connection, or edit **Connections → Device name** (`PUT /api/connections/{id}`). It defaults to `message-sync` for new connections and applies when linking the device. Existing connections import their former global name once. User accounts and admin security stay global. The former `/api/config` runtime endpoint returns HTTP 410 with the replacement paths.
+
+Enable **Membership review** in each sync set’s settings modal. The saved setting replaces the former browser-local switch. Instructions, evidence guidance and custom fields stay specific to that set. **Review membership** opens requests and pipelines for the selected set; the Membership selector switches between enabled sets. This controls the review interface; existing pipeline enablement and in-flight applications keep their existing behavior.
 
 The project does not have a general versioned migration framework; schema changes that must preserve existing installations may use narrowly scoped idempotent initialization migrations with explicit upgrade tests. Back up `/data` before upgrades and consult release notes before reusing existing state.
 
@@ -224,10 +228,16 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 
 Messages may refer to an observed member of another endpoint in the same sync
 set using `@{group2/Rust Ocean Q7M5K}`, `@{group2/Alice Smith}`,
+the discriminator alone as `@{group2/Q7M5K}`,
 or the stable fallback `@{group2/P1}`. Group aliases are the configured
 endpoint aliases. In anonymized Discord destinations, observed authors retain
-their deterministic pseudonyms, such as `group2/Rust Ocean Q7M5K`, rather
-than being replaced by P-numbers. An unambiguous two-word pseudonym stem,
+their deterministic word-based pseudonyms, such as `group2/Rust Ocean`, rather
+than being replaced by P-numbers. Discriminators are hidden by default. Enable
+**Sync Sets → select set → Edit settings → Show participant discriminator in this sync set**
+(`showDiscriminator=true`) to display `group2/Alice Smith Q7M5K` or
+`group2/Rust Ocean Q7M5K`. The code is computed independently of anonymization;
+it is the same for the same provider actor and identity secret. An unambiguous
+two-word pseudonym stem,
 such as `Rust Ocean`, is also accepted. Plain `@name` provider mentions
 remain unchanged.
 
@@ -243,7 +253,7 @@ braced references may tag verified local Discord members even with
 Sender and ordinary provider-native mention anonymization remain unchanged;
 user-authored braced references are not automatically redacted.
 
-Pseudonyms and handles resolve after restart from HMAC-only participant records;
+Discriminators, pseudonyms and handles resolve after restart from HMAC-only participant records;
 full pseudonyms stay stable while `IDENTITY_SECRET` and the provider identity
 stay unchanged. Real names are kept only in memory. After restart, WhatsApp
 and Discord can rebuild a missing name lookup through the referenced group's
@@ -251,7 +261,14 @@ adapter, limited to that group's registered HMAC actors and unique matching
 provider metadata. This allows references copied from older forwarded
 messages to work without another post when that metadata is available.
 Addresses are learned from accepted messages, rather than a member picker or
-roster autocomplete.
+roster autocomplete. Discriminator matching is case-insensitive and requires a
+unique participant in the referenced group. Collisions with another code,
+observed name or handle remain literal. Existing full pseudonyms and `Pn`
+handles provide fallback addresses. Showing the same code alongside real and
+anonymized names makes those presentations linkable to someone who sees both.
+The setting changes new bridge-generated attribution, not existing messages,
+provider account names, native mention-chip labels, or authored reference text.
+Name-plus-code references are not an additional supported addressing form.
 Discord and Telegram need an observed native identity in the destination
 adapter's memory. Discord learns IDs from live messages, accepted history
 recovery, or a bounded on-demand guild-roster lookup matched by HMAC when

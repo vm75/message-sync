@@ -73,7 +73,7 @@ Flattened child messages use one human-facing attribution header: `<group-alias>
 
 Telegram basic-group to supergroup migrations are handled as addressing maintenance: the adapter recognizes the migration service message and transactionally updates only the matching endpoint's `remote_id` in `sync.db`, preserving the alias, sync set, and canonical lineage. Telegram mentions are sanitized at the adapter boundary: `text_mention` entities are reduced to HMAC actor IDs plus transient display labels, and `@username` entities are rewritten to the generic `@mention` fallback to keep raw usernames out of canonical state.
 
-Route-aware Discord anonymization: When a sync set configures `anonymizeToDiscord = true`, outbound deliveries to Discord endpoints replace sender presentation names, structured mentions, reply quotes, and reaction fallback attributions with deterministic pseudonyms (e.g., `Silent Falcon Q7M`) derived purely from HMAC actor IDs. No PII-to-pseudonym mapping table is stored. WhatsApp and Telegram endpoints in the same sync set retain normal push name attribution in `push_name` mode.
+Route-aware Discord anonymization: When a sync set configures `anonymizeToDiscord = true`, outbound deliveries to Discord endpoints replace sender presentation names, structured mentions, reply quotes, and reaction fallback attributions with deterministic pseudonyms (e.g., `Silent Falcon`) derived purely from HMAC actor IDs. No PII-to-pseudonym mapping table is stored. WhatsApp and Telegram endpoints in the same sync set retain normal push name attribution in `push_name` mode.
 
 ## Persistence and trust boundaries
 
@@ -84,6 +84,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 `internal/store/schema.sql` initializes the application routing database. It may contain:
 
 - safe endpoint aliases, connection IDs, and provider target IDs needed for addressing;
+- per-sync-set routing policies in `sync_sets.settings_json`; `global_config` remains only as legacy initialization data;
 - sync set definitions (including the boolean `anonymize_to_discord` flag) and endpoint memberships;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
@@ -206,13 +207,13 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | `/api/connections/{id}/pair`, `/logout` | `POST` | Admin | Serialized WhatsApp QR pairing lifecycle and session logout. |
 | `/api/endpoints` | `GET`, `POST` | Authenticated | Lists or creates safe endpoint aliases mapping to connection targets. |
 | `/api/endpoints/{alias}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates alias, sync set, or deletes endpoint. |
-| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets (with optional `anonymizeToDiscord`) for fan-out. |
-| `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates sync set endpoints, anonymization settings, or deletes sync set. |
-| `/api/config` | `GET`, `PUT` | Authenticated | Reads or modifies `global_config` in `sync.db` with live router reload. |
+| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets with `anonymizeToDiscord` and nested `settings` policies for fan-out. |
+| `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates endpoints, anonymization, and nested runtime `settings`, or deletes the set. Omitted update fields are preserved. |
+| `/api/config` | `GET`, `PUT` | Authenticated | Retired runtime-settings endpoint: returns HTTP 410 pointing to sync sets and connections. |
 | `/api/delivery/status` | `GET` | Authenticated | Real-time content-free delivery health, lane depth, and failure classes. |
-| `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages experimental membership intake pipelines bound to endpoint sync sets. |
+| `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages experimental membership intake pipelines bound to endpoint sync sets. GET accepts optional `syncSetId` filtering. |
 | `/api/sync-sets/{id}/membership` | `GET`, `PUT` | Admin | Configures experimental sync-set membership instructions and custom fields. |
-| `/api/verification/requests` | `GET` | Authenticated | Reviews pending email-verified membership applications (experimental). |
+| `/api/verification/requests` | `GET` | Authenticated | Reviews pending email-verified membership applications (experimental). Optional `syncSetId` scopes requests through pipeline endpoint membership before the 500-row limit. |
 | `/api/verification/requests/{id}/decision` | `POST` | Authenticated | Human-authorized approve/reject/needs-review decision (experimental). |
 | `/api/verification/join/{token}` | `GET`, `POST` | Public | Public membership application intake form submission (experimental). |
 | `/api/verification/email/verify` | `GET`, `POST` | Public | Validates email challenge token (experimental). |
@@ -246,9 +247,36 @@ actor ID, and a monotonically allocated endpoint-local ordinal. Its stable
 identities, display names, usernames, message bodies, or phone numbers are stored.
 The table is created idempotently on startup for existing databases.
 
+The discriminator extends the existing pseudonym derivation for every actor;
+it needs no participant column or persistent lookup table. Each sync set owns
+`showDiscriminator` (false by default) and `codeLength` (5–10; new sets use 8).
+Initialization imports the former global policies into `sync_sets.settings_json`
+for existing sets, preserving five-character codes and explicit settings on reopen.
+The legacy `global_config` row is initialization data, no longer writable through
+the runtime API. Sync-set saves reload router and adapter endpoint policies.
+The UI uses a shared settings modal for creating/editing sync sets, including
+privacy and membership fields. Save is disabled for an unchanged draft, including
+a reverted edit. Only saving, saved and error messages are shown. A runtime reload failure
+returns an error even when the database commit has succeeded, permitting retry.
+Canonical messages retain their original `sync_set_id` for retention, inferred
+only from unambiguous existing copy membership during upgrade. Periodic pruning
+loads current saved policies. Orphan history and suppression markers expire
+after 90 days. Friendly-label persistence is scoped to each endpoint's set.
+WhatsApp device names live in `control.db.transport_connections.whatsapp_device_name`;
+startup imports the old global name only for unnamed existing connections. New
+connections receive an explicit default, and the UI/API can edit existing names.
+User accounts and admin security remain global.
+The router keeps the full pseudonym for historical reference lookup and formats
+its word stem separately. Displaying codes never changes canonical actor IDs.
+Suffix visibility applies across transports, including sender headers, polls,
+media companions and reaction fallbacks. Discord reserves suffix space when
+truncating webhook usernames. Colliding code/name/handle candidates remain
+literal; display settings never enable or disable address resolution.
+
 The canonical router observes sender IDs from accepted events and resolves
 only explicit `@{endpoint/label}` tokens within the source sync set,
-including stable handles, deterministic pseudonyms and unique observed names.
+including stable handles, deterministic pseudonyms, unique observed names,
+and case-insensitive discriminator-only labels.
 It passes
 transient, resolved `CrossReference` values to outbound creates; they never
 enter a persistent delivery ledger or recovery cursor. Adapters verify
@@ -293,3 +321,11 @@ from live group membership after restart. No native cross-group mention support 
 provided on Telegram MTProto. Edit propagation uses existing text-only adapter
 semantics and does not produce new native mention notifications.
 
+
+The per-set `settings.membershipReviewEnabled` flag defaults false and controls
+review UI visibility across browsers, replacing the browser-local preference.
+Application instructions, evidence guidance, reviewer guidance and custom fields
+remain private in `control.db`, keyed by sync-set ID. The Membership UI selects
+one enabled set at a time; its request/pipeline lists use `syncSetId` filters.
+This flag does not replace authorization or change existing pipeline processing,
+public intake enablement, human decisions, fulfillment or evidence retention.

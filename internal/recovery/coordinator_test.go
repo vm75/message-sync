@@ -358,3 +358,56 @@ func TestCoordinatorRecoveryIsSingleFlightAndCancellable(t *testing.T) {
 		t.Fatalf("recovery ran concurrently, max active = %d", maxActive)
 	}
 }
+
+type policyRecoverySource struct{ requests []transport.RecoveryRequest }
+
+func (s *policyRecoverySource) RecoveryStreams() []string {
+	return []string{"disabled", "short", "long"}
+}
+func (s *policyRecoverySource) RecoverySignals() <-chan struct{} { return nil }
+func (s *policyRecoverySource) RecoveryPolicy(stream string) (bool, int, time.Duration) {
+	switch stream {
+	case "disabled":
+		return false, 0, 0
+	case "short":
+		return true, 17, 2 * time.Hour
+	default:
+		return true, 321, 72 * time.Hour
+	}
+}
+func (s *policyRecoverySource) Recover(ctx context.Context, req transport.RecoveryRequest, emit func(context.Context, transport.Incoming) error) error {
+	s.requests = append(s.requests, req)
+	return nil
+}
+func TestCoordinatorHonorsPerStreamRecoveryPolicy(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir()+"/sync.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, err := router.New(recoveryConfig(), st, &recoverySender{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	coordinator, err := NewCoordinator(st, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &policyRecoverySource{}
+	coordinator.Recover(ctx, []transport.RecoverySource{source})
+	if len(source.requests) != 2 {
+		t.Fatalf("disabled stream recovered: %+v", source.requests)
+	}
+	for i, want := range []struct {
+		stream string
+		count  int
+		age    time.Duration
+	}{{"short", 17, 2 * time.Hour}, {"long", 321, 72 * time.Hour}} {
+		got := source.requests[i]
+		if got.Cursor.StreamKey != want.stream || got.MaxEvents != want.count || got.MaxAge != want.age {
+			t.Fatalf("wrong per-stream bounds: %+v", got)
+		}
+	}
+}

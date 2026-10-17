@@ -24,6 +24,26 @@ func TestPseudonymDeterministic(t *testing.T) {
 	}
 }
 
+func TestDiscriminatorPreservesExistingAliases(t *testing.T) {
+	// A fixed historical alias protects messages and references from algorithm drift.
+	const actor = "u_abcdefghij"
+	if got := Pseudonym(actor); got != "Lunar Marten 7WCUX" {
+		t.Fatalf("legacy alias changed: %q", got)
+	}
+	if got := PseudonymName(actor); got != "Lunar Marten" {
+		t.Fatalf("name = %q", got)
+	}
+	if got := Discriminator(actor); got != "7WCUX" {
+		t.Fatalf("discriminator = %q", got)
+	}
+	if got := Discriminator("  " + actor + " "); got != "7WCUX" {
+		t.Fatalf("normalized discriminator = %q", got)
+	}
+	if got := Discriminator(""); got != "" {
+		t.Fatalf("empty identity got a discriminator: %q", got)
+	}
+}
+
 func TestPseudonymDistinctForDifferentInputs(t *testing.T) {
 	seen := make(map[string]string)
 	fixtures := []string{
@@ -120,5 +140,18 @@ func TestActorIDStableAndDomainSeparated(t *testing.T) {
 	otherDomain := h.ActorID("user", "15551234567@s.whatsapp.net")
 	if mentionID1 == otherDomain {
 		t.Fatalf("ActorID failed domain separation: %q vs %q", mentionID1, otherDomain)
+	}
+}
+
+func TestConfigurableCodesPreserveHistoricalPrefix(t *testing.T) {
+	actor := "u_abcdefghij"
+	for length := 5; length <= 10; length++ {
+		code := DiscriminatorForLength(actor, length)
+		if len(code) != length || !strings.HasPrefix(code, "7WCUX") {
+			t.Fatalf("length %d changed historical code: %q", length, code)
+		}
+		if got := PseudonymForLength(actor, length); got != "Lunar Marten "+code {
+			t.Fatalf("word alias changed: %q", got)
+		}
 	}
 }

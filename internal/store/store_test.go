@@ -794,3 +794,46 @@ func TestAnonymizeToDiscordOldSchemaUpgrade(t *testing.T) {
 		t.Fatalf("expected value to remain 0 after second open, got %d", val)
 	}
 }
+
+func TestDiscriminatorSettingUpgradeAndReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSchema := strings.Replace(schemaSQL, "    show_discriminator BOOLEAN NOT NULL DEFAULT 0,\n", "", 1)
+	if oldSchema == schemaSQL {
+		t.Fatal("old schema fixture did not remove new column")
+	}
+	if _, err := raw.ExecContext(ctx, oldSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `UPDATE global_config SET username_mode='hash', storage_message_retention_days=37 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		db, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var show bool
+		var mode string
+		var retention int
+		if err := db.DB().QueryRowContext(ctx, `SELECT show_discriminator, username_mode, storage_message_retention_days FROM global_config WHERE id=1`).Scan(&show, &mode, &retention); err != nil {
+			t.Fatal(err)
+		}
+		if show != (attempt == 1) || mode != "hash" || retention != 37 {
+			t.Fatalf("upgrade/reopen lost settings: show=%t mode=%s retention=%d", show, mode, retention)
+		}
+		if _, err := db.DB().ExecContext(ctx, `UPDATE global_config SET show_discriminator=1 WHERE id=1`); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}

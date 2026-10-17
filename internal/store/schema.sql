@@ -2,6 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS canonical_messages (
     canonical_id TEXT PRIMARY KEY,
+    sync_set_id TEXT,
     created_at INTEGER NOT NULL,
     tombstoned_at INTEGER
 );
@@ -69,12 +70,14 @@ CREATE TABLE IF NOT EXISTS global_config (
     whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30,
     local_message_prefix TEXT NOT NULL DEFAULT '',
     whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync',
+    show_discriminator BOOLEAN NOT NULL DEFAULT 0,
     child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly'))
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
 CREATE TABLE IF NOT EXISTS sync_sets (
     id TEXT PRIMARY KEY,
+    settings_json TEXT,
     anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0
 );
 

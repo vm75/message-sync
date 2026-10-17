@@ -34,9 +34,30 @@ const suffixAlphabet = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 // Pseudonym derives a deterministic, privacy-safe, human-friendly alias from an
 // opaque actor identifier. No real-name or phone state is required or exposed.
 func Pseudonym(opaqueID string) string {
+	name, discriminator := pseudonymParts(opaqueID)
+	if discriminator == "" {
+		return name
+	}
+	return name + " " + discriminator
+}
+
+// PseudonymName returns the word-based alias without its discriminator.
+func PseudonymName(opaqueID string) string {
+	name, _ := pseudonymParts(opaqueID)
+	return name
+}
+
+// Discriminator is stable for an actor regardless of anonymization or display
+// settings. It is a short address component, not a globally unique identity.
+func Discriminator(opaqueID string) string {
+	_, discriminator := pseudonymParts(opaqueID)
+	return discriminator
+}
+
+func pseudonymParts(opaqueID string) (string, string) {
 	opaqueID = strings.TrimSpace(opaqueID)
 	if opaqueID == "" {
-		return "Member"
+		return "Member", ""
 	}
 
 	digest := sha256.Sum256([]byte("discord-pseudonym\x00" + opaqueID))
@@ -50,5 +71,32 @@ func Pseudonym(opaqueID string) string {
 	c4 := suffixAlphabet[digest[7]&31]
 	c5 := suffixAlphabet[digest[8]&31]
 
-	return fmt.Sprintf("%s %s %c%c%c%c%c", adjectives[adjIdx], nouns[nounIdx], c1, c2, c3, c4, c5)
+	return adjectives[adjIdx] + " " + nouns[nounIdx], fmt.Sprintf("%c%c%c%c%c", c1, c2, c3, c4, c5)
+}
+
+// DiscriminatorForLength preserves the historical five-character prefix.
+// Valid configured lengths are 5 through 10; invalid lengths use five.
+func DiscriminatorForLength(opaqueID string, length int) string {
+	opaqueID = strings.TrimSpace(opaqueID)
+	if opaqueID == "" {
+		return ""
+	}
+	if length < 5 || length > 10 {
+		length = 5
+	}
+	digest := sha256.Sum256([]byte("discord-pseudonym\x00" + opaqueID))
+	code := make([]byte, length)
+	for i := range code {
+		code[i] = suffixAlphabet[digest[4+i]&31]
+	}
+	return string(code)
+}
+
+func PseudonymForLength(opaqueID string, length int) string {
+	name := PseudonymName(opaqueID)
+	code := DiscriminatorForLength(opaqueID, length)
+	if code == "" {
+		return name
+	}
+	return name + " " + code
 }

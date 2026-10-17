@@ -45,7 +45,7 @@ func TestTelegramCrossMentionMembershipAndLabels(t *testing.T) {
 		{name: "wrong member", member: &models.ChatMember{Member: &models.ChatMemberMember{User: &models.User{ID: 456}}}},
 		{name: "lookup error", err: errors.New("unavailable")},
 	} {
-		for _, label := range []string{"Alice Smith", "Rust Ocean Q7M5K", "Rust Ocean", "P1", strings.Repeat("&", 96)} {
+		for _, label := range []string{"Alice Smith", "Rust Ocean Q7M5K", "Rust Ocean", "P1", "7WCUX", strings.Repeat("&", 96)} {
 			t.Run(tc.name+"/"+label, func(t *testing.T) {
 				api := &crossMentionAPI{fakeTelegramAPI: &fakeTelegramAPI{}, lookup: func(params *telegrambot.GetChatMemberParams) (*models.ChatMember, error) {
 					if params.ChatID != int64(-1001234567890) || params.UserID != 123 {

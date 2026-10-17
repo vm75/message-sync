@@ -109,6 +109,7 @@ func formatWhatsAppText(text string) string {
 }
 
 type Options struct {
+	EndpointSettings map[string]config.SyncSetSettings
 	ConnectionID     string
 	DatabasePath     string
 	GroupJIDs        map[string]string
@@ -126,6 +127,7 @@ type Options struct {
 }
 
 type Adapter struct {
+	endpointSettings map[string]config.SyncSetSettings
 	connectionID     string
 	client           *whatsmeow.Client
 	container        *sqlstore.Container
@@ -183,7 +185,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		opts.QROut = io.Discard
 	}
 
-	normalizer, err := NewNormalizer(opts.GroupJIDs, opts.Hasher, opts.UsernameMode)
+	normalizer, err := NewNormalizer(opts.GroupJIDs, opts.Hasher, opts.UsernameMode, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +207,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		client:           client,
 		container:        container,
 		normalizer:       normalizer,
+		endpointSettings: opts.EndpointSettings,
 		targets:          targets,
 		events:           make(chan transport.Incoming, eventBufferSize),
 		logger:           opts.Logger,
@@ -286,6 +289,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	a.mu.Lock()
 	target, ok := a.targets[outgoing.Endpoint]
 	mediaEnabled := a.mediaEnabled
+	if policy, ok := a.endpointSettings[string(outgoing.Endpoint)]; ok {
+		mediaEnabled = policy.Media.Enabled
+	}
 	a.mu.Unlock()
 	if !ok {
 		return transport.MessageRef{}, fmt.Errorf("unknown WhatsApp endpoint %q", outgoing.Endpoint)
@@ -1276,7 +1282,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	}
 	a.mu.Unlock()
 
-	normalizer, err := NewNormalizer(groupJIDs, hasher, cfg.Identity.UsernameMode)
+	normalizer, err := NewNormalizer(groupJIDs, hasher, cfg.LegacySettings().UsernameMode, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return fmt.Errorf("create normalizer for updated config: %w", err)
 	}
@@ -1287,13 +1293,14 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
 	a.targets = targets
 	a.mediaEnabled = cfg.Media.Enabled
 	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	a.recoveryEnabled = cfg.Recovery.Enabled
 	a.recoveryMaxAge = time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour
 	a.recoveryMaxCount = cfg.Recovery.MaxMessagesPerGroup
-	a.deviceName = configureDeviceProps(cfg.WhatsAppDeviceName)
+	// The linked-device name is owned by this connection.
 	a.mu.Unlock()
 
 	return nil
@@ -1345,6 +1352,11 @@ func (a *Adapter) handleEvent(raw any) {
 		client := a.client
 		a.mu.Unlock()
 
+		if normalizer != nil {
+			if policy, ok := normalizer.endpointSettings[string(normalizer.endpoints[evt.Info.Chat.ToNonAD().String()])]; ok {
+				recoveryMaxAge = time.Duration(policy.Recovery.MaxAgeHours) * time.Hour
+			}
+		}
 		isEditEvent := isWhatsAppEdit(evt)
 		if recoveryMaxAge > 0 && !evt.Info.Timestamp.IsZero() && time.Since(evt.Info.Timestamp) > recoveryMaxAge {
 			if a.logger != nil && isEditEvent {
@@ -1415,7 +1427,7 @@ func (a *Adapter) handleEvent(raw any) {
 		client := a.client
 		a.mu.Unlock()
 
-		if !recoveryEnabled || evt.Data == nil || normalizer == nil || client == nil {
+		if (!recoveryEnabled && len(normalizerPolicyMap(normalizer)) == 0) || evt.Data == nil || normalizer == nil || client == nil {
 			return
 		}
 		for _, conv := range evt.Data.GetConversations() {
@@ -1426,6 +1438,13 @@ func (a *Adapter) handleEvent(raw any) {
 			chatJID = chatJID.ToNonAD()
 			if _, ok := normalizer.endpoints[chatJID.String()]; !ok {
 				continue
+			}
+			if policy, ok := normalizer.endpointSettings[string(normalizer.endpoints[chatJID.String()])]; ok {
+				if !policy.Recovery.Enabled {
+					continue
+				}
+				recoveryMaxAge = time.Duration(policy.Recovery.MaxAgeHours) * time.Hour
+				recoveryMaxCount = policy.Recovery.MaxMessagesPerGroup
 			}
 			parsedMessages := make([]parsedHistoryMessage, 0, len(conv.GetMessages()))
 			for _, historyMsg := range conv.GetMessages() {
@@ -1680,4 +1699,18 @@ func openSessionStore(ctx context.Context, rawPath string) (*sqlstore.Container,
 		return nil, nil, fmt.Errorf("load WhatsApp session: %w", err)
 	}
 	return container, device, nil
+}
+
+func normalizerPolicyMap(n *Normalizer) map[string]config.SyncSetSettings {
+	if n == nil {
+		return nil
+	}
+	return n.endpointSettings
+}
+
+// UpdateDeviceName applies to subsequent pairing on this connection only.
+func (a *Adapter) UpdateDeviceName(name string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.deviceName = configureDeviceProps(name)
 }

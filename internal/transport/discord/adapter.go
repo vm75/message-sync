@@ -17,6 +17,7 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
+	EndpointSettings         map[string]config.SyncSetSettings
 	ConnectionID             string
 	Token                    string
 	ChannelIDs               map[string]string
@@ -31,6 +32,7 @@ type Options struct {
 }
 
 type Adapter struct {
+	endpointSettings      map[string]config.SyncSetSettings
 	connectionID          string
 	session               *discordgo.Session
 	api                   discordAPI
@@ -92,7 +94,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	default:
 	}
 
-	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.UsernameMode)
+	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.UsernameMode, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -132,6 +134,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		api:                   session,
 		adminAPI:              session,
 		normalizer:            normalizer,
+		endpointSettings:      opts.EndpointSettings,
 		hasher:                opts.Hasher,
 		webhook:               webhook,
 		fixedWebhookChannelID: explicitWebhookChannelID,
@@ -320,7 +323,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			}
 		}
 	}
-	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.Identity.UsernameMode)
+	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.LegacySettings().UsernameMode, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}
@@ -340,6 +343,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
 	a.targets = targets
 	if a.historyStatus == nil {
 		a.historyStatus = make(map[string]HistoryStatus)

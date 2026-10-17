@@ -487,3 +487,30 @@ func protoPtr[T any](v T) *T {
 func protoEnum[T ~int32](v T) *T {
 	return &v
 }
+
+func TestNormalizerIsolatesSyncSetUsernameAndMediaPolicies(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, hash := config.DefaultSyncSetSettings(), config.DefaultSyncSetSettings()
+	hash.UsernameMode = config.UsernameModeHash
+	hash.Media.Enabled = false
+	normalizer, err := NewNormalizer(map[string]string{"push": "111@g.us", "hash": "222@g.us"}, hasher, config.UsernameModePushName, map[string]config.SyncSetSettings{"push": push, "hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chat := range []string{"111", "222", "111"} {
+		body := "Synthetic"
+		evt := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: types.NewJID(chat, types.GroupServer), Sender: types.NewJID("123", types.HiddenUserServer), IsGroup: true}, ID: "1", PushName: "Alice"}, Message: &waE2E.Message{Conversation: &body}}
+		incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil, nil, nil)
+		if !ok || (incoming.Sender.DisplayName != "") != (chat == "111") {
+			t.Fatalf("policy leaked for %s: %+v", chat, incoming)
+		}
+		evt.Message = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}
+		incoming, ok = normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil, nil, nil)
+		if ok != (chat == "111") {
+			t.Fatalf("media policy leaked for %s: ok=%t %+v", chat, ok, incoming)
+		}
+	}
+}

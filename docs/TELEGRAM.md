@@ -81,3 +81,10 @@ This keeps bot/user sessions, peer caches, poll provider references, recovery cu
 - **MTProto send after restart cannot resolve a group:** run discovery once if the account has never observed/discovered that peer; resolved peer/access-hash metadata is thereafter kept inside encrypted connection state.
 - **Backfill unavailable:** only Phone / MTProto advertises arbitrary history recovery, and the connection must be authenticated with a configured endpoint and explicit bounds.
 - **Endpoint cannot be created/reassigned:** confirm its transport matches the selected connection and that the target is a supported group.
+
+Automatic recovery uses the endpoint’s sync-set `recovery.enabled`,
+`recovery.maxAgeHours`, and `recovery.maxMessagesPerGroup` settings. Bot API
+availability remains limited by Telegram's retained update queue. MTProto
+history is capped at 5,000 messages per request; manual backfill uses its
+explicit request bounds. Media and username presentation policies also belong
+to the endpoint's sync set, even when one connection serves several sets.

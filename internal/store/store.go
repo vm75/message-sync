@@ -222,6 +222,36 @@ func initialize(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate sync_sets schema: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN show_discriminator BOOLEAN NOT NULL DEFAULT 0`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate discriminator display setting: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE sync_sets ADD COLUMN settings_json TEXT`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate sync-set settings: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sync_sets SET settings_json=(SELECT json_object(
+  'usernameMode', username_mode, 'showDiscriminator', json(CASE WHEN show_discriminator THEN 'true' ELSE 'false' END), 'codeLength', 5,
+  'childContextDisplayMode', child_context_display_mode,
+  'media', json_object('enabled',json(CASE WHEN media_enabled THEN 'true' ELSE 'false' END),'maxSizeMB',media_max_size_mb),
+  'recovery',json_object('enabled',json(CASE WHEN recovery_enabled THEN 'true' ELSE 'false' END),'maxAgeHours',recovery_max_age_hours,'maxMessagesPerGroup',recovery_max_messages_per_group),
+  'storage',json_object('messageRetentionDays',storage_message_retention_days),
+  'polls',json_object('aggregationTrigger',poll_aggregation_trigger),
+  'whatsappCleanup',json_object('enabled',json(CASE WHEN whatsapp_chat_cleanup_enabled THEN 'true' ELSE 'false' END),'retentionDays',whatsapp_chat_retention_days),
+  'localPrefix',local_message_prefix
+ ) FROM global_config WHERE id=1) WHERE settings_json IS NULL`); err != nil {
+		return fmt.Errorf("import legacy sync-set settings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE canonical_messages ADD COLUMN sync_set_id TEXT`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate retention ownership: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE canonical_messages SET sync_set_id=(SELECT MIN(e.sync_set_id) FROM message_copies c JOIN endpoints e ON e.alias=c.endpoint_id WHERE c.canonical_id=canonical_messages.canonical_id HAVING COUNT(DISTINCT e.sync_set_id)=1) WHERE sync_set_id IS NULL`); err != nil {
+		return fmt.Errorf("import retention ownership: %w", err)
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sync schema initialization: %w", err)
 	}
@@ -404,8 +434,8 @@ func (s *Store) ResolveOrCreateCanonical(ctx context.Context, candidateCanonical
 		createdAt = time.Now().UTC()
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO canonical_messages(canonical_id, created_at) VALUES (?, ?)`,
-		candidateCanonicalID, unixMillis(createdAt),
+		`INSERT INTO canonical_messages(canonical_id, created_at, sync_set_id) VALUES (?, ?, (SELECT sync_set_id FROM endpoints WHERE alias=?))`,
+		candidateCanonicalID, unixMillis(createdAt), source.EndpointID,
 	); err != nil {
 		return "", false, fmt.Errorf("create canonical message: %w", err)
 	}

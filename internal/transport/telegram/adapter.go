@@ -29,6 +29,7 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
+	EndpointSettings       map[string]config.SyncSetSettings
 	ConnectionID           string
 	Token                  string
 	ChatIDs                map[string]string
@@ -49,15 +50,16 @@ type Options struct {
 }
 
 type Adapter struct {
-	connectionID string
-	client       botClient
-	normalizer   *Normalizer
-	hasher       *identity.Hasher
-	events       chan transport.Incoming
-	logger       *slog.Logger
-	botUserID    int64
-	token        string
-	httpClient   *http.Client
+	endpointSettings map[string]config.SyncSetSettings
+	connectionID     string
+	client           botClient
+	normalizer       *Normalizer
+	hasher           *identity.Hasher
+	events           chan transport.Incoming
+	logger           *slog.Logger
+	botUserID        int64
+	token            string
+	httpClient       *http.Client
 
 	mediaEnabled           bool
 	mediaMaxBytes          uint64
@@ -105,7 +107,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
 		return nil, err
 	}
-	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID)
+	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +120,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	adapter := &Adapter{
 		connectionID:           strings.TrimSpace(opts.ConnectionID),
 		normalizer:             normalizer,
+		endpointSettings:       opts.EndpointSettings,
 		hasher:                 opts.Hasher,
 		events:                 make(chan transport.Incoming, eventBufferSize),
 		logger:                 opts.Logger,
@@ -261,13 +264,14 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			chatIDs[alias] = endpoint.RemoteID
 		}
 	}
-	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, cfg.Identity.UsernameMode, a.connectionID)
+	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, cfg.LegacySettings().UsernameMode, a.connectionID, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
 	a.mediaEnabled = cfg.Media.Enabled
 	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	a.mu.Unlock()

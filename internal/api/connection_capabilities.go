@@ -23,13 +23,14 @@ func applyConnectionCapabilities(dto *ConnectionDTO) {
 
 func connectionDTOFromControl(conn controlstore.Connection) ConnectionDTO {
 	dto := ConnectionDTO{
-		ID:              conn.ID,
-		Transport:       conn.Transport,
-		IntegrationMode: conn.IntegrationMode,
-		Label:           conn.Label,
-		Enabled:         conn.Enabled,
-		CreatedAt:       conn.CreatedAt,
-		UpdatedAt:       conn.UpdatedAt,
+		ID:                 conn.ID,
+		WhatsAppDeviceName: conn.WhatsAppDeviceName,
+		Transport:          conn.Transport,
+		IntegrationMode:    conn.IntegrationMode,
+		Label:              conn.Label,
+		Enabled:            conn.Enabled,
+		CreatedAt:          conn.CreatedAt,
+		UpdatedAt:          conn.UpdatedAt,
 	}
 	applyConnectionCapabilities(&dto)
 	return dto

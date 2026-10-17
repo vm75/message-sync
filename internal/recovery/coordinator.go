@@ -159,7 +159,14 @@ func (c *Coordinator) Recover(ctx context.Context, sources []transport.RecoveryS
 					cursor.Position = saved.Position
 					cursor.EventTimestamp = saved.EventTimestamp
 				}
-				_ = source.Recover(ctx, transport.RecoveryRequest{Cursor: cursor, MaxEvents: DefaultMaxEvents, MaxAge: DefaultMaxAge}, func(eventCtx context.Context, incoming transport.Incoming) error {
+				enabled, maxEvents, maxAge := true, DefaultMaxEvents, DefaultMaxAge
+				if provider, ok := source.(transport.RecoveryPolicyProvider); ok {
+					enabled, maxEvents, maxAge = provider.RecoveryPolicy(key)
+				}
+				if !enabled {
+					continue
+				}
+				_ = source.Recover(ctx, transport.RecoveryRequest{Cursor: cursor, MaxEvents: maxEvents, MaxAge: maxAge}, func(eventCtx context.Context, incoming transport.Incoming) error {
 					_, err := c.Handle(eventCtx, incoming)
 					return err
 				})

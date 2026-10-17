@@ -320,3 +320,24 @@ func TestNormalizeUnsupportedDiscordFormatsAreIgnored(t *testing.T) {
 		t.Fatal("native Discord sticker-only message should be ignored")
 	}
 }
+
+func TestNormalizerIsolatesSyncSetUsernamePolicies(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	push, hash := config.DefaultSyncSetSettings(), config.DefaultSyncSetSettings()
+	hash.UsernameMode = config.UsernameModeHash
+	normalizer, err := NewNormalizer(map[string]string{"push": testChannelID, "hash": "523456789012345678"}, hasher, config.UsernameModePushName, map[string]config.SyncSetSettings{"push": push, "hash": hash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, channel := range []string{testChannelID, "523456789012345678", testChannelID} {
+		message := testMessage()
+		message.ChannelID = channel
+		incoming, ok := normalizer.NormalizeMessage(message, "", nil)
+		if !ok || (incoming.Sender.DisplayName != "") != (channel == testChannelID) {
+			t.Fatalf("policy leaked for %s: %+v", channel, incoming)
+		}
+	}
+}

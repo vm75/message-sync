@@ -13,6 +13,7 @@ import (
 // endpoint is a configured alias, and a label is either a stable Pn handle
 // or a recently observed unambiguous display name/pseudonym.
 var crossReferencePattern = regexp.MustCompile(`@\{([A-Za-z0-9][A-Za-z0-9_-]{0,63})/([^{}\r\n]{1,96})\}`)
+var discriminatorLabel = regexp.MustCompile(`(?i)^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{5,10}$`)
 var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*$`)
 
 const maxCrossReferences = 32
@@ -63,14 +64,24 @@ func (r *Router) observedReferenceActor(ctx context.Context, endpoint transport.
 	}
 	r.mu.RLock()
 	var matched string
+	isCode := discriminatorLabel.MatchString(label)
+	aliasStem, aliasCode := "", ""
+	hasAliasCode := false
+	if split := strings.LastIndex(strings.TrimSpace(label), " "); split >= 0 {
+		aliasStem = normalizedReferenceName(label[:split])
+		aliasCode = label[split+1:]
+		hasAliasCode = true
+	} else {
+		hasAliasCode = false
+	}
+	hasAliasCode = hasAliasCode && discriminatorLabel.MatchString(aliasCode)
 	for _, address := range addresses {
 		alias := identity.Pseudonym(address.ActorID)
-		words := strings.Fields(alias)
-		shortAlias := alias
-		if len(words) > 2 {
-			shortAlias = strings.Join(words[:len(words)-1], " ")
-		}
-		if normalized != normalizedReferenceName(r.referenceNames[endpoint][address.ActorID]) &&
+		shortAlias := identity.PseudonymName(address.ActorID)
+		if label != address.Handle && !(isCode && strings.EqualFold(label, address.Handle)) &&
+			!(isCode && normalized == strings.ToLower(identity.DiscriminatorForLength(address.ActorID, len(label)))) &&
+			!(hasAliasCode && aliasStem == normalizedReferenceName(shortAlias) && strings.EqualFold(aliasCode, identity.DiscriminatorForLength(address.ActorID, len(aliasCode)))) &&
+			normalized != normalizedReferenceName(r.referenceNames[endpoint][address.ActorID]) &&
 			normalized != normalizedReferenceName(alias) &&
 			normalized != normalizedReferenceName(shortAlias) &&
 			normalized != strings.ToLower(address.ActorID) {
@@ -83,7 +94,7 @@ func (r *Router) observedReferenceActor(ctx context.Context, endpoint transport.
 		matched = address.ActorID
 	}
 	r.mu.RUnlock()
-	if matched != "" || len(addresses) == 0 {
+	if matched != "" || len(addresses) == 0 || stableReferenceHandle.MatchString(label) {
 		return matched, nil
 	}
 	resolver, ok := r.sender.(transport.ParticipantResolver)
@@ -140,11 +151,7 @@ func (r *Router) crossReferences(ctx context.Context, source transport.EndpointI
 		}
 
 		var addressActor, addressHandle string
-		if stableReferenceHandle.MatchString(label) {
-			if address, err := r.store.ParticipantByHandle(ctx, endpoint, label); err == nil {
-				addressActor, addressHandle = address.ActorID, address.Handle
-			}
-		} else if actor, err := r.observedReferenceActor(ctx, transport.EndpointID(endpoint), label); err == nil && actor != "" {
+		if actor, err := r.observedReferenceActor(ctx, transport.EndpointID(endpoint), label); err == nil && actor != "" {
 			if address, err := r.store.ParticipantByActor(ctx, endpoint, actor); err == nil {
 				addressActor, addressHandle = address.ActorID, address.Handle
 			}

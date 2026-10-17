@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -762,8 +763,8 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 4. Update global config via PUT /api/config to set usernameMode to "hash"
-	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/config", apiAddr), strings.NewReader(`{"usernameMode":"hash"}`))
+	// 4. Update sync-set config via PUT /api/sync-sets/mesh to set usernameMode to "hash"
+	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"settings":{"usernameMode":"hash"}}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -1007,5 +1008,87 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 	// Verify zero group JID / PII in log
 	if strings.Contains(logStr, "111111111111111111@g.us") || strings.Contains(logStr, "222222222222222222@g.us") {
 		t.Fatalf("log leaked raw JID: %s", logStr)
+	}
+}
+
+func TestRetentionPrunerReadsSavedPolicies(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.DB().Exec(`INSERT INTO sync_sets(id,settings_json) VALUES('mesh','{"storage":{"messageRetentionDays":7}}')`); err != nil {
+		t.Fatal(err)
+	}
+	stamp := time.Now().AddDate(0, 0, -20).UnixMilli()
+	if _, err := st.DB().Exec(`INSERT INTO canonical_messages(canonical_id,sync_set_id,created_at) VALUES('old','mesh',?)`, stamp); err != nil {
+		t.Fatal(err)
+	}
+	// A live save extends retention; the next prune must use the new policy.
+	if _, err := st.DB().Exec(`UPDATE sync_sets SET settings_json='{"storage":{"messageRetentionDays":60}}'`); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := pruneSyncSetRetention(ctx, st); err != nil || deleted != 0 {
+		t.Fatalf("saved longer policy ignored: deleted=%d err=%v", deleted, err)
+	}
+	if _, err := st.DB().Exec(`UPDATE sync_sets SET settings_json='{"storage":{"messageRetentionDays":7}}'`); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := pruneSyncSetRetention(ctx, st); err != nil || deleted != 1 {
+		t.Fatalf("saved shorter policy ignored: deleted=%d err=%v", deleted, err)
+	}
+}
+
+type scopedCleanupRecorder struct {
+	*fakeWhatsAppTransport
+	calls []struct {
+		groups []types.JID
+		cutoff time.Time
+	}
+}
+
+func (r *scopedCleanupRecorder) ClearSyncSetChats(ctx context.Context, groups []types.JID, cutoff time.Time) (int, error) {
+	r.calls = append(r.calls, struct {
+		groups []types.JID
+		cutoff time.Time
+	}{append([]types.JID(nil), groups...), cutoff})
+	return len(groups), nil
+}
+func TestWhatsAppCleanupIsScopedOnSharedConnection(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := &config.Config{Endpoints: map[string]config.Endpoint{}}
+	for index, days := range []int{7, 30, 0} {
+		settings := config.DefaultSyncSetSettings()
+		settings.WhatsAppCleanup.Enabled = days > 0
+		if days > 0 {
+			settings.WhatsAppCleanup.RetentionDays = days
+		}
+		set := config.SyncSet{ID: fmt.Sprintf("set%d", index), Settings: &settings}
+		for member := 0; member < 2; member++ {
+			alias := fmt.Sprintf("g%d%d", index, member)
+			set.Endpoints = append(set.Endpoints, alias)
+			cfg.Endpoints[alias] = config.Endpoint{Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: fmt.Sprintf("%d@g.us", index*2+member+1)}
+		}
+		cfg.SyncSets = append(cfg.SyncSets, set)
+	}
+	if err := config.Save(ctx, st.DB(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	fake := &scopedCleanupRecorder{fakeWhatsAppTransport: &fakeWhatsAppTransport{status: api.WhatsAppStatus{IsLoggedIn: true}}}
+	runWhatsAppChatCleanup(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), st.DB(), map[string]whatsappTransport{"conn-wa-1": fake})
+	if len(fake.calls) != 2 {
+		t.Fatalf("disabled set cleaned or enabled set skipped: %d calls", len(fake.calls))
+	}
+	for index, days := range []int{7, 30} {
+		call := fake.calls[index]
+		if len(call.groups) != 2 || call.groups[0].User != fmt.Sprint(index*2+1) || time.Since(call.cutoff) < time.Duration(days)*24*time.Hour-time.Minute || time.Since(call.cutoff) > time.Duration(days)*24*time.Hour+time.Minute {
+			t.Fatalf("mixed cleanup policies: %+v", call)
+		}
 	}
 }

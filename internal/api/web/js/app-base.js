@@ -198,6 +198,8 @@
   const btnNewSyncSet       = document.getElementById('btn-new-sync-set');
   const syncsetCountBadge   = document.getElementById('syncset-count-badge');
   const syncsetList         = document.getElementById('syncset-list');
+  const syncsetSettingsPanel = document.getElementById('syncset-settings-panel');
+  const settingsCodeLength = document.getElementById('settings-code-length');
   const syncsetEditorForm   = document.getElementById('syncset-editor-form');
   const syncsetEditorPlaceholder = document.getElementById('syncset-editor-placeholder');
   const syncsetEditorTitle  = document.getElementById('syncset-editor-title');
@@ -209,7 +211,11 @@
   const btnDeleteSyncSet    = document.getElementById('btn-delete-sync-set');
   const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
   const btnCancelEditor     = document.getElementById('btn-cancel-editor');
+  const membershipReviewEnabled = document.getElementById('settings-membership-review-enabled');
+  const membershipSyncSet = document.getElementById('membership-sync-set');
+  const membershipFields = document.getElementById('syncset-membership-fields');
   const membershipInstructions = document.getElementById('membership-applicant-instructions');
+  const membershipEvidenceInstructions = document.getElementById('membership-evidence-instructions');
   const membershipReviewerGuidance = document.getElementById('membership-reviewer-guidance');
   const membershipEvidenceRequired = document.getElementById('membership-evidence-required');
   const membershipCustomFields = document.getElementById('membership-custom-fields');
@@ -227,7 +233,7 @@
 
   // ── DOM – Settings ──────────────────────────────────────────
   const formSettings                 = document.getElementById('form-settings');
-  const settingsAlert                = document.getElementById('settings-alert');
+  const settingsShowDiscriminator    = document.getElementById('settings-show-discriminator');
   const settingsUsernameMode         = document.getElementById('settings-username-mode');
   const settingsChildContextMode     = document.getElementById('settings-child-context-mode');
   const settingsMediaEnabled         = document.getElementById('settings-media-enabled');
@@ -241,8 +247,6 @@
   const settingsWaCleanupEnabled     = document.getElementById('settings-whatsapp-cleanup-enabled');
   const settingsWaCleanupRetention   = document.getElementById('settings-whatsapp-cleanup-retention-days');
   const settingsWaDeviceName         = document.getElementById('settings-whatsapp-device-name');
-  const btnResetSettings             = document.getElementById('btn-reset-settings');
-  const btnSaveSettings              = document.getElementById('btn-save-settings');
 
   const formChangePassword           = document.getElementById('form-change-password');
   const changePwdAlert               = document.getElementById('change-pwd-alert');
@@ -286,7 +290,66 @@
   let currentUser = null;
   let cachedEndpoints = [];
   let cachedSyncSets = [];
-  let cachedConfig = null;
+  let editorDirty = false;
+  let editorBaseline = null;
+  let editorSaveState = 'clean';
+  let membershipSelection = '';
+  let editorSaving = false;
+  let editorLoading = false;
+  let membershipConfigReady = false;
+  let editorDisabledControls = [];
+
+  function syncSetSnapshot() {
+    return {
+      id: inputSyncsetId?.value || '',
+      endpoints: editorEndpoints.map(endpoint => ({...endpoint})),
+      fields: Array.from(syncsetSettingsPanel.querySelectorAll('input, select, textarea'))
+        .filter(field => field.id)
+        .map(field => [field.id, field.type === 'checkbox' ? field.checked : field.value])
+    };
+  }
+
+  function setSyncSetSaveState(state, message) {
+    editorSaveState = state;
+    document.querySelectorAll('.syncset-list-item.active [data-syncset-save-status], #syncset-editor-form [data-syncset-save-status], #modal-create-sync-set [data-syncset-save-status], #modal-sync-set-settings [data-syncset-save-status]').forEach(el => {
+      el.dataset.state = state;
+      const text = message || ({saving: 'Saving changes…', error: 'Save failed. Your changes are still available.'}[state] || '');
+      el.hidden = !text;
+      el.textContent = text;
+    });
+    document.querySelectorAll('.syncset-list-item.active .syncset-save-btn, .syncset-list-item.active .syncset-polished-save, #btn-save-sync-set, #modal-create-sync-set-save, #modal-sync-set-settings-save').forEach(button => {
+      button.disabled = editorSaving || !editorDirty || !membershipConfigReady;
+      button.setAttribute('aria-busy', String(editorSaving));
+    });
+  }
+
+  function markSyncSetDirty() {
+    if (editorLoading || editorSaving) return;
+    editorDirty = !editorBaseline || JSON.stringify(syncSetSnapshot()) !== JSON.stringify(editorBaseline);
+    setSyncSetSaveState(editorDirty ? 'dirty' : 'clean');
+  }
+
+  function updateMembershipFields() {
+    membershipFields.hidden = !membershipReviewEnabled.checked;
+    membershipFields.disabled = !membershipConfigReady;
+  }
+  membershipReviewEnabled?.addEventListener('change', updateMembershipFields);
+
+  function membershipEnabled(id) {
+    return cachedSyncSets.some(set => set.id === id && set.settings?.membershipReviewEnabled === true);
+  }
+
+  function refreshMembershipVisibility() {
+    const enabled = cachedSyncSets.some(set => set.settings?.membershipReviewEnabled === true);
+    navMembership?.classList.toggle('hidden', currentUser?.role !== 'admin' || !enabled);
+  }
+
+  document.addEventListener('input', event => {
+    if (event.target.closest('#syncset-settings-panel, #syncset-privacy-card, .syncset-privacy-panel, .syncset-membership-panel') || event.target.id === 'input-syncset-id' || event.target.id.startsWith('membership-')) markSyncSetDirty();
+  });
+  document.addEventListener('change', event => {
+    if (event.target.closest('#syncset-settings-panel, #syncset-privacy-card, .syncset-privacy-panel, .syncset-membership-panel') || event.target.id.startsWith('membership-')) markSyncSetDirty();
+  });
   let cachedDiscordChannels = [];
   let cachedDiscordStatus = null;
   let cachedTelegramChats = [];
@@ -659,7 +722,8 @@
     if (sessionRole) sessionRole.textContent = role;
     const isAdmin = role === 'admin';
     if (navUsers) navUsers.classList.toggle('hidden', !isAdmin);
-    if (navMembership) navMembership.classList.toggle('hidden', !isAdmin);
+    refreshMembershipVisibility();
+    if (isAdmin) window.API.getSyncSets().then(sets => { cachedSyncSets = sets; refreshMembershipVisibility(); }).catch(() => {});
     document.querySelectorAll('.admin-only').forEach(el => {
       el.classList.toggle('hidden', !isAdmin);
     });
@@ -1380,6 +1444,7 @@
           </button>`;
 
           if (conn.transport === 'whatsapp') {
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.editDeviceName('${escapeHtml(conn.id)}')">Device name</button>`;
             actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">Pair</button>`;
             actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">Logout</button>`;
           } else if (conn.transport === 'telegram' && caps.historyRecovery) {
@@ -1443,6 +1508,8 @@
     if (addConnPairingView) addConnPairingView.classList.add('hidden');
     if (addConnAlert) addConnAlert.classList.add('hidden');
     if (addConnLabel) addConnLabel.value = '';
+    const deviceNameInput = document.getElementById('add-conn-device-name');
+    if (deviceNameInput) deviceNameInput.value = 'message-sync';
     if (addConnId) addConnId.value = '';
     if (addConnToken) addConnToken.value = '';
     if (addConnDiscordMode) addConnDiscordMode.value = 'managed';
@@ -1489,6 +1556,7 @@
     if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
     if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
     if (addConnWaHelp) addConnWaHelp.classList.toggle('hidden', transport !== 'whatsapp');
+    document.getElementById('add-conn-device-name-group')?.classList.toggle('hidden', transport !== 'whatsapp');
     if (btnSubmitAddConn) {
       const buttonText = btnSubmitAddConn.querySelector('.btn-text');
       if (buttonText) buttonText.textContent = transport === 'whatsapp' ? 'Create & Pair' : 'Create Connection';
@@ -1542,6 +1610,7 @@
     setButtonLoading(btnSubmitAddConn, true);
     try {
       const payload = { transport: addConnTransport, label, enabled: true };
+      if (addConnTransport === 'whatsapp') payload.whatsappDeviceName = document.getElementById('add-conn-device-name')?.value.trim() || 'message-sync';
       if (id) payload.id = id;
       if (addConnTransport === 'telegram') payload.integrationMode = telegramMode;
       if (addConnTransport === 'discord') payload.integrationMode = discordMode;
@@ -1724,6 +1793,44 @@
         discoveryAlert.classList.remove('hidden');
       }
     } catch (err) { showToast(err.message || 'Topic discovery failed.', 'danger'); }
+  }
+
+  function editDeviceName(connId) {
+    const conn = cachedConnections.find(c => c.id === connId);
+    if (!conn) return;
+    const modal = document.getElementById('modal-device-name');
+    const form = document.getElementById('form-device-name');
+    const input = document.getElementById('connection-device-name');
+    const status = document.getElementById('device-name-status');
+    const button = document.getElementById('save-device-name');
+    input.value = conn.whatsappDeviceName || 'message-sync';
+    let savedName = input.value;
+    status.textContent = '';
+    status.hidden = true;
+    button.disabled = true;
+    input.oninput = () => { status.hidden = true; button.disabled = input.value === savedName; };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      button.disabled = true;
+      input.disabled = true;
+      status.hidden = false;
+      status.textContent = 'Saving changes…';
+      status.dataset.state = 'saving';
+      try {
+        const updated = await window.API.updateConnection(connId, {whatsappDeviceName: input.value});
+        Object.assign(conn, updated);
+        savedName = input.value;
+        status.hidden = true;
+        status.textContent = '';
+      } catch (err) {
+        status.textContent = 'Save failed: ' + err.message;
+        status.dataset.state = 'error';
+      } finally {
+        button.disabled = input.value === savedName;
+        input.disabled = false;
+      }
+    };
+    openModal(modal);
   }
 
   function openReplaceTokenModal(connId, label) {
@@ -1998,7 +2105,7 @@
   // Sync Sets Page
   // ══════════════════════════════════════════════════════════════
 
-  async function loadSyncSetsPage() {
+  async function loadSyncSetsPage(throwOnError = false) {
     try {
       const [syncSetsRes, endpointsRes] = await Promise.all([
         window.API.getSyncSets(),
@@ -2007,9 +2114,11 @@
       cachedSyncSets   = Array.isArray(syncSetsRes)  ? syncSetsRes  : [];
       cachedEndpoints  = Array.isArray(endpointsRes) ? endpointsRes : [];
     } catch (err) {
+      if (throwOnError) throw err;
       showToast(err.message || 'Failed to load sync sets', 'danger');
     }
     if (editingSyncSetId && !cachedSyncSets.some(s => s.id === editingSyncSetId)) editingSyncSetId = null;
+    refreshMembershipVisibility();
     renderSyncSetList();
     showEditorPlaceholder();
   }
@@ -2036,12 +2145,13 @@
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
         <div class="syncset-card-body" ${isActive ? '' : 'hidden'}>
+          <div class="syncset-save-feedback" data-syncset-save-status role="status" aria-live="polite" hidden></div>
           <div class="syncset-conversations"></div>
           <div class="syncset-card-actions">
             <button type="button" class="btn btn-ghost btn-sm syncset-add-btn">Add conversation</button>
             <span class="syncset-card-actions-main">
               <button type="button" class="btn btn-ghost btn-sm syncset-discard-btn">Cancel</button>
-              <button type="button" class="btn btn-primary btn-sm syncset-save-btn">Save</button>
+              <button type="button" class="btn btn-primary btn-sm syncset-save-btn" disabled>Save</button>
             </span>
           </div>
         </div>
@@ -2052,6 +2162,7 @@
     // their quick rename, reassign, and remove actions.
     const activeBody = syncsetList.querySelector('.syncset-list-item.active .syncset-conversations');
     if (activeBody && endpointChips) activeBody.appendChild(endpointChips);
+    setSyncSetSaveState(editorSaving ? 'saving' : editorDirty ? 'dirty' : 'clean');
 
     syncsetList.querySelectorAll('.syncset-card-toggle').forEach(toggle => {
       toggle.addEventListener('click', e => {
@@ -2068,7 +2179,8 @@
     });
     syncsetList.querySelectorAll('.syncset-add-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
-      openSyncSetEditor(btn.closest('.syncset-list-item').getAttribute('data-id'));
+      const id = btn.closest('.syncset-list-item').getAttribute('data-id');
+      if (editingSyncSetId !== id) openSyncSetEditor(id);
       document.dispatchEvent(new CustomEvent('syncset:add-conversation'));
     }));
     syncsetList.querySelectorAll('.syncset-save-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); btnSaveSyncSet?.click(); }));
@@ -2095,7 +2207,11 @@
     if (syncsetEditorForm) { syncsetEditorForm.classList.remove('hidden'); syncsetEditorForm.style.display = 'flex'; }
   }
 
-  function openSyncSetEditor(id) {
+  function openSyncSetEditor(id, force = false) {
+    if (editorSaving && !force) return;
+    editorLoading = true;
+    editorDirty = false;
+    membershipConfigReady = !id;
     const set = id ? cachedSyncSets.find(s => s.id === id) : null;
     editingSyncSetId = set ? set.id : null;
 
@@ -2118,19 +2234,32 @@
     }
     renderChips();
 
+    populateSettings(set?.settings || defaultSyncSetSettings());
     // Reset add-endpoint form
     resetAddEndpointForm();
     if (syncsetAnonymizeToDiscord) syncsetAnonymizeToDiscord.checked = !!(set && set.anonymizeToDiscord);
 		if (membershipInstructions) membershipInstructions.value = '';
 		if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
+    if (membershipEvidenceInstructions) membershipEvidenceInstructions.value = '';
 		if (membershipEvidenceRequired) membershipEvidenceRequired.checked = false;
 		if (membershipCustomFields) membershipCustomFields.value = '';
 		if (set) {
 			window.API.getMembershipConfig(set.id).then(cfg => {
+        if (editingSyncSetId !== set.id) return;
+        membershipConfigReady = true;
 				if (membershipInstructions) membershipInstructions.value = cfg.applicantInstructions || '';
 				if (membershipReviewerGuidance) membershipReviewerGuidance.value = cfg.reviewerGuidance || '';
+        if (membershipEvidenceInstructions) membershipEvidenceInstructions.value = cfg.evidenceInstructions || '';
 				if (membershipEvidenceRequired) membershipEvidenceRequired.checked = !!cfg.evidenceRequired;
 				if (membershipCustomFields) membershipCustomFields.value = JSON.stringify(cfg.customFields || [], null, 2);
+        // Only the fields loaded by this request become the baseline; retain
+        // changes the user may already have made to other settings.
+        if (editorBaseline) {
+          const loaded = new Map(syncSetSnapshot().fields);
+          editorBaseline.fields = editorBaseline.fields.map(([key, value]) => [key, key.startsWith('membership-') ? loaded.get(key) : value]);
+        }
+        updateMembershipFields();
+        markSyncSetDirty();
 			}).catch(err => showToast(err.message || 'Failed to load membership configuration', 'danger'));
 		}
 
@@ -2138,6 +2267,10 @@
     renderSyncSetList();
     if (set) showEditorPlaceholder();
     else { showEditorForm(); document.dispatchEvent(new CustomEvent('syncset:create')); }
+    editorBaseline = syncSetSnapshot();
+    updateMembershipFields();
+    editorLoading = false;
+    setSyncSetSaveState('clean');
   }
 
   function handleDeleteSyncSet(id) {
@@ -2167,6 +2300,7 @@
   let chipRenameIdx = null;
 
   function renderChips() {
+    markSyncSetDirty();
     if (!endpointChips) return;
     if (editorEndpoints.length === 0) {
       endpointChips.innerHTML = '<span class="chips-placeholder">No endpoints yet. Add one below.</span>';
@@ -2620,14 +2754,21 @@
   // Save sync set
   if (btnSaveSyncSet) {
     btnSaveSyncSet.addEventListener('click', async () => {
+      if (editorSaving || !editorDirty) return;
       const id = editingSyncSetId || (inputSyncsetId ? inputSyncsetId.value.trim() : '');
       if (!SYNC_SET_ID_REGEX.test(id)) {
         showToast('Sync Set ID must start with alphanumeric and be 1–64 chars.', 'warning');
         if (inputSyncsetId) inputSyncsetId.focus();
         return;
       }
+      editorSaving = true;
+      setSyncSetSaveState('saving');
+      editorDisabledControls = Array.from(document.querySelectorAll('#syncset-settings-panel input, #syncset-settings-panel select, #syncset-settings-panel textarea, .syncset-list-item.active input, .syncset-list-item.active textarea, #syncset-editor-form input, #syncset-editor-form textarea, .syncset-list-item.active select, #syncset-editor-form select, #create-sync-set-body input, #create-sync-set-body textarea, #create-sync-set-body select, .syncset-list-item.active button, #syncset-editor-form button, #modal-create-sync-set button, #view-sync-sets button, #modal-sync-set-settings button')).map(el => [el,el.disabled]);
+      editorDisabledControls.forEach(([el]) => {el.disabled=true;});
       setButtonLoading(btnSaveSyncSet, true);
       try {
+        if (!membershipConfigReady) throw new Error('Membership settings are still loading. Please retry.');
+        const settings = readSyncSetSettings();
         const aliases = editorEndpoints.map(e => e.alias);
 			let customFields = [];
 			if (membershipCustomFields && membershipCustomFields.value.trim()) {
@@ -2636,6 +2777,7 @@
 			}
 			const membershipConfig = {
 				applicantInstructions: membershipInstructions ? membershipInstructions.value : '',
+        evidenceInstructions: membershipEvidenceInstructions ? membershipEvidenceInstructions.value : '',
 				reviewerGuidance: membershipReviewerGuidance ? membershipReviewerGuidance.value : '',
 				evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
 				customFields
@@ -2645,6 +2787,7 @@
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
             if (existingEp) {
+              if (existingEp.alias === ep.alias && existingEp.transport === ep.transport && existingEp.connectionId === ep.connectionId && existingEp.remoteId === ep.remoteId && existingEp.syncSetId === editingSyncSetId) continue;
               await window.API.updateEndpoint(existingEp.alias, {
                 alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId,
                 remoteId: ep.remoteId, syncSetId: editingSyncSetId
@@ -2653,12 +2796,11 @@
               await window.API.createEndpoint({ ...ep, syncSetId: editingSyncSetId });
             }
           }
-          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, anonymizeToDiscord });
+          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, anonymizeToDiscord, settings });
 			await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
-          showToast(`Sync set '${editingSyncSetId}' saved.`, 'success');
         } else {
           // Create set first
-          await window.API.createSyncSet({ id, endpoints: [], anonymizeToDiscord });
+          await window.API.createSyncSet({ id, endpoints: [], anonymizeToDiscord, settings });
           editingSyncSetId = id;
           // Now create or update all pending endpoints
           for (const ep of editorEndpoints) {
@@ -2670,24 +2812,36 @@
             }
           }
           // Update the sync set with endpoint aliases
-          await window.API.updateSyncSet(id, { endpoints: aliases, anonymizeToDiscord });
+          await window.API.updateSyncSet(id, { endpoints: aliases, anonymizeToDiscord, settings });
 			await window.API.updateMembershipConfig(id, membershipConfig);
           showToast(`Sync set '${id}' created.`, 'success');
         }
-        await loadSyncSetsPage();
+        await loadSyncSetsPage(true);
         // Re-open editor for the now-saved set
-        openSyncSetEditor(editingSyncSetId);
+        openSyncSetEditor(editingSyncSetId, true);
+        editorDirty = false;
+        setSyncSetSaveState('clean');
         document.dispatchEvent(new CustomEvent('syncset:saved'));
       } catch (err) {
+        // A failed runtime reload can follow a successful database commit.
+        if (err.data?.persisted && err.data.syncSetId === id) editingSyncSetId = id;
+        try { cachedEndpoints = await window.API.getEndpoints(); } catch (_) { /* preserve the draft for retry */ }
+        editorDirty = true;
+        setSyncSetSaveState('error', 'Save failed: ' + (err.message || 'Please retry.'));
         showToast(err.message || 'Failed to save sync set.', 'danger');
       } finally {
+        editorSaving = false;
+        editorDisabledControls.forEach(([el,disabled]) => {el.disabled=disabled;});
         setButtonLoading(btnSaveSyncSet, false);
+        updateMembershipFields();
+        setSyncSetSaveState(editorSaveState);
       }
     });
   }
 
   if (btnNewSyncSet) {
     btnNewSyncSet.addEventListener('click', () => {
+      if (editorSaving) return;
       editingSyncSetId = null;
       editorEndpoints = [];
       openSyncSetEditor(null);
@@ -2712,15 +2866,19 @@
   // Settings
   // ══════════════════════════════════════════════════════════════
 
-  async function loadSettings() {
-    if (settingsAlert) settingsAlert.classList.add('hidden');
-    try {
-      const cfg = await window.API.getConfig();
-      cachedConfig = cfg;
-      populateSettings(cfg);
-    } catch (err) {
-      showToast(err.message || 'Failed to load settings', 'danger');
-    }
+  async function loadSettings() { /* Account/security settings are global. */ }
+
+  function defaultSyncSetSettings() {
+    return {
+      membershipReviewEnabled: false,
+      usernameMode: 'push_name', showDiscriminator: false, codeLength: 8,
+      childContextDisplayMode: 'opaque',
+      media: {enabled: true, maxSizeMB: 100},
+      recovery: {enabled: true, maxAgeHours: 24, maxMessagesPerGroup: 200},
+      storage: {messageRetentionDays: 90},
+      polls: {aggregationTrigger: 'aggregate-response'},
+      localPrefix: '', whatsappCleanup: {enabled: false, retentionDays: 30}
+    };
   }
 
   function setupChipsInput({ containerId, hiddenInputId, textInputId, placeholderEmpty, placeholderFilled }) {
@@ -2793,12 +2951,14 @@
       if (changed) {
         render();
       }
+      return changed;
     }
 
     function removeAt(idx) {
       if (idx >= 0 && idx < values.length) {
         values.splice(idx, 1);
         render();
+        markSyncSetDirty();
       }
     }
 
@@ -2808,6 +2968,7 @@
       if (val) {
         addValues(val);
         textInput.value = '';
+        markSyncSetDirty();
       }
     }
 
@@ -2862,6 +3023,7 @@
         e.preventDefault();
         addValues(pasteText);
         textInput.value = '';
+        markSyncSetDirty();
       }
     });
 
@@ -2892,14 +3054,17 @@
 
   function populateSettings(cfg) {
     if (!cfg) return;
+    membershipReviewEnabled.checked = cfg.membershipReviewEnabled === true;
+    if (settingsShowDiscriminator) settingsShowDiscriminator.checked = cfg.showDiscriminator === true;
+    if (settingsCodeLength) settingsCodeLength.value = cfg.codeLength || 8;
     if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
     if (settingsChildContextMode) settingsChildContextMode.value = cfg.childContextDisplayMode || 'opaque';
     if (settingsMediaEnabled)  settingsMediaEnabled.checked = cfg.media ? cfg.media.enabled : false;
-    if (settingsMediaMaxSize)  settingsMediaMaxSize.value  = cfg.media ? cfg.media.maxSizeMB : 50;
+    if (settingsMediaMaxSize)  settingsMediaMaxSize.value  = cfg.media ? cfg.media.maxSizeMB : 100;
     if (settingsRecoveryEnabled) settingsRecoveryEnabled.checked = cfg.recovery ? cfg.recovery.enabled : true;
-    if (settingsRecoveryMaxAge)  settingsRecoveryMaxAge.value   = cfg.recovery ? cfg.recovery.maxAgeHours : 72;
-    if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value  = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
-    if (settingsRetentionDays)   settingsRetentionDays.value    = cfg.storage ? cfg.storage.messageRetentionDays : 14;
+    if (settingsRecoveryMaxAge)  settingsRecoveryMaxAge.value   = cfg.recovery ? cfg.recovery.maxAgeHours : 24;
+    if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value  = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 200;
+    if (settingsRetentionDays)   settingsRetentionDays.value    = cfg.storage ? cfg.storage.messageRetentionDays : 90;
     if (chipsPollsAggTrigger) {
       chipsPollsAggTrigger.setValues(cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response');
     } else if (settingsPollsAggTrigger) {
@@ -2912,60 +3077,33 @@
     }
     if (settingsWaCleanupEnabled) settingsWaCleanupEnabled.checked = cfg.whatsappCleanup ? cfg.whatsappCleanup.enabled : false;
     if (settingsWaCleanupRetention) settingsWaCleanupRetention.value = cfg.whatsappCleanup ? cfg.whatsappCleanup.retentionDays : 30;
-    if (settingsWaDeviceName) settingsWaDeviceName.value = cfg.whatsappDeviceName || 'message-sync';
+
   }
 
-  if (formSettings) {
-    formSettings.addEventListener('submit', async e => {
-      e.preventDefault();
-      if (settingsAlert) settingsAlert.classList.add('hidden');
-
-      const mediaMaxSize   = parseInt(settingsMediaMaxSize ? settingsMediaMaxSize.value : 50, 10);
-      const recovMaxAge    = parseInt(settingsRecoveryMaxAge ? settingsRecoveryMaxAge.value : 72, 10);
-      const recovMaxMsgs   = parseInt(settingsRecoveryMaxMsgs ? settingsRecoveryMaxMsgs.value : 1000, 10);
-      const retentionDays  = parseInt(settingsRetentionDays ? settingsRetentionDays.value : 14, 10);
-      const waRetention    = parseInt(settingsWaCleanupRetention ? settingsWaCleanupRetention.value : 30, 10);
-      const aggTrigger     = chipsPollsAggTrigger ? chipsPollsAggTrigger.getValue() : (settingsPollsAggTrigger ? settingsPollsAggTrigger.value.trim() : '');
-      const localPrefix    = chipsLocalPrefix ? chipsLocalPrefix.getValue() : (settingsLocalPrefix ? settingsLocalPrefix.value : '');
-      const waDeviceName   = settingsWaDeviceName ? settingsWaDeviceName.value.trim() : '';
-
-      if (isNaN(mediaMaxSize) || mediaMaxSize < 1)  { settingsAlert.textContent = 'Media max size must be ≥1 MB.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(recovMaxAge) || recovMaxAge < 1)     { settingsAlert.textContent = 'Recovery max age must be ≥1 hour.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(recovMaxMsgs) || recovMaxMsgs < 1)   { settingsAlert.textContent = 'Recovery max messages must be ≥1.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(retentionDays) || retentionDays < 1) { settingsAlert.textContent = 'Retention must be ≥1 day.'; settingsAlert.classList.remove('hidden'); return; }
-      if (!aggTrigger) { settingsAlert.textContent = 'Polls aggregation trigger cannot be empty.'; settingsAlert.classList.remove('hidden'); return; }
-
-      const payload = {
-        usernameMode: settingsUsernameMode ? settingsUsernameMode.value : 'push_name',
-        childContextDisplayMode: settingsChildContextMode ? settingsChildContextMode.value : 'opaque',
-        media: { enabled: settingsMediaEnabled ? settingsMediaEnabled.checked : false, maxSizeMB: mediaMaxSize },
-        recovery: { enabled: settingsRecoveryEnabled ? settingsRecoveryEnabled.checked : true, maxAgeHours: recovMaxAge, maxMessagesPerGroup: recovMaxMsgs },
-        storage: { messageRetentionDays: retentionDays },
-        polls: { aggregationTrigger: aggTrigger },
-        whatsappCleanup: { enabled: settingsWaCleanupEnabled ? settingsWaCleanupEnabled.checked : false, retentionDays: isNaN(waRetention) ? 30 : waRetention },
-        localPrefix: localPrefix,
-        whatsappDeviceName: waDeviceName || 'message-sync'
-      };
-
-      setButtonLoading(btnSaveSettings, true);
-      try {
-        const updated = await window.API.updateConfig(payload);
-        cachedConfig = updated;
-        populateSettings(updated);
-        showToast('Settings saved.', 'success');
-      } catch (err) {
-        if (settingsAlert) { settingsAlert.textContent = err.message || 'Failed to save settings.'; settingsAlert.classList.remove('hidden'); }
-      } finally {
-        setButtonLoading(btnSaveSettings, false);
-      }
-    });
+  function readSyncSetSettings() {
+    const value = id => document.getElementById(id)?.value;
+    const integer = (id,min,max,label) => {
+      const n=Number(value(id));
+      if (!Number.isInteger(n) || n<min || n>max) throw new Error(Number.isFinite(max) ? `${label} must be between ${min} and ${max}.` : `${label} must be a positive integer.`);
+      return n;
+    };
+    chipsPollsAggTrigger?.commitPending();
+    chipsLocalPrefix?.commitPending();
+    return {
+      membershipReviewEnabled: membershipReviewEnabled.checked,
+      usernameMode:settingsUsernameMode.value,
+      showDiscriminator:settingsShowDiscriminator.checked,
+      codeLength:integer('settings-code-length',5,10,'Code length'),
+      childContextDisplayMode:settingsChildContextMode.value,
+      media:{enabled:settingsMediaEnabled.checked,maxSizeMB:integer('settings-media-max-size',1,Infinity,'Media size')},
+      recovery:{enabled:settingsRecoveryEnabled.checked,maxAgeHours:integer('settings-recovery-max-age',1,Infinity,'Recovery age'),maxMessagesPerGroup:integer('settings-recovery-max-msgs',1,Infinity,'Recovery count')},
+      storage:{messageRetentionDays:integer('settings-retention-days',1,Infinity,'Retention')},
+      polls:{aggregationTrigger:chipsPollsAggTrigger?.getValue() || settingsPollsAggTrigger.value || 'aggregate-response'},
+      localPrefix:chipsLocalPrefix?.getValue() || settingsLocalPrefix.value || '',
+      whatsappCleanup:{enabled:settingsWaCleanupEnabled.checked,retentionDays:integer('settings-whatsapp-cleanup-retention-days',1,Infinity,'WhatsApp retention')}
+    };
   }
-
-  if (btnResetSettings) {
-    btnResetSettings.addEventListener('click', () => {
-      if (cachedConfig) populateSettings(cachedConfig);
-    });
-  }
+  formSettings?.addEventListener('submit', event => {event.preventDefault();btnSaveSyncSet?.click();});
 
   if (formChangePassword) {
     formChangePassword.addEventListener('submit', async e => {
@@ -3042,21 +3180,45 @@
   // Membership
   // ══════════════════════════════════════════════════════════════
 
-  async function loadMembership() {
-    const isAdmin = currentUser && currentUser.role === 'admin';
-    if (!isAdmin) return;
-    if (membershipPipelines) membershipPipelines.classList.remove('hidden');
-    await refreshMembership();
-    await loadPipelines();
+  async function openMembership(id) {
+    membershipSelection = id;
+    if (window.Router.getRoute() === 'membership') await loadMembership();
+    else window.Router.navigate('membership');
   }
+
+  async function loadMembership() {
+    if (currentUser?.role !== 'admin') return;
+    try {
+      cachedSyncSets = await window.API.getSyncSets();
+      refreshMembershipVisibility();
+      const enabled = cachedSyncSets.filter(set => set.settings?.membershipReviewEnabled === true);
+      if (!enabled.some(set => set.id === membershipSelection)) membershipSelection = enabled[0]?.id || '';
+      membershipSyncSet.innerHTML = enabled.map(set => `<option value="${escapeHtml(set.id)}">${escapeHtml(set.id)}</option>`).join('') || '<option value="">Enable membership review in a sync set’s settings</option>';
+      membershipSyncSet.value = membershipSelection;
+      membershipPipelines?.classList.toggle('hidden', !membershipSelection);
+      if (membershipDetail) membershipDetail.textContent = '';
+      await refreshMembership();
+      await loadPipelines();
+    } catch (err) { showToast(err.message || 'Failed to load membership settings', 'danger'); }
+  }
+
+  membershipSyncSet?.addEventListener('change', () => {
+    membershipSelection = membershipSyncSet.value;
+    if (membershipDetail) membershipDetail.textContent = '';
+    refreshMembership();
+    loadPipelines();
+  });
 
   async function refreshMembership() {
     if (!membershipTableBody) return;
-    const filters = {};
+    if (!membershipSelection) { membershipTableBody.innerHTML = '<tr><td colspan="5">Enable membership review in a sync set’s settings.</td></tr>'; return; }
+    const scope = membershipSelection;
+    const filters = {syncSetId: scope};
     if (membershipStatusFilter && membershipStatusFilter.value) filters.status = membershipStatusFilter.value;
     if (membershipAgeFilter && membershipAgeFilter.value)     filters.ageHours = membershipAgeFilter.value;
     try {
       const data = await window.API.getMembershipRequests(filters);
+      if (membershipSelection !== scope) return;
       const items = Array.isArray(data) ? data : (data && data.requests ? data.requests : []);
       membershipTableBody.innerHTML = items.map(r => `
         <tr>
@@ -3080,7 +3242,10 @@
   async function loadPipelines() {
     if (!pipelineList) return;
     try {
-      const pipelines = await window.API.getVerificationPipelines();
+      if (!membershipSelection) { pipelineList.innerHTML = ''; return; }
+      const scope = membershipSelection;
+      const pipelines = await window.API.getVerificationPipelines(scope);
+      if (membershipSelection !== scope) return;
       pipelineList.innerHTML = (Array.isArray(pipelines) ? pipelines : []).map(p => `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
           <span style="flex:1;font-size:.8rem;">${escapeHtml(p.label || p.id)}</span>
@@ -3101,6 +3266,8 @@
         const transport = pipelineTransport ? pipelineTransport.value     : 'whatsapp';
         const endpoint  = pipelineEndpoint  ? pipelineEndpoint.value.trim() : '';
         const roleId    = pipelineRole      ? pipelineRole.value.trim()   : '';
+        const set = cachedSyncSets.find(set => set.id === membershipSelection);
+        if (!set?.endpoints.includes(endpoint)) throw new Error('Choose an endpoint in the selected sync set.');
         await window.API.createVerificationPipeline({ label, transport, endpoint, discordRoleId: roleId || undefined });
         showToast('Pipeline created.', 'success');
         await loadPipelines();
@@ -3110,6 +3277,9 @@
 
   // Exposed globals for inline onclick handlers
   window.App = {
+    membershipEnabled,
+    openMembership,
+    editDeviceName,
     openDiscovery,
     selectDiscoveredTarget,
     openReassignModal,

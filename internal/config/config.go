@@ -3,6 +3,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -168,7 +169,10 @@ func (m UsernameMode) IsValid() bool {
 	return m == UsernameModePushName || m == UsernameModeHash
 }
 
+// Config retains legacy global fields only as initialization defaults for older
+// in-process callers. Persisted sync-set settings always take precedence.
 type Config struct {
+	ShowDiscriminator       bool                    `json:"showDiscriminator"`
 	Endpoints               map[string]Endpoint     `json:"endpoints"`
 	SyncSets                []SyncSet               `json:"syncSets"`
 	Identity                Identity                `json:"identity"`
@@ -189,9 +193,10 @@ type Endpoint struct {
 }
 
 type SyncSet struct {
-	ID                 string   `json:"id"`
-	Endpoints          []string `json:"endpoints"`
-	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
+	ID                 string           `json:"id"`
+	Endpoints          []string         `json:"endpoints"`
+	AnonymizeToDiscord bool             `json:"anonymizeToDiscord"`
+	Settings           *SyncSetSettings `json:"settings,omitempty"`
 }
 
 type Identity struct {
@@ -248,10 +253,10 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		childContextMode       string
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName, &childContextMode); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName, &childContextMode, &cfg.ShowDiscriminator); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -301,7 +306,7 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	}
 	endpointRows.Close()
 
-	setRows, err := db.QueryContext(ctx, `SELECT id, anonymize_to_discord FROM sync_sets ORDER BY id ASC`)
+	setRows, err := db.QueryContext(ctx, `SELECT id, anonymize_to_discord, settings_json FROM sync_sets ORDER BY id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read sync_sets: %w", err)
 	}
@@ -312,17 +317,25 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 			id                 string
 			anonymizeToDiscord bool
 		)
-		if err := setRows.Scan(&id, &anonymizeToDiscord); err != nil {
+		var settingsJSON sql.NullString
+		if err := setRows.Scan(&id, &anonymizeToDiscord, &settingsJSON); err != nil {
 			return nil, fmt.Errorf("scan sync_set: %w", err)
 		}
 		endpoints := syncSetMap[id]
 		if endpoints == nil {
 			endpoints = []string{}
 		}
+		settings := cfg.LegacySettings()
+		if settingsJSON.Valid {
+			if err := json.Unmarshal([]byte(settingsJSON.String), &settings); err != nil {
+				return nil, errors.New("decode sync-set settings")
+			}
+		}
 		cfg.SyncSets = append(cfg.SyncSets, SyncSet{
 			ID:                 id,
 			Endpoints:          endpoints,
 			AnonymizeToDiscord: anonymizeToDiscord,
+			Settings:           &settings,
 		})
 	}
 	if err := setRows.Err(); err != nil {
@@ -431,8 +444,6 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 		return fmt.Errorf("begin save config transaction: %w", err)
 	}
 	defer tx.Rollback()
-	previousChildContextMode := ChildContextDisplayOpaque
-	_ = tx.QueryRowContext(ctx, `SELECT child_context_display_mode FROM global_config WHERE id = 1`).Scan(&previousChildContextMode)
 	type savedChildScopeLabel struct {
 		endpointID, transport, remoteID, scopeKind, remoteScopeID, displayName string
 		updatedAt                                                              int64
@@ -461,8 +472,8 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -476,15 +487,11 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			whatsapp_chat_retention_days = excluded.whatsapp_chat_retention_days,
 			local_message_prefix = excluded.local_message_prefix,
 			whatsapp_device_name = excluded.whatsapp_device_name,
-			child_context_display_mode = excluded.child_context_display_mode
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName, string(cfg.ChildContextDisplayMode))
+			child_context_display_mode = excluded.child_context_display_mode,
+			show_discriminator = excluded.show_discriminator
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName, string(cfg.ChildContextDisplayMode), cfg.ShowDiscriminator)
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
-	}
-	if previousChildContextMode == ChildContextDisplayFriendly && cfg.ChildContextDisplayMode == ChildContextDisplayOpaque {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM child_scope_labels`); err != nil {
-			return fmt.Errorf("clear child scope labels: %w", err)
-		}
 	}
 
 	endpointToSyncSet := make(map[string]string)
@@ -502,7 +509,11 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	}
 
 	for _, set := range cfg.SyncSets {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sync_sets (id, anonymize_to_discord) VALUES (?, ?)`, set.ID, set.AnonymizeToDiscord); err != nil {
+		settingsJSON, err := json.Marshal(cfg.SettingsForSet(set))
+		if err != nil {
+			return errors.New("encode sync-set settings")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sync_sets (id, anonymize_to_discord, settings_json) VALUES (?, ?, ?)`, set.ID, set.AnonymizeToDiscord, string(settingsJSON)); err != nil {
 			return fmt.Errorf("insert sync_set %q: %w", set.ID, err)
 		}
 	}
@@ -513,17 +524,18 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			return fmt.Errorf("insert endpoint %q: %w", alias, err)
 		}
 	}
-	if cfg.ChildContextDisplayMode == ChildContextDisplayFriendly {
-		for _, label := range savedLabels {
-			endpoint, ok := cfg.Endpoints[label.endpointID]
-			if !ok || string(endpoint.Transport) != label.transport || endpoint.RemoteID != label.remoteID {
-				continue
-			}
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO child_scope_labels(endpoint_id, scope_kind, remote_scope_id, display_name, updated_at)
-				VALUES (?, ?, ?, ?, ?)`, label.endpointID, label.scopeKind, label.remoteScopeID, label.displayName, label.updatedAt); err != nil {
-				return fmt.Errorf("restore child scope label: %w", err)
-			}
+	for _, label := range savedLabels {
+		if cfg.SettingsForEndpoint(label.endpointID).ChildContextDisplayMode != ChildContextDisplayFriendly {
+			continue
+		}
+		endpoint, ok := cfg.Endpoints[label.endpointID]
+		if !ok || string(endpoint.Transport) != label.transport || endpoint.RemoteID != label.remoteID {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO child_scope_labels(endpoint_id, scope_kind, remote_scope_id, display_name, updated_at)
+			VALUES (?, ?, ?, ?, ?)`, label.endpointID, label.scopeKind, label.remoteScopeID, label.displayName, label.updatedAt); err != nil {
+			return fmt.Errorf("restore child scope label: %w", err)
 		}
 	}
 
@@ -623,6 +635,11 @@ func (c Config) Validate() error {
 
 	membership := make(map[string]string, len(c.Endpoints))
 	for _, set := range c.SyncSets {
+		if set.Settings != nil {
+			if err := set.Settings.Validate(); err != nil {
+				return fmt.Errorf("sync set %q: %w", set.ID, err)
+			}
+		}
 		if err := ValidateSyncSetID(set.ID); err != nil {
 			return err
 		}

@@ -18,6 +18,10 @@ func (a *Adapter) withDiscordMedia(incoming transport.Incoming, message *discord
 	a.mu.RLock()
 	enabled := a.mediaEnabled
 	maxBytes := a.mediaMaxBytes
+	if policy, ok := a.endpointSettings[string(incoming.Endpoint)]; ok {
+		enabled = policy.Media.Enabled
+		maxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	a.mu.RUnlock()
 
 	if !enabled {

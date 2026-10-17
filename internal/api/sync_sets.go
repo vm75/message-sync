@@ -2,6 +2,7 @@ package api
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,317 +12,202 @@ import (
 	"github.com/vm75/message-sync/internal/safelog"
 )
 
-type SyncSetDTO struct {
-	ID                 string   `json:"id"`
-	Endpoints          []string `json:"endpoints"`
-	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
-}
+type SyncSetDTO = config.SyncSet
 
 type CreateSyncSetRequest struct {
-	ID                 string   `json:"id"`
-	Endpoints          []string `json:"endpoints"`
-	AnonymizeToDiscord bool     `json:"anonymizeToDiscord"`
+	ID                 string          `json:"id"`
+	Endpoints          []string        `json:"endpoints"`
+	AnonymizeToDiscord bool            `json:"anonymizeToDiscord"`
+	Settings           json.RawMessage `json:"settings,omitempty"`
 }
 
 type UpdateSyncSetRequest struct {
-	ID                 string   `json:"id,omitempty"`
-	Endpoints          []string `json:"endpoints"`
-	AnonymizeToDiscord *bool    `json:"anonymizeToDiscord,omitempty"`
+	ID                 string          `json:"id,omitempty"`
+	Endpoints          *[]string       `json:"endpoints,omitempty"`
+	AnonymizeToDiscord *bool           `json:"anonymizeToDiscord,omitempty"`
+	Settings           json.RawMessage `json:"settings,omitempty"`
 }
 
 func (s *Server) handleListSyncSets(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+		WriteError(w, 503, "database unavailable")
 		return
 	}
-
-	setRows, err := s.db.QueryContext(r.Context(), `SELECT id, anonymize_to_discord FROM sync_sets ORDER BY id ASC`)
+	cfg, err := config.LoadRaw(r.Context(), s.db)
 	if err != nil {
-		safelog.Error(s.logger, "query sync_sets failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query sync sets")
+		WriteError(w, 500, "failed to read sync sets")
 		return
 	}
-
-	setIDs := make([]string, 0)
-	setAnonymize := make(map[string]bool)
-	for setRows.Next() {
-		var (
-			id                 string
-			anonymizeToDiscord bool
-		)
-		if err := setRows.Scan(&id, &anonymizeToDiscord); err != nil {
-			setRows.Close()
-			safelog.Error(s.logger, "scan sync_set failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to read sync set")
-			return
-		}
-		setIDs = append(setIDs, id)
-		setAnonymize[id] = anonymizeToDiscord
-	}
-	if err := setRows.Err(); err != nil {
-		setRows.Close()
-		safelog.Error(s.logger, "iterate sync_sets failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to iterate sync sets")
-		return
-	}
-	setRows.Close()
-
-	endpointRows, err := s.db.QueryContext(r.Context(), `SELECT alias, sync_set_id FROM endpoints WHERE sync_set_id IS NOT NULL ORDER BY alias ASC`)
-	if err != nil {
-		safelog.Error(s.logger, "query endpoints for sync_sets failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query endpoints")
-		return
-	}
-	defer endpointRows.Close()
-
-	syncSetEndpoints := make(map[string][]string)
-	for endpointRows.Next() {
-		var alias, syncSetID string
-		if err := endpointRows.Scan(&alias, &syncSetID); err != nil {
-			safelog.Error(s.logger, "scan endpoint alias failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to read endpoint memberships")
-			return
-		}
-		syncSetEndpoints[syncSetID] = append(syncSetEndpoints[syncSetID], alias)
-	}
-	if err := endpointRows.Err(); err != nil {
-		safelog.Error(s.logger, "iterate endpoints failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to iterate endpoints")
-		return
-	}
-
-	syncSets := make([]SyncSetDTO, 0, len(setIDs))
-	for _, id := range setIDs {
-		endpoints := syncSetEndpoints[id]
-		if endpoints == nil {
-			endpoints = []string{}
-		}
-		syncSets = append(syncSets, SyncSetDTO{
-			ID:                 id,
-			Endpoints:          endpoints,
-			AnonymizeToDiscord: setAnonymize[id],
-		})
-	}
-
-	_ = WriteJSON(w, http.StatusOK, syncSets)
+	_ = WriteJSON(w, http.StatusOK, cfg.SyncSets)
 }
 
 func (s *Server) handleGetSyncSet(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+		WriteError(w, 503, "database unavailable")
 		return
 	}
-
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		WriteError(w, http.StatusBadRequest, "sync set id is required")
-		return
-	}
-
-	var (
-		exists             string
-		anonymizeToDiscord bool
-	)
-	err := s.db.QueryRowContext(r.Context(), `SELECT id, anonymize_to_discord FROM sync_sets WHERE id = ?`, id).Scan(&exists, &anonymizeToDiscord)
-	if errors.Is(err, sql.ErrNoRows) {
-		WriteError(w, http.StatusNotFound, "sync set not found")
-		return
-	} else if err != nil {
-		safelog.Error(s.logger, "query sync set failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query sync set")
-		return
-	}
-
-	rows, err := s.db.QueryContext(r.Context(), `SELECT alias FROM endpoints WHERE sync_set_id = ? ORDER BY alias ASC`, id)
+	cfg, err := config.LoadRaw(r.Context(), s.db)
 	if err != nil {
-		safelog.Error(s.logger, "query sync set endpoints failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to query sync set endpoints")
+		WriteError(w, 500, "failed to read sync sets")
 		return
 	}
-	defer rows.Close()
-
-	endpoints := make([]string, 0)
-	for rows.Next() {
-		var alias string
-		if err := rows.Scan(&alias); err != nil {
-			safelog.Error(s.logger, "scan sync set endpoint failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to read endpoint")
+	for _, set := range cfg.SyncSets {
+		if set.ID == r.PathValue("id") {
+			_ = WriteJSON(w, 200, set)
 			return
 		}
-		endpoints = append(endpoints, alias)
 	}
-
-	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:                 id,
-		Endpoints:          endpoints,
-		AnonymizeToDiscord: anonymizeToDiscord,
-	})
+	WriteError(w, 404, "sync set not found")
 }
 
 func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+		WriteError(w, 503, "database unavailable")
 		return
 	}
-
 	var req CreateSyncSetRequest
 	if err := ReadJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, 400, "invalid request body")
 		return
 	}
-
 	req.ID = strings.TrimSpace(req.ID)
 	if err := config.ValidateSyncSetID(req.ID); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+		WriteError(w, 400, err.Error())
 		return
 	}
-
 	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id = ?`, req.ID).Scan(&existing)
+	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id=?`, req.ID).Scan(&existing)
 	if err == nil {
-		WriteError(w, http.StatusBadRequest, "sync set already exists")
-		return
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		safelog.Error(s.logger, "check existing sync set failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database error")
+		WriteError(w, 400, "sync set already exists")
 		return
 	}
-
+	if !errors.Is(err, sql.ErrNoRows) {
+		WriteError(w, 500, "database error")
+		return
+	}
 	if err := s.validateSyncSetEndpoints(r, req.ID, req.Endpoints, true); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
+		WriteError(w, 400, err.Error())
 		return
 	}
-
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	settings, err := mergeSyncSetSettings(config.DefaultSyncSetSettings(), req.Settings)
 	if err != nil {
-		safelog.Error(s.logger, "begin tx failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database transaction error")
+		WriteError(w, 400, err.Error())
 		return
 	}
-	defer tx.Rollback()
-
-	if _, err := tx.ExecContext(r.Context(), `INSERT INTO sync_sets (id, anonymize_to_discord) VALUES (?, ?)`, req.ID, req.AnonymizeToDiscord); err != nil {
-		safelog.Error(s.logger, "insert sync set failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to insert sync set")
+	set := config.SyncSet{ID: req.ID, Endpoints: req.Endpoints, AnonymizeToDiscord: req.AnonymizeToDiscord, Settings: &settings}
+	if set.Endpoints == nil {
+		set.Endpoints = []string{}
+	}
+	if !s.saveSyncSet(w, r, set, true) {
 		return
 	}
-
-	for _, alias := range req.Endpoints {
-		alias = strings.TrimSpace(alias)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, req.ID, alias); err != nil {
-			safelog.Error(s.logger, "assign endpoint to sync set failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to assign endpoints")
-			return
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		safelog.Error(s.logger, "commit tx failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
-		return
-	}
-	s.notifyConfigChange(r.Context())
-
-	endpoints := req.Endpoints
-	if endpoints == nil {
-		endpoints = []string{}
-	}
-	_ = WriteJSON(w, http.StatusCreated, SyncSetDTO{
-		ID:                 req.ID,
-		Endpoints:          endpoints,
-		AnonymizeToDiscord: req.AnonymizeToDiscord,
-	})
+	_ = WriteJSON(w, http.StatusCreated, set)
 }
 
 func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	if s.db == nil {
-		WriteError(w, http.StatusServiceUnavailable, "database unavailable")
+		WriteError(w, 503, "database unavailable")
 		return
 	}
-
 	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		WriteError(w, http.StatusBadRequest, "sync set id is required")
-		return
-	}
-
 	var req UpdateSyncSetRequest
 	if err := ReadJSON(r, &req); err != nil {
-		WriteError(w, http.StatusBadRequest, "invalid request body")
+		WriteError(w, 400, "invalid request body")
 		return
 	}
-
 	if req.ID != "" && req.ID != id {
-		WriteError(w, http.StatusBadRequest, "sync set id in body does not match path")
+		WriteError(w, 400, "sync set id in body does not match path")
 		return
 	}
-
-	var existing string
-	err := s.db.QueryRowContext(r.Context(), `SELECT id FROM sync_sets WHERE id = ?`, id).Scan(&existing)
-	if errors.Is(err, sql.ErrNoRows) {
-		WriteError(w, http.StatusNotFound, "sync set not found")
-		return
-	} else if err != nil {
-		safelog.Error(s.logger, "check sync set existence failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if err := s.validateSyncSetEndpoints(r, id, req.Endpoints, false); err != nil {
-		WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	tx, err := s.db.BeginTx(r.Context(), nil)
+	cfg, err := config.LoadRaw(r.Context(), s.db)
 	if err != nil {
-		safelog.Error(s.logger, "begin tx failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database transaction error")
+		WriteError(w, 500, "failed to read sync sets")
 		return
 	}
-	defer tx.Rollback()
-
-	anonymize := false
-	if req.AnonymizeToDiscord != nil {
-		anonymize = *req.AnonymizeToDiscord
-	}
-	if _, err := tx.ExecContext(r.Context(), `UPDATE sync_sets SET anonymize_to_discord = ? WHERE id = ?`, anonymize, id); err != nil {
-		safelog.Error(s.logger, "update sync set anonymize_to_discord failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = NULL WHERE sync_set_id = ?`, id); err != nil {
-		safelog.Error(s.logger, "clear old sync set memberships failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "database error")
-		return
-	}
-
-	for _, alias := range req.Endpoints {
-		alias = strings.TrimSpace(alias)
-		if _, err := tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id = ? WHERE alias = ?`, id, alias); err != nil {
-			safelog.Error(s.logger, "assign endpoint to sync set failed", "sync_set_api", err)
-			WriteError(w, http.StatusInternalServerError, "failed to assign endpoints")
-			return
+	var current *config.SyncSet
+	for index := range cfg.SyncSets {
+		if cfg.SyncSets[index].ID == id {
+			current = &cfg.SyncSets[index]
+			break
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		safelog.Error(s.logger, "commit tx failed", "sync_set_api", err)
-		WriteError(w, http.StatusInternalServerError, "failed to commit transaction")
+	if current == nil {
+		WriteError(w, 404, "sync set not found")
 		return
 	}
-
-	s.notifyConfigChange(r.Context())
-
-	endpoints := req.Endpoints
-	if endpoints == nil {
-		endpoints = []string{}
+	set := *current
+	if req.Endpoints != nil {
+		set.Endpoints = *req.Endpoints
 	}
-	_ = WriteJSON(w, http.StatusOK, SyncSetDTO{
-		ID:                 id,
-		Endpoints:          endpoints,
-		AnonymizeToDiscord: anonymize,
-	})
+	if req.AnonymizeToDiscord != nil {
+		set.AnonymizeToDiscord = *req.AnonymizeToDiscord
+	}
+	if err := s.validateSyncSetEndpoints(r, id, set.Endpoints, false); err != nil {
+		WriteError(w, 400, err.Error())
+		return
+	}
+	settings, err := mergeSyncSetSettings(cfg.SettingsForSet(set), req.Settings)
+	if err != nil {
+		WriteError(w, 400, err.Error())
+		return
+	}
+	set.Settings = &settings
+	if !s.saveSyncSet(w, r, set, false) {
+		return
+	}
+	_ = WriteJSON(w, http.StatusOK, set)
+}
+
+func (s *Server) saveSyncSet(w http.ResponseWriter, r *http.Request, set config.SyncSet, create bool) bool {
+	payload, err := json.Marshal(set.Settings)
+	if err != nil {
+		WriteError(w, 500, "encode settings failed")
+		return false
+	}
+	tx, err := s.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		WriteError(w, 500, "database transaction error")
+		return false
+	}
+	defer tx.Rollback()
+	if create {
+		_, err = tx.ExecContext(r.Context(), `INSERT INTO sync_sets(id,anonymize_to_discord,settings_json) VALUES(?,?,?)`, set.ID, set.AnonymizeToDiscord, string(payload))
+	} else {
+		_, err = tx.ExecContext(r.Context(), `UPDATE sync_sets SET anonymize_to_discord=?,settings_json=? WHERE id=?`, set.AnonymizeToDiscord, string(payload), set.ID)
+	}
+	if err != nil {
+		WriteError(w, 500, "failed to save sync set")
+		return false
+	}
+	if _, err = tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id=NULL WHERE sync_set_id=?`, set.ID); err != nil {
+		WriteError(w, 500, "failed to update memberships")
+		return false
+	}
+	for _, alias := range set.Endpoints {
+		if _, err = tx.ExecContext(r.Context(), `UPDATE endpoints SET sync_set_id=? WHERE alias=?`, set.ID, alias); err != nil {
+			WriteError(w, 500, "failed to assign endpoint")
+			return false
+		}
+	}
+	if set.Settings.ChildContextDisplayMode == config.ChildContextDisplayOpaque {
+		if _, err = tx.ExecContext(r.Context(), `DELETE FROM child_scope_labels WHERE endpoint_id IN (SELECT alias FROM endpoints WHERE sync_set_id=?)`, set.ID); err != nil {
+			WriteError(w, 500, "failed to clear child labels")
+			return false
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		WriteError(w, 500, "failed to commit sync set")
+		return false
+	}
+	if err := s.notifyConfigChange(r.Context()); err != nil {
+		_ = WriteJSON(w, http.StatusInternalServerError, map[string]any{
+			"error":     "settings saved but runtime reload failed; retry Save",
+			"persisted": true,
+			"syncSetId": set.ID,
+		})
+		return false
+	}
+	return true
 }
 
 func (s *Server) handleDeleteSyncSet(w http.ResponseWriter, r *http.Request) {

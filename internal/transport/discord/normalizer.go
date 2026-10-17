@@ -29,9 +29,10 @@ type ManagedWebhookChecker interface {
 // display names remain transient and only configured channel IDs are mapped to
 // safe application aliases.
 type Normalizer struct {
-	endpoints    map[string]transport.EndpointID
-	hasher       *identity.Hasher
-	usernameMode config.UsernameMode
+	endpointSettings map[string]config.SyncSetSettings
+	endpoints        map[string]transport.EndpointID
+	hasher           *identity.Hasher
+	usernameMode     config.UsernameMode
 }
 
 func (n *Normalizer) endpointFor(channelID string) (transport.EndpointID, bool) {
@@ -55,7 +56,7 @@ func (n *Normalizer) NormalizePollVote(channelID, messageID, userID string, inde
 	}, true
 }
 
-func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
+func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
 	}
@@ -78,8 +79,8 @@ func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, userna
 		endpoints[channelID] = transport.EndpointID(alias)
 	}
 	return &Normalizer{
-		endpoints:    endpoints,
-		hasher:       hasher,
+		endpoints: endpoints,
+		hasher:    hasher, endpointSettings: normalizerPolicies(policies),
 		usernameMode: usernameMode,
 	}, nil
 }
@@ -111,7 +112,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 	}
 
 	displayName := ""
-	if n.usernameMode == config.UsernameModePushName {
+	if n.mode(endpoint) == config.UsernameModePushName {
 		displayName = transientDisplayName(msg)
 	}
 
@@ -128,19 +129,19 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 				RemoteMessageID: strings.TrimSpace(ref.MessageID),
 			}
 			if msg.ReferencedMessage != nil {
-				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher, n.usernameMode)
+				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher, n.mode(endpoint))
 			}
 		}
 	}
 
-	text, mentions := normalizeDiscordMentions(msg.Content, msg.Mentions, n.hasher, n.usernameMode)
+	text, mentions := normalizeDiscordMentions(msg.Content, msg.Mentions, n.hasher, n.mode(endpoint))
 	kind := "text"
 	var pollOptions []string
 	selectableCount := 0
 	durationHours := 0
 	if msg.Poll != nil {
 		kind = "poll"
-		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher, n.usernameMode)
+		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher, n.mode(endpoint))
 		mentions = nil
 		for _, answer := range msg.Poll.Answers {
 			if answer.Media == nil || strings.TrimSpace(answer.Media.Text) == "" {
@@ -276,4 +277,17 @@ func sanitizeDiscordMentions(content string, users []*discordgo.User, hasher *id
 		content = strings.ReplaceAll(content, "@"+mention.RemoteID, "@"+name)
 	}
 	return content
+}
+
+func normalizerPolicies(policies []map[string]config.SyncSetSettings) map[string]config.SyncSetSettings {
+	if len(policies) > 0 {
+		return policies[0]
+	}
+	return nil
+}
+func (n *Normalizer) mode(endpoint transport.EndpointID) config.UsernameMode {
+	if policy, ok := n.endpointSettings[string(endpoint)]; ok {
+		return policy.UsernameMode
+	}
+	return n.usernameMode
 }

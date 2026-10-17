@@ -17,16 +17,17 @@ import (
 )
 
 type Normalizer struct {
-	endpoints    map[string]transport.EndpointID
-	hasher       *identity.Hasher
-	usernameMode config.UsernameMode
+	endpointSettings map[string]config.SyncSetSettings
+	endpoints        map[string]transport.EndpointID
+	hasher           *identity.Hasher
+	usernameMode     config.UsernameMode
 }
 
 type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 type VoteDecryptor func(context.Context, *events.Message) (*waE2E.PollVoteMessage, error)
 type ContactGetter func(types.JID) types.ContactInfo
 
-func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
+func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
 	}
@@ -46,7 +47,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 		}
 		endpoints[key] = transport.EndpointID(alias)
 	}
-	return &Normalizer{endpoints: endpoints, hasher: hasher, usernameMode: usernameMode}, nil
+	return &Normalizer{endpoints: endpoints, hasher: hasher, endpointSettings: normalizerPolicies(policies), usernameMode: usernameMode}, nil
 }
 
 func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor, contactGetter ContactGetter, resolver JIDResolver) (transport.Incoming, bool) {
@@ -58,8 +59,12 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		return transport.Incoming{}, false
 	}
 
+	if policy, ok := n.endpointSettings[string(endpoint)]; ok {
+		mediaEnabled = policy.Media.Enabled
+		mediaMaxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	displayName := ""
-	if n.usernameMode == config.UsernameModePushName {
+	if n.mode(endpoint) == config.UsernameModePushName {
 		displayName = strings.TrimSpace(evt.Info.PushName)
 	}
 	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)
@@ -446,4 +451,17 @@ func normalizedPayload(msg *waE2E.Message) (kind, text string, dl whatsmeow.Down
 		}
 	}
 	return "other", "", nil, 0
+}
+
+func normalizerPolicies(policies []map[string]config.SyncSetSettings) map[string]config.SyncSetSettings {
+	if len(policies) > 0 {
+		return policies[0]
+	}
+	return nil
+}
+func (n *Normalizer) mode(endpoint transport.EndpointID) config.UsernameMode {
+	if policy, ok := n.endpointSettings[string(endpoint)]; ok {
+		return policy.UsernameMode
+	}
+	return n.usernameMode
 }

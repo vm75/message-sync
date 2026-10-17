@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS verification_assessments (
 );
 
 CREATE TABLE IF NOT EXISTS transport_connections (
+    whatsapp_device_name TEXT NOT NULL DEFAULT '',
     id TEXT PRIMARY KEY,
     transport TEXT NOT NULL CHECK (transport IN ('whatsapp', 'discord', 'telegram')),
     label TEXT NOT NULL CHECK (length(label) > 0),

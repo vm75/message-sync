@@ -116,7 +116,7 @@ func TestAuthSetupLoginAndServerSideSessions(t *testing.T) {
 	if first == second {
 		t.Fatal("sessions are not independent")
 	}
-	if rec := request(t, srv, http.MethodGet, "/api/config", nil, first); rec.Code != 200 {
+	if rec := request(t, srv, http.MethodGet, "/api/config", nil, first); rec.Code != http.StatusGone {
 		t.Fatalf("authenticated API=%d", rec.Code)
 	}
 	if rec := request(t, srv, http.MethodPost, "/api/auth/logout", nil, first); rec.Code != 200 {
@@ -125,7 +125,7 @@ func TestAuthSetupLoginAndServerSideSessions(t *testing.T) {
 	if rec := request(t, srv, http.MethodGet, "/api/config", nil, first); rec.Code != 401 {
 		t.Fatalf("revoked session=%d", rec.Code)
 	}
-	if rec := request(t, srv, http.MethodGet, "/api/config", nil, second); rec.Code != 200 {
+	if rec := request(t, srv, http.MethodGet, "/api/config", nil, second); rec.Code != http.StatusGone {
 		t.Fatalf("other session affected=%d", rec.Code)
 	}
 }

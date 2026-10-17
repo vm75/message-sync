@@ -21,7 +21,7 @@ The release workflow publishes the same multi-architecture `message-sync` image 
 - **Full Message Lifecycle**: Synchronizes text with provenance attribution, transient in-memory media (images, video, audio/voice notes, documents, stickers), native replies with fallback attribution, emoji reactions, edits (including plain text edits from the linked WhatsApp account's phone), and deletions/revocations.
 - **Polls & Live Aggregation**: Native polls with source labels included in cross-endpoint Discord/Telegram poll presentation, aggregate-only live-result companions, and live on-demand aggregate summaries that update with poll changes via configurable reply triggers (e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions/options survive server restarts while remaining outside the PII-free routing database.
 - **Source-Local Message Suppression**: Configurable message prefix filtering (e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before transmission or media loading.
-- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g. `Silent Falcon Q7M`) exclusively for Discord destinations without storing PII or mapping tables.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g. `Silent Falcon`) exclusively for Discord destinations without storing PII or mapping tables.
 - **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
 - **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
@@ -158,3 +158,28 @@ Maintainers should follow [RELEASING.md](RELEASING.md); do not create release ta
   transient. Full pseudonyms are stable with the same identity secret and
   provider identity. Telegram MTProto and edits use non-notifying reference text.
 
+
+Participant discriminator display is controlled in each sync set’s settings
+or `PUT /api/sync-sets/{id}` with `{"settings":{"showDiscriminator":true}}`. It defaults to false,
+including existing installations. When enabled, forwarded names across all
+transports show `group/Alice Q7M5K` or anonymized `group/Silent Falcon Q7M5K`;
+when disabled the code is hidden. Computation and `@{group/Q7M5K}` addressing
+remain enabled regardless of anonymization or display. Codes are stable with
+the same identity secret/provider actor; duplicate or ambiguous code/name/handle
+matches remain literal. Existing full pseudonyms and `Pn` addresses still work.
+Showing a code beside real and anonymized names makes them linkable to someone
+who sees both. No additional environment variable or participant identity
+storage is required.
+
+All routing/runtime policies are configured per sync set, including media,
+recovery, retention, polls, local prefixes and child-label persistence. Code
+length is configurable from 5 to 10 characters per set: new sets default to 8,
+and upgrades retain existing policies and five-character codes. Supported old
+codes remain valid addresses. Open **Edit settings** on a sync set to configure it in a modal with spaced
+sections. Save is enabled only for pending changes; saving, saved and error
+feedback remains visible. Membership review is enabled separately per sync set
+with a persisted `membershipReviewEnabled` setting, replacing the old browser
+switch. The review page scopes requests and pipelines to the selected enabled set. User/account and admin-security settings remain global. WhatsApp
+linked-device names are connection settings shared by all sets using that
+connection; edit them in Connections → Device name. Existing connections import
+their old name once. The former `/api/config` endpoint returns HTTP 410.
