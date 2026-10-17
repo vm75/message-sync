@@ -227,6 +227,11 @@ func initialize(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate discriminator display setting: %w", err)
 		}
 	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN private_dm_relay_enabled BOOLEAN NOT NULL DEFAULT 0 CHECK (private_dm_relay_enabled IN (0, 1))`); err != nil {
+		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+			return fmt.Errorf("migrate private DM relay setting: %w", err)
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE sync_sets ADD COLUMN settings_json TEXT`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return fmt.Errorf("migrate sync-set settings: %w", err)

@@ -4,6 +4,24 @@ This document defines the user-visible attribution syntax produced by the canoni
 
 ## Sender attribution
 
+The opt-in private relay has its own presentation, outside canonical group
+headers. It always uses an endpoint-scoped pseudonym, independent of
+`anonymizeToDiscord`, `usernameMode` and discriminator display settings:
+
+```text
+DM from <source-endpoint>/<endpoint-scoped pseudonym>
+<sanitized private body>
+Reply to this message to respond privately.
+```
+
+The pseudonym includes its deterministic five-character code. No provider
+display name, username, phone, native user ID or quoted message content is
+added. User-authored native mentions and embedded bridge references are
+neutralized; Discord/Bot API previews are disabled. Private Reply uses the
+structured provider message ID only, never this header or any text marker.
+Private edits/deletes do not change the delivered original. See
+[private messaging](PRIVATE_MESSAGING.md) for expiry and cleanup semantics.
+
 With the default `push_name` username mode, sender presentation uses this precedence:
 
 1. normalized provider display name;

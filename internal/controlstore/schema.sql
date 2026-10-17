@@ -149,6 +149,43 @@ CREATE TABLE IF NOT EXISTS transport_connections (
 );
 CREATE INDEX IF NOT EXISTS idx_transport_connections_transport ON transport_connections(transport);
 
+-- Private DM state contains no message bodies. Provider chat/message tokens and
+-- the paired actor inboxes are encrypted. Lookup keys are keyed digests.
+CREATE TABLE IF NOT EXISTS private_dm_reply_mappings (
+    lookup_key TEXT PRIMARY KEY,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_private_dm_reply_expiry ON private_dm_reply_mappings(expires_at);
+
+CREATE TABLE IF NOT EXISTS private_dm_seen_messages (
+    lookup_key TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_private_dm_seen_expiry ON private_dm_seen_messages(expires_at);
+
+CREATE TABLE IF NOT EXISTS private_dm_inboxes (
+    lookup_key TEXT PRIMARY KEY,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_private_dm_inboxes_expiry ON private_dm_inboxes(expires_at);
+
+CREATE TABLE IF NOT EXISTS private_dm_cleanup_candidates (
+    candidate_key TEXT PRIMARY KEY,
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    cleanup_after INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 3),
+    next_attempt_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_private_dm_cleanup_due ON private_dm_cleanup_candidates(cleanup_after,next_attempt_at);
+
 -- Poll questions/options are sensitive message content. Keep them encrypted
 -- in the control database rather than adding them to the PII-free sync store.
 CREATE TABLE IF NOT EXISTS poll_presentations (

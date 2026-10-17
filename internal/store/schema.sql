@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS global_config (
     local_message_prefix TEXT NOT NULL DEFAULT '',
     whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync',
     show_discriminator BOOLEAN NOT NULL DEFAULT 0,
-    child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly'))
+    child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly')),
+    private_dm_relay_enabled BOOLEAN NOT NULL DEFAULT 0 CHECK (private_dm_relay_enabled IN (0, 1))
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 

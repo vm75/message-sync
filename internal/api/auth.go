@@ -383,6 +383,9 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 }
 
 func requiresAdmin(method, path string) bool {
+	if path == "/api/config" {
+		return true
+	}
 	if strings.HasPrefix(path, "/api/sync-sets/") && strings.HasSuffix(path, "/membership") {
 		return true
 	}

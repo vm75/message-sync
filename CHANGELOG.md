@@ -3,6 +3,15 @@
 
 ### Unreleased — cross-group participant addressing
 
+- Add an anonymous, default-off private `/dm` relay for WhatsApp, Discord bot
+  and Telegram Bot API accounts, with global and per-sync-set administrator gates.
+- Continue private conversations only through exact native reply mappings;
+  verify observed actors, current membership and owning connections on every hop.
+- Encrypt content-free 24-hour reply/inbox state and bounded WhatsApp local
+  cleanup metadata in `control.db`; keep private content outside group routing.
+- Ignore private edits/deletes. Use only WhatsApp per-message Delete for Me;
+  never delete Discord/Bot API participant-visible messages or MTProto personal chats.
+
 - Hide discriminator suffixes by default, including anonymized Discord names.
   Add per-sync-set `showDiscriminator`, default false,
   to show the stable suffix across forwarded attribution.
@@ -10,14 +19,14 @@
 - Move routing/runtime policies into sync-set settings, with live reload and
   independent media, recovery, retention, polls, local-prefix and child-label
   policies. Preserve existing settings during initialization; retire the global
-  runtime `/api/config` endpoint with HTTP 410.
+  runtime fields from `/api/config`, which now exposes only the DM safety gate.
 - Add per-sync-set discriminator `codeLength` (5–10; 8 for new sets, preserve 5
   on upgrade). Keep historical supported-length addresses working.
 - Move WhatsApp linked-device names to connections, with one-time import and
   editing for existing connections. Keep accounts and admin security global.
 - Move runtime, privacy and membership settings into an **Edit settings** modal
   with consistent section spacing. Enable Save only for changed drafts, disable
-  it on revert/save, and show saving/saved/error feedback without clean-state banners.
+  it on revert/save, and show saving/error feedback without clean-state banners.
 - Make membership review visibility a saved per-sync-set setting; replace the
   browser-only switch and scope review requests/pipelines to the selected set.
 - Preserve chip removal/paste tracking and report runtime reload failures.

@@ -638,12 +638,14 @@ sync.db. MTProto and edits keep literal reference text.
   verify the earlier code still addresses the same member if unambiguous.
 - Edit settings, privacy and membership fields; remove a poll/local-prefix chip
   and paste multiple tokens. Each change must enable Save without a clean-state or unsaved-state banner. Reverting all changes must disable Save. Save must
-  show “Saving changes…” then a saved confirmation; a failed request must show
+  show “Saving changes…” then disable Save without a success banner; a failed request must show
   an error while preserving pending edits for retry.
 - Create a WhatsApp connection and edit an existing connection's Device name.
   Confirm one name is shared by its sync sets and retained after restart; the
   linked-device display changes when linking. Global Settings contains account
-  security. Membership review is enabled per sync set in its settings modal. `/api/config` must return HTTP 410.
+  security and the global DM safety switch. Membership review and private DM
+  enablement are per sync set. `/api/config` must expose only the administrator
+  `privateDMRelayEnabled` safety flag and reject historical global runtime fields.
 - Increase a set's retention and verify the next periodic prune uses the saved
   value without restart. Move an endpoint: old canonical history retains its
   original set's policy. Deleted-endpoint suppression markers expire at 90 days.
@@ -659,3 +661,67 @@ sync.db. MTProto and edits keep literal reference text.
   switch the review selector, and confirm each list contains only that set’s
   requests/pipelines. Test status filters together with set filtering; switch
   while a request is loading and ensure stale responses do not replace the list.
+
+## Private DM relay
+
+Use dedicated test accounts and private conversations. Never put live tokens,
+phone numbers, native IDs or message bodies in CI output or screenshots shared
+outside the test participants. No live provider secrets are required by tests.
+
+1. Confirm both global **Settings → Allow private DM relays** and per-set
+   **Edit settings → Enable private DM relay for this sync set** start off.
+   Enable both as an administrator; verify an operator cannot change either.
+   Turn either off and confirm new commands and existing reply mappings stop
+   relaying. Discord should reconnect when its DM intent requirement changes.
+2. Have both participants post in their configured groups so their HMAC actors
+   are observed. For Telegram Bot API, privately `/start` the exact owning bot;
+   verify the response is help. Do not switch Telegram accounts as a fallback.
+3. From a Discord bot DM, send `/dm @{wa-group/P1} hello`. Only the addressed
+   WhatsApp private chat should receive `DM from dc-group/<pseudonym>` and the
+   Reply instruction. Check every synced group/channel/topic for zero copies.
+   Reply natively from WhatsApp, then natively from Discord. Repeat WA↔WA,
+   Discord↔Discord, Bot API↔Bot API and the remaining mixed directions, including
+   two connections on the same provider. Check exact owning accounts each time.
+4. Start two conversations with different peers and two with the same peer.
+   Reply to older messages in a different order. Check the recorded peer and
+   conversation remain correct; plain new text must only receive private help.
+   A new `/dm` while replying must start a new conversation.
+5. Try plain `hello`, bare `@{group/P1}`, unknown commands, escaped/malformed
+   commands, empty/oversized bodies, media, copied display references, help
+   replies and unknown/foreign-chat reply IDs. Expect private help and no third
+   party delivery. Test full pseudonyms, unique stems, codes, Pn, whitespace,
+   case rules and ambiguous names. Native @mentions should not ping or leak a
+   native identity, and URLs should not generate Discord/Telegram previews.
+6. Block Discord DMs, omit Telegram `/start`, and test a WhatsApp participant
+   whose roster exposes only an unverified LID. Expect a safe private failure,
+   never public delivery or exposed contact details. Revoke membership/channel
+   access; remove or reassign endpoints/sync sets. Old reply mappings must fail
+   closed, including after restart. Refresh Telegram private contact when its
+   encrypted 24-hour reachability record expires.
+7. Edit and delete/unsend both the original command and a native reply on every
+   supported provider. The peer's delivered original must remain unchanged.
+   No edited `/dm` may become a new delivery. Check ordinary configured group
+   edits/deletes, replies, media, polls, reactions and local-prefix suppression
+   still behave as before. A personal message to an MTProto user connection
+   must remain untouched and unanswered.
+8. Keep the recipient's relayed message visible until and beyond 24 hours.
+   Before expiry, its native reply should work. After expiry, expect help even
+   when the message remains readable. Restart around expiry and run startup
+   cleanup; application mappings must expire independently of provider support.
+9. On WhatsApp, inspect the sync account's own private chat after the cleanup
+   tick: feature-owned inbound/help copies are eligible after handling and
+   relayed copies after 24 hours. Confirm per-message Delete for Me removes
+   those bot-side copies where supported, without any “deleted”/revoke notice
+   or change to the participant's readable message. Confirm unrelated personal
+   and group messages remain. Do not use clearChat/deleteChat as a substitute
+   if the provider does not apply the one-message operation.
+10. Discord and Bot API private cleanup must make zero provider deletion calls;
+    their retained provider copies are expected. Inject unavailable connections
+    and failed WhatsApp cleanup; verify at most three attempts and bounded
+    metadata retention. Check `sync.db`, admin JSON, metrics and application
+    logs contain no private body/native inbox or contact details. `control.db`
+    may contain only encrypted native routing tokens and content-free metadata.
+
+Automated tests inspect operation types and fake-provider behavior. Record live
+provider/version observations separately; do not describe an unperformed live
+WhatsApp linked-device deletion check as verified.

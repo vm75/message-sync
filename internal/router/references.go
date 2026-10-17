@@ -18,6 +18,25 @@ var stableReferenceHandle = regexp.MustCompile(`^P[1-9][0-9]*$`)
 
 const maxCrossReferences = 32
 
+// ResolveParticipantReference reuses the group-address namespace for private
+// relay commands. The caller must separately authorize the requesting actor.
+func (r *Router) ResolveParticipantReference(ctx context.Context, token string) (transport.CrossReference, bool) {
+	match := crossReferencePattern.FindStringSubmatch(token)
+	if len(match) != 3 || match[0] != token {
+		return transport.CrossReference{}, false
+	}
+	endpoint := transport.EndpointID(match[1])
+	actor, err := r.observedReferenceActor(ctx, endpoint, strings.TrimSpace(match[2]))
+	if err != nil || actor == "" {
+		return transport.CrossReference{}, false
+	}
+	address, err := r.store.ParticipantByActor(ctx, string(endpoint), actor)
+	if err != nil {
+		return transport.CrossReference{}, false
+	}
+	return transport.CrossReference{Token: token, Endpoint: endpoint, ActorID: actor, Handle: address.Handle}, true
+}
+
 func normalizedReferenceName(name string) string {
 	return transport.NormalizeParticipantLabel(name)
 }

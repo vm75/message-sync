@@ -95,6 +95,12 @@ func (s *Server) handleCreateSyncSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	set := config.SyncSet{ID: req.ID, Endpoints: req.Endpoints, AnonymizeToDiscord: req.AnonymizeToDiscord, Settings: &settings}
+	if settings.PrivateDMRelayEnabled {
+		if principal, ok := principalFromContext(r.Context()); !ok || principal.Role != "admin" {
+			WriteError(w, http.StatusForbidden, "private DM relay enablement requires an administrator")
+			return
+		}
+	}
 	if set.Endpoints == nil {
 		set.Endpoints = []string{}
 	}
@@ -150,6 +156,12 @@ func (s *Server) handleUpdateSyncSet(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		WriteError(w, 400, err.Error())
 		return
+	}
+	if settings.PrivateDMRelayEnabled != cfg.SettingsForSet(*current).PrivateDMRelayEnabled {
+		if principal, ok := principalFromContext(r.Context()); !ok || principal.Role != "admin" {
+			WriteError(w, http.StatusForbidden, "private DM relay enablement requires an administrator")
+			return
+		}
 	}
 	set.Settings = &settings
 	if !s.saveSyncSet(w, r, set, false) {

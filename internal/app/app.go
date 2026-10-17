@@ -17,6 +17,7 @@ import (
 	"github.com/vm75/message-sync/internal/connection"
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/privatedm"
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/safelog"
@@ -243,6 +244,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 					}
 					dcInst, err := openDiscord(ctx, discord.Options{
+						PrivateDMEnabled:         cfg.PrivateDMConnectionEnabled(c.ID),
 						ConnectionID:             c.ID,
 						EndpointSettings:         cfg.EndpointSettings(c.ID),
 						Token:                    discordCredential.BotToken,
@@ -305,6 +307,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 					connID := c.ID
 					tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
+						PrivateDMEnabled:  cfg.PrivateDMConnectionEnabled(c.ID),
 						ConnectionID:      connID,
 						EndpointSettings:  cfg.EndpointSettings(connID),
 						Token:             token,
@@ -392,6 +395,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := connMgr.UpdateConfig(cfg); err != nil {
 		return fmt.Errorf("apply initial connection configuration: %w", err)
 	}
+	privateState, err := controlstore.NewPrivateDMStore(controlStore.DB(), []byte(secret))
+	if err != nil {
+		return err
+	}
+	privateRelay := &privatedm.Relay{Sync: syncStore, State: privateState, Runtime: adapterRegistry, Resolver: mesh, Hasher: hasher, LoadConfig: func(loadCtx context.Context) (*config.Config, error) { return config.LoadRaw(loadCtx, syncStore.DB()) }}
+	logPrivateDMCleanupCapabilities(logger, cfg)
 
 	onConfigChange := func(updateCtx context.Context) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
@@ -482,12 +491,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 				}
 				for connID, c := range enabledDiscord {
-					_, exists := discordAdapters[connID]
-					if !exists || credentialChanged[connID] {
+					existingAdapter, exists := discordAdapters[connID]
+					dmChanged := false
+					if state, ok := existingAdapter.(interface{ PrivateDMEnabled() bool }); ok {
+						dmChanged = state.PrivateDMEnabled() != updatedCfg.PrivateDMConnectionEnabled(connID)
+					}
+					if !exists || credentialChanged[connID] || dmChanged {
 						credentialBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
-							if exists && credentialChanged[connID] {
+							if exists && (credentialChanged[connID] || dmChanged) {
 								reloadErr = errors.Join(reloadErr, errors.New("decrypt Discord credential failed"))
 							}
 							continue
@@ -504,6 +517,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							}
 						}
 						dcInst, err := openDiscord(ctx, discord.Options{
+							PrivateDMEnabled:         updatedCfg.PrivateDMConnectionEnabled(c.ID),
 							ConnectionID:             c.ID,
 							EndpointSettings:         updatedCfg.EndpointSettings(c.ID),
 							Token:                    discordCredential.BotToken,
@@ -518,7 +532,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						})
 						if err != nil {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
-							if exists && credentialChanged[connID] {
+							if exists && (credentialChanged[connID] || dmChanged) {
 								reloadErr = errors.Join(reloadErr, errors.New("start Discord transport failed"))
 							}
 							continue
@@ -584,6 +598,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 						cid := c.ID
 						tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
+							PrivateDMEnabled:  updatedCfg.PrivateDMConnectionEnabled(c.ID),
 							ConnectionID:      cid,
 							EndpointSettings:  updatedCfg.EndpointSettings(cid),
 							Token:             token,
@@ -642,6 +657,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err := mesh.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update router config: %w", err)
 		}
+		logPrivateDMCleanupCapabilities(logger, updatedCfg)
 		logger.Info("configuration reloaded",
 			"endpoints", len(updatedCfg.Endpoints),
 			"sync_sets", len(updatedCfg.SyncSets),
@@ -727,6 +743,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	defer pruneTicker.Stop()
 	membershipTicker := time.NewTicker(time.Minute)
 	defer membershipTicker.Stop()
+	privateCleanupTicker := time.NewTicker(time.Minute)
+	defer privateCleanupTicker.Stop()
+	initialCleanupCtx, initialCleanupCancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := privateRelay.Sweep(initialCleanupCtx); err != nil {
+		safelog.Error(logger, "private DM cleanup failed", "private_dm_cleanup", err)
+	}
+	initialCleanupCancel()
 
 	for {
 		select {
@@ -751,6 +774,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			}
 		case <-membershipTicker.C:
 			apiServer.ReconcileMembership(ctx)
+		case <-privateCleanupTicker.C:
+			cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := privateRelay.Sweep(cleanupCtx); err != nil {
+				safelog.Error(logger, "private DM cleanup failed", "private_dm_cleanup", err)
+			}
+			cancel()
+		case incoming := <-connMgr.PrivateEvents():
+			privateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := privateRelay.Handle(privateCtx, incoming); err != nil {
+				safelog.Error(logger, "private DM processing failed", "private_dm", err)
+			}
+			cancel()
 		case incoming, ok := <-connMgr.Events():
 			if !ok {
 				return errors.New("connection manager event stream closed")
@@ -768,6 +803,17 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				"kind", incoming.Kind,
 			)
 		}
+	}
+}
+
+func logPrivateDMCleanupCapabilities(logger *slog.Logger, cfg *config.Config) {
+	seen := make(map[config.Transport]bool)
+	for _, ep := range cfg.Endpoints {
+		if !cfg.PrivateDMConnectionEnabled(ep.ConnectionID) || seen[ep.Transport] || ep.Transport == config.TransportWhatsApp {
+			continue
+		}
+		seen[ep.Transport] = true
+		logger.Info("private DM local cleanup unsupported", "event", "private_dm_cleanup_unsupported", "transport", string(ep.Transport))
 	}
 }
 

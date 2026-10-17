@@ -8,6 +8,8 @@ Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packag
 
 ## Repository map
 
+- `internal/privatedm/` — opt-in anonymous private relay, outside canonical group routing.
+
 - `cmd/message-sync/` — CLI entry point (`run`, `validate-config`, and `version`).
 - `internal/app/` — process wiring and the single ordered ingress worker.
 - `internal/api/` — authenticated HTTP API and embedded Web UI.
@@ -124,6 +126,17 @@ AI agents MUST keep all repository documentation in sync with the implementation
 
 
 ## Cross-group reference invariants
+
+Private DM relays reuse this resolver and require both the global and sync-set
+administrator switches (default off). Native reply mappings authorize only the
+recorded addressee in the exact owning connection/private chat, expire after
+24 hours and recheck current membership on every hop. No private content or
+native inbox identity enters `sync.db`, logs, metrics or admin JSON. Persist
+only encrypted content-free routing/inbox/cleanup tokens in `control.db`.
+Private edits/deletes/revokes are ignored. WhatsApp cleanup may use only a
+per-message Delete for Me AppState operation on feature-owned private copies.
+Never substitute group deletion, REVOKE, whole-chat cleanup, Discord deletion
+or Telegram Bot API deleteMessage. MTProto personal inboxes remain unmanaged.
 
 Cross-group participant syntax is an explicit `@{endpoint/name-or-alias}`
 namespace, separate from provider-native `@user`. Accept unambiguous observed

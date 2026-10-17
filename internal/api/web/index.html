@@ -599,6 +599,10 @@
 
                 <div class="settings-card syncset-section" id="syncset-privacy-card" style="margin:16px 0;">
                   <div class="section-label">Privacy &amp; Presentation</div>
+                  <label class="form-check admin-only" style="margin-top:8px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
+                    <input type="checkbox" id="settings-private-dm-relay-enabled">
+                    <span><span style="font-weight:500;display:block;">Enable private DM relay for this sync set</span><span class="form-hint" style="margin-top:2px;display:block;">Requires the global switch in Settings. Sends private messages only to an addressed member and continues only through native replies.</span></span>
+                  </label>
                   <label class="form-check" style="margin-top:8px;display:flex;align-items:flex-start;gap:8px;cursor:pointer;">
                     <input type="checkbox" id="syncset-anonymize-to-discord">
                     <span>
@@ -741,6 +745,19 @@
           <div class="page-header">
             <div>
               <h1 class="page-title">Settings</h1>
+            </div>
+          </div>
+
+          <div class="settings-card admin-only" id="private-dm-global-card">
+            <div class="settings-card-header"><div class="settings-card-meta"><div class="settings-card-title">Private messaging</div></div></div>
+            <div class="settings-card-body">
+              <label class="toggle-control" for="private-dm-global-enabled">
+                <input type="checkbox" id="private-dm-global-enabled" class="toggle-checkbox" disabled>
+                <span class="toggle-slider"></span><span class="toggle-label">Allow private DM relays</span>
+              </label>
+              <p class="form-hint">This is the global safety switch. A relay also requires the setting on its sync set.</p>
+              <div id="private-dm-global-error" class="alert alert-danger hidden" role="alert"></div>
+              <div class="settings-form-actions"><button type="button" id="private-dm-global-save" class="btn btn-primary" disabled>Save</button></div>
             </div>
           </div>
 

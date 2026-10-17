@@ -8,34 +8,82 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vm75/message-sync/internal/config"
 )
 
-func TestLegacyConfigRetired(t *testing.T) {
+func TestGlobalPrivateDMRelayToggle(t *testing.T) {
 	db := setupTestDB(t)
 	srv := setupTestServer(t, db)
 	token, err := srv.sessions.CreateToken()
 	if err != nil {
 		t.Fatal(err)
 	}
+	unauthorized := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized GET status = %d", unauthorized.Code)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	get.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, get)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"privateDMRelayEnabled":false`) {
+		t.Fatalf("initial global setting response = %d %s", response.Code, response.Body.String())
+	}
+	update := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{"privateDMRelayEnabled":true}`))
+	update.Header.Set("Authorization", "Bearer "+token)
+	updated := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"privateDMRelayEnabled":true`) {
+		t.Fatalf("update response = %d %s", updated.Code, updated.Body.String())
+	}
+	var enabled bool
+	if err := db.QueryRow(`SELECT private_dm_relay_enabled FROM global_config WHERE id=1`).Scan(&enabled); err != nil || !enabled {
+		t.Fatalf("persisted global setting = %t, error = %v", enabled, err)
+	}
+	invalid := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{"usernameMode":"hash"}`))
+	invalid.Header.Set("Authorization", "Bearer "+token)
+	invalidResponse := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("legacy setting payload status = %d", invalidResponse.Code)
+	}
+}
+
+func TestPrivateDMEnablementRequiresAdministrator(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	admin, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.controlDB.Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES('operator','operator','hash','operator',1,1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := srv.sessions.createSession(context.Background(), "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, method := range []string{http.MethodGet, http.MethodPut} {
-		for _, authorized := range []bool{false, true} {
-			req := httptest.NewRequest(method, "/api/config", bytes.NewBufferString(`{"usernameMode":"hash"}`))
-			if authorized {
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			rec := httptest.NewRecorder()
-			srv.Handler().ServeHTTP(rec, req)
-			want := http.StatusUnauthorized
-			if authorized {
-				want = http.StatusGone
-			}
-			if rec.Code != want {
-				t.Fatalf("%s authorized=%t: %d", method, authorized, rec.Code)
-			}
+		if rec := request(t, srv, method, "/api/config", map[string]bool{"privateDMRelayEnabled": true}, operator); rec.Code != http.StatusForbidden {
+			t.Fatalf("operator global %s=%d", method, rec.Code)
 		}
+	}
+	create := map[string]any{"id": "private-set", "endpoints": []string{}, "settings": map[string]bool{"privateDMRelayEnabled": true}}
+	if rec := request(t, srv, http.MethodPost, "/api/sync-sets", create, operator); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator enabled new set: %d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPost, "/api/sync-sets", create, admin); rec.Code != http.StatusCreated {
+		t.Fatalf("administrator create=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]bool{"privateDMRelayEnabled": false}}, operator); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator changed set gate=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]int{"codeLength": 7}}, operator); rec.Code != http.StatusOK {
+		t.Fatalf("unrelated operator settings behavior changed=%d", rec.Code)
 	}
 }
 

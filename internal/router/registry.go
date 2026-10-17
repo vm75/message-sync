@@ -143,6 +143,85 @@ func (r *AdapterRegistry) ResolveParticipant(ctx context.Context, endpoint trans
 	return resolver.ResolveParticipant(ctx, endpoint, label, actors)
 }
 
+func (r *AdapterRegistry) privateMessengerForEndpoint(endpoint transport.EndpointID) (transport.PrivateMessenger, error) {
+	adapter, err := r.adapterFor(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	messenger, ok := adapter.(transport.PrivateMessenger)
+	if !ok {
+		return nil, errors.New("private messaging is unsupported by this connection")
+	}
+	return messenger, nil
+}
+
+func (r *AdapterRegistry) privateMessengerForConnection(connectionID string) (transport.PrivateMessenger, error) {
+	if r == nil || connectionID == "" {
+		return nil, errors.New("private messaging connection is unavailable")
+	}
+	r.mu.RLock()
+	adapter := r.adapters[connectionID]
+	r.mu.RUnlock()
+	if adapter == nil {
+		return nil, errors.New("private messaging connection is unavailable")
+	}
+	messenger, ok := adapter.(transport.PrivateMessenger)
+	if !ok {
+		return nil, errors.New("private messaging is unsupported by this connection")
+	}
+	return messenger, nil
+}
+
+func (r *AdapterRegistry) VerifyPrivateMember(ctx context.Context, endpoint transport.EndpointID, actorID string) bool {
+	messenger, err := r.privateMessengerForEndpoint(endpoint)
+	return err == nil && messenger.VerifyPrivateMember(ctx, endpoint, actorID)
+}
+
+func (r *AdapterRegistry) VerifyPrivateInboxMember(ctx context.Context, endpoint transport.EndpointID, actorID string, inbox transport.PrivateInbox) bool {
+	r.mu.RLock()
+	owner := r.endpoints[endpoint]
+	r.mu.RUnlock()
+	if owner != inbox.ConnectionID {
+		return false
+	}
+	messenger, err := r.privateMessengerForEndpoint(endpoint)
+	return err == nil && messenger.VerifyPrivateInboxMember(ctx, endpoint, actorID, inbox)
+}
+
+func (r *AdapterRegistry) ResolvePrivateInbox(ctx context.Context, endpoint transport.EndpointID, actorID string) (transport.PrivateInbox, bool) {
+	messenger, err := r.privateMessengerForEndpoint(endpoint)
+	if err != nil {
+		return transport.PrivateInbox{}, false
+	}
+	inbox, ok := messenger.ResolvePrivateInbox(ctx, endpoint, actorID)
+	if !ok || inbox.ConnectionID == "" || inbox.Transport == "" || inbox.OwnerID == "" || inbox.ChatID == "" || len(inbox.Token) == 0 {
+		return transport.PrivateInbox{}, false
+	}
+	r.mu.RLock()
+	wantConnectionID := r.endpoints[endpoint]
+	r.mu.RUnlock()
+	if inbox.ConnectionID != wantConnectionID {
+		return transport.PrivateInbox{}, false
+	}
+	return inbox, true
+}
+
+func (r *AdapterRegistry) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+	messenger, err := r.privateMessengerForConnection(inbox.ConnectionID)
+	if err != nil {
+		return transport.PrivateSendResult{}, err
+	}
+	return messenger.SendPrivate(ctx, inbox, text)
+}
+
+func (r *AdapterRegistry) DeletePrivateCopyForMe(ctx context.Context, copy transport.PrivateCopy) error {
+	messenger, err := r.privateMessengerForConnection(copy.ConnectionID)
+	if err != nil {
+		return err
+	}
+	return messenger.DeletePrivateCopyForMe(ctx, copy)
+}
+
 func (r *AdapterRegistry) React(ctx context.Context, reaction transport.Reaction) error {
 	adapter, err := r.adapterFor(reaction.Endpoint)
 	if err != nil {

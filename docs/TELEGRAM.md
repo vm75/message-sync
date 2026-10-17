@@ -4,6 +4,18 @@ A Telegram connection uses exactly one integration method: **Bot API** or **Phon
 
 ## Choosing a method
 
+The opt-in [private DM relay](PRIVATE_MESSAGING.md) supports Bot API only.
+Users must first privately contact the same bot with `/start`, which returns
+`/help`. Native Reply on an active relayed bot message routes the next turn;
+unattached private text receives help. Verified operational inbox tokens are
+encrypted in `control.db` for 24 hours and renewed on private contact. Expired
+reachability requires contacting the bot again. Current group membership must
+be verifiable on every hop; blocked DMs fail privately with no group fallback.
+Private edits are ignored. Bot API `deleteMessage` is never used for private
+cleanup because it deletes the participant's copy too. Reply metadata expires
+even when provider messages remain. MTProto personal inboxes are unsupported,
+not auto-answered, and never touched by private cleanup.
+
 | Capability | Bot API | Phone / MTProto |
 |---|---|---|
 | Authentication | BotFather token | Telegram API ID/hash + phone login code + optional 2FA |

@@ -169,9 +169,11 @@ func (m UsernameMode) IsValid() bool {
 	return m == UsernameModePushName || m == UsernameModeHash
 }
 
-// Config retains legacy global fields only as initialization defaults for older
-// in-process callers. Persisted sync-set settings always take precedence.
+// Config retains legacy global routing fields as initialization defaults for
+// older callers. Persisted sync-set policies take precedence. The global
+// private DM safety gate remains an explicit administrator setting.
 type Config struct {
+	PrivateDMRelayEnabled   bool                    `json:"privateDMRelayEnabled"`
 	ShowDiscriminator       bool                    `json:"showDiscriminator"`
 	Endpoints               map[string]Endpoint     `json:"endpoints"`
 	SyncSets                []SyncSet               `json:"syncSets"`
@@ -251,12 +253,13 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		localPrefix            string
 		whatsappDeviceName     string
 		childContextMode       string
+		privateDMRelayEnabled  bool
 	)
 	row := db.QueryRowContext(ctx, `
-		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator
+		SELECT username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator, private_dm_relay_enabled
 		FROM global_config WHERE id = 1
 	`)
-	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName, &childContextMode, &cfg.ShowDiscriminator); err != nil {
+	if err := row.Scan(&modeStr, &mediaEnabled, &maxSizeMB, &recEnabled, &maxAgeHours, &maxPerGroup, &retention, &aggTrigger, &whatsappCleanupEnabled, &whatsappCleanupDays, &localPrefix, &whatsappDeviceName, &childContextMode, &cfg.ShowDiscriminator, &privateDMRelayEnabled); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("read global_config: %w", err)
 		}
@@ -274,6 +277,7 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 		cfg.LocalPrefix = localPrefix
 		cfg.WhatsAppDeviceName = whatsappDeviceName
 		cfg.ChildContextDisplayMode = ChildContextDisplayMode(childContextMode)
+		cfg.PrivateDMRelayEnabled = privateDMRelayEnabled
 	}
 
 	applyDefaults(cfg)
@@ -472,8 +476,8 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 	}
 
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator)
-		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO global_config (id, username_mode, media_enabled, media_max_size_mb, recovery_enabled, recovery_max_age_hours, recovery_max_messages_per_group, storage_message_retention_days, poll_aggregation_trigger, whatsapp_chat_cleanup_enabled, whatsapp_chat_retention_days, local_message_prefix, whatsapp_device_name, child_context_display_mode, show_discriminator, private_dm_relay_enabled)
+		VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			username_mode = excluded.username_mode,
 			media_enabled = excluded.media_enabled,
@@ -488,8 +492,9 @@ func Save(ctx context.Context, db *sql.DB, cfg *Config) error {
 			local_message_prefix = excluded.local_message_prefix,
 			whatsapp_device_name = excluded.whatsapp_device_name,
 			child_context_display_mode = excluded.child_context_display_mode,
-			show_discriminator = excluded.show_discriminator
-	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName, string(cfg.ChildContextDisplayMode), cfg.ShowDiscriminator)
+			show_discriminator = excluded.show_discriminator,
+			private_dm_relay_enabled = excluded.private_dm_relay_enabled
+	`, string(cfg.Identity.UsernameMode), cfg.Media.Enabled, cfg.Media.MaxSizeMB, cfg.Recovery.Enabled, cfg.Recovery.MaxAgeHours, cfg.Recovery.MaxMessagesPerGroup, cfg.Storage.MessageRetentionDays, cfg.Polls.AggregationTrigger, cfg.WhatsAppCleanup.Enabled, cfg.WhatsAppCleanup.RetentionDays, cfg.LocalPrefix, cfg.WhatsAppDeviceName, string(cfg.ChildContextDisplayMode), cfg.ShowDiscriminator, cfg.PrivateDMRelayEnabled)
 	if err != nil {
 		return fmt.Errorf("save global_config: %w", err)
 	}

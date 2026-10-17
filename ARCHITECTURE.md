@@ -54,7 +54,42 @@ The HTTP server, router, adapters, connection manager, recovery coordinator, and
 | `internal/identity` | Stable HMAC-derived actor identifiers. |
 | `internal/safelog` | Fixed safe error classification at the logging boundary. |
 
-Dependencies point inward toward canonical contracts. Adapters may translate provider data into `transport.Incoming` and execute `transport.Outgoing`; they do not define cross-endpoint semantics or global identity. The router depends on adapter interfaces and application stores, never on a provider's raw event model. `controlstore` does not participate in message routing.
+Dependencies point inward toward canonical contracts. Adapters may translate provider data into `transport.Incoming` and execute `transport.Outgoing`; they do not define cross-endpoint semantics or global identity. The router depends on adapter interfaces and application stores, never on a provider's raw event model. `controlstore` does not participate in canonical group routing. The separate opt-in private DM relay uses encrypted, content-free control-store mappings and its own adapter ingress/capability.
+
+## Private DM relay
+
+`internal/privatedm` is a separate, default-off path. WhatsApp, Discord bot and
+Telegram Bot API adapters classify private creates before group normalization
+and emit `transport.PrivateIncoming` through a separate connection-manager
+channel. The single app worker invokes the private relay without the recovery
+coordinator or canonical router. MTProto exposes no private capability.
+
+The relay reuses the router's participant-reference resolver, durable observed
+HMAC actors and fresh provider membership checks. Every hop binds both actors
+to their original sync set, endpoint target and owning connection. A keyed
+lookup over connection/private-inbox/outbound-message identity selects the
+recorded peer; rendered text and pseudonyms never authorize routing. Source
+attribution uses the sorted eligible source endpoint and an endpoint-scoped
+pseudonym derived with a private-presentation HMAC domain.
+
+`control.db.private_dm_reply_mappings` stores encrypted, content-free paired
+inboxes for 24 hours after each send. `private_dm_seen_messages` stores only
+keyed deduplication digests. `private_dm_inboxes` holds at most 10,000 encrypted,
+verified Telegram operational inboxes with a 24-hour re-observation TTL.
+`private_dm_cleanup_candidates` separately encrypts per-message WhatsApp
+local-copy keys. No table accepts private message bodies or media.
+Initialization adds these tables idempotently; `sync.db.global_config` gains a
+default-false `private_dm_relay_enabled` column, and sync-set JSON gains a
+default-false `privateDMRelayEnabled` field. Both administrator gates must be true.
+
+Private creates are attempted once without a durable payload queue. Edits,
+deletes, revokes, recovery payloads and bot echoes never enter this path.
+Startup/minutely batches expire metadata and attempt only WhatsApp's per-message
+Delete for Me AppState operation after mapping expiry, or after handling
+inbound/help copies. Cleanup has three bounded attempts and a 72-hour deadline
+after eligibility. Discord/Bot API shared-message deletion is unsupported and
+never used. Recipient-visible messages remain intact. See
+[private messaging](docs/PRIVATE_MESSAGING.md) for exact usage and limitations.
 
 ## Addressing hierarchy
 
@@ -84,7 +119,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 `internal/store/schema.sql` initializes the application routing database. It may contain:
 
 - safe endpoint aliases, connection IDs, and provider target IDs needed for addressing;
-- per-sync-set routing policies in `sync_sets.settings_json`; `global_config` remains only as legacy initialization data;
+- per-sync-set routing policies in `sync_sets.settings_json`; `global_config` retains legacy initialization data and the default-off global private DM safety switch;
 - sync set definitions (including the boolean `anonymize_to_discord` flag) and endpoint memberships;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
@@ -209,7 +244,7 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | `/api/endpoints/{alias}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates alias, sync set, or deletes endpoint. |
 | `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets with `anonymizeToDiscord` and nested `settings` policies for fan-out. |
 | `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates endpoints, anonymization, and nested runtime `settings`, or deletes the set. Omitted update fields are preserved. |
-| `/api/config` | `GET`, `PUT` | Authenticated | Retired runtime-settings endpoint: returns HTTP 410 pointing to sync sets and connections. |
+| `/api/config` | `GET`, `PUT` | Admin | Reads/updates only global `privateDMRelayEnabled`. Legacy global runtime fields are rejected. |
 | `/api/delivery/status` | `GET` | Authenticated | Real-time content-free delivery health, lane depth, and failure classes. |
 | `/api/verification/pipelines` | `GET`, `POST` | Admin | Manages experimental membership intake pipelines bound to endpoint sync sets. GET accepts optional `syncSetId` filtering. |
 | `/api/sync-sets/{id}/membership` | `GET`, `PUT` | Admin | Configures experimental sync-set membership instructions and custom fields. |
@@ -252,11 +287,12 @@ it needs no participant column or persistent lookup table. Each sync set owns
 `showDiscriminator` (false by default) and `codeLength` (5–10; new sets use 8).
 Initialization imports the former global policies into `sync_sets.settings_json`
 for existing sets, preserving five-character codes and explicit settings on reopen.
-The legacy `global_config` row is initialization data, no longer writable through
-the runtime API. Sync-set saves reload router and adapter endpoint policies.
+The legacy routing fields of `global_config` are initialization data. Only its
+new global DM safety gate is writable through `/api/config`. Sync-set saves
+reload router and adapter endpoint policies.
 The UI uses a shared settings modal for creating/editing sync sets, including
 privacy and membership fields. Save is disabled for an unchanged draft, including
-a reverted edit. Only saving, saved and error messages are shown. A runtime reload failure
+a reverted edit. Only saving and error messages are shown. A runtime reload failure
 returns an error even when the database commit has succeeded, permitting retry.
 Canonical messages retain their original `sync_set_id` for retention, inferred
 only from unambiguous existing copy membership during upgrade. Periodic pruning

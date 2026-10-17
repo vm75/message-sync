@@ -17,6 +17,7 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
+	PrivateDMEnabled         bool
 	EndpointSettings         map[string]config.SyncSetSettings
 	ConnectionID             string
 	Token                    string
@@ -32,6 +33,8 @@ type Options struct {
 }
 
 type Adapter struct {
+	privateDMEnabled      bool
+	privateEvents         chan transport.PrivateIncoming
 	endpointSettings      map[string]config.SyncSetSettings
 	connectionID          string
 	session               *discordgo.Session
@@ -104,10 +107,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 	session.ShouldRetryOnRateLimit = true
 
-	// Request only the guild message and reaction events needed by the bridge.
-	// DMs are intentionally not subscribed, and the normalizer still rejects
-	// any DM event defensively.
-	session.Identify.Intents = discordGatewayIntents()
+	// Private events are requested only for explicitly enabled relay connections.
+	session.Identify.Intents = discordGatewayIntents(opts.PrivateDMEnabled)
 
 	// DiscordGo's default logger may include protocol identifiers and arbitrary
 	// server error text. Replace it with a fixed-field classifier and keep only
@@ -129,6 +130,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		}
 	}
 	adapter := &Adapter{
+		privateDMEnabled:      opts.PrivateDMEnabled,
+		privateEvents:         make(chan transport.PrivateIncoming, eventBufferSize),
 		connectionID:          strings.TrimSpace(opts.ConnectionID),
 		session:               session,
 		api:                   session,
@@ -188,8 +191,12 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	return adapter, nil
 }
 
-func discordGatewayIntents() discordgo.Intent {
-	return discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent | discordgo.IntentGuildMessagePolls
+func discordGatewayIntents(privateEnabled ...bool) discordgo.Intent {
+	intents := discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent | discordgo.IntentGuildMessagePolls
+	if len(privateEnabled) > 0 && privateEnabled[0] {
+		intents |= discordgo.IntentsDirectMessages
+	}
+	return intents
 }
 
 func installSafeDiscordLogger(logger *slog.Logger) {
@@ -370,6 +377,9 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	}
 
 	if evt == nil || evt.Message == nil {
+		return
+	}
+	if evt.GuildID == "" && a.handlePrivateMessage(session, evt.Message) {
 		return
 	}
 	routeChannelID := configuredIngressChannelID(session, normalizer, evt.Message.ChannelID)

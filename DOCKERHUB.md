@@ -176,10 +176,22 @@ recovery, retention, polls, local prefixes and child-label persistence. Code
 length is configurable from 5 to 10 characters per set: new sets default to 8,
 and upgrades retain existing policies and five-character codes. Supported old
 codes remain valid addresses. Open **Edit settings** on a sync set to configure it in a modal with spaced
-sections. Save is enabled only for pending changes; saving, saved and error
+sections. Save is enabled only for pending changes; saving and error
 feedback remains visible. Membership review is enabled separately per sync set
 with a persisted `membershipReviewEnabled` setting, replacing the old browser
 switch. The review page scopes requests and pipelines to the selected enabled set. User/account and admin-security settings remain global. WhatsApp
 linked-device names are connection settings shared by all sets using that
 connection; edit them in Connections → Device name. Existing connections import
-their old name once. The former `/api/config` endpoint returns HTTP 410.
+their old name once. `/api/config` now exposes only the administrator's global
+`privateDMRelayEnabled` safety switch.
+
+Optional private DMs require that default-off global switch and the matching
+per-sync-set switch. No new port, environment variable, volume or public
+participant endpoint is required. `/dm @{group/P1} text` in a private bot chat
+sends to one verified member; native Reply continues the conversation.
+Private edits/deletes do not propagate. Encrypted content-free reply mappings
+expire after 24 hours in `/data/control.db`. WhatsApp attempts only per-message
+Delete for Me; Discord and Telegram Bot API retain provider messages because
+their delete APIs affect the recipient too. No provider-local cleanliness is
+promised for those bots. MTProto personal inboxes remain unmanaged. See the
+[private messaging contract](https://github.com/vm75/message-sync/blob/main/docs/PRIVATE_MESSAGING.md).

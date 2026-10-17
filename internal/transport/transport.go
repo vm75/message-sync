@@ -176,6 +176,64 @@ type Adapter interface {
 	Close() error
 }
 
+// PrivateInbox is an opaque, transient provider address for one private chat.
+// Token may contain provider-native IDs and must be encrypted before storage,
+// and must never be logged or returned through the API.
+type PrivateInbox struct {
+	ConnectionID string
+	Transport    string
+	OwnerID      string // HMAC proof of the authenticated account behind this connection
+	ChatID       string // sensitive canonical private-chat identity, encrypted before storage
+	Token        []byte
+}
+
+// PrivateCopy identifies one message in the sync account's own private-chat
+// view. Its token may contain provider-native IDs and is sensitive.
+type PrivateCopy struct {
+	ConnectionID string
+	Transport    string
+	OwnerID      string
+	Token        []byte
+}
+
+type PrivateSendResult struct {
+	RemoteMessageID string
+	LocalCopy       PrivateCopy
+}
+
+// PrivateIncoming is deliberately separate from Incoming: it bypasses the
+// canonical group router and carries sensitive provider-private addresses
+// only in memory. Text must never be persisted. Native IDs may be stored only
+// as encrypted operational tokens or keyed digests, and must never be logged.
+type PrivateIncoming struct {
+	ConnectionID     string
+	Transport        string
+	Inbox            PrivateInbox
+	LocalCopy        PrivateCopy
+	ActorID          string   // HMAC actor identity, never the provider-native ID
+	ActorAliases     []string // authenticated PN/LID-equivalent HMAC identities, transient only
+	RemoteMessageID  string   // provider-private message ID, transient only
+	ReplyToMessageID string   // structured native reply ID, never inferred from text
+	Text             string   // transient only
+	Kind             string   // text or unsupported
+	Timestamp        time.Time
+	FromSelf         bool
+}
+
+type PrivateEventsSource interface {
+	PrivateEvents() <-chan PrivateIncoming
+}
+
+// PrivateMessenger is an optional adapter capability for direct, non-routed
+// messages. Implementations must verify endpoint membership on each call.
+type PrivateMessenger interface {
+	VerifyPrivateMember(context.Context, EndpointID, string) bool
+	VerifyPrivateInboxMember(context.Context, EndpointID, string, PrivateInbox) bool
+	ResolvePrivateInbox(context.Context, EndpointID, string) (PrivateInbox, bool)
+	SendPrivate(context.Context, PrivateInbox, string) (PrivateSendResult, error)
+	DeletePrivateCopyForMe(context.Context, PrivateCopy) error
+}
+
 // RecoveryPolicyProvider supplies the policy owned by a recovery stream's sync set.
 type RecoveryPolicyProvider interface {
 	RecoveryPolicy(string) (bool, int, time.Duration)

@@ -8,6 +8,7 @@ import (
 // SyncSetSettings owns the message and lifecycle policy for one routing mesh.
 type SyncSetSettings struct {
 	MembershipReviewEnabled bool                    `json:"membershipReviewEnabled"`
+	PrivateDMRelayEnabled   bool                    `json:"privateDMRelayEnabled"`
 	UsernameMode            UsernameMode            `json:"usernameMode"`
 	ShowDiscriminator       bool                    `json:"showDiscriminator"`
 	CodeLength              int                     `json:"codeLength"`
@@ -77,6 +78,18 @@ func (c *Config) EndpointSettings(connectionID string) map[string]SyncSetSetting
 		}
 	}
 	return result
+}
+
+func (c *Config) PrivateDMConnectionEnabled(connectionID string) bool {
+	if !c.PrivateDMRelayEnabled {
+		return false
+	}
+	for alias, endpoint := range c.Endpoints {
+		if endpoint.ConnectionID == connectionID && c.SettingsForEndpoint(alias).PrivateDMRelayEnabled {
+			return true
+		}
+	}
+	return false
 }
 
 func (s SyncSetSettings) Validate() error {

@@ -212,6 +212,10 @@
   const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
   const btnCancelEditor     = document.getElementById('btn-cancel-editor');
   const membershipReviewEnabled = document.getElementById('settings-membership-review-enabled');
+  const privateDMSetEnabled = document.getElementById('settings-private-dm-relay-enabled');
+  const privateDMGlobalEnabled = document.getElementById('private-dm-global-enabled');
+  const privateDMGlobalSave = document.getElementById('private-dm-global-save');
+  const privateDMGlobalError = document.getElementById('private-dm-global-error');
   const membershipSyncSet = document.getElementById('membership-sync-set');
   const membershipFields = document.getElementById('syncset-membership-fields');
   const membershipInstructions = document.getElementById('membership-applicant-instructions');
@@ -298,6 +302,7 @@
   let editorLoading = false;
   let membershipConfigReady = false;
   let editorDisabledControls = [];
+  let privateDMGlobalBaseline = false;
 
   function syncSetSnapshot() {
     return {
@@ -333,6 +338,26 @@
     membershipFields.hidden = !membershipReviewEnabled.checked;
     membershipFields.disabled = !membershipConfigReady;
   }
+
+  privateDMGlobalEnabled?.addEventListener('change', () => {
+    privateDMGlobalSave.disabled = privateDMGlobalEnabled.checked === privateDMGlobalBaseline;
+    privateDMGlobalError?.classList.add('hidden');
+  });
+  privateDMGlobalSave?.addEventListener('click', async () => {
+    privateDMGlobalSave.disabled = true;
+    privateDMGlobalEnabled.disabled = true;
+    privateDMGlobalError?.classList.add('hidden');
+    try {
+      const updated = await window.API.updateConfig({privateDMRelayEnabled: privateDMGlobalEnabled.checked});
+      privateDMGlobalBaseline = updated.privateDMRelayEnabled === true;
+      privateDMGlobalEnabled.checked = privateDMGlobalBaseline;
+    } catch (err) {
+      if (privateDMGlobalError) { privateDMGlobalError.textContent = err.message || 'Failed to update private DM relay setting.'; privateDMGlobalError.classList.remove('hidden'); }
+    } finally {
+      privateDMGlobalEnabled.disabled = false;
+      privateDMGlobalSave.disabled = privateDMGlobalEnabled.checked === privateDMGlobalBaseline;
+    }
+  });
   membershipReviewEnabled?.addEventListener('change', updateMembershipFields);
 
   function membershipEnabled(id) {
@@ -2866,11 +2891,23 @@
   // Settings
   // ══════════════════════════════════════════════════════════════
 
-  async function loadSettings() { /* Account/security settings are global. */ }
+  async function loadSettings() {
+    if (currentUser?.role !== 'admin') return;
+    if (privateDMGlobalEnabled) privateDMGlobalEnabled.disabled = true;
+    try {
+      const cfg = await window.API.getConfig();
+      privateDMGlobalBaseline = cfg.privateDMRelayEnabled === true;
+      if (privateDMGlobalEnabled) privateDMGlobalEnabled.checked = privateDMGlobalBaseline;
+      if (privateDMGlobalEnabled) privateDMGlobalEnabled.disabled = false;
+      if (privateDMGlobalSave) privateDMGlobalSave.disabled = true;
+      privateDMGlobalError?.classList.add('hidden');
+    } catch (err) { showToast(err.message || 'Failed to load settings.', 'danger'); }
+  }
 
   function defaultSyncSetSettings() {
     return {
       membershipReviewEnabled: false,
+      privateDMRelayEnabled: false,
       usernameMode: 'push_name', showDiscriminator: false, codeLength: 8,
       childContextDisplayMode: 'opaque',
       media: {enabled: true, maxSizeMB: 100},
@@ -3055,6 +3092,7 @@
   function populateSettings(cfg) {
     if (!cfg) return;
     membershipReviewEnabled.checked = cfg.membershipReviewEnabled === true;
+    if (privateDMSetEnabled) privateDMSetEnabled.checked = cfg.privateDMRelayEnabled === true;
     if (settingsShowDiscriminator) settingsShowDiscriminator.checked = cfg.showDiscriminator === true;
     if (settingsCodeLength) settingsCodeLength.value = cfg.codeLength || 8;
     if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
@@ -3091,6 +3129,7 @@
     chipsLocalPrefix?.commitPending();
     return {
       membershipReviewEnabled: membershipReviewEnabled.checked,
+      privateDMRelayEnabled: privateDMSetEnabled?.checked === true,
       usernameMode:settingsUsernameMode.value,
       showDiscriminator:settingsShowDiscriminator.checked,
       codeLength:integer('settings-code-length',5,10,'Code length'),

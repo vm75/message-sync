@@ -29,6 +29,7 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
+	PrivateDMEnabled       bool
 	EndpointSettings       map[string]config.SyncSetSettings
 	ConnectionID           string
 	Token                  string
@@ -50,6 +51,9 @@ type Options struct {
 }
 
 type Adapter struct {
+	privateDMEnabled bool
+	privateEvents    chan transport.PrivateIncoming
+	privateInboxes   map[string]privateInboxObservation
 	endpointSettings map[string]config.SyncSetSettings
 	connectionID     string
 	client           botClient
@@ -118,6 +122,9 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
+		privateDMEnabled:       opts.PrivateDMEnabled,
+		privateEvents:          make(chan transport.PrivateIncoming, eventBufferSize),
+		privateInboxes:         make(map[string]privateInboxObservation),
 		connectionID:           strings.TrimSpace(opts.ConnectionID),
 		normalizer:             normalizer,
 		endpointSettings:       opts.EndpointSettings,
@@ -272,6 +279,10 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	a.mu.Lock()
 	a.normalizer = normalizer
 	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
+	a.privateDMEnabled = cfg.PrivateDMConnectionEnabled(a.connectionID)
+	if !a.privateDMEnabled {
+		a.privateInboxes = make(map[string]privateInboxObservation)
+	}
 	a.mediaEnabled = cfg.Media.Enabled
 	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	a.mu.Unlock()
@@ -282,8 +293,17 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	if a == nil || update == nil || !a.acceptUpdateID(update.ID) {
 		return
 	}
-	a.observeUpdate(update)
 	checkpoint := transport.Checkpoint{StreamKey: a.checkpointStreamKey(), Position: update.ID, EventTimestamp: telegramUpdateTimestamp(update), Valid: update.ID > 0}
+	if update.Message != nil && update.Message.Chat.Type == models.ChatTypePrivate {
+		a.handlePrivateMessage(update.Message)
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
+		return
+	}
+	if update.EditedMessage != nil && update.EditedMessage.Chat.Type == models.ChatTypePrivate {
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
+		return
+	}
+	a.observeUpdate(update)
 
 	a.mu.RLock()
 	normalizer := a.normalizer

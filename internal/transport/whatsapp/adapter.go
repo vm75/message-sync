@@ -130,10 +130,12 @@ type Adapter struct {
 	endpointSettings map[string]config.SyncSetSettings
 	connectionID     string
 	client           *whatsmeow.Client
+	privateClient    privateWhatsAppClient
 	container        *sqlstore.Container
 	normalizer       *Normalizer
 	targets          map[transport.EndpointID]types.JID
 	events           chan transport.Incoming
+	privateEvents    chan transport.PrivateIncoming
 	logger           *slog.Logger
 	qrOut            io.Writer
 	enableTerminalQR bool
@@ -205,11 +207,13 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	adapter := &Adapter{
 		connectionID:     opts.ConnectionID,
 		client:           client,
+		privateClient:    client,
 		container:        container,
 		normalizer:       normalizer,
 		endpointSettings: opts.EndpointSettings,
 		targets:          targets,
 		events:           make(chan transport.Incoming, eventBufferSize),
+		privateEvents:    make(chan transport.PrivateIncoming, eventBufferSize),
 		logger:           opts.Logger,
 		qrOut:            opts.QROut,
 		enableTerminalQR: opts.EnableTerminalQR,
@@ -1344,6 +1348,10 @@ func (a *Adapter) handleEvent(raw any) {
 	case *events.Message:
 		a.ingressMu.Lock()
 		defer a.ingressMu.Unlock()
+		if !evt.Info.IsGroup {
+			a.handlePrivateMessage(evt)
+			return
+		}
 		a.mu.Lock()
 		normalizer := a.normalizer
 		mediaEnabled := a.mediaEnabled

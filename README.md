@@ -165,11 +165,12 @@ Discord bot tokens, optional explicit Discord webhook URLs, Telegram Bot API tok
 
 ### Runtime settings
 
-Routing and feature settings belong to each sync set. Open a sync set and choose **Edit settings** to open its settings modal, or use `PUT /api/sync-sets/{id}` with a nested `settings` object. Omitted fields retain their current values, including nested fields and `anonymizeToDiscord`. Changes reload without restarting the service. Save is enabled only while the draft differs from the saved settings; saving, success and failure feedback appears beside the button. Reverting a change disables Save again.
+Routing and feature settings belong to each sync set. Open a sync set and choose **Edit settings** to open its settings modal, or use `PUT /api/sync-sets/{id}` with a nested `settings` object. Omitted fields retain their current values, including nested fields and `anonymizeToDiscord`. Changes reload without restarting the service. Save is enabled only while the draft differs from the saved settings; saving and failure feedback appears beside the button. Saving or reverting a change disables Save again.
 
 | Setting inside `settings` | New-set default | Description |
 |---|---|---|
 | `membershipReviewEnabled` | `false` | Enable the experimental membership review UI for this set, shared across browsers. |
+| `privateDMRelayEnabled` | `false` | Permit private relays within this set only when the global administrator switch is also enabled. |
 | `showDiscriminator` | `false` | Append the stable discriminator to forwarded names across this sync set. Addressing works even when hidden or anonymization is disabled. |
 | `codeLength` | `8` | Discriminator length, from 5 to 10 characters. Existing sets retain 5 on upgrade; historical supported-length codes remain valid addresses. |
 | `usernameMode` | `push_name` | Use transient provider names or HMAC actor IDs (`hash`). |
@@ -183,7 +184,19 @@ Routing and feature settings belong to each sync set. Open a sync set and choose
 
 For example, `{"settings":{"codeLength":8,"showDiscriminator":true}}` updates one set's display while preserving its other settings. Upgrade initialization copies existing routing policies into each existing sync set once. Subsequent changes are independent. Retention follows the original sync set of each canonical message, even after an endpoint moves; orphan history and suppression markers expire after 90 days.
 
-The WhatsApp linked-device name belongs to its connection, shared by every set using that connection. Set `whatsappDeviceName` when creating a WhatsApp connection, or edit **Connections → Device name** (`PUT /api/connections/{id}`). It defaults to `message-sync` for new connections and applies when linking the device. Existing connections import their former global name once. User accounts and admin security stay global. The former `/api/config` runtime endpoint returns HTTP 410 with the replacement paths.
+The WhatsApp linked-device name belongs to its connection, shared by every set using that connection. Set `whatsappDeviceName` when creating a WhatsApp connection, or edit **Connections → Device name** (`PUT /api/connections/{id}`). It defaults to `message-sync` for new connections and applies when linking the device. Existing connections import their former global name once. User accounts and admin security stay global. `/api/config` exposes only the administrator's default-off `privateDMRelayEnabled` safety switch; other runtime settings belong to sync sets.
+
+Private messaging requires **Settings → Allow private DM relays** and the
+matching switch in each sync set's **Edit settings** modal. In a private chat
+with the owning sync account/bot, `/dm @{group/P1} message` addresses one observed,
+currently verified member of the same set. Continue only with native **Reply**
+on the bot's relayed message. `/help` and Telegram `/start` explain usage.
+Text only, 1600 UTF-8 bytes per relayed body. Reply mappings expire after 24
+hours. Private edits and deletes never propagate. WhatsApp attempts per-message
+**Delete for Me** only; Discord and Telegram Bot API retain provider copies
+because their delete APIs would also remove the participant's message.
+MTProto personal inboxes are not intercepted. See [private messaging](docs/PRIVATE_MESSAGING.md)
+for reachability, privacy, cleanup and restart limits.
 
 Enable **Membership review** in each sync set’s settings modal. The saved setting replaces the former browser-local switch. Instructions, evidence guidance and custom fields stay specific to that set. **Review membership** opens requests and pipelines for the selected set; the Membership selector switches between enabled sets. This controls the review interface; existing pipeline enablement and in-flight applications keep their existing behavior.
 

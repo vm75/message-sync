@@ -172,6 +172,15 @@ Their absence should not be interpreted as an implementation queue. New scope sh
 
 ## Capabilities Generalized Beyond the Upstream Design
 
+The optional private DM relay is deliberately small: two commands (`/dm` and
+`/help`, with Bot API `/start` as help bootstrap), native-reply continuation,
+24-hour encrypted routing metadata and mandatory pseudonyms. It has no contact
+exchange, participant enrollment, approval flow, blocking dashboard or private
+history. Private edits/deletes never propagate. Only verified WhatsApp
+per-message Delete for Me is attempted; Discord/Bot API shared-message deletion
+is prohibited. MTProto personal chats remain unmanaged. See
+[the private relay contract](PRIVATE_MESSAGING.md).
+
 `message-sync` now has several capabilities whose architecture is materially broader than the original bridge model:
 
 - dynamic platform connections supporting multiple concurrent WhatsApp accounts, Discord bots, and Telegram bots without restart;

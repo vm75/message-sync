@@ -1,5 +1,20 @@
 # Testing
 
+## Private DM relay regression gate
+
+Run `go test ./internal/privatedm ./internal/controlstore ./internal/connection
+./internal/transport/... ./internal/app ./internal/api` in addition to the full
+gate below. Private relay tests cover all nine provider pairings, owning
+connections, native reply correlation, concurrent conversations, command
+precedence, invalid inputs, duplicate creates, expiry, membership changes,
+endpoint reassignment, ignored lifecycle events and zero canonical group copies.
+Control-store tests check ciphertext, inbox-bound lookup, restart persistence
+and bounded cleanup retries. Adapter tests inspect WhatsApp per-message Delete
+for Me operations, Discord bot DM payloads/intents, Telegram bootstrap and
+structured replies, suppressed previews/pings and absence of shared-message
+deletion. Real-provider cleanup behavior requires the documented manual checks;
+fake tests do not claim live linked-device deletion has been verified.
+
 The automated reliability gate is:
 
 ```sh
@@ -7,7 +22,8 @@ make fmt
 git diff --check
 GOCACHE=/tmp/message-sync-go-cache make test
 GOCACHE=/tmp/message-sync-go-cache make vet
-GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/integration ./internal/connection ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp
+GOCACHE=/tmp/message-sync-go-cache make build
+GOCACHE=/tmp/message-sync-go-cache go test -race ./internal/privatedm ./internal/controlstore ./internal/integration ./internal/connection ./internal/delivery ./internal/recovery ./internal/router ./internal/api ./internal/transport/discord ./internal/transport/telegram ./internal/transport/whatsapp
 git diff --exit-code VERSION
 ```
 
@@ -111,10 +127,10 @@ WhatsApp media isolation, scoped friendly-label preservation, live retention
 reload, original retention ownership and orphan suppression cleanup. Upgrade
 fixtures remove the new sync-set settings/retention and connection-name columns,
 import nondefault policies, and reopen to prove idempotence and independence.
-API tests require HTTP 410 for retired global settings and visible failure when
+API tests reject retired global settings, protect the DM safety gate, and show failure when
 saved settings cannot reload into the runtime. Browser smoke checks exercise
 creation/editing modals, dirty-only Save enablement (including reverted fields),
-saving/saved/error states, chip removal/paste, independent set values, section
+saving/error states, chip removal/paste, independent set values, section
 spacing at desktop/mobile sizes, and existing WhatsApp connection names.
 Membership list tests assert sync-set filtering before the request limit and
 independent persisted review flags. Browser checks cover enabling membership
