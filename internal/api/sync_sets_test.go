@@ -418,7 +418,7 @@ func TestSyncSetsAnonymizeToDiscordAPI(t *testing.T) {
 			t.Fatalf("PUT true status = %d", recTrue.Code)
 		}
 
-		// Now update with omitted field => defaults to false
+		// A partial update preserves the existing privacy setting.
 		bodyOmitted := `{"endpoints":["e1","e2"]}`
 		reqOmitted := httptest.NewRequest(http.MethodPut, "/api/sync-sets/s_omitted", bytes.NewReader([]byte(bodyOmitted)))
 		reqOmitted.Header.Set("Authorization", authHeader)
@@ -431,8 +431,8 @@ func TestSyncSetsAnonymizeToDiscordAPI(t *testing.T) {
 		if err := json.NewDecoder(recOmitted.Body).Decode(&updated); err != nil {
 			t.Fatal(err)
 		}
-		if updated.AnonymizeToDiscord {
-			t.Fatal("expected omitted AnonymizeToDiscord to default to false")
+		if !updated.AnonymizeToDiscord {
+			t.Fatal("expected omitted AnonymizeToDiscord to preserve true")
 		}
 	}
 

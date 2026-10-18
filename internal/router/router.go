@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vm75/message-sync/internal/commands"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/identity"
@@ -73,8 +74,9 @@ type pendingReaction struct {
 }
 
 type routeTarget struct {
-	Endpoint           transport.EndpointID
-	AnonymizeToDiscord bool
+	SyncSetID  string
+	Endpoint   transport.EndpointID
+	Anonymized bool
 }
 
 func endpointIDs(targets []routeTarget) []transport.EndpointID {
@@ -91,7 +93,9 @@ type Router struct {
 	lanes              *delivery.Manager
 	routes             map[transport.EndpointID][]routeTarget
 	endpointTransports map[transport.EndpointID]config.Transport
-	usernameMode       config.UsernameMode
+	endpointSettings   map[transport.EndpointID]config.SyncSetSettings
+	endpointSets       map[transport.EndpointID]string
+
 	childContextMode   config.ChildContextDisplayMode
 	aggTrigger         string
 	localPrefix        string
@@ -147,14 +151,14 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 	if transportSender == nil {
 		return nil, errors.New("transport sender is required")
 	}
-	if !cfg.Identity.UsernameMode.IsValid() {
-		return nil, errors.New("username mode must be push_name or hash")
-	}
 
 	routes := make(map[transport.EndpointID][]routeTarget, len(cfg.Endpoints))
 	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
 	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
 	for alias, ep := range cfg.Endpoints {
+		if (ep.AnonymizeIncoming || ep.AnonymizeOutgoing) && hasher == nil {
+			return nil, errors.New("identity hasher is required for anonymization")
+		}
 		endpoints = append(endpoints, transport.EndpointID(alias))
 		endpointTransports[transport.EndpointID(alias)] = ep.Transport
 	}
@@ -165,14 +169,21 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord
+			anonymize := epConfig.AnonymizeIncoming || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
-				Endpoint:           transport.EndpointID(alias),
-				AnonymizeToDiscord: anonymize,
+				Endpoint:   transport.EndpointID(alias),
+				SyncSetID:  set.ID,
+				Anonymized: anonymize,
 			})
 		}
 		for _, target := range targets {
-			routes[target.Endpoint] = targets
+			sourceTargets := append([]routeTarget(nil), targets...)
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeOutgoing {
+				for i := range sourceTargets {
+					sourceTargets[i].Anonymized = true
+				}
+			}
+			routes[target.Endpoint] = sourceTargets
 		}
 	}
 
@@ -186,7 +197,10 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		lanes:              lanes,
 		routes:             routes,
 		endpointTransports: endpointTransports,
-		usernameMode:       cfg.Identity.UsernameMode,
+
+		endpointSettings: routerEndpointSettings(cfg),
+		endpointSets:     routerEndpointSets(cfg),
+
 		childContextMode:   cfg.ChildContextDisplayMode,
 		aggTrigger:         cfg.Polls.AggregationTrigger,
 		localPrefix:        cfg.LocalPrefix,
@@ -210,9 +224,6 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	if cfg == nil {
 		return errors.New("config is required")
 	}
-	if !cfg.Identity.UsernameMode.IsValid() {
-		return errors.New("username mode must be push_name or hash")
-	}
 
 	for _, set := range cfg.SyncSets {
 		if set.AnonymizeToDiscord && r.scopeHasher == nil {
@@ -223,20 +234,30 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	routes := make(map[transport.EndpointID][]routeTarget, len(cfg.Endpoints))
 	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
 	for alias, ep := range cfg.Endpoints {
+		if (ep.AnonymizeIncoming || ep.AnonymizeOutgoing) && r.scopeHasher == nil {
+			return errors.New("identity hasher is required for anonymization")
+		}
 		endpointTransports[transport.EndpointID(alias)] = ep.Transport
 	}
 	for _, set := range cfg.SyncSets {
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord
+			anonymize := epConfig.AnonymizeIncoming || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
-				Endpoint:           transport.EndpointID(alias),
-				AnonymizeToDiscord: anonymize,
+				Endpoint:   transport.EndpointID(alias),
+				SyncSetID:  set.ID,
+				Anonymized: anonymize,
 			})
 		}
 		for _, target := range targets {
-			routes[target.Endpoint] = targets
+			sourceTargets := append([]routeTarget(nil), targets...)
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeOutgoing {
+				for i := range sourceTargets {
+					sourceTargets[i].Anonymized = true
+				}
+			}
+			routes[target.Endpoint] = sourceTargets
 		}
 	}
 	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
@@ -247,9 +268,11 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 		return fmt.Errorf("update delivery lanes: %w", err)
 	}
 	r.mu.Lock()
+	r.endpointSettings = routerEndpointSettings(cfg)
+	r.endpointSets = routerEndpointSets(cfg)
 	r.routes = routes
 	r.endpointTransports = endpointTransports
-	r.usernameMode = cfg.Identity.UsernameMode
+
 	r.childContextMode = cfg.ChildContextDisplayMode
 	r.aggTrigger = cfg.Polls.AggregationTrigger
 	r.localPrefix = cfg.LocalPrefix
@@ -341,7 +364,8 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 	// Existing copies, including bridge echoes, must continue through the
 	// normal idempotence/lifecycle path and must not be newly classified local.
-	if _, err := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.RemoteID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+	existingCanonical, existingErr := r.store.CanonicalForRemote(ctx, string(incoming.Endpoint), incoming.RemoteID)
+	if err := existingErr; err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("check existing canonical message: %w", err)
 	}
 	if suppressed, err := r.store.IsSuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID); err != nil {
@@ -357,8 +381,35 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		}
 	}
 	r.mu.RLock()
-	localPrefix := r.localPrefix
+	localPrefix := r.endpointSettings[incoming.Endpoint].LocalPrefix
+	if _, ok := r.endpointSettings[incoming.Endpoint]; !ok {
+		localPrefix = r.localPrefix
+	}
 	r.mu.RUnlock()
+	if incoming.Kind == "text" && existingCanonical == "" && strings.TrimSpace(incoming.Text) == "/help" {
+		r.mu.RLock()
+		settings := r.endpointSettings[incoming.Endpoint]
+		r.mu.RUnlock()
+		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
+			return fmt.Errorf("mark local help command: %w", err)
+		}
+		ref, err := r.sender.Send(ctx, transport.Outgoing{
+			Endpoint: incoming.Endpoint, Kind: "text", ChildScope: incoming.ChildScope,
+			Text: commands.Describe(commands.Settings{
+				LocalPrefixes: settings.LocalPrefix, AggregationTriggers: settings.Polls.AggregationTrigger,
+			}),
+		})
+		if err != nil {
+			return fmt.Errorf("send command help: %w", err)
+		}
+		if ref.Endpoint != incoming.Endpoint || strings.TrimSpace(ref.RemoteMessageID) == "" {
+			return errors.New("help transport returned invalid message reference")
+		}
+		if err := r.store.SuppressedLocalMessage(ctx, string(ref.Endpoint), ref.RemoteMessageID, time.Now().UTC()); err != nil {
+			return fmt.Errorf("mark local help response: %w", err)
+		}
+		return nil
+	}
 	if incoming.Kind != "edit" && incoming.Kind != "delete" && incoming.Kind != "revoke" && incoming.Kind != "reaction" && matchLocalPrefix(incoming.Text, localPrefix) {
 		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
 			return fmt.Errorf("suppress local message: %w", err)
@@ -421,7 +472,10 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 	}
 
 	r.mu.RLock()
-	aggTrigger := r.aggTrigger
+	aggTrigger := r.endpointSettings[incoming.Endpoint].Polls.AggregationTrigger
+	if _, ok := r.endpointSettings[incoming.Endpoint]; !ok {
+		aggTrigger = r.aggTrigger
+	}
 	r.mu.RUnlock()
 
 	if matchAggregationTrigger(incoming.Text, aggTrigger) && incoming.ReplyTo != nil && incoming.ReplyTo.RemoteMessageID != "" {
@@ -528,7 +582,10 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if destination == incoming.Endpoint {
 				continue
 			}
-			targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+			targetSender, _, targetText, targetQuotedText, err := r.presentationForTarget(ctx, incoming, target)
+			if err != nil {
+				return err
+			}
 			targetIncoming := incoming
 			targetIncoming.Text = targetText
 			targetIncoming.QuotedText = targetQuotedText
@@ -536,7 +593,6 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if err != nil {
 				return err
 			}
-			_ = targetMentions
 			targetCopy, err := r.store.MessageCopyForEndpoint(ctx, targetCanonical, string(destination))
 			if err != nil {
 				key := mutationKey{canonical: targetCanonical, endpoint: destination}
@@ -628,8 +684,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			if destination == incoming.Endpoint {
 				continue
 			}
-			targetSender, _, _, _ := r.presentationForTarget(incoming, target)
-			username := senderPresentationUsername(targetSender, r.getUsernameMode())
+			targetSender, _, _, _, err := r.presentationForTarget(ctx, incoming, target)
+			if err != nil {
+				return err
+			}
+			username := senderPresentationUsername(targetSender)
 			fallbackText := fmt.Sprintf("%s/%s removed their reaction from a message", incoming.Endpoint, username)
 			if emoji != "" {
 				fallbackText = fmt.Sprintf("%s/%s reacted %s to a message", incoming.Endpoint, username, emoji)
@@ -674,6 +733,67 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		return nil
 	}
 
+	setID := ""
+	if len(targets) > 0 {
+		setID = targets[0].SyncSetID
+	}
+	var references []transport.CrossReference
+	var sourcePollHashes []string
+	if !(incoming.FromSelf && existingCanonical != "") {
+		if err := r.assertRouteSet(ctx, incoming.Endpoint, incoming.Endpoint, setID); err != nil {
+			return err
+		}
+		if incoming.Sender.IdentityUnavailable {
+			return transport.NewFailure(transport.FailureTransient, 0, errors.New("canonical author identity unavailable"))
+		}
+		if !isOpaqueActorID(incoming.Sender.OpaqueID) {
+			return errors.New("canonical author identity is required")
+		}
+		record, err := r.store.ObserveSyncSetActor(ctx, setID, incoming.Sender.OpaqueID)
+		if err != nil {
+			return fmt.Errorf("observe author alias: %w", err)
+		}
+		incoming.Sender.Alias = record.Alias
+		incoming.Mentions, err = r.prepareMentionAliases(ctx, setID, incoming.Mentions)
+		if err != nil {
+			return err
+		}
+		incoming.QuotedMentions, err = r.prepareMentionAliases(ctx, setID, incoming.QuotedMentions)
+		if err != nil {
+			return err
+		}
+		if incoming.Kind == "poll" {
+			sourcePollHashes = make([]string, len(incoming.PollOptions))
+			for i, option := range incoming.PollOptions {
+				hash := sha256.Sum256([]byte(option))
+				sourcePollHashes[i] = hex.EncodeToString(hash[:])
+			}
+			// Native poll fields have no portable mention chip. Canonical aliases
+			// give poll/result text a restart-safe, route-neutral representation.
+			labels := presentMentions(incoming.Mentions, true)
+			incoming.Text = sanitizeMentionsText(incoming.Text, labels)
+			incoming.PollOptions = append([]string(nil), incoming.PollOptions...)
+			for i := range incoming.PollOptions {
+				incoming.PollOptions[i] = sanitizeMentionsText(incoming.PollOptions[i], labels)
+			}
+			changed := false
+			for i, option := range incoming.PollOptions {
+				hash := sha256.Sum256([]byte(option))
+				changed = changed || sourcePollHashes[i] != hex.EncodeToString(hash[:])
+			}
+			if !changed {
+				sourcePollHashes = nil
+			}
+		}
+		references, err = r.referencesForSet(ctx, setID, incoming.Text)
+		if err != nil {
+			return err
+		}
+		if _, err := r.store.ObserveParticipant(ctx, string(incoming.Endpoint), incoming.Sender.OpaqueID); err != nil {
+			return fmt.Errorf("observe author endpoint: %w", err)
+		}
+	}
+
 	canonicalID, created, err := r.resolveCanonical(ctx, incoming)
 	if err != nil {
 		return err
@@ -716,6 +836,11 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 						return fmt.Errorf("mark source poll unavailable: %w", err)
 					}
 				}
+			}
+		}
+		if len(sourcePollHashes) > 0 {
+			if err := r.store.SavePollSourceOptionHashes(ctx, canonicalID, string(incoming.Endpoint), sourcePollHashes); err != nil {
+				return fmt.Errorf("save original poll vote keys: %w", err)
 			}
 		}
 		if err := r.rememberPollPresentation(ctx, canonicalID, incoming); err != nil {
@@ -817,7 +942,10 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			}
 		}
 
-		targetSender, targetMentions, targetText, targetQuotedText := r.presentationForTarget(incoming, target)
+		targetSender, targetMentions, targetText, targetQuotedText, err := r.presentationForTarget(ctx, incoming, target)
+		if err != nil {
+			return err
+		}
 		targetIncoming := incoming
 		targetIncoming.Text = targetText
 		targetIncoming.QuotedText = targetQuotedText
@@ -834,7 +962,7 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 			return fmt.Errorf("load presentation child scopes: %w", err)
 		}
 
-		if err := r.enqueueCreate(ctx, canonicalID, incoming, target, targetSender, targetMentions, targetQuotedText, destinationText, outgoingReplyTo, childScope, mediaBytes); err != nil {
+		if err := r.enqueueCreate(ctx, canonicalID, incoming, target, targetSender, targetMentions, references, targetQuotedText, destinationText, outgoingReplyTo, childScope, mediaBytes); err != nil {
 			return err
 		}
 	}
@@ -861,7 +989,7 @@ func (r *Router) rememberPollPresentation(ctx context.Context, canonicalID strin
 }
 
 func (r *Router) edit(ctx context.Context, ref transport.MessageRef, text string) error {
-	if r.getChildContextMode() == config.ChildContextDisplayFriendly {
+	if r.getChildContextMode(ref.Endpoint) == config.ChildContextDisplayFriendly {
 		if editor, ok := r.sender.(renderedEditor); ok {
 			return editor.EditRendered(ctx, ref, text)
 		}
@@ -908,7 +1036,7 @@ func (r *Router) enqueuePollResultCompanionDelete(ctx context.Context, canonical
 	}, nil)
 }
 
-func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, target routeTarget, targetSender transport.Sender, targetMentions []transport.Mention, targetQuotedText string, destinationText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
+func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming transport.Incoming, target routeTarget, targetSender transport.Sender, targetMentions []transport.Mention, references []transport.CrossReference, targetQuotedText string, destinationText string, replyTo *transport.MessageRef, childScope *transport.ChildScope, mediaBytes []byte) error {
 	destination := target.Endpoint
 	senderLabel, err := r.senderLabelFor(ctx, incoming, targetSender)
 	if err != nil {
@@ -973,6 +1101,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 			}
 			return err
 		}
+		if err := r.assertRouteSet(jobCtx, incoming.Endpoint, destination, target.SyncSetID); err != nil {
+			return finishFailure(err)
+		}
 		if len(mediaBytes) > 0 && (incoming.Kind == "audio" || incoming.Kind == "sticker") {
 			step, stepErr := r.store.CreateStep(jobCtx, canonicalID, string(destination), 1, "companion")
 			if stepErr != nil {
@@ -987,8 +1118,9 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					SenderLabel: senderLabel,
 					SourceText:  incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: destinationText,
-					RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
-					PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
+					References: references, ReferenceAnonymized: target.Anonymized,
+					RenderedText:    childAwareRenderedText(r.getChildContextMode(incoming.Endpoint), incoming.ChildScope, destinationText),
+					PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(incoming.Endpoint), incoming, incoming.ChildScope, targetSender),
 					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
 				}); err != nil {
 					if transport.Classify(err).Certainty == transport.SendUnknown {
@@ -1016,12 +1148,12 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				Endpoint: destination, OriginEndpoint: incoming.Endpoint, Sender: targetSender,
 				SenderLabel: senderLabel,
 				SourceText:  incoming.Text, ReplyFallback: incoming.ReplyTo != nil && replyTo == nil,
-				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions,
-				RenderedText:    childAwareRenderedText(r.getChildContextMode(), incoming.ChildScope, destinationText),
-				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(), incoming, incoming.ChildScope, targetSender),
+				Kind: incoming.Kind, Text: destinationText, Mentions: targetMentions, References: references,
+				RenderedText:    childAwareRenderedText(r.getChildContextMode(incoming.Endpoint), incoming.ChildScope, destinationText),
+				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(incoming.Endpoint), incoming, incoming.ChildScope, targetSender),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
-				PollDurationHours: incoming.PollDurationHours,
+				PollDurationHours: incoming.PollDurationHours, ReferenceAnonymized: target.Anonymized,
 			})
 			if err != nil {
 				if transport.Classify(err).Certainty == transport.SendUnknown {
@@ -1423,10 +1555,30 @@ func (r *Router) resolveCanonical(ctx context.Context, incoming transport.Incomi
 	return canonicalID, created, nil
 }
 
-func (r *Router) getUsernameMode() config.UsernameMode {
+func routerEndpointSettings(cfg *config.Config) map[transport.EndpointID]config.SyncSetSettings {
+	result := make(map[transport.EndpointID]config.SyncSetSettings)
+	for _, set := range cfg.SyncSets {
+		for _, endpoint := range set.Endpoints {
+			result[transport.EndpointID(endpoint)] = cfg.SettingsForSet(set)
+		}
+	}
+	return result
+}
+
+func (r *Router) settingsFor(endpoint transport.EndpointID) config.SyncSetSettings {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.usernameMode
+	if settings, ok := r.endpointSettings[endpoint]; ok {
+		return settings
+	}
+	return config.SyncSetSettings{ChildContextDisplayMode: r.childContextMode}
+}
+
+func presentationEndpoint(endpoints []transport.EndpointID) transport.EndpointID {
+	if len(endpoints) > 0 {
+		return endpoints[0]
+	}
+	return ""
 }
 
 func (r *Router) forwardedText(ctx context.Context, incoming transport.Incoming) (string, error) {
@@ -1446,7 +1598,14 @@ func (r *Router) senderLabel(ctx context.Context, incoming transport.Incoming) (
 }
 
 func (r *Router) senderLabelFor(ctx context.Context, incoming transport.Incoming, sender transport.Sender) (string, error) {
-	username := senderPresentationUsername(sender, r.getUsernameMode())
+	if sender.Alias == "" {
+		alias, err := r.store.AliasByActor(ctx, r.syncSetFor(incoming.Endpoint), sender.OpaqueID)
+		if err != nil {
+			return "", fmt.Errorf("load attribution alias: %w", err)
+		}
+		sender.Alias = alias
+	}
+	username := senderPresentationUsername(sender)
 	if strings.TrimSpace(username) == "" {
 		return "", errors.New("incoming sender identity is required")
 	}
@@ -1455,7 +1614,7 @@ func (r *Router) senderLabelFor(ctx context.Context, incoming transport.Incoming
 		label := normalizeDisplayName(incoming.ChildScope.Label)
 		// childContextDisplayMode controls label persistence, not visible syntax.
 		// Opaque mode may use a live label transiently but must not store it.
-		if label == "" && r.getChildContextMode() == config.ChildContextDisplayFriendly {
+		if label == "" && r.getChildContextMode(incoming.Endpoint) == config.ChildContextDisplayFriendly {
 			if stored, err := r.store.ChildScopeLabel(ctx, string(incoming.Endpoint), string(incoming.ChildScope.Kind), incoming.ChildScope.RemoteID); err == nil {
 				label = normalizeDisplayName(stored.DisplayName)
 			}
@@ -1475,58 +1634,59 @@ func (r *Router) senderLabelFor(ctx context.Context, incoming transport.Incoming
 	return prefix + "/" + username, nil
 }
 
-// presentationForTarget applies route-aware anonymization for destinations where
-// AnonymizeToDiscord is active, replacing sender and mention identities with
-// deterministic pseudonyms and clearing phone numbers. For non-anonymized routes,
-// it returns the incoming values unchanged.
-func (r *Router) presentationForTarget(incoming transport.Incoming, target routeTarget) (transport.Sender, []transport.Mention, string, string) {
+// presentationForTarget uses only assigned aliases; it never enrolls a mention.
+func (r *Router) presentationForTarget(ctx context.Context, incoming transport.Incoming, target routeTarget) (transport.Sender, []transport.Mention, string, string, error) {
 	sender := incoming.Sender
-	mentions := incoming.Mentions
-	text := incoming.Text
-	quotedText := incoming.QuotedText
-
-	if target.AnonymizeToDiscord {
-		sender.DisplayName = identity.Pseudonym(incoming.Sender.OpaqueID)
-		sender.PhoneNumber = ""
-		if len(incoming.Mentions) > 0 {
-			anonymizedMentions := make([]transport.Mention, len(incoming.Mentions))
-			for i, m := range incoming.Mentions {
-				anonymizedMentions[i] = transport.Mention{
-					RemoteID: m.RemoteID,
-					Name:     r.mentionPseudonym(string(incoming.Endpoint), m.RemoteID),
-				}
-			}
-			mentions = anonymizedMentions
-			text = sanitizeMentionsText(text, mentions)
+	if sender.Alias == "" {
+		setID := target.SyncSetID
+		if setID == "" {
+			setID = r.syncSetFor(incoming.Endpoint)
 		}
-		if quotedText != "" {
-			quotedText = r.sanitizeQuotedAttribution(quotedText)
-			quotedText = sanitizeMentionsText(quotedText, mentions)
+		alias, err := r.store.AliasByActor(ctx, setID, sender.OpaqueID)
+		if err != nil {
+			return transport.Sender{}, nil, "", "", fmt.Errorf("load author alias: %w", err)
+		}
+		sender.Alias = alias
+		incoming.Mentions, err = r.prepareMentionAliases(ctx, setID, incoming.Mentions)
+		if err != nil {
+			return transport.Sender{}, nil, "", "", err
+		}
+		incoming.QuotedMentions, err = r.prepareMentionAliases(ctx, setID, incoming.QuotedMentions)
+		if err != nil {
+			return transport.Sender{}, nil, "", "", err
 		}
 	}
-	return sender, mentions, text, quotedText
+	sender.Anonymized = target.Anonymized
+	if sender.Anonymized {
+		sender.DisplayName = sender.Alias
+		sender.PhoneNumber = ""
+	}
+	mentions := presentMentions(incoming.Mentions, sender.Anonymized)
+	quotedMentions := presentMentions(incoming.QuotedMentions, sender.Anonymized)
+	text := sanitizeMentionsText(incoming.Text, mentions)
+	quote := incoming.QuotedText
+	if sender.Anonymized {
+		quote = r.sanitizeQuotedAttribution(quote)
+	}
+	quote = sanitizeMentionsText(quote, quotedMentions)
+	quote = sanitizeMentionsText(quote, mentions)
+	return sender, mentions, text, quote, nil
 }
 
-// mentionPseudonym derives a stable pseudonym for a mentioned participant.
-// Privacy-safe opaque actor IDs from normalizers are used directly so sender and
-// mention aliases stay consistent. Provider-native IDs are first keyed under the
-// source transport namespace. Anonymization-enabled routers require a keyed hasher.
-func (r *Router) mentionPseudonym(sourceEndpoint, remoteID string) string {
-	remoteID = strings.TrimSpace(remoteID)
-	if r.scopeHasher == nil || remoteID == "" {
-		return "Member"
+func routerEndpointSets(cfg *config.Config) map[transport.EndpointID]string {
+	sets := make(map[transport.EndpointID]string)
+	for _, set := range cfg.SyncSets {
+		for _, endpoint := range set.Endpoints {
+			sets[transport.EndpointID(endpoint)] = set.ID
+		}
 	}
-	if isOpaqueActorID(remoteID) {
-		return identity.Pseudonym(remoteID)
-	}
+	return sets
+}
+
+func (r *Router) syncSetFor(endpoint transport.EndpointID) string {
 	r.mu.RLock()
-	transportKind := string(r.endpointTransports[transport.EndpointID(sourceEndpoint)])
-	r.mu.RUnlock()
-	if transportKind == "" {
-		transportKind = sourceEndpoint
-	}
-	actorID := r.scopeHasher.ActorID("mention:"+transportKind, remoteID)
-	return identity.Pseudonym(actorID)
+	defer r.mu.RUnlock()
+	return r.endpointSets[endpoint]
 }
 
 // sanitizeQuotedAttribution strips the bridge-generated sender header from a
@@ -1606,10 +1766,8 @@ func sanitizeMentionsText(content string, mentions []transport.Mention) string {
 	return content
 }
 
-func (r *Router) getChildContextMode() config.ChildContextDisplayMode {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.childContextMode
+func (r *Router) getChildContextMode(endpoints ...transport.EndpointID) config.ChildContextDisplayMode {
+	return r.settingsFor(presentationEndpoint(endpoints)).ChildContextDisplayMode
 }
 
 func (r *Router) withChildContextHeaders(incoming transport.Incoming, destination transport.EndpointID, scopes []store.CanonicalScope, text string) string {
@@ -1617,16 +1775,16 @@ func (r *Router) withChildContextHeaders(incoming transport.Incoming, destinatio
 	return text
 }
 
-func senderPresentationUsername(sender transport.Sender, mode config.UsernameMode) string {
-	if mode == config.UsernameModePushName {
-		if displayName := normalizeDisplayName(sender.DisplayName); displayName != "" {
-			return displayName
-		}
-		if sender.PhoneNumber != "" {
-			return sender.PhoneNumber
-		}
+func senderPresentationUsername(sender transport.Sender) string {
+	name := sender.OpaqueID
+
+	if displayName := normalizeDisplayName(sender.DisplayName); displayName != "" {
+		name = displayName
+	} else if sender.PhoneNumber != "" {
+		name = sender.PhoneNumber
 	}
-	return sender.OpaqueID
+
+	return sender.NameWithAlias(name)
 }
 
 func normalizeDisplayName(value string) string {
@@ -1650,25 +1808,9 @@ func newCanonicalID() (string, error) {
 }
 
 func matchLocalPrefix(text string, localPrefixConfig string) bool {
-	prefixes := strings.Fields(localPrefixConfig)
-	for _, prefix := range prefixes {
-		if prefix != "" && strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
+	return commands.MatchLocal(text, localPrefixConfig)
 }
 
 func matchAggregationTrigger(text string, aggTriggerConfig string) bool {
-	triggers := strings.Fields(aggTriggerConfig)
-	if len(triggers) == 0 {
-		triggers = []string{"aggregate-response"}
-	}
-	trimmed := strings.TrimSpace(text)
-	for _, trigger := range triggers {
-		if trimmed == trigger {
-			return true
-		}
-	}
-	return false
+	return commands.MatchSummary(text, aggTriggerConfig)
 }

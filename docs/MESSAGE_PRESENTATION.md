@@ -1,82 +1,170 @@
 # Synchronized message presentation
 
-This document defines the user-visible attribution syntax produced by the canonical router. These formats are compatibility invariants: coding agents must not casually normalize delimiters, expose additional identity fields, or change the precedence rules while refactoring routing, LID handling, threads/topics, reactions, polls, or recovery.
+This document defines the rendered bridge attribution contract. Routing uses
+opaque identities and explicit aliases; rendered headers never authorize routing.
 
 ## Sender attribution
 
-With the default `push_name` username mode, sender presentation uses this precedence:
+Every accepted group-message author receives a permanent, globally unique alias
+belonging to its `(sync set, HMAC actor)` record. The vocabulary has exactly 256
+adjectives and 256 nouns. New installations use a fixed scrambled pair order;
+existing installations retain their original issued order and addresses. Successive assignments
+span both word lists (for example `Amber Badger`, `Pale Poppy`, `Jolly Coconut`).
+The first 65,536 assignments use
+two words; ordinal 65,537 starts `Amber Badger 2`. Aliases and ordinals are never
+reused, even when their set is deleted. The same account in another set receives
+a different alias. Names, phone numbers and provider user identities are not
+stored in the alias registry.
+
+Ordinary sender-name precedence remains:
 
 1. normalized provider display name;
 2. phone number only when no display name is available;
-3. opaque sender ID only when neither is available.
+3. opaque actor ID only when neither is available.
 
-A phone number must **not** be added alongside an available display name. In particular, do not render `phone (name)`.
+Append the assigned alias in parentheses: `Alice (Amber Badger)`. Never add a
+phone beside an available display name. Username-mode and discriminator controls
+are removed; HMAC hashing still provides internal canonical actor identities.
 
-With `hash` username mode, the opaque HMAC-derived sender ID is used instead of the display name/phone fallback chain.
+The router allocates only for accepted group-message creates, after validity,
+configuration, echo, help-command and local-prefix checks. Allocation and lookup failures stop
+delivery rather than substituting a missing or unrelated author alias. Edits,
+reaction fallbacks and other author presentation require an existing assignment.
+Structured mentions and private commands never enroll a new actor.
+
+WhatsApp author identities require a verified canonical LID. Provider-owned APIs
+resolve PN-form messages to that LID using the existing author hash domain;
+hosted LIDs normalize to the same identity. PN-only observations do not consume
+an alias. If no LID is available, forwarding fails before canonical/create state
+or delivery. Recovery checkpoints remain replayable, subject to provider windows;
+there is no guarantee of later recovery and no persistent content queue.
 
 ## Message header syntax
 
-For an ordinary message, the visible attribution header is:
+Ordinary attribution:
 
 ```text
-<group-alias>/<name>: <message>
+<group>/<name> (<alias>): <message>
 ```
 
-The router currently wraps the attribution portion in bold-italic provider markup where supported, for example:
+Where supported, the attribution is bold-italic:
 
 ```text
-*_<group-alias>/<name>_*: <message>
+*_developers/Alice (Amber Badger)_*: deployed the fix
 ```
 
-When `childContextDisplayMode=friendly` and a Discord thread/forum-post or Telegram topic label is available, the visible attribution header is:
+Child messages retain the same slash-separated context:
 
 ```text
-<group-alias>/<thread-or-topic-label>/<name>: <message>
+*_developers/Backend API/Alice (Amber Badger)_*: deployed the fix
 ```
 
-For example:
+On anonymized routes, the assigned alias replaces the name entirely:
 
 ```text
-developers/Backend API/Alice: deployed the fix
-community/Travel Plans/Bob: Saturday works for me
+developers/Amber Badger: deployed the fix
+developers/Backend API/Amber Badger: deployed the fix
 ```
 
-The `/` separators are intentional and part of the presentation contract. Do not add `thread:` or `topic:` prefixes unless the product contract is deliberately changed together with tests and documentation.
-
-The child label itself is sufficient presentation context; routing still uses opaque child-scope identity and never parses this rendered header. Opaque child IDs or context tokens must never be shown in forwarded messages.
+Keep existing source prefixes in webhook names, poll attribution, media captions
+and companions, reply fallbacks and reaction fallbacks. Discord reserves the
+complete alias before truncating a long real name/source prefix to its 80-rune
+webhook username limit. Polls retain the platform bot author where native APIs
+require it; the bridge's visible source attribution includes the alias. Native
+poll questions/options render structured mentions using assigned aliases (or
+non-identifying text when unassigned) on every route, so result companions retain
+the same safe labels after restart. If projection changes an option label, the
+source's original option hash still maps to its canonical index; forwarded
+WhatsApp votes use the projected label's hash. Both contribute to the same count.
 
 ## Child-context storage mode
 
-The current default is `childContextDisplayMode=opaque`. This setting controls **label persistence**, not the visible header shape.
+`childContextDisplayMode` controls label persistence, not header syntax:
 
-- `opaque`: use a live thread/topic label transiently when available; otherwise show the generic `thread` or `topic` fallback. Do not persist the child name.
-- `friendly`: use the same `<group>/<thread-or-topic>/<user>` header and additionally persist bounded observed labels so names can survive restart/replay.
+- `opaque` keeps live thread/topic labels transient and otherwise uses `thread`
+  or `topic`.
+- `friendly` may persist bounded normalized labels for restart/replay.
 
-Both modes therefore use the same human-facing syntax and neither mode emits an opaque context preamble. ChildScope IDs remain internal routing metadata only.
+Both use `<group>/<child>/<sender>`. Opaque child IDs and `[contexts ...]`
+preambles never enter rendered messages. Switching to opaque clears stored
+labels. Group/child labels never select an actor or route.
 
-## One-way Discord Anonymization (`anonymizeToDiscord`)
+## Directional endpoint anonymization
 
-When a sync set configures `anonymizeToDiscord=true`, messages forwarded to Discord endpoints are subject to route-aware one-way pseudonymization:
+Each endpoint has independent `anonymizeIncoming` and `anonymizeOutgoing`
+booleans, both defaulting to false. Outgoing covers messages sent from
+that conversation; incoming covers messages delivered to it. If either the
+source Outgoing or destination Incoming flag is true, the route uses alias-only
+author presentation and clears phone fields, on every transport. Otherwise it
+retains ordinary names with aliases. Both can be enabled together. These
+checkboxes sit alongside move/rename/remove in the sync-set conversation editor
+and take effect on Save without restarting. Structured verified mentions reuse the mentioned author's existing
+set alias. A missing assignment uses safe non-identifying mention text on an
+anonymized route; ordinary destinations retain safe normal mention presentation.
+No invented HMAC pseudonym or separate mention hash domain is used. Mention
+normalizers must match the canonical author identity, including WhatsApp PN/LID
+reconciliation. Structured names and native IDs remain transient.
 
-1. **Sender name**: In `push_name` mode, the `<name>` attribution component and Discord webhook display name are replaced with a deterministic pseudonym derived from the sender's HMAC actor ID (e.g. `Silent Falcon Q7M5K`).
-2. **Phone numbers**: Fallback phone numbers are stripped completely for all Discord-bound senders regardless of `usernameMode`; phone numbers never appear in attribution headers or sender fields forwarded to Discord.
-3. **Structured mentions**: Mentions in Discord-bound creates **and edits** have their display names replaced with deterministic pseudonyms (e.g. `@Amber Otter 2PF3R`). Telegram and Discord ingress keep user mentions as privacy-safe HMAC actor tokens plus transient display metadata so normal destinations can still render the usual name while anonymized Discord can substitute a pseudonym. Provider-native mention IDs that still require derivation are keyed under the source transport namespace. Anonymization-enabled routing requires the identity hasher.
-4. **Reply quotes**: Quoted text headers produced by this bridge (the exact `*_<label>_*: <body>` format) are stripped before being forwarded to Discord; other message content that happens to contain `/` is left untouched.
-5. **Reactions**: Reaction fallback text sent to Discord uses the sender's deterministic pseudonym rather than their real name or phone number.
-6. **Multi-destination isolation**: The anonymization is applied strictly per-destination. Other destinations in the same sync set (such as WhatsApp groups or Telegram chats) continue to receive standard attribution and real push names in `push_name` mode.
-7. **Hash mode**: If the service is configured with `usernameMode=hash`, opaque HMAC actor IDs (`u_...`) are used for message body attribution (as in non-anonymized hash mode), but `PhoneNumber` is still cleared before the message is forwarded to Discord.
+Quote-only mention metadata stays transient through ingress, independently of
+the current message body. The router applies the quoted actor's existing set
+alias before formatting. Anonymized quoted text strips bridge attribution wrappers
+and sanitizes structured mention tokens. Other quoted content containing a slash is unchanged.
+Edits follow text-only mention semantics without new native notifications.
+Explicit braced references remain literal when native rendering is unavailable;
+do not rewrite an authored literal merely because anonymization is enabled.
 
-## Do-not-regress checklist
+## Cross-group participant references
 
-Changes touching sender identity, WhatsApp PN/LID resolution, Discord threads/forum posts, Telegram topics, reactions, polls, edits, replies, or routing presentation must preserve these rules unless a product change explicitly says otherwise:
+Only explicit `@{Amber Badger}` or `@{Amber Badger 2}` addresses are supported.
+Comparisons are case-insensitive; stored aliases retain canonical title case.
+Each token has exactly one space between its ASCII words and optional canonical
+numeric tier. Endpoint prefixes, bare names, discriminators and public `Pn`
+handles are not alternate addresses. Native provider `@user` syntax is separate.
 
-- ordinary attribution: `<group-alias>/<name>`;
-- child attribution: `<group-alias>/<thread-or-topic-label>/<name>`;
-- `/` separates the group alias, child label, and sender;
-- display name wins over phone number in `push_name` mode;
-- phone number is only a fallback when display name is absent;
-- hash mode continues to use the opaque sender ID;
-- `anonymizeToDiscord` pseudonyms apply only to Discord destinations and preserve normal push names for other transports;
-- rendered presentation is never parsed as routing identity.
+Users learn aliases from forwarded author attribution. The registry resolves
+only already assigned aliases, and group ingress requires the assignment's set
+to equal the source endpoint's set. No directory, picker, read tracking, real-name
+search or cross-provider identity guessing is involved.
 
-Automated tests should assert the exact rendered forms whenever presentation logic is changed.
+Every actual destination independently verifies membership before a native tag:
+
+- WhatsApp uses matching LID text and mention metadata from its live target
+  roster, including captions and audio/sticker text companions; never a PN.
+- Discord verifies current guild/channel access and private-thread membership,
+  uses an explicit user allowlist, and may restore native bindings from accepted
+  history or a bounded HMAC-matched guild-roster lookup when Server Members
+  Intent permits it. No additional privileged gateway intent is added.
+- Telegram Bot API verifies membership in the destination chat and emits an
+  HTML-escaped inline mention. It does not invent extra topic membership rules.
+
+An explicit reference may tag a verified local Discord account even on an
+anonymized route; the resulting chip identifies that native account. Every other
+sender and ordinary mention anonymization rule remains active.
+
+Unknown, out-of-set or unverifiable references preserve the exact authored token,
+including case, braces and spelling. A backslash escapes a reference:
+`\@{Amber Badger}` does not request a notification. Repeated references work
+independently. Discord/Telegram native-ID caches are transient; cold or denied
+lookups remain literal. MTProto and edits do not add native braced-reference
+notifications. Database failures are errors, not proof an alias is absent.
+
+## Private relay presentation
+
+The opt-in private relay uses ordinary source attribution:
+
+```text
+DM from <group>/<name> (<alias>)
+<sanitized private body>
+Reply to this message to respond privately.
+```
+
+The attribution after `DM from ` is bold-italic. Names come from the current
+private event and remain transient. With no available name, or for an anonymized
+route, use `DM from <group>/<alias>`. The group is the source
+endpoint alias. Both parties need existing group-author assignments; `/dm`
+does not allocate. Each response natively references the original author message
+in the destination inbox; missing provider copies may fall back to an unthreaded
+delivery. Old mappings without a source message token also remain unthreaded.
+Reply routing uses the exact structured inbox/message binding, never this text.
+Native mentions and embedded bridge references are neutralized. Private edits
+and deletes do not change the delivered original. See [private messaging](PRIVATE_MESSAGING.md).

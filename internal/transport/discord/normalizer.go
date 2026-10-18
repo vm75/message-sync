@@ -29,9 +29,9 @@ type ManagedWebhookChecker interface {
 // display names remain transient and only configured channel IDs are mapped to
 // safe application aliases.
 type Normalizer struct {
-	endpoints    map[string]transport.EndpointID
-	hasher       *identity.Hasher
-	usernameMode config.UsernameMode
+	endpointSettings map[string]config.SyncSetSettings
+	endpoints        map[string]transport.EndpointID
+	hasher           *identity.Hasher
 }
 
 func (n *Normalizer) endpointFor(channelID string) (transport.EndpointID, bool) {
@@ -55,12 +55,9 @@ func (n *Normalizer) NormalizePollVote(channelID, messageID, userID string, inde
 	}, true
 }
 
-func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
+func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
-	}
-	if !usernameMode.IsValid() {
-		return nil, errors.New("username mode must be push_name or hash")
 	}
 
 	endpoints := make(map[string]transport.EndpointID, len(channelIDs))
@@ -78,9 +75,8 @@ func NewNormalizer(channelIDs map[string]string, hasher *identity.Hasher, userna
 		endpoints[channelID] = transport.EndpointID(alias)
 	}
 	return &Normalizer{
-		endpoints:    endpoints,
-		hasher:       hasher,
-		usernameMode: usernameMode,
+		endpoints: endpoints,
+		hasher:    hasher, endpointSettings: normalizerPolicies(policies),
 	}, nil
 }
 
@@ -111,12 +107,12 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 	}
 
 	displayName := ""
-	if n.usernameMode == config.UsernameModePushName {
-		displayName = transientDisplayName(msg)
-	}
+
+	displayName = transientDisplayName(msg)
 
 	var replyTo *transport.MessageRef
 	var quotedText string
+	var quotedMentions []transport.Mention
 	if ref := msg.MessageReference; ref != nil && strings.TrimSpace(ref.MessageID) != "" {
 		channelID := strings.TrimSpace(ref.ChannelID)
 		if channelID == "" {
@@ -128,25 +124,26 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 				RemoteMessageID: strings.TrimSpace(ref.MessageID),
 			}
 			if msg.ReferencedMessage != nil {
-				quotedText = sanitizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher, n.usernameMode)
+				quotedText, quotedMentions = normalizeDiscordMentions(msg.ReferencedMessage.Content, msg.ReferencedMessage.Mentions, n.hasher)
 			}
 		}
 	}
 
-	text, mentions := normalizeDiscordMentions(msg.Content, msg.Mentions, n.hasher, n.usernameMode)
+	text, mentions := normalizeDiscordMentions(msg.Content, msg.Mentions, n.hasher)
 	kind := "text"
 	var pollOptions []string
 	selectableCount := 0
 	durationHours := 0
 	if msg.Poll != nil {
 		kind = "poll"
-		text = sanitizeDiscordMentions(msg.Poll.Question.Text, nil, n.hasher, n.usernameMode)
-		mentions = nil
+		text, mentions = normalizeDiscordMentions(msg.Poll.Question.Text, msg.Mentions, n.hasher)
 		for _, answer := range msg.Poll.Answers {
 			if answer.Media == nil || strings.TrimSpace(answer.Media.Text) == "" {
 				return transport.Incoming{}, false
 			}
-			pollOptions = append(pollOptions, answer.Media.Text)
+			option, optionMentions := normalizeDiscordMentions(answer.Media.Text, msg.Mentions, n.hasher)
+			pollOptions = append(pollOptions, option)
+			mentions = append(mentions, optionMentions...)
 		}
 		if msg.Poll.AllowMultiselect {
 			selectableCount = len(pollOptions)
@@ -171,6 +168,7 @@ func (n *Normalizer) NormalizeMessage(evt *discordgo.MessageCreate, botUserID st
 		Mentions:            mentions,
 		ReplyTo:             replyTo,
 		QuotedText:          quotedText,
+		QuotedMentions:      quotedMentions,
 		Timestamp:           msg.Timestamp,
 	}, true
 }
@@ -212,7 +210,7 @@ func discordMessageSupported(msg *discordgo.Message) bool {
 	return strings.TrimSpace(msg.Content) != "" || len(msg.Attachments) > 0
 }
 
-func normalizeDiscordMentions(content string, users []*discordgo.User, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, []transport.Mention) {
+func normalizeDiscordMentions(content string, users []*discordgo.User, hasher *identity.Hasher) (string, []transport.Mention) {
 	if hasher == nil {
 		content = discordUserMentionPattern.ReplaceAllString(content, "@user")
 		content = discordRoleMentionPattern.ReplaceAllString(content, "@role")
@@ -231,11 +229,11 @@ func normalizeDiscordMentions(content string, users []*discordgo.User, hasher *i
 		}
 		opaqueID := hasher.UserID("discord:" + id)
 		name := opaqueID
-		if usernameMode == config.UsernameModePushName {
-			if displayName := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " "); displayName != "" && displayName != id {
-				name = displayName
-			}
+
+		if displayName := strings.Join(strings.Fields(transientUserDisplayName(mentioned)), " "); displayName != "" && displayName != id {
+			name = displayName
 		}
+
 		byProviderID[id] = transport.Mention{RemoteID: opaqueID, Name: name}
 	}
 
@@ -266,14 +264,9 @@ func normalizeDiscordMentions(content string, users []*discordgo.User, hasher *i
 	return content, result
 }
 
-func sanitizeDiscordMentions(content string, users []*discordgo.User, hasher *identity.Hasher, usernameMode config.UsernameMode) string {
-	content, mentions := normalizeDiscordMentions(content, users, hasher, usernameMode)
-	for _, mention := range mentions {
-		name := strings.Join(strings.Fields(mention.Name), " ")
-		if name == "" || name == mention.RemoteID {
-			name = mention.RemoteID
-		}
-		content = strings.ReplaceAll(content, "@"+mention.RemoteID, "@"+name)
+func normalizerPolicies(policies []map[string]config.SyncSetSettings) map[string]config.SyncSetSettings {
+	if len(policies) > 0 {
+		return policies[0]
 	}
-	return content
+	return nil
 }

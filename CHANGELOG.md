@@ -1,11 +1,44 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes are documented here, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.4.0] - 2026-10-18
+
+### Added
+
+- Built-in `/local` and `/summary` commands supplement configured prefixes and
+  triggers. `/help` lists all commands and authorized configured values, with
+  source-only group help and membership-scoped private help.
+- Permanent, globally unique participant aliases scoped to each sync-set actor,
+  using a frozen 256×256 vocabulary with numeric overflow tiers. Assignments
+  survive restarts and are never reused. Same-set `@{Amber Badger}` references
+  verify membership at each destination; unavailable native mentions stay literal.
+- Optional text-only `/dm @{Amber Badger} message` relay for WhatsApp, Discord
+  bots and Telegram Bot API, enabled globally and per sync set. Native replies
+  continue conversations with current membership and exact inbox checks;
+  encrypted, content-free mappings expire after 24 hours. Private edits/deletes
+  are ignored; only feature-owned WhatsApp copies receive Delete for Me cleanup.
+
+### Changed
+
+- Replace Discord-only sync-set anonymity with independent per-conversation
+  controls on every transport: Outgoing anonymizes messages sent from the
+  conversation; Incoming anonymizes messages delivered to it. Existing Discord
+  policies migrate to Incoming, editable beside Move/Rename/Remove.
+- Show `group/name (alias)` ordinarily and `group/alias` on anonymized routes,
+  including replies, polls and private relay attribution. Remove username-mode
+  and discriminator controls. WhatsApp authors require verified canonical LIDs;
+  unresolved identities fail safely before delivery or checkpoint advancement.
+- Move runtime policies and membership-review visibility into persisted per-set
+  settings with a shared create/edit modal, dirty-only Save and live reload.
+  `/api/config` exposes only the global private-relay safety gate; WhatsApp
+  device names are editable per connection. Configuration saves preserve
+  retained routing state and participant assignments.
+- Display discovered conversation names and improve mobile conversation controls.
+  Telegram discovery also retrieves configured chats before new messages arrive.
 
 ## [0.3.3] - 2026-10-09
 

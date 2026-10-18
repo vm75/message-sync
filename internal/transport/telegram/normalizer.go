@@ -21,22 +21,19 @@ import (
 // chat IDs are mapped to safe endpoint aliases, and user IDs are immediately
 // replaced by HMAC-derived actor IDs.
 type Normalizer struct {
-	connectionID string
-	endpoints    map[int64]transport.EndpointID
-	hasher       *identity.Hasher
-	usernameMode config.UsernameMode
+	endpointSettings map[string]config.SyncSetSettings
+	connectionID     string
+	endpoints        map[int64]transport.EndpointID
+	hasher           *identity.Hasher
 }
 
-func NewNormalizer(chatIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode) (*Normalizer, error) {
-	return NewNormalizerWithConnection(chatIDs, hasher, usernameMode, "")
+func NewNormalizer(chatIDs map[string]string, hasher *identity.Hasher, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
+	return NewNormalizerWithConnection(chatIDs, hasher, "", policies...)
 }
 
-func NewNormalizerWithConnection(chatIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode, connectionID string) (*Normalizer, error) {
+func NewNormalizerWithConnection(chatIDs map[string]string, hasher *identity.Hasher, connectionID string, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
-	}
-	if !usernameMode.IsValid() {
-		return nil, errors.New("username mode must be push_name or hash")
 	}
 
 	endpoints := make(map[int64]transport.EndpointID, len(chatIDs))
@@ -61,8 +58,7 @@ func NewNormalizerWithConnection(chatIDs map[string]string, hasher *identity.Has
 	return &Normalizer{
 		connectionID: strings.TrimSpace(connectionID),
 		endpoints:    endpoints,
-		hasher:       hasher,
-		usernameMode: usernameMode,
+		hasher:       hasher, endpointSettings: normalizerPolicies(policies),
 	}, nil
 }
 
@@ -112,7 +108,8 @@ func (n *Normalizer) withChatMigration(endpoint transport.EndpointID, oldChatID,
 		connectionID: n.connectionID,
 		endpoints:    endpoints,
 		hasher:       n.hasher,
-		usernameMode: n.usernameMode,
+
+		endpointSettings: n.endpointSettings,
 	}, nil
 }
 
@@ -138,15 +135,18 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 	text, entities := telegramTextPayload(msg)
 	kind := "text"
 	var pollOptions []string
+	var mentions []transport.Mention
 	selectableCount := 0
 	providerReference := ""
 	if msg.Poll != nil {
 		if telegramPollRepresentable(msg.Poll) {
 			kind = "poll"
 			text = msg.Poll.Question
-			text, _ = normalizeTelegramMentions(text, msg.Poll.QuestionEntities, n.hasher, n.usernameMode)
+			text, mentions = normalizeTelegramMentions(text, msg.Poll.QuestionEntities, n.hasher)
 			for _, option := range msg.Poll.Options {
-				pollOptions = append(pollOptions, option.Text)
+				optionText, optionMentions := normalizeTelegramMentions(option.Text, option.TextEntities, n.hasher)
+				pollOptions = append(pollOptions, optionText)
+				mentions = append(mentions, optionMentions...)
 			}
 			if msg.Poll.AllowsMultipleAnswers {
 				selectableCount = len(pollOptions)
@@ -156,14 +156,16 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			providerReference = msg.Poll.ID
 		} else {
 			var ok bool
-			text, ok = telegramPollMessageText(msg.Poll, n.hasher, n.usernameMode)
+			text, mentions, ok = telegramPollMessageText(msg.Poll, n.hasher)
 			if !ok {
 				return transport.Incoming{}, false
 			}
 		}
 		entities = nil
 	}
-	text, mentions := normalizeTelegramMentions(text, entities, n.hasher, n.usernameMode)
+	normalizedText, bodyMentions := normalizeTelegramMentions(text, entities, n.hasher)
+	text = normalizedText
+	mentions = append(mentions, bodyMentions...)
 	if strings.TrimSpace(text) == "" && !hasTelegramMedia(msg) {
 		// Service-only messages and unsupported payloads are intentionally
 		// ignored. Supported media may legitimately have no caption.
@@ -171,23 +173,23 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 	}
 
 	displayName := ""
-	if n.usernameMode == config.UsernameModePushName {
-		displayName = transientTelegramDisplayName(msg.From)
-	}
+
+	displayName = transientTelegramDisplayName(msg.From)
 
 	var replyTo *transport.MessageRef
 	var quotedText string
+	var quotedMentions []transport.Mention
 	if reply := msg.ReplyToMessage; reply != nil && reply.ID > 0 && reply.Chat.ID == msg.Chat.ID && !telegramTopicRootReply(msg, reply) {
 		replyTo = &transport.MessageRef{
 			Endpoint:        endpoint,
 			RemoteMessageID: strconv.Itoa(reply.ID),
 		}
 		if reply.Poll != nil {
-			quotedText, _ = telegramPollMessageText(reply.Poll, n.hasher, n.usernameMode)
+			quotedText, quotedMentions, _ = telegramPollMessageText(reply.Poll, n.hasher)
 		} else {
 			var quotedEntities []models.MessageEntity
 			quotedText, quotedEntities = telegramTextPayload(reply)
-			quotedText, _ = normalizeTelegramMentions(quotedText, quotedEntities, n.hasher, n.usernameMode)
+			quotedText, quotedMentions = normalizeTelegramMentions(quotedText, quotedEntities, n.hasher)
 		}
 	}
 
@@ -223,8 +225,9 @@ func (n *Normalizer) NormalizeMessage(msg *models.Message, botUserID int64) (tra
 			}
 			return nil
 		}(),
-		QuotedText: quotedText,
-		Timestamp:  timestamp,
+		QuotedText:     quotedText,
+		QuotedMentions: quotedMentions,
+		Timestamp:      timestamp,
 	}, true
 }
 
@@ -297,9 +300,9 @@ func (n *Normalizer) NormalizeReaction(update *models.MessageReactionUpdated, bo
 	}
 
 	displayName := ""
-	if n.usernameMode == config.UsernameModePushName {
-		displayName = transientTelegramDisplayName(update.User)
-	}
+
+	displayName = transientTelegramDisplayName(update.User)
+
 	timestamp := time.Unix(int64(update.Date), 0).UTC()
 	if update.Date == 0 {
 		timestamp = time.Time{}
@@ -358,7 +361,7 @@ type telegramMentionReplacement struct {
 	text  string
 }
 
-func normalizeTelegramMentions(content string, entities []models.MessageEntity, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, []transport.Mention) {
+func normalizeTelegramMentions(content string, entities []models.MessageEntity, hasher *identity.Hasher) (string, []transport.Mention) {
 	if len(entities) == 0 || hasher == nil {
 		return content, nil
 	}
@@ -383,10 +386,8 @@ func normalizeTelegramMentions(content string, entities []models.MessageEntity, 
 				continue
 			}
 			name := opaqueID
-			if usernameMode == config.UsernameModePushName {
-				if displayName := transientTelegramDisplayName(entity.User); displayName != "" {
-					name = displayName
-				}
+			if displayName := transientTelegramDisplayName(entity.User); displayName != "" {
+				name = displayName
 			}
 			mentions = append(mentions, transport.Mention{RemoteID: opaqueID, Name: name})
 			replacements = append(replacements, telegramMentionReplacement{
@@ -425,4 +426,11 @@ func normalizeTelegramMentions(content string, entities []models.MessageEntity, 
 		return content, nil
 	}
 	return content, mentions
+}
+
+func normalizerPolicies(policies []map[string]config.SyncSetSettings) map[string]config.SyncSetSettings {
+	if len(policies) > 0 {
+		return policies[0]
+	}
+	return nil
 }

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/transport"
 )
 
 func telegramPollText(question string, options []string, selectableCount int) (string, error) {
@@ -37,14 +37,15 @@ func telegramPollText(question string, options []string, selectableCount int) (s
 	return builder.String(), nil
 }
 
-func telegramPollMessageText(poll *models.Poll, hasher *identity.Hasher, usernameMode config.UsernameMode) (string, bool) {
+func telegramPollMessageText(poll *models.Poll, hasher *identity.Hasher) (string, []transport.Mention, bool) {
 	if poll == nil || telegramPollHasSensitiveLocation(poll) {
-		return "", false
+		return "", nil, false
 	}
-	question, _ := normalizeTelegramMentions(poll.Question, poll.QuestionEntities, hasher, usernameMode)
+	question, mentions := normalizeTelegramMentions(poll.Question, poll.QuestionEntities, hasher)
 	options := make([]string, 0, len(poll.Options))
 	for _, option := range poll.Options {
-		optionText, _ := normalizeTelegramMentions(option.Text, option.TextEntities, hasher, usernameMode)
+		optionText, optionMentions := normalizeTelegramMentions(option.Text, option.TextEntities, hasher)
+		mentions = append(mentions, optionMentions...)
 		options = append(options, optionText)
 	}
 	selectableCount := 1
@@ -52,7 +53,7 @@ func telegramPollMessageText(poll *models.Poll, hasher *identity.Hasher, usernam
 		selectableCount = len(options)
 	}
 	text, err := telegramPollText(question, options, selectableCount)
-	return text, err == nil
+	return text, mentions, err == nil
 }
 
 func telegramPollHasSensitiveLocation(poll *models.Poll) bool {

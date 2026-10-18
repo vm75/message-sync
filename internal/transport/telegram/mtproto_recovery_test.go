@@ -9,7 +9,6 @@ import (
 
 	gotdsession "github.com/gotd/td/session"
 	"github.com/gotd/td/tg"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -51,7 +50,7 @@ func newRecoveryAdapter(t *testing.T, id string, auth *fakeMTRecoveryAuth, max u
 	a, err := OpenMTProto(context.Background(), Options{
 		ConnectionID: id, Logger: testLogger(), MTProtoStateStore: store,
 		ChatIDs: map[string]string{"tg": "-1000000000042"}, Hasher: hasher,
-		UsernameMode: config.UsernameModePushName, MediaEnabled: true, MediaMaxBytes: max,
+		MediaEnabled: true, MediaMaxBytes: max,
 		mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime {
 			return fakeMTLiveRuntime{auth: auth}
 		},

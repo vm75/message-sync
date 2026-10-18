@@ -17,6 +17,7 @@ import (
 	"github.com/vm75/message-sync/internal/connection"
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
+	"github.com/vm75/message-sync/internal/privatedm"
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/safelog"
@@ -138,6 +139,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		cfg = loadedCfg
 	}
 
+	// Import the former global name once for existing WhatsApp connections.
+	if controlStore != nil {
+		if err := controlStore.ImportWhatsAppDeviceNames(ctx, cfg.WhatsAppDeviceName); err != nil {
+			return fmt.Errorf("import WhatsApp device names: %w", err)
+		}
+	}
 	observeChildScopeLabel := transport.ChildScopeLabelObserver(func(observeCtx context.Context, endpoint transport.EndpointID, scope transport.ChildScope) {
 		if strings.TrimSpace(scope.Label) == "" {
 			return
@@ -147,7 +154,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			safelog.Error(logger, "load child scope display mode failed", "child_scope_mode", loadErr)
 			return
 		}
-		if currentCfg.ChildContextDisplayMode != config.ChildContextDisplayFriendly {
+		if currentCfg.SettingsForEndpoint(string(endpoint)).ChildContextDisplayMode != config.ChildContextDisplayFriendly {
 			return
 		}
 		if upsertErr := syncStore.UpsertChildScopeLabel(observeCtx, string(endpoint), string(scope.Kind), scope.RemoteID, scope.Label); upsertErr != nil {
@@ -182,10 +189,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 					waInst, err := openWhatsApp(ctx, whatsapp.Options{
 						ConnectionID:     c.ID,
+						EndpointSettings: cfg.EndpointSettings(c.ID),
 						DatabasePath:     dbPath,
 						GroupJIDs:        connGroupJIDs,
 						Hasher:           hasher,
-						UsernameMode:     cfg.Identity.UsernameMode,
+
 						Logger:           logger,
 						QROut:            os.Stdout,
 						EnableTerminalQR: false,
@@ -194,7 +202,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						RecoveryEnabled:  cfg.Recovery.Enabled,
 						RecoveryMaxAge:   time.Duration(cfg.Recovery.MaxAgeHours) * time.Hour,
 						RecoveryMaxCount: cfg.Recovery.MaxMessagesPerGroup,
-						DeviceName:       cfg.WhatsAppDeviceName,
+						DeviceName:       c.WhatsAppDeviceName,
 					})
 					if err != nil {
 						safelog.Error(logger, "start WhatsApp transport failed", "whatsapp_start", err)
@@ -236,16 +244,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 					}
 					dcInst, err := openDiscord(ctx, discord.Options{
+						PrivateDMEnabled:         cfg.PrivateDMConnectionEnabled(c.ID),
 						ConnectionID:             c.ID,
+						EndpointSettings:         cfg.EndpointSettings(c.ID),
 						Token:                    discordCredential.BotToken,
 						ChannelIDs:               connChannelIDs,
 						ExplicitWebhookURL:       discordCredential.WebhookURL,
 						ExplicitWebhookChannelID: discordCredential.ChannelID,
 						Hasher:                   hasher,
-						UsernameMode:             cfg.Identity.UsernameMode,
-						Logger:                   logger,
-						MediaEnabled:             cfg.Media.Enabled,
-						MediaMaxBytes:            uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+
+						Logger:        logger,
+						MediaEnabled:  cfg.Media.Enabled,
+						MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 					})
 					if err != nil {
 						safelog.Error(logger, "start Discord transport failed", "discord_start", err)
@@ -297,16 +307,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 					connID := c.ID
 					tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
+						PrivateDMEnabled:  cfg.PrivateDMConnectionEnabled(c.ID),
 						ConnectionID:      connID,
+						EndpointSettings:  cfg.EndpointSettings(connID),
 						Token:             token,
 						MTProtoStateStore: mtState,
 						ChatIDs:           connChatIDs,
 						Hasher:            hasher,
-						UsernameMode:      cfg.Identity.UsernameMode,
-						Logger:            logger,
-						MediaEnabled:      cfg.Media.Enabled,
-						MediaMaxBytes:     uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-						InitialUpdateID:   initialUpdateID,
+
+						Logger:          logger,
+						MediaEnabled:    cfg.Media.Enabled,
+						MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+						InitialUpdateID: initialUpdateID,
 						MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 							return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), connID, oldRemoteID, newRemoteID)
 						},
@@ -383,6 +395,12 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	if err := connMgr.UpdateConfig(cfg); err != nil {
 		return fmt.Errorf("apply initial connection configuration: %w", err)
 	}
+	privateState, err := controlstore.NewPrivateDMStore(controlStore.DB(), []byte(secret))
+	if err != nil {
+		return err
+	}
+	privateRelay := &privatedm.Relay{Sync: syncStore, State: privateState, Runtime: adapterRegistry, Resolver: mesh, Hasher: hasher, LoadConfig: func(loadCtx context.Context) (*config.Config, error) { return config.LoadRaw(loadCtx, syncStore.DB()) }}
+	logPrivateDMCleanupCapabilities(logger, cfg)
 
 	onConfigChange := func(updateCtx context.Context) error {
 		updatedCfg, err := config.LoadRaw(updateCtx, syncStore.DB())
@@ -415,6 +433,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 					}
 				}
+				for connID, adapter := range whatsappAdapters {
+					if conn, ok := enabledWhatsApp[connID]; ok {
+						if setter, ok := adapter.(interface{ UpdateDeviceName(string) }); ok {
+							setter.UpdateDeviceName(conn.WhatsAppDeviceName)
+						}
+					}
+				}
 				for connID := range whatsappAdapters {
 					if _, ok := enabledWhatsApp[connID]; !ok {
 						_ = connMgr.Stop(connID)
@@ -436,10 +461,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 						waInst, err := openWhatsApp(ctx, whatsapp.Options{
 							ConnectionID:     c.ID,
+							EndpointSettings: updatedCfg.EndpointSettings(c.ID),
 							DatabasePath:     dbPath,
 							GroupJIDs:        connGroupJIDs,
 							Hasher:           hasher,
-							UsernameMode:     updatedCfg.Identity.UsernameMode,
+
 							Logger:           logger,
 							QROut:            os.Stdout,
 							EnableTerminalQR: false,
@@ -448,7 +474,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							RecoveryEnabled:  updatedCfg.Recovery.Enabled,
 							RecoveryMaxAge:   time.Duration(updatedCfg.Recovery.MaxAgeHours) * time.Hour,
 							RecoveryMaxCount: updatedCfg.Recovery.MaxMessagesPerGroup,
-							DeviceName:       updatedCfg.WhatsAppDeviceName,
+							DeviceName:       c.WhatsAppDeviceName,
 						})
 						if err != nil {
 							safelog.Error(logger, "start WhatsApp transport failed", "whatsapp_start", err)
@@ -465,12 +491,16 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 					}
 				}
 				for connID, c := range enabledDiscord {
-					_, exists := discordAdapters[connID]
-					if !exists || credentialChanged[connID] {
+					existingAdapter, exists := discordAdapters[connID]
+					dmChanged := false
+					if state, ok := existingAdapter.(interface{ PrivateDMEnabled() bool }); ok {
+						dmChanged = state.PrivateDMEnabled() != updatedCfg.PrivateDMConnectionEnabled(connID)
+					}
+					if !exists || credentialChanged[connID] || dmChanged {
 						credentialBytes, err := credentialCipher.Decrypt(c.EncryptedCredential, c.CredentialNonce)
 						if err != nil {
 							safelog.Error(logger, "decrypt discord credential failed", "discord_decrypt", err)
-							if exists && credentialChanged[connID] {
+							if exists && (credentialChanged[connID] || dmChanged) {
 								reloadErr = errors.Join(reloadErr, errors.New("decrypt Discord credential failed"))
 							}
 							continue
@@ -487,20 +517,22 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							}
 						}
 						dcInst, err := openDiscord(ctx, discord.Options{
+							PrivateDMEnabled:         updatedCfg.PrivateDMConnectionEnabled(c.ID),
 							ConnectionID:             c.ID,
+							EndpointSettings:         updatedCfg.EndpointSettings(c.ID),
 							Token:                    discordCredential.BotToken,
 							ChannelIDs:               connChannelIDs,
 							ExplicitWebhookURL:       discordCredential.WebhookURL,
 							ExplicitWebhookChannelID: discordCredential.ChannelID,
 							Hasher:                   hasher,
-							UsernameMode:             updatedCfg.Identity.UsernameMode,
-							Logger:                   logger,
-							MediaEnabled:             updatedCfg.Media.Enabled,
-							MediaMaxBytes:            uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+
+							Logger:        logger,
+							MediaEnabled:  updatedCfg.Media.Enabled,
+							MediaMaxBytes: uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
 						})
 						if err != nil {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
-							if exists && credentialChanged[connID] {
+							if exists && (credentialChanged[connID] || dmChanged) {
 								reloadErr = errors.Join(reloadErr, errors.New("start Discord transport failed"))
 							}
 							continue
@@ -566,16 +598,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						}
 						cid := c.ID
 						tgInst, err := openTelegramForIntegrationMode(ctx, c.IntegrationMode, telegram.Options{
+							PrivateDMEnabled:  updatedCfg.PrivateDMConnectionEnabled(c.ID),
 							ConnectionID:      cid,
+							EndpointSettings:  updatedCfg.EndpointSettings(cid),
 							Token:             token,
 							MTProtoStateStore: mtState,
 							ChatIDs:           connChatIDs,
 							Hasher:            hasher,
-							UsernameMode:      updatedCfg.Identity.UsernameMode,
-							Logger:            logger,
-							MediaEnabled:      updatedCfg.Media.Enabled,
-							MediaMaxBytes:     uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
-							InitialUpdateID:   initialUpdateID,
+
+							Logger:          logger,
+							MediaEnabled:    updatedCfg.Media.Enabled,
+							MediaMaxBytes:   uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+							InitialUpdateID: initialUpdateID,
 							MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 								return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), cid, oldRemoteID, newRemoteID)
 							},
@@ -623,10 +657,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		if err := mesh.UpdateConfig(updatedCfg); err != nil {
 			return fmt.Errorf("update router config: %w", err)
 		}
+		logPrivateDMCleanupCapabilities(logger, updatedCfg)
 		logger.Info("configuration reloaded",
 			"endpoints", len(updatedCfg.Endpoints),
 			"sync_sets", len(updatedCfg.SyncSets),
-			"username_mode", string(updatedCfg.Identity.UsernameMode),
 		)
 		return nil
 	}
@@ -667,7 +701,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	}()
 
 	syncDBPath := filepath.Join(dataDir, SyncDBName)
-	if deleted, err := syncStore.PruneRetention(ctx, cfg.Storage.MessageRetentionDays, 1000); err != nil {
+	if deleted, err := pruneSyncSetRetention(ctx, syncStore); err != nil {
 		safelog.Error(logger, "initial retention prune failed", "retention_prune", err)
 	} else if deleted > 0 {
 		logger.Info("retention prune completed", "deleted_messages", deleted)
@@ -708,6 +742,13 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 	defer pruneTicker.Stop()
 	membershipTicker := time.NewTicker(time.Minute)
 	defer membershipTicker.Stop()
+	privateCleanupTicker := time.NewTicker(time.Minute)
+	defer privateCleanupTicker.Stop()
+	initialCleanupCtx, initialCleanupCancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := privateRelay.Sweep(initialCleanupCtx); err != nil {
+		safelog.Error(logger, "private DM cleanup failed", "private_dm_cleanup", err)
+	}
+	initialCleanupCancel()
 
 	for {
 		select {
@@ -715,7 +756,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			logger.Info("message-sync stopping")
 			return nil
 		case <-pruneTicker.C:
-			if deleted, err := syncStore.PruneRetention(ctx, cfg.Storage.MessageRetentionDays, 1000); err != nil {
+			if deleted, err := pruneSyncSetRetention(ctx, syncStore); err != nil {
 				safelog.Error(logger, "periodic retention prune failed", "retention_prune", err)
 			} else if deleted > 0 {
 				logger.Info("retention prune completed", "deleted_messages", deleted)
@@ -732,6 +773,18 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 			}
 		case <-membershipTicker.C:
 			apiServer.ReconcileMembership(ctx)
+		case <-privateCleanupTicker.C:
+			cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := privateRelay.Sweep(cleanupCtx); err != nil {
+				safelog.Error(logger, "private DM cleanup failed", "private_dm_cleanup", err)
+			}
+			cancel()
+		case incoming := <-connMgr.PrivateEvents():
+			privateCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := privateRelay.Handle(privateCtx, incoming); err != nil {
+				safelog.Error(logger, "private DM processing failed", "private_dm", err)
+			}
+			cancel()
 		case incoming, ok := <-connMgr.Events():
 			if !ok {
 				return errors.New("connection manager event stream closed")
@@ -749,6 +802,17 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 				"kind", incoming.Kind,
 			)
 		}
+	}
+}
+
+func logPrivateDMCleanupCapabilities(logger *slog.Logger, cfg *config.Config) {
+	seen := make(map[config.Transport]bool)
+	for _, ep := range cfg.Endpoints {
+		if !cfg.PrivateDMConnectionEnabled(ep.ConnectionID) || seen[ep.Transport] || ep.Transport == config.TransportWhatsApp {
+			continue
+		}
+		seen[ep.Transport] = true
+		logger.Info("private DM local cleanup unsupported", "event", "private_dm_cleanup_unsupported", "transport", string(ep.Transport))
 	}
 }
 
@@ -770,74 +834,55 @@ func telegramInitialUpdateID(ctx context.Context, syncStore *store.Store, connec
 func runWhatsAppChatCleanup(ctx context.Context, logger *slog.Logger, db *sql.DB, wa map[string]whatsappTransport) {
 	cfg, err := config.LoadRaw(ctx, db)
 	if err != nil {
-		safelog.Error(logger, "failed to load config for whatsapp cleanup", "whatsapp_cleanup", err)
+		safelog.Error(logger, "load WhatsApp cleanup settings failed", "whatsapp_cleanup", err)
 		return
 	}
-	if !cfg.WhatsAppCleanup.Enabled {
-		return
-	}
-	retentionDays := cfg.WhatsAppCleanup.RetentionDays
-	if retentionDays < 1 {
-		retentionDays = 30
-	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -retentionDays)
-
-	adapters := make(map[string]any, len(wa))
-	for k, v := range wa {
-		adapters[k] = v
-	}
-
-	syncSetGroupAliases := make(map[string]struct{})
 	for _, set := range cfg.SyncSets {
-		for _, alias := range set.Endpoints {
-			syncSetGroupAliases[alias] = struct{}{}
-		}
-	}
-
-	for connID, a := range adapters {
-		cleaner, ok := a.(interface {
-			IsLoggedIn() bool
-			ClearSyncSetChats(context.Context, []types.JID, time.Time) (int, error)
-		})
-		if !ok || cleaner == nil || !cleaner.IsLoggedIn() {
+		settings := cfg.SettingsForSet(set)
+		if !settings.WhatsAppCleanup.Enabled {
 			continue
 		}
-
-		connJIDs := make(map[string]types.JID)
-		for alias := range syncSetGroupAliases {
-			if endpoint, ok := cfg.Endpoints[alias]; ok && endpoint.Transport == config.TransportWhatsApp {
-				if endpoint.ConnectionID == connID {
-					if strings.TrimSpace(endpoint.RemoteID) != "" {
-						parsedJID, err := types.ParseJID(endpoint.RemoteID)
-						if err == nil {
-							connJIDs[parsedJID.String()] = parsedJID
-						}
-					}
-				}
+		cutoff := time.Now().UTC().AddDate(0, 0, -settings.WhatsAppCleanup.RetentionDays)
+		groups := make(map[string][]types.JID)
+		for _, alias := range set.Endpoints {
+			ep := cfg.Endpoints[alias]
+			if ep.Transport != config.TransportWhatsApp {
+				continue
+			}
+			jid, err := types.ParseJID(ep.RemoteID)
+			if err == nil {
+				groups[ep.ConnectionID] = append(groups[ep.ConnectionID], jid)
 			}
 		}
-
-		if len(connJIDs) == 0 {
-			continue
-		}
-
-		jids := make([]types.JID, 0, len(connJIDs))
-		for _, jid := range connJIDs {
-			jids = append(jids, jid)
-		}
-
-		cleared, err := cleaner.ClearSyncSetChats(ctx, jids, cutoff)
-		if err != nil {
-			safelog.Error(logger, "whatsapp chat cleanup had errors", "whatsapp_cleanup", err)
-		}
-		if cleared > 0 {
-			logger.Info("whatsapp chat cleanup completed",
-				"connection_id", connID,
-				"groups_cleared", cleared,
-				"retention_days", retentionDays,
-			)
+		for connectionID, jids := range groups {
+			cleaner, ok := wa[connectionID].(interface {
+				IsLoggedIn() bool
+				ClearSyncSetChats(context.Context, []types.JID, time.Time) (int, error)
+			})
+			if !ok || !cleaner.IsLoggedIn() {
+				continue
+			}
+			cleared, err := cleaner.ClearSyncSetChats(ctx, jids, cutoff)
+			if err != nil {
+				safelog.Error(logger, "WhatsApp cleanup failed", "whatsapp_cleanup", err)
+			}
+			if cleared > 0 {
+				logger.Info("whatsapp chat cleanup completed", "connection_id", connectionID, "sync_set", set.ID, "groups_cleared", cleared, "retention_days", settings.WhatsAppCleanup.RetentionDays)
+			}
 		}
 	}
+}
+
+func pruneSyncSetRetention(ctx context.Context, syncStore *store.Store) (int64, error) {
+	cfg, err := config.LoadRaw(ctx, syncStore.DB())
+	if err != nil {
+		return 0, err
+	}
+	policies := make(map[string]int)
+	for _, set := range cfg.SyncSets {
+		policies[set.ID] = cfg.SettingsForSet(set).Storage.MessageRetentionDays
+	}
+	return syncStore.PruneSyncSetRetention(ctx, policies, 1000)
 }
 
 type appConnectionService struct {

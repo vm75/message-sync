@@ -11,7 +11,6 @@ import (
 
 	gotdsession "github.com/gotd/td/session"
 	"github.com/gotd/td/tg"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -81,7 +80,7 @@ func openPollAdapter(t *testing.T, id string, store *memoryMTStore, auth mtproto
 	}
 	adapter, err := OpenMTProto(context.Background(), Options{
 		ConnectionID: id, Logger: testLogger(), MTProtoStateStore: store,
-		ChatIDs: map[string]string{"tg": "-1000000000042"}, Hasher: hasher, UsernameMode: config.UsernameModePushName,
+		ChatIDs: map[string]string{"tg": "-1000000000042"}, Hasher: hasher,
 		MediaEnabled: true, MediaMaxBytes: 1024 * 1024,
 		mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime { return fakeMTLiveRuntime{auth: auth} },
 	})

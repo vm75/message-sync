@@ -60,7 +60,12 @@ On the same **Bot** page, scroll down to the **Privileged Gateway Intents** sect
 2. Toggle **Message Content Intent** to ON.
    > [!IMPORTANT]
    > **Message Content Intent** is mandatory. If this intent is disabled, Discord will hide all message text and attachments from the bridge bot, preventing messages from being relayed.
-3. Click **Save Changes** at the bottom of the page.
+3. Optionally enable **Server Members Intent** for native cross-group mentions
+   immediately after restart. This permits the REST guild-roster lookup when
+   the temporary native-ID cache is empty; live/history message observations
+   work without this optional lookup. The bridge does not request this intent
+   on its gateway connection.
+4. Click **Save Changes** at the bottom of the page.
 
 ### Step 2.4: Invite the Bot to Your Discord Server
 1. In the left menu of the Developer Portal, click **Installation** (or **OAuth2** &rarr; **URL Generator**).
@@ -264,7 +269,7 @@ You should see logs indicating that the HTTP API is listening on port 8080. Prov
 1. Navigate to the **Sync Sets** view.
 2. Click **Create Sync Set**.
 3. Name the sync set (e.g., `test_sync_set`).
-4. (Optional) Check **Anonymize sender presentation when forwarding to Discord** to pseudonymize sender identities, phone numbers, and mentions forwarded to Discord.
+4. (Optional) Check **Anonymize sender presentation when forwarding to Discord** to use assigned aliases and hide sender names/phone numbers in mentions forwarded to Discord.
 5. Select the configured endpoints:
    - `wa_test` (WhatsApp)
    - `dc_test` (Discord)
@@ -377,7 +382,7 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 
 ### Scenario 8: Source-local Messages
 
-- [ ] In authenticated Settings, set a global Local-only message prefix (for example `//local `); leave it empty to disable.
+- [ ] In a sync set’s settings, set a Local-only message prefix (for example `//local `); leave it empty to disable.
 - [ ] Send a new text, captioned media message, and representable poll beginning exactly with the prefix from each configured parent and, where available, a Discord thread/forum post and Telegram topic.
   - **Verify**: each remains only in its source conversation, no destination delivery is queued, and captioned media is not downloaded.
 - [ ] Restart/replay the service, edit a suppressed message to remove the prefix, and exercise delete/reaction.
@@ -417,16 +422,14 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 - [ ] Query `control.db`: Verify `transport_connections` stores only AES-256-GCM ciphertext and nonces; no plaintext token appears anywhere in database strings.
 - [ ] Check application logs: Verify zero tokens or raw protocol update dumps appear in stdout.
 
-### Scenario 14: Route-Aware Discord Anonymization (`anonymizeToDiscord`)
-- [ ] In the **Sync Sets** view, edit your sync set to enable **Anonymize sender presentation when forwarding to Discord** and save.
-- [ ] Send a message from WhatsApp: `Hello from WhatsApp!`.
-  - **Verify Discord**: The message attribution uses a deterministic pseudonym (e.g., `*_wa_test/Silent Falcon Q7M_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
-  - **Verify Telegram**: The message attribution retains the real WhatsApp push name (e.g., `*_wa_test/Alice_*: Hello from WhatsApp!`).
-- [ ] Send a message from WhatsApp containing a mention and reply quote.
-  - **Verify Discord**: Mentions are pseudonymized, and quoted text has real sender names stripped.
-  - **Verify Telegram**: Mentions and quote headers retain normal names.
-- [ ] Add a reaction to a bridged message in WhatsApp.
-  - **Verify Discord**: The fallback attribution or reaction uses the pseudonym without leaking the WhatsApp user's name or phone number.
+### Scenario 14: Directional conversation anonymization
+- [ ] In Sync Sets, enable **Anonymize incoming** beside a conversation’s move/rename/remove controls and Save. Repeat for WhatsApp, Discord and Telegram destinations.
+- [ ] Send from each other conversation. Only deliveries to that destination use alias-only authors, anonymized structured mentions and sanitized quote attribution.
+- [ ] Disable Incoming, enable **Anonymize outgoing** on the source, and Save. Messages from it must use alias-only attribution at every destination; messages from other sources retain ordinary attribution.
+- [ ] Enable both flags and verify both directions. Disable both and verify ordinary name-plus-alias attribution returns.
+- [ ] Repeat with edits, reaction fallbacks, replies, media captions, child threads/topics and polls. Explicit verified cross-group references keep their existing native-reference exception.
+- [ ] Toggle a flag back before Save: the draft should become clean. Save changes, reopen the editor and restart: both checkbox values must persist independently. Rename or move the conversation and save unrelated settings: the values must remain intact.
+- [ ] Upgrade a database with the old Discord policy enabled: affected Discord endpoints start with Incoming enabled and Outgoing disabled. Turn Incoming off and restart; it must stay off.
 
 ---
 
@@ -470,7 +473,7 @@ The analyzer is disabled unless `OPENROUTER_ALLOW_TRAINING` is exactly `false`. 
 
 ### Configure the test application
 
-1. In **Settings**, enable the browser-local **Membership review** preference (marked as Experimental) so the Membership navigation and sync-set application controls are visible.
+1. Open the relevant sync set, choose **Edit settings**, enable **Membership review for this sync set** (Experimental), and save. Its application controls appear in the same modal; **Review membership** opens its requests and pipelines. The setting persists across browsers.
 2. Create a dedicated sync set with a configured WhatsApp or Discord endpoint.
 3. Open that sync set's **Membership Application** controls, require evidence, and configure bounded instructions. For example:
 
@@ -570,3 +573,164 @@ All logs produced by `message-sync` are strictly zero-PII/PHI:
 docker compose logs -f message-sync
 ```
 You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_test`), and canonical message IDs without exposing message bodies, phone numbers, or tokens.
+
+
+### Cross-group address manual test
+
+Have participant A post an ordinary group message and note the assigned alias,
+such as `Amber Badger`. Normal destinations show `group/Alice (Amber Badger)`;
+anonymized destinations show `group/Amber Badger`. Confirm that username
+mode, discriminator visibility and code-length controls are absent from the shared
+settings modal. Media captions/companions, child-context headers, polls, edits and
+reaction fallbacks retain the same alias. Long Discord webhook names preserve it.
+
+From another configured group in the same set send `Hi @{Amber Badger}` and
+`Hi @{amber badger}`. Every actual destination containing A may render a native
+mention only after its own membership check. Other destinations preserve the
+exact token. WhatsApp chips must use matching verified LID text/metadata without
+a phone number; Discord requires channel/private-thread access and an explicit
+user allowlist; Telegram Bot API checks chat membership. Repeat with anonymization
+on/off and check repeated tokens and escaped `\@{Amber Badger}`.
+
+Restart and repeat using the same alias. Reset Discord/Telegram native caches:
+unavailable native identities stay literal. With Discord Server Members Intent,
+verify cold HMAC-based guild-roster lookup, then revoke permission and verify
+literal fallback. Accepted history should restore Discord observations. No
+real-name/member-search addressing remains. Remove a target member or revoke
+channel/private-thread access and verify that another group's membership cannot
+authorize a tag there. An alias from another set must never resolve in this set.
+An account appearing in two sets has two distinct aliases. Unknown names, old
+endpoint/handle syntax and malformed tokens remain literal. MTProto and edits
+must not emit new native braced-reference notifications.
+
+For WhatsApp, test a PN-only sender with no verified LID mapping: there must be
+no forwarding, alias allocation or recovery checkpoint advance. Make a trusted
+provider LID mapping available and replay within the supported recovery window;
+verify one stable assignment, including after restart. Unassigned structured
+mentions do not enroll users or invent pseudonyms. Once their author message
+has been forwarded, verified mentions reuse the same assigned alias.
+
+Save settings, rename an endpoint, delete/recreate an endpoint and restart:
+retained set assignments remain stable. Delete a complete set and create another:
+previous aliases must never be reassigned. Check logs and routing tables for no
+names, phones, native user identities or message content; configured operational
+endpoint targets and HMAC actor IDs are the documented routing exceptions.
+
+### Scoped settings and save feedback
+
+- Create two sync sets sharing one connection, with different
+  media/recovery/retention policies, poll triggers and local prefixes. Save,
+  reload the page and restart the bridge; verify each set retains its policies.
+- New sets default to code length 8 and hidden codes. Existing sets preserve
+  former policies and length 5 on upgrade. Enable display and change length;
+  verify the earlier code still addresses the same member if unambiguous.
+- Edit settings, privacy and membership fields; remove a poll/local-prefix chip
+  and paste multiple tokens. Each change must enable Save without a clean-state or unsaved-state banner. Reverting all changes must disable Save. Save must
+  show “Saving changes…” then disable Save without a success banner; a failed request must show
+  an error while preserving pending edits for retry.
+- Create a WhatsApp connection and edit an existing connection's Device name.
+  Confirm one name is shared by its sync sets and retained after restart; the
+  linked-device display changes when linking. Global Settings contains account
+  security and the global DM safety switch. Membership review and private DM
+  enablement are per sync set. `/api/config` must expose only the administrator
+  `privateDMRelayEnabled` safety flag and reject historical global runtime fields.
+- Increase a set's retention and verify the next periodic prune uses the saved
+  value without restart. Move an endpoint: old canonical history retains its
+  original set's policy. Deleted-endpoint suppression markers expire at 90 days.
+
+- Verify every sync-set runtime/privacy/membership setting appears only in the
+  **Edit settings** modal, with consistent card gaps and interior padding. Check
+  at desktop and mobile widths: body scrolls while the Save footer stays usable.
+- Initially Save is disabled. Change and revert text, numbers, checkboxes and
+  chips; Save tracks the actual draft. After save it is disabled again. No
+  “No unsaved changes” banner should appear.
+- Enable membership review for one set and leave another disabled. Reload and
+  restart: only the enabled set offers Review membership. Enable the second,
+  switch the review selector, and confirm each list contains only that set’s
+  requests/pipelines. Test status filters together with set filtering; switch
+  while a request is loading and ensure stale responses do not replace the list.
+
+## Private DM relay
+
+Use dedicated test accounts and private conversations. Never put live tokens,
+phone numbers, native IDs or message bodies in CI output or screenshots shared
+outside the test participants. No live provider secrets are required by tests.
+
+1. Confirm both global **Settings → Allow private DM relays** and per-set
+   **Edit settings → Enable private DM relay for this sync set** start off.
+   Enable both as an administrator; verify an operator cannot change either.
+   Turn either off and confirm new commands and existing reply mappings stop
+   relaying. Discord should reconnect when its DM intent requirement changes.
+2. Have both participants post in their configured groups so their HMAC actors
+   and their assigned aliases are observed. DMs and braced mentions assume the
+   address was learned from forwarded author attribution; they do not enroll a
+   missing participant. For Telegram Bot API, privately `/start` the exact owning bot;
+   verify the response is help. Do not switch Telegram accounts as a fallback.
+3. From a Discord bot DM, send `/dm @{Amber Badger} hello`. Only the addressed
+   WhatsApp private chat should receive `DM from <group>/<name> (<sender-assigned-alias>)` (bold-italic attribution,
+   alias-only when the name is unavailable) and the
+   Reply instruction. Check every synced group/channel/topic for zero copies.
+   Reply natively from WhatsApp, then natively from Discord. Repeat WA↔WA,
+   Discord↔Discord, Bot API↔Bot API and the remaining mixed directions, including
+   two connections on the same provider. Check exact owning accounts each time.
+4. Start two conversations with different peers and two with the same peer.
+   Reply to older messages in a different order. Check the recorded peer and
+   conversation remain correct; plain new text must only receive private help.
+   A new `/dm` while replying must start a new conversation.
+5. Try plain `hello`, bare `@{Amber Badger}`, unknown commands, escaped/malformed
+   commands, empty/oversized bodies, media, copied display references, help
+   replies and unknown/foreign-chat reply IDs. Expect private help and no third
+   party delivery. Test assigned aliases, case-insensitive spelling, numeric
+   tiers, missing assignments, malformed whitespace and out-of-set aliases. Native @mentions should not ping or leak a
+   native identity, and URLs should not generate Discord/Telegram previews.
+6. Block Discord DMs, omit Telegram `/start`, and test a WhatsApp participant
+   whose roster exposes only an unverified LID. Expect a safe private failure,
+   never public delivery or exposed contact details. Revoke membership/channel
+   access; remove or reassign endpoints/sync sets. Old reply mappings must fail
+   closed, including after restart. Refresh Telegram private contact when its
+   encrypted 24-hour reachability record expires.
+7. Edit and delete/unsend both the original command and a native reply on every
+   supported provider. The peer's delivered original must remain unchanged.
+   No edited `/dm` may become a new delivery. Check ordinary configured group
+   edits/deletes, replies, media, polls, reactions and local-prefix suppression
+   still behave as before. A personal message to an MTProto user connection
+   must remain untouched and unanswered.
+8. Keep the recipient's relayed message visible until and beyond 24 hours.
+   Before expiry, its native reply should work. After expiry, expect help even
+   when the message remains readable. Restart around expiry and run startup
+   cleanup; application mappings must expire independently of provider support.
+9. On WhatsApp, inspect the sync account's own private chat after the cleanup
+   tick: feature-owned inbound/help copies are eligible after handling and
+   relayed copies after 24 hours. Confirm per-message Delete for Me removes
+   those bot-side copies where supported, without any “deleted”/revoke notice
+   or change to the participant's readable message. Confirm unrelated personal
+   and group messages remain. Do not use clearChat/deleteChat as a substitute
+   if the provider does not apply the one-message operation.
+10. Discord and Bot API private cleanup must make zero provider deletion calls;
+    their retained provider copies are expected. Inject unavailable connections
+    and failed WhatsApp cleanup; verify at most three attempts and bounded
+    metadata retention. Check `sync.db`, admin JSON, metrics and application
+    logs contain no private body/native inbox or contact details. `control.db`
+    may contain only encrypted native routing tokens and content-free metadata.
+
+Automated tests inspect operation types and fake-provider behavior. Record live
+provider/version observations separately; do not describe an unperformed live
+WhatsApp linked-device deletion check as verified.
+
+Private DM reply check: alternate three native replies across transports and verify
+each delivered response references the preceding author message in that inbox.
+Check alias-only headers on anonymized destinations and named headers elsewhere.
+
+## Built-in commands
+
+- Clear additional local prefixes, then send `/local keep this here` with media.
+  No other endpoint should receive it or later edits/reactions/deletes.
+- Set a custom local prefix and poll trigger. Confirm they still work alongside
+  `/local` and `/summary`; neither built-in is removable in the settings UI.
+- Reply `/summary` to a synchronized poll. Verify aggregate summaries appear and
+  continue updating as votes change; configured triggers must still work.
+- Send `/help` in each configured group/thread/topic. Verify all five commands
+  and only that set’s extra prefixes/triggers are listed, without fan-out.
+- Use private `/help` or Telegram `/start` with the relay enabled. Verify custom
+  values are listed only for currently verified sets on the owning connection;
+  revoke membership and confirm private settings disappear from help.

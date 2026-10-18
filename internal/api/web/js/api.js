@@ -142,8 +142,9 @@
       return decision;
     },
     async fulfillMembership(id) { return this.request(`/api/verification/requests/${encodeURIComponent(id)}/fulfill`, { method: 'POST' }); },
-    async getVerificationPipelines() {
-      const pipelines = await this.request('/api/verification/pipelines');
+    async getVerificationPipelines(syncSetId = '') {
+      const query = syncSetId ? '?syncSetId=' + encodeURIComponent(syncSetId) : '';
+      const pipelines = await this.request('/api/verification/pipelines' + query);
       return Array.isArray(pipelines) ? pipelines.map((pipeline) => ({ ...pipeline, endpoint: pipeline.endpointAlias })) : pipelines;
     },
     async createVerificationPipeline(body) {

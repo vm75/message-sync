@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 )
 
@@ -18,7 +17,7 @@ const (
 	testBotUserID    int64 = 423456789
 )
 
-func testNormalizer(t *testing.T, mode config.UsernameMode) *Normalizer {
+func testNormalizer(t *testing.T) *Normalizer {
 	t.Helper()
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
@@ -27,7 +26,7 @@ func testNormalizer(t *testing.T, mode config.UsernameMode) *Normalizer {
 	normalizer, err := NewNormalizerWithConnection(map[string]string{
 		"team-telegram":  strconv.FormatInt(testGroupID, 10),
 		"super-telegram": strconv.FormatInt(testSupergroupID, 10),
-	}, hasher, mode, "conn-tg-test")
+	}, hasher, "conn-tg-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +49,7 @@ func testMessage(chatID int64, chatType models.ChatType) *models.Message {
 }
 
 func TestNormalizeConfiguredGroupMessage(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
 	msg.ReplyToMessage = &models.Message{
 		ID:   77,
@@ -86,8 +85,28 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 	}
 }
 
+func TestTelegramQuoteAndPollMentionsRemainStructuredForAliases(t *testing.T) {
+	n := testNormalizer(t)
+	mentioned := &models.User{ID: 523456789, FirstName: "Private Bob"}
+	entity := models.MessageEntity{Type: models.MessageEntityTypeTextMention, Offset: 4, Length: 3, User: mentioned}
+	msg := testMessage(testGroupID, models.ChatTypeGroup)
+	msg.ReplyToMessage = &models.Message{ID: 77, Chat: msg.Chat, Text: "Ask Bob", Entities: []models.MessageEntity{entity}}
+	in, ok := n.NormalizeMessage(msg, testBotUserID)
+	actor := telegramActorID(n.hasher, mentioned.ID)
+	if !ok || len(in.QuotedMentions) != 1 || in.QuotedMentions[0].RemoteID != actor || in.QuotedText != "Ask @"+actor {
+		t.Fatalf("quote metadata lost: %+v", in)
+	}
+	msg.ReplyToMessage = nil
+	msg.Text = ""
+	msg.Poll = &models.Poll{ID: "poll-id", Question: "Ask Bob", QuestionEntities: []models.MessageEntity{entity}, Options: []models.PollOption{{Text: "Ask Bob", TextEntities: []models.MessageEntity{entity}}, {Text: "Other"}}}
+	in, ok = n.NormalizeMessage(msg, testBotUserID)
+	if !ok || len(in.Mentions) != 2 || in.Text != "Ask @"+actor || in.PollOptions[0] != "Ask @"+actor {
+		t.Fatalf("poll metadata lost: %+v", in)
+	}
+}
+
 func TestNormalizeConfiguredSupergroupCaption(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
 	msg.Text = ""
 	msg.Caption = "transient Telegram caption"
@@ -101,19 +120,19 @@ func TestNormalizeConfiguredSupergroupCaption(t *testing.T) {
 	}
 }
 
-func TestNormalizeHashModeDropsTelegramDisplayName(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+func TestNormalizerRetainsTelegramDisplayName(t *testing.T) {
+	normalizer := testNormalizer(t)
 	incoming, ok := normalizer.NormalizeMessage(testMessage(testGroupID, models.ChatTypeGroup), testBotUserID)
 	if !ok {
 		t.Fatal("configured Telegram message was ignored")
 	}
-	if incoming.Sender.DisplayName != "" {
-		t.Fatalf("hash mode retained Telegram display name: %q", incoming.Sender.DisplayName)
+	if incoming.Sender.DisplayName != "Alice Example" {
+		t.Fatalf("transient Telegram display name lost: %q", incoming.Sender.DisplayName)
 	}
 }
 
 func TestNormalizeTelegramActorIDIsStableAndNamespaced(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	first, ok := normalizer.NormalizeMessage(testMessage(testGroupID, models.ChatTypeGroup), testBotUserID)
 	if !ok {
 		t.Fatal("first Telegram message was ignored")
@@ -139,7 +158,7 @@ func TestNormalizeTelegramActorIDIsStableAndNamespaced(t *testing.T) {
 }
 
 func TestNormalizeFiltersPrivateUnconfiguredBotAndUnsupportedMessages(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 
 	tests := []struct {
 		name      string
@@ -197,7 +216,7 @@ func TestNormalizeFiltersPrivateUnconfiguredBotAndUnsupportedMessages(t *testing
 }
 
 func TestNormalizeTelegramTextMentionUsesHMACIdentity(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	mentionedID := int64(523456789)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
 	msg.Text = "Hello Alice and @username_only"
@@ -252,14 +271,14 @@ func TestNewNormalizerRejectsDuplicateTelegramChat(t *testing.T) {
 	_, err = NewNormalizer(map[string]string{
 		"one": strconv.FormatInt(testGroupID, 10),
 		"two": strconv.FormatInt(testGroupID, 10),
-	}, hasher, config.UsernameModeHash)
+	}, hasher)
 	if err == nil {
 		t.Fatal("expected duplicate configured Telegram chat to be rejected")
 	}
 }
 
 func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
 	msg.IsTopicMessage = true
 	msg.MessageThreadID = 777
@@ -277,7 +296,7 @@ func TestNormalizeForumTopicUsesConfiguredParentEndpoint(t *testing.T) {
 }
 
 func TestNormalizeForumTopicIgnoresSyntheticRootReply(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
 	msg.IsTopicMessage = true
 	msg.MessageThreadID = 777
@@ -296,7 +315,7 @@ func TestNormalizeForumTopicIgnoresSyntheticRootReply(t *testing.T) {
 }
 
 func TestNormalizeForumTopicPreservesGenuineReply(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testSupergroupID, models.ChatTypeSupergroup)
 	msg.IsTopicMessage = true
 	msg.MessageThreadID = 777
@@ -316,7 +335,7 @@ func TestNormalizeForumTopicPreservesGenuineReply(t *testing.T) {
 }
 
 func TestNormalizeTelegramPollUsesNativeCanonicalModel(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
 	msg.Text = ""
 	msg.Poll = &models.Poll{
@@ -338,8 +357,8 @@ func TestNormalizeTelegramPollUsesNativeCanonicalModel(t *testing.T) {
 	}
 }
 
-func TestNormalizeTelegramTextMentionUsesHashFallbackInHashMode(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+func TestNormalizeTelegramTextMentionUsesOpaqueTokenWithTransientName(t *testing.T) {
+	normalizer := testNormalizer(t)
 	msg := testMessage(testGroupID, models.ChatTypeGroup)
 	msg.Text = "Ping Bob"
 	msg.Entities = []models.MessageEntity{{
@@ -358,17 +377,17 @@ func TestNormalizeTelegramTextMentionUsesHashFallbackInHashMode(t *testing.T) {
 		t.Fatal("Telegram text mention was ignored")
 	}
 	if !strings.Contains(incoming.Text, "@u_") {
-		t.Fatalf("hash-mode mention did not use HMAC fallback: %q", incoming.Text)
+		t.Fatalf("normalized mention did not use HMAC fallback: %q", incoming.Text)
 	}
 	for _, forbidden := range []string{"523456789", "Private", "Name"} {
 		if strings.Contains(incoming.Text, forbidden) {
-			t.Fatalf("hash-mode mention leaked %q: %q", forbidden, incoming.Text)
+			t.Fatalf("normalized mention leaked %q: %q", forbidden, incoming.Text)
 		}
 	}
 }
 
 func TestNormalizeIgnoresContactsLocationsAndVenuesEvenWithText(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	tests := []struct {
 		name    string
 		message *models.Message

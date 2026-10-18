@@ -146,6 +146,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	case "text":
 		content = truncateTelegramText(content, telegramTextLimit)
 		content, parseMode = telegramPresentation(content)
+		content, parseMode = a.renderCrossMentions(ctx, api, chatID, outgoing, content, parseMode)
 		if strings.TrimSpace(content) == "" {
 			return transport.MessageRef{}, errors.New("outgoing Telegram text is required")
 		}
@@ -176,6 +177,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		}
 		content = truncateTelegramText(content, telegramCaptionLimit)
 		content, parseMode = telegramPresentation(content)
+		content, parseMode = a.renderCrossMentions(ctx, api, chatID, outgoing, content, parseMode)
 		message, err = a.sendTelegramMedia(ctx, api, chatID, kind, outgoing.MediaBytes, content, parseMode, reply, threadID)
 		if err != nil {
 			return transport.MessageRef{}, err
@@ -206,7 +208,7 @@ func telegramPollAttribution(outgoing transport.Outgoing) string {
 		return ""
 	}
 	label := outgoing.SenderLabel
-	if displayName := sanitizeTelegramAttribution(outgoing.Sender.DisplayName); displayName != "" {
+	if displayName := sanitizeTelegramAttribution(outgoing.Sender.NameWithAlias(outgoing.Sender.DisplayName)); displayName != "" {
 		label = string(outgoing.OriginEndpoint) + "/" + displayName
 	}
 	return "<b><i>" + html.EscapeString(sanitizeTelegramAttribution(label)) + "</i></b>:"
@@ -579,6 +581,10 @@ func (a *Adapter) outboundState(endpoint transport.EndpointID) (int64, telegramA
 	normalizer := a.normalizer
 	mediaEnabled := a.mediaEnabled
 	mediaMaxBytes := a.mediaMaxBytes
+	if policy, ok := a.endpointSettings[string(endpoint)]; ok {
+		mediaEnabled = policy.Media.Enabled
+		mediaMaxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	client := a.client
 	a.mu.RUnlock()
 	if normalizer == nil {
@@ -744,7 +750,7 @@ func telegramSenderLabel(sender transport.Sender) string {
 	if label == "" {
 		label = sanitizeTelegramAttribution(sender.OpaqueID)
 	}
-	return label
+	return sender.NameWithAlias(label)
 }
 
 func sanitizeTelegramAttribution(value string) string {

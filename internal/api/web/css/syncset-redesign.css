@@ -341,7 +341,8 @@
   white-space: nowrap;
 }
 
-.endpoint-chip > span[style*="font-size:.7rem"] {
+.endpoint-chip > span[style*="font-size:.7rem"],
+.endpoint-chip > .chip-conn-label {
   margin: 0 8px 0 0 !important;
   color: var(--text-muted) !important;
   font-size: .74rem !important;
@@ -546,26 +547,74 @@
 
   .endpoint-chip {
     flex-wrap: wrap;
-    gap: 7px;
-    padding: 10px;
+    gap: 8px 6px;
+    padding: 10px 12px;
+  }
+
+  .endpoint-chip > .badge {
+    order: 1;
+    flex: 0 0 auto;
   }
 
   .chip-alias {
+    order: 2;
     min-width: 0;
-    flex: 1 1 45%;
+    flex: 0 0 auto;
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .endpoint-chip > span[style*="font-size:.7rem"] {
-    flex: 1 0 calc(100% - 48px);
+  .endpoint-chip > span[style*="font-size:.7rem"],
+  .endpoint-chip > .chip-conn-label {
     order: 3;
-    margin-left: 41px !important;
+    display: inline-flex !important;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 !important;
+    color: var(--text-muted) !important;
+    font-size: .74rem !important;
+  }
+
+  .chip-anonymity-controls {
+    order: 4;
+    flex: 0 0 100%;
+    min-width: 0;
+  }
+
+  .chip-actions {
+    order: 5;
+    flex: 0 0 100%;
+  }
+
+  .chip-anonymity-controls .chip-anonymity {
+    flex: 1 1 0;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: .72rem;
+    white-space: normal;
+  }
+
+  .chip-anonymity input[type="checkbox"] {
+    flex-shrink: 0;
+    margin: 0;
   }
 
   .chip-reassign,
   .chip-edit,
   .chip-remove {
-    flex: 1 1 30%;
-    order: 4;
+    order: 5;
+    flex: 1 1 calc(33.333% - 6px);
+    min-width: 0;
+    padding: 6px 4px;
+    font-size: .74rem;
     justify-content: center;
   }
 
@@ -885,4 +934,21 @@
   #modal-add-conversation { padding: 12px; }
   #modal-add-conversation .modal-card { max-height: calc(100dvh - 24px); }
   #modal-add-conversation .add-endpoint-row { grid-template-columns: 1fr; }
+}
+
+/* Keep each control group together when a conversation row wraps. */
+.chip-anonymity-controls,
+.chip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.endpoint-chip { flex-wrap: wrap; }
+.chip-anonymity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .75rem;
+  white-space: nowrap;
+  cursor: pointer;
 }

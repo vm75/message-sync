@@ -79,6 +79,10 @@ func (a *Adapter) withTelegramMedia(incoming transport.Incoming, message *models
 	a.mu.RLock()
 	enabled := a.mediaEnabled
 	configuredMax := a.mediaMaxBytes
+	if policy, ok := a.endpointSettings[string(incoming.Endpoint)]; ok {
+		enabled = policy.Media.Enabled
+		configuredMax = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	a.mu.RUnlock()
 	if !enabled {
 		// Preserve a caption as an ordinary text message when media forwarding

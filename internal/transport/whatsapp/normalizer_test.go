@@ -21,7 +21,7 @@ func TestNormalizeConfiguredGroupMessage(t *testing.T) {
 	}
 	normalizer, err := NewNormalizer(map[string]string{
 		"c1g1": "123456789@g.us",
-	}, hasher, config.UsernameModePushName)
+	}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,12 +96,12 @@ func TestNormalizeIgnoresDMAndUnconfiguredGroup(t *testing.T) {
 	}
 }
 
-func TestHashModeDropsPushName(t *testing.T) {
+func TestNormalizerRetainsTransientDisplayName(t *testing.T) {
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,15 +112,15 @@ func TestHashModeDropsPushName(t *testing.T) {
 				Chat: types.NewJID("123456789", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), IsGroup: true,
 			},
 			ID:       "hash-id",
-			PushName: "Should Be Dropped",
+			PushName: "Alice Example",
 		},
 		Message: &waE2E.Message{Conversation: &body},
 	}, true, 100*1024*1024, nil, nil, nil, nil)
 	if !ok {
 		t.Fatal("message was ignored")
 	}
-	if incoming.Sender.DisplayName != "" {
-		t.Fatalf("hash mode retained push name: %q", incoming.Sender.DisplayName)
+	if incoming.Sender.DisplayName != "Alice Example" {
+		t.Fatalf("transient display name lost: %q", incoming.Sender.DisplayName)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestNormalizeEditMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestNormalizeEditMessage_MediaDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +226,7 @@ func TestNormalizeUnwrappedEditMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestNormalizeDeleteMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,7 +329,7 @@ func TestNormalizePollCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestNormalizeV4PollCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +407,7 @@ func TestNormalizePollCreationZeroSelectableCountAsUnlimited(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func TestNormalizePollVote(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,4 +486,73 @@ func protoPtr[T any](v T) *T {
 
 func protoEnum[T ~int32](v T) *T {
 	return &v
+}
+
+func TestNormalizerIsolatesSyncSetMediaPolicies(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	enabled, disabled := config.DefaultSyncSetSettings(), config.DefaultSyncSetSettings()
+
+	disabled.Media.Enabled = false
+	normalizer, err := NewNormalizer(map[string]string{"enabled": "111@g.us", "disabled": "222@g.us"}, hasher, map[string]config.SyncSetSettings{"enabled": enabled, "disabled": disabled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chat := range []string{"111", "222", "111"} {
+		body := "Synthetic"
+		evt := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: types.NewJID(chat, types.GroupServer), Sender: types.NewJID("123", types.HiddenUserServer), IsGroup: true}, ID: "1", PushName: "Alice"}, Message: &waE2E.Message{Conversation: &body}}
+		incoming, ok := normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil, nil, nil)
+		if !ok || incoming.Sender.DisplayName != "Alice" {
+			t.Fatalf("policy leaked for %s: %+v", chat, incoming)
+		}
+		evt.Message = &waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}
+		incoming, ok = normalizer.NormalizeMessage(evt, true, 100*1024*1024, nil, nil, nil, nil)
+		if ok != (chat == "111") {
+			t.Fatalf("media policy leaked for %s: ok=%t %+v", chat, ok, incoming)
+		}
+	}
+}
+
+func TestWhatsAppMentionUsesCanonicalAuthorLIDIdentity(t *testing.T) {
+	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizer, err := NewNormalizer(map[string]string{"group": "111@g.us"}, hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pn := types.NewJID("15551234567", types.DefaultUserServer)
+	lid := types.NewJID("987654321012345", types.HiddenUserServer)
+	resolver := func(_ context.Context, jid types.JID) (types.JID, error) {
+		if jid.ToNonAD() == pn {
+			return lid, nil
+		}
+		if jid.ToNonAD() == lid {
+			return pn, nil
+		}
+		return types.EmptyJID, nil
+	}
+	text := "Ask @" + pn.User
+	event := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: types.NewJID("111", types.GroupServer), Sender: pn, IsGroup: true}, ID: "mention", PushName: "Alice"}, Message: &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: &text, ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{pn.String()}}}}}
+	in, ok := normalizer.NormalizeMessage(event, true, 1024, nil, nil, nil, resolver)
+	if !ok || in.Sender.IdentityUnavailable || len(in.Mentions) != 1 || in.Mentions[0].ActorID != in.Sender.OpaqueID || in.Sender.OpaqueID != hasher.UserID(lid.String()) {
+		t.Fatalf("author/mention identity mismatch: %+v", in)
+	}
+	unresolved, ok := normalizer.NormalizeMessage(event, true, 1024, nil, nil, nil, nil)
+	if !ok || !unresolved.Sender.IdentityUnavailable || unresolved.Mentions[0].ActorID != "" {
+		t.Fatalf("unresolved PN became an eligible actor: %+v", unresolved)
+	}
+	// The mention appears only inside the reply quote, not in the new message.
+	info := event.Message.ExtendedTextMessage.ContextInfo
+	event.Message.ExtendedTextMessage.Text = protoPtr("hello")
+	info.MentionedJID = nil
+	info.StanzaID = protoPtr("quoted-message")
+	info.QuotedMessage = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: protoPtr("Ask @" + pn.User), ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{pn.String()}}}}
+	quoted, ok := normalizer.NormalizeMessage(event, true, 1024, nil, nil, nil, resolver)
+	if !ok || len(quoted.Mentions) != 0 || len(quoted.QuotedMentions) != 1 || quoted.QuotedMentions[0].ActorID != in.Sender.OpaqueID || quoted.QuotedText != "Ask @"+pn.String() {
+		t.Fatalf("quote-only identity lost its canonical LID: %+v", quoted)
+	}
 }

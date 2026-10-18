@@ -40,7 +40,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Child-context presentation | Child messages render `group/user` or `group/topic-or-thread/user`; live labels are transient presentation metadata, generic when unknown, and never used for routing. `opaque` keeps labels transient; `friendly` may persist bounded observed labels so names survive restart/replay. Discord uses the complete presentation label as its per-message APP name and removes the wrapper from the body; WhatsApp and Telegram retain body attribution | Platform-specific presentation and topic metadata are available in bridge flows | Visible syntax is the same in both storage modes. Disabling friendly mode clears the stored label catalog without affecting opaque ChildScope routing. Presentation remains transport-specific because Telegram Bot API cannot rename a bot per message. |
 | Endpoint discovery | Authenticated live Discord discovery; bounded in-memory observed Telegram group discovery; WhatsApp joined-group discovery | Web-console discovery for WhatsApp, Discord, and Telegram resources | Preserved, with stricter persistence rules for human-readable names. |
 | Sender presentation in Discord | One managed webhook per destination channel. Root messages use the transient sender display name or HMAC fallback, prefixing cross-endpoint messages with the source alias. Child messages use the complete transient label, such as `tg1/tt1/Alice`, as the per-message APP username and leave the body unprefixed | Webhook delivery can override username/presentation per forwarded sender | Preserved and narrowed so sender presentation is transient metadata rather than persistent identity; no per-user webhook is created. |
-| Identity model | HMAC-derived actor IDs for persisted canonical identity; transient display names where permitted. Optional route-aware one-way Discord anonymization (`anonymizeToDiscord`) on sync sets derives deterministic pseudonyms (e.g. `Silent Falcon Q7M`) purely from HMAC actor IDs without persisting PII or mapping tables | Persistent anonymized aliases plus broader contact/member identity records | Reworked to reduce stored identity. |
+| Identity model | HMAC actor IDs with persistent globally unique aliases scoped to each sync set; frozen 256×256 vocabulary and numeric tiers, no real-name or raw native identity persistence. Directional per-endpoint anonymization uses the assigned alias | Persistent anonymized aliases plus broader contact/member identity records | Scope aliases to configured sets without linking people across providers. |
 | Text synchronization | Bidirectional across all configured transports | Bidirectional WhatsApp/Discord and additional bridge flows | Preserved and generalized. |
 | Media | Text, image, video, audio/voice, documents, stickers within configured in-memory limits | Rich media forwarding, with GCS fallback for larger files in some paths | Preserved without cloud overflow storage. |
 | Large-media overflow | No cloud fallback; over-limit content fails deterministically | Can upload oversized media to GCS and send a link | Intentionally not carried forward because transient in-memory media is a privacy boundary. |
@@ -50,7 +50,7 @@ The upstream design remains useful as a product-behavior reference, especially f
 | Deletes/revokes | Canonical delete lifecycle routes to known destination copies and poll companions | Delete propagation is implemented with platform-specific mapping lookup | Preserved and generalized. |
 | Native polls | Native WhatsApp, Discord, and Telegram polls are used where destination semantics can represent the source; cross-endpoint Discord/Telegram polls include source labels in their visible poll presentation | Poll handling is centered on bridge-specific WhatsApp/Discord behavior | Expanded into transport-neutral poll semantics. |
 | Live poll results | Every bridged poll gets one bridge-owned editable companion containing aggregate option counts only; no voter names or per-voter choices | Live cross-group aggregate result messages are updated from upstream poll vote handling | Preserved conceptually, with a stricter aggregate-only privacy rule and generalized lifecycle. |
-| Manual poll aggregation | Exact `aggregate-response` reply remains supported; triggered aggregate responses continue updating with poll changes | Aggregate-result behavior exists in the bridge flow | Preserved and extended so on-demand results remain live. |
+| Manual poll aggregation | Built-in `/summary` replies and configured triggers (default `aggregate-response`) request aggregate responses that continue updating with poll changes | Aggregate-result behavior exists in the bridge flow | Preserved and extended so on-demand results remain live. |
 | Loop prevention | Persistent copy/idempotency constraints plus bounded bridge-echo suppression | In-memory sent-message caches, processed-message checks, formatting guards, and stored mappings | Strengthened so restart correctness does not depend mainly on process-local caches. |
 | Canonical message identity | Random transport-neutral canonical ID | Platform message IDs are connected through bridge-specific mappings | New abstraction in `message-sync`. |
 | Persistent message-copy mapping | One canonical message may have one opaque remote copy per endpoint | Discord/WhatsApp mapping records connect corresponding messages | Generalized across every transport. |
@@ -172,6 +172,15 @@ Their absence should not be interpreted as an implementation queue. New scope sh
 
 ## Capabilities Generalized Beyond the Upstream Design
 
+The optional private DM relay is deliberately small: two commands (`/dm` and
+`/help`, with Bot API `/start` as help bootstrap), native-reply continuation,
+24-hour encrypted routing metadata and assigned set aliases. It has no contact
+exchange, participant enrollment, approval flow, blocking dashboard or private
+history. Private edits/deletes never propagate. Only verified WhatsApp
+per-message Delete for Me is attempted; Discord/Bot API shared-message deletion
+is prohibited. MTProto personal chats remain unmanaged. See
+[the private relay contract](PRIVATE_MESSAGING.md).
+
 `message-sync` now has several capabilities whose architecture is materially broader than the original bridge model:
 
 - dynamic platform connections supporting multiple concurrent WhatsApp accounts, Discord bots, and Telegram bots without restart;
@@ -191,3 +200,12 @@ Their absence should not be interpreted as an implementation queue. New scope sh
 This file is a comparison snapshot, not a backlog.
 
 Update it when an implemented feature materially changes the comparison, when an existing implementation is removed, or when an architectural decision changes why the two projects differ. Product scope remains authoritative in `README.md`; architecture and privacy invariants remain authoritative in `ARCHITECTURE.md` and `AGENTS.md`.
+
+
+| Cross-group participant addressing | Explicit `@{Amber Badger}` references to observed assigned authors; case-insensitive global uniqueness with source-set authorization and actual-destination membership checks. Native WhatsApp LID/Discord/Bot API mentions, exact authored fallback elsewhere; MTProto and edits stay literal. No public Pn, discriminator or real-name addressing | No equivalent cross-provider identity addressing guarantee | Alias selection stays separate from provider-native mentions and stores no PII. |
+
+
+Sync-set administration uses an **Edit settings** modal for routing, privacy
+and membership options. Membership review visibility persists per set; the
+review UI scopes requests and pipelines to one selected set. Accounts and
+admin security remain global.

@@ -8,11 +8,11 @@
   'use strict';
 
   // ── Validation ──────────────────────────────────────────────
-  const ALIAS_REGEX          = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-  const GROUP_JID_REGEX      = /^[0-9]+(-[0-9]+)?@g\.us$/;
+  const ALIAS_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  const GROUP_JID_REGEX = /^[0-9]+(-[0-9]+)?@g\.us$/;
   const DISCORD_CHANNEL_REGEX = /^[0-9]+$/;
-  const TELEGRAM_CHAT_ID_REGEX  = /^-[0-9]+$/;
-  const SYNC_SET_ID_REGEX    = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  const TELEGRAM_CHAT_ID_REGEX = /^-[0-9]+$/;
+  const SYNC_SET_ID_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
   // Webhook readiness labels (used in delivery table and discovery)
   // status values: 'ready', 'missing_permission', 'unavailable'
@@ -23,127 +23,127 @@
   }
 
   // ── DOM – shell ─────────────────────────────────────────────
-  const appShell         = document.getElementById('app-shell');
-  const toastContainer   = document.getElementById('toast-container');
-  const btnLogout        = document.getElementById('btn-logout');
-  const sessionUsername  = document.getElementById('session-username');
-  const sessionRole      = document.getElementById('session-role');
-  const navUsers         = document.getElementById('nav-users');
-  const navMembership    = document.getElementById('nav-membership');
+  const appShell = document.getElementById('app-shell');
+  const toastContainer = document.getElementById('toast-container');
+  const btnLogout = document.getElementById('btn-logout');
+  const sessionUsername = document.getElementById('session-username');
+  const sessionRole = document.getElementById('session-role');
+  const navUsers = document.getElementById('nav-users');
+  const navMembership = document.getElementById('nav-membership');
 
   // ── DOM – views ─────────────────────────────────────────────
   const views = {
-    loading:      document.getElementById('view-loading'),
-    setup:        document.getElementById('view-setup'),
-    login:        document.getElementById('view-login'),
-    invite:       document.getElementById('view-invite'),
-    reset:        document.getElementById('view-reset'),
-    dashboard:    document.getElementById('view-dashboard'),
-    connections:  document.getElementById('view-connections'),
-    'sync-sets':  document.getElementById('view-sync-sets'),
-    settings:     document.getElementById('view-settings'),
-    users:        document.getElementById('view-users'),
-    membership:   document.getElementById('view-membership'),
+    loading: document.getElementById('view-loading'),
+    setup: document.getElementById('view-setup'),
+    login: document.getElementById('view-login'),
+    invite: document.getElementById('view-invite'),
+    reset: document.getElementById('view-reset'),
+    dashboard: document.getElementById('view-dashboard'),
+    connections: document.getElementById('view-connections'),
+    'sync-sets': document.getElementById('view-sync-sets'),
+    settings: document.getElementById('view-settings'),
+    users: document.getElementById('view-users'),
+    membership: document.getElementById('view-membership'),
   };
 
   // ── DOM – auth ──────────────────────────────────────────────
-  const formSetup               = document.getElementById('form-setup');
-  const setupUsernameInput      = document.getElementById('setup-username');
-  const setupPasswordInput      = document.getElementById('setup-password');
+  const formSetup = document.getElementById('form-setup');
+  const setupUsernameInput = document.getElementById('setup-username');
+  const setupPasswordInput = document.getElementById('setup-password');
   const setupConfirmPasswordInput = document.getElementById('setup-confirm-password');
-  const setupStrengthFill       = document.getElementById('setup-strength-fill');
-  const setupPasswordHint       = document.getElementById('setup-password-hint');
-  const setupConfirmHint        = document.getElementById('setup-confirm-hint');
-  const setupAlert              = document.getElementById('setup-alert');
-  const btnSubmitSetup          = document.getElementById('btn-submit-setup');
+  const setupStrengthFill = document.getElementById('setup-strength-fill');
+  const setupPasswordHint = document.getElementById('setup-password-hint');
+  const setupConfirmHint = document.getElementById('setup-confirm-hint');
+  const setupAlert = document.getElementById('setup-alert');
+  const btnSubmitSetup = document.getElementById('btn-submit-setup');
 
-  const formLogin               = document.getElementById('form-login');
-  const loginUsernameInput      = document.getElementById('login-username');
-  const loginPasswordInput      = document.getElementById('login-password');
-  const loginAlert              = document.getElementById('login-alert');
-  const btnSubmitLogin          = document.getElementById('btn-submit-login');
+  const formLogin = document.getElementById('form-login');
+  const loginUsernameInput = document.getElementById('login-username');
+  const loginPasswordInput = document.getElementById('login-password');
+  const loginAlert = document.getElementById('login-alert');
+  const btnSubmitLogin = document.getElementById('btn-submit-login');
 
-  const formInvite              = document.getElementById('form-invite');
-  const formReset               = document.getElementById('form-reset');
+  const formInvite = document.getElementById('form-invite');
+  const formReset = document.getElementById('form-reset');
 
   // ── DOM – dashboard ─────────────────────────────────────────
-  const waStatusDot     = document.getElementById('wa-status-dot');
-  const waStatusText    = document.getElementById('wa-status-text');
-  const waStatusDesc    = document.getElementById('wa-status-desc');
-  const discordDot      = document.getElementById('discord-status-dot');
-  const discordText     = document.getElementById('discord-status-text');
-  const discordDesc     = document.getElementById('discord-status-desc');
-  const telegramDot     = document.getElementById('telegram-status-dot');
-  const telegramText    = document.getElementById('telegram-status-text');
-  const telegramDesc    = document.getElementById('telegram-status-desc');
-  const deliveryBody    = document.getElementById('delivery-health-body');
-  const deliveryEmpty   = document.getElementById('delivery-health-empty');
-  const deliveryError   = document.getElementById('delivery-health-error');
-  const btnDashRefresh  = document.getElementById('btn-dash-refresh');
+  const waStatusDot = document.getElementById('wa-status-dot');
+  const waStatusText = document.getElementById('wa-status-text');
+  const waStatusDesc = document.getElementById('wa-status-desc');
+  const discordDot = document.getElementById('discord-status-dot');
+  const discordText = document.getElementById('discord-status-text');
+  const discordDesc = document.getElementById('discord-status-desc');
+  const telegramDot = document.getElementById('telegram-status-dot');
+  const telegramText = document.getElementById('telegram-status-text');
+  const telegramDesc = document.getElementById('telegram-status-desc');
+  const deliveryBody = document.getElementById('delivery-health-body');
+  const deliveryEmpty = document.getElementById('delivery-health-empty');
+  const deliveryError = document.getElementById('delivery-health-error');
+  const btnDashRefresh = document.getElementById('btn-dash-refresh');
 
   // WA menu actions
-  const waMenuBtn       = document.getElementById('wa-menu-btn');
-  const waMenu          = document.getElementById('wa-menu');
-  const btnWaPair       = document.getElementById('btn-wa-pair');
-  const btnWaLogout     = document.getElementById('btn-wa-logout');
-  const discordMenuBtn  = document.getElementById('discord-menu-btn');
-  const discordMenu     = document.getElementById('discord-menu');
+  const waMenuBtn = document.getElementById('wa-menu-btn');
+  const waMenu = document.getElementById('wa-menu');
+  const btnWaPair = document.getElementById('btn-wa-pair');
+  const btnWaLogout = document.getElementById('btn-wa-logout');
+  const discordMenuBtn = document.getElementById('discord-menu-btn');
+  const discordMenu = document.getElementById('discord-menu');
   const telegramMenuBtn = document.getElementById('telegram-menu-btn');
-  const telegramMenu    = document.getElementById('telegram-menu');
+  const telegramMenu = document.getElementById('telegram-menu');
 
   // ── DOM – WA pair modal ──────────────────────────────────────
-  const modalWaPair     = document.getElementById('modal-wa-pair');
-  const waPairStatus    = document.getElementById('wa-pair-status');
-  const waQrSection     = document.getElementById('wa-qr-section');
-  const waQrCanvas      = document.getElementById('wa-qr-canvas');
+  const modalWaPair = document.getElementById('modal-wa-pair');
+  const waPairStatus = document.getElementById('wa-pair-status');
+  const waQrSection = document.getElementById('wa-qr-section');
+  const waQrCanvas = document.getElementById('wa-qr-canvas');
   const waCountdownText = document.getElementById('wa-countdown-text');
   const btnWaCancelPair = document.getElementById('btn-wa-cancel-pair');
-  const btnWaRetryPair  = document.getElementById('btn-wa-retry-pair');
+  const btnWaRetryPair = document.getElementById('btn-wa-retry-pair');
   const btnWaPairDiscover = document.getElementById('btn-wa-pair-discover');
   const waPairBody = modalWaPair ? modalWaPair.querySelector('.modal-body') : null;
   const waPairFooter = modalWaPair ? modalWaPair.querySelector('.modal-footer') : null;
 
   // ── DOM – Connections ───────────────────────────────────────
-  const navConnections        = document.getElementById('nav-connections');
+  const navConnections = document.getElementById('nav-connections');
   const btnConnectionsRefresh = document.getElementById('btn-connections-refresh');
-  const btnAddConnection      = document.getElementById('btn-add-connection');
+  const btnAddConnection = document.getElementById('btn-add-connection');
   const btnEmptyAddConnection = document.getElementById('btn-empty-add-connection');
-  const connectionsContainer  = document.getElementById('connections-container');
-  const connectionsEmpty      = document.getElementById('connections-empty');
-  const connectionsAlert      = document.getElementById('connections-alert');
+  const connectionsContainer = document.getElementById('connections-container');
+  const connectionsEmpty = document.getElementById('connections-empty');
+  const connectionsAlert = document.getElementById('connections-alert');
 
-  const modalAddConnection    = document.getElementById('modal-add-connection');
-  const formAddConnection     = document.getElementById('form-add-connection');
-  const addConnAlert          = document.getElementById('add-conn-alert');
-  const addConnLabel          = document.getElementById('add-conn-label');
-  const addConnId             = document.getElementById('add-conn-id');
-  const addConnToken          = document.getElementById('conn-bot-token');
-  const addConnTokenGroup     = document.getElementById('add-conn-token-group');
+  const modalAddConnection = document.getElementById('modal-add-connection');
+  const formAddConnection = document.getElementById('form-add-connection');
+  const addConnAlert = document.getElementById('add-conn-alert');
+  const addConnLabel = document.getElementById('add-conn-label');
+  const addConnId = document.getElementById('add-conn-id');
+  const addConnToken = document.getElementById('conn-bot-token');
+  const addConnTokenGroup = document.getElementById('add-conn-token-group');
   const addConnDiscordModeGroup = document.getElementById('add-conn-discord-mode-group');
   const addConnDiscordMode = document.getElementById('add-conn-discord-mode');
   const addConnDiscordWebhookGroup = document.getElementById('add-conn-discord-webhook-group');
   const addConnDiscordWebhookURL = document.getElementById('add-conn-discord-webhook-url');
   const addConnDiscordChannelID = document.getElementById('add-conn-discord-channel-id');
   const addConnTelegramModeGroup = document.getElementById('add-conn-telegram-mode-group');
-  const addConnTelegramMode   = document.getElementById('add-conn-telegram-mode');
-  const addConnMTProtoGroup   = document.getElementById('add-conn-mtproto-group');
-  const addConnMTProtoAPIID   = document.getElementById('add-conn-mtproto-api-id');
+  const addConnTelegramMode = document.getElementById('add-conn-telegram-mode');
+  const addConnMTProtoGroup = document.getElementById('add-conn-mtproto-group');
+  const addConnMTProtoAPIID = document.getElementById('add-conn-mtproto-api-id');
   const addConnMTProtoAPIHash = document.getElementById('add-conn-mtproto-api-hash');
-  const addConnMTProtoPhone   = document.getElementById('add-conn-mtproto-phone');
-  const addConnHelpDiscord    = document.getElementById('add-conn-help-discord');
-  const addConnHelpTelegram   = document.getElementById('add-conn-help-telegram');
+  const addConnMTProtoPhone = document.getElementById('add-conn-mtproto-phone');
+  const addConnHelpDiscord = document.getElementById('add-conn-help-discord');
+  const addConnHelpTelegram = document.getElementById('add-conn-help-telegram');
   const addConnHelpTelegramBot = document.getElementById('add-conn-help-telegram-bot');
   const addConnHelpTelegramMTProto = document.getElementById('add-conn-help-telegram-mtproto');
-  const addConnWaHelp         = document.getElementById('add-conn-wa-help');
-  const btnSubmitAddConn      = document.getElementById('btn-submit-add-conn');
-  const addConnFormView       = document.getElementById('add-conn-form-view');
-  const addConnPairingView    = document.getElementById('add-conn-pairing-view');
+  const addConnWaHelp = document.getElementById('add-conn-wa-help');
+  const btnSubmitAddConn = document.getElementById('btn-submit-add-conn');
+  const addConnFormView = document.getElementById('add-conn-form-view');
+  const addConnPairingView = document.getElementById('add-conn-pairing-view');
 
-  const modalReplaceToken     = document.getElementById('modal-replace-token');
-  const formReplaceToken      = document.getElementById('form-replace-token');
-  const replaceTokenAlert     = document.getElementById('replace-token-alert');
-  const replaceTokenConnInfo  = document.getElementById('replace-token-conn-info');
-  const replaceTokenInput     = document.getElementById('replace-conn-bot-token');
+  const modalReplaceToken = document.getElementById('modal-replace-token');
+  const formReplaceToken = document.getElementById('form-replace-token');
+  const replaceTokenAlert = document.getElementById('replace-token-alert');
+  const replaceTokenConnInfo = document.getElementById('replace-token-conn-info');
+  const replaceTokenInput = document.getElementById('replace-conn-bot-token');
   const btnSubmitReplaceToken = document.getElementById('btn-submit-replace-token');
 
   const modalTelegramMTProto = document.getElementById('modal-telegram-mtproto');
@@ -169,116 +169,120 @@
   const btnMTProtoBackfill = document.getElementById('btn-mtproto-backfill');
   const btnMTProtoLogout = document.getElementById('btn-mtproto-logout');
 
-  const modalDiscovery        = document.getElementById('modal-discovery');
-  const discoveryConnBadge    = document.getElementById('discovery-conn-badge');
-  const discoveryAlert        = document.getElementById('discovery-alert');
-  const discoveryLoading      = document.getElementById('discovery-loading');
-  const discoveryEmpty        = document.getElementById('discovery-empty');
-  const discoveryEmptyTitle   = document.getElementById('discovery-empty-title');
-  const discoveryEmptyDesc    = document.getElementById('discovery-empty-desc');
-  const discoveryItems        = document.getElementById('discovery-items');
-  const discoveryTbody        = document.getElementById('discovery-tbody');
-  const discoveryCreateForm   = document.getElementById('discovery-create-form');
-  const discoveryAliasInput   = document.getElementById('discovery-alias-input');
+  const modalDiscovery = document.getElementById('modal-discovery');
+  const discoveryConnBadge = document.getElementById('discovery-conn-badge');
+  const discoveryAlert = document.getElementById('discovery-alert');
+  const discoveryLoading = document.getElementById('discovery-loading');
+  const discoveryEmpty = document.getElementById('discovery-empty');
+  const discoveryEmptyTitle = document.getElementById('discovery-empty-title');
+  const discoveryEmptyDesc = document.getElementById('discovery-empty-desc');
+  const discoveryItems = document.getElementById('discovery-items');
+  const discoveryTbody = document.getElementById('discovery-tbody');
+  const discoveryCreateForm = document.getElementById('discovery-create-form');
+  const discoveryAliasInput = document.getElementById('discovery-alias-input');
   const discoverySyncsetSelect = document.getElementById('discovery-syncset-select');
   const btnDiscoverySubmitCreate = document.getElementById('btn-discovery-submit-create');
   const btnDiscoveryCancelCreate = document.getElementById('btn-discovery-cancel-create');
 
   const modalReassignEndpoint = document.getElementById('modal-reassign-endpoint');
-  const formReassignEndpoint  = document.getElementById('form-reassign-endpoint');
-  const reassignAlert         = document.getElementById('reassign-alert');
-  const reassignEndpointInfo  = document.getElementById('reassign-endpoint-info');
-  const reassignConnSelect    = document.getElementById('reassign-conn-select');
-  const btnSubmitReassign     = document.getElementById('btn-submit-reassign');
+  const formReassignEndpoint = document.getElementById('form-reassign-endpoint');
+  const reassignAlert = document.getElementById('reassign-alert');
+  const reassignEndpointInfo = document.getElementById('reassign-endpoint-info');
+  const reassignConnSelect = document.getElementById('reassign-conn-select');
+  const btnSubmitReassign = document.getElementById('btn-submit-reassign');
 
   const addEndpointConnSelect = document.getElementById('add-endpoint-conn-select');
-  const addEndpointNoConn     = document.getElementById('add-endpoint-no-conn');
+  const addEndpointNoConn = document.getElementById('add-endpoint-no-conn');
 
   // ── DOM – Sync Sets ──────────────────────────────────────────
-  const btnNewSyncSet       = document.getElementById('btn-new-sync-set');
-  const syncsetCountBadge   = document.getElementById('syncset-count-badge');
-  const syncsetList         = document.getElementById('syncset-list');
-  const syncsetEditorForm   = document.getElementById('syncset-editor-form');
+  const btnNewSyncSet = document.getElementById('btn-new-sync-set');
+  const syncsetCountBadge = document.getElementById('syncset-count-badge');
+  const syncsetList = document.getElementById('syncset-list');
+  const syncsetSettingsPanel = document.getElementById('syncset-settings-panel');
+  const syncsetEditorForm = document.getElementById('syncset-editor-form');
   const syncsetEditorPlaceholder = document.getElementById('syncset-editor-placeholder');
-  const syncsetEditorTitle  = document.getElementById('syncset-editor-title');
+  const syncsetEditorTitle = document.getElementById('syncset-editor-title');
   const syncsetEditorIdDisplay = document.getElementById('syncset-editor-id-display');
-  const inputSyncsetId      = document.getElementById('input-syncset-id');
-  const syncsetIdField      = document.getElementById('syncset-id-field');
-  const syncsetAnonymizeToDiscord = document.getElementById('syncset-anonymize-to-discord');
-  const endpointChips       = document.getElementById('endpoint-chips');
-  const btnDeleteSyncSet    = document.getElementById('btn-delete-sync-set');
-  const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
-  const btnCancelEditor     = document.getElementById('btn-cancel-editor');
+  const inputSyncsetId = document.getElementById('input-syncset-id');
+  const syncsetIdField = document.getElementById('syncset-id-field');
+  const endpointChips = document.getElementById('endpoint-chips');
+  const btnDeleteSyncSet = document.getElementById('btn-delete-sync-set');
+  const btnSaveSyncSet = document.getElementById('btn-save-sync-set');
+  const btnCancelEditor = document.getElementById('btn-cancel-editor');
+  const membershipReviewEnabled = document.getElementById('settings-membership-review-enabled');
+  const privateDMSetEnabled = document.getElementById('settings-private-dm-relay-enabled');
+  const privateDMGlobalEnabled = document.getElementById('private-dm-global-enabled');
+  const privateDMGlobalSave = document.getElementById('private-dm-global-save');
+  const privateDMGlobalError = document.getElementById('private-dm-global-error');
+  const membershipSyncSet = document.getElementById('membership-sync-set');
+  const membershipFields = document.getElementById('syncset-membership-fields');
   const membershipInstructions = document.getElementById('membership-applicant-instructions');
+  const membershipEvidenceInstructions = document.getElementById('membership-evidence-instructions');
   const membershipReviewerGuidance = document.getElementById('membership-reviewer-guidance');
   const membershipEvidenceRequired = document.getElementById('membership-evidence-required');
   const membershipCustomFields = document.getElementById('membership-custom-fields');
 
   // Add endpoint widgets
-  const transportTabs       = document.querySelectorAll('.transport-tab');
-  const addRemoteLabel      = document.getElementById('add-remote-label');
-  const addRemoteSelect     = document.getElementById('add-remote-select');
-  const addRemoteHint       = document.getElementById('add-remote-hint');
-  const addAliasInput       = document.getElementById('add-alias-input');
-  const btnAddEndpoint      = document.getElementById('btn-add-endpoint');
-  const addEndpointAlert    = document.getElementById('add-endpoint-alert');
-  const platformSetupNote   = document.getElementById('platform-setup-note');
+  const transportTabs = document.querySelectorAll('.transport-tab');
+  const addRemoteLabel = document.getElementById('add-remote-label');
+  const addRemoteSelect = document.getElementById('add-remote-select');
+  const addRemoteHint = document.getElementById('add-remote-hint');
+  const addAliasInput = document.getElementById('add-alias-input');
+  const btnAddEndpoint = document.getElementById('btn-add-endpoint');
+  const addEndpointAlert = document.getElementById('add-endpoint-alert');
+  const platformSetupNote = document.getElementById('platform-setup-note');
   const platformSetupNoteText = document.getElementById('platform-setup-note-text');
 
   // ── DOM – Settings ──────────────────────────────────────────
-  const formSettings                 = document.getElementById('form-settings');
-  const settingsAlert                = document.getElementById('settings-alert');
-  const settingsUsernameMode         = document.getElementById('settings-username-mode');
-  const settingsChildContextMode     = document.getElementById('settings-child-context-mode');
-  const settingsMediaEnabled         = document.getElementById('settings-media-enabled');
-  const settingsMediaMaxSize         = document.getElementById('settings-media-max-size');
-  const settingsRecoveryEnabled      = document.getElementById('settings-recovery-enabled');
-  const settingsRecoveryMaxAge       = document.getElementById('settings-recovery-max-age');
-  const settingsRecoveryMaxMsgs      = document.getElementById('settings-recovery-max-msgs');
-  const settingsRetentionDays        = document.getElementById('settings-retention-days');
-  const settingsPollsAggTrigger      = document.getElementById('settings-polls-aggregation-trigger');
-  const settingsLocalPrefix          = document.getElementById('settings-local-prefix');
-  const settingsWaCleanupEnabled     = document.getElementById('settings-whatsapp-cleanup-enabled');
-  const settingsWaCleanupRetention   = document.getElementById('settings-whatsapp-cleanup-retention-days');
-  const settingsWaDeviceName         = document.getElementById('settings-whatsapp-device-name');
-  const btnResetSettings             = document.getElementById('btn-reset-settings');
-  const btnSaveSettings              = document.getElementById('btn-save-settings');
+  const formSettings = document.getElementById('form-settings');
+  const settingsChildContextMode = document.getElementById('settings-child-context-mode');
+  const settingsMediaEnabled = document.getElementById('settings-media-enabled');
+  const settingsMediaMaxSize = document.getElementById('settings-media-max-size');
+  const settingsRecoveryEnabled = document.getElementById('settings-recovery-enabled');
+  const settingsRecoveryMaxAge = document.getElementById('settings-recovery-max-age');
+  const settingsRecoveryMaxMsgs = document.getElementById('settings-recovery-max-msgs');
+  const settingsRetentionDays = document.getElementById('settings-retention-days');
+  const settingsPollsAggTrigger = document.getElementById('settings-polls-aggregation-trigger');
+  const settingsLocalPrefix = document.getElementById('settings-local-prefix');
+  const settingsWaCleanupEnabled = document.getElementById('settings-whatsapp-cleanup-enabled');
+  const settingsWaCleanupRetention = document.getElementById('settings-whatsapp-cleanup-retention-days');
+  const settingsWaDeviceName = document.getElementById('settings-whatsapp-device-name');
 
-  const formChangePassword           = document.getElementById('form-change-password');
-  const changePwdAlert               = document.getElementById('change-pwd-alert');
-  const changePwdCurrent             = document.getElementById('change-pwd-current');
-  const changePwdNew                 = document.getElementById('change-pwd-new');
-  const changePwdConfirm             = document.getElementById('change-pwd-confirm');
-  const changePwdStrengthFill        = document.getElementById('change-pwd-strength-fill');
-  const changePwdHint                = document.getElementById('change-pwd-hint');
-  const changePwdConfirmHint         = document.getElementById('change-pwd-confirm-hint');
-  const btnSubmitChangePwd           = document.getElementById('btn-submit-change-pwd');
+  const formChangePassword = document.getElementById('form-change-password');
+  const changePwdAlert = document.getElementById('change-pwd-alert');
+  const changePwdCurrent = document.getElementById('change-pwd-current');
+  const changePwdNew = document.getElementById('change-pwd-new');
+  const changePwdConfirm = document.getElementById('change-pwd-confirm');
+  const changePwdStrengthFill = document.getElementById('change-pwd-strength-fill');
+  const changePwdHint = document.getElementById('change-pwd-hint');
+  const changePwdConfirmHint = document.getElementById('change-pwd-confirm-hint');
+  const btnSubmitChangePwd = document.getElementById('btn-submit-change-pwd');
 
   // ── DOM – Users ──────────────────────────────────────────────
-  const inviteRole    = document.getElementById('invite-role');
+  const inviteRole = document.getElementById('invite-role');
   const btnCreateInvite = document.getElementById('btn-create-invite');
-  const inviteResult  = document.getElementById('invite-result');
+  const inviteResult = document.getElementById('invite-result');
   const usersTableBody = document.getElementById('users-table-body');
 
   // ── DOM – Membership ─────────────────────────────────────────
   const membershipStatusFilter = document.getElementById('membership-status-filter');
-  const membershipAgeFilter    = document.getElementById('membership-age-filter');
-  const membershipRefresh      = document.getElementById('membership-refresh');
-  const membershipTableBody    = document.getElementById('membership-table-body');
-  const membershipDetail       = document.getElementById('membership-detail');
-  const membershipPipelines    = document.getElementById('membership-pipelines');
-  const pipelineLabel          = document.getElementById('pipeline-label');
-  const pipelineTransport      = document.getElementById('pipeline-transport');
-  const pipelineEndpoint       = document.getElementById('pipeline-endpoint');
-  const pipelineRole           = document.getElementById('pipeline-role');
-  const pipelineCreate         = document.getElementById('pipeline-create');
-  const pipelineList           = document.getElementById('pipeline-list');
+  const membershipAgeFilter = document.getElementById('membership-age-filter');
+  const membershipRefresh = document.getElementById('membership-refresh');
+  const membershipTableBody = document.getElementById('membership-table-body');
+  const membershipDetail = document.getElementById('membership-detail');
+  const membershipPipelines = document.getElementById('membership-pipelines');
+  const pipelineLabel = document.getElementById('pipeline-label');
+  const pipelineTransport = document.getElementById('pipeline-transport');
+  const pipelineEndpoint = document.getElementById('pipeline-endpoint');
+  const pipelineRole = document.getElementById('pipeline-role');
+  const pipelineCreate = document.getElementById('pipeline-create');
+  const pipelineList = document.getElementById('pipeline-list');
 
   // ── DOM – Confirm modal ──────────────────────────────────────
-  const modalConfirm      = document.getElementById('modal-confirm');
+  const modalConfirm = document.getElementById('modal-confirm');
   const modalConfirmTitle = document.getElementById('modal-confirm-title');
-  const modalConfirmMsg   = document.getElementById('modal-confirm-msg');
-  const btnConfirmOk      = document.getElementById('btn-confirm-ok');
+  const modalConfirmMsg = document.getElementById('modal-confirm-msg');
+  const btnConfirmOk = document.getElementById('btn-confirm-ok');
 
   // ── Application State ────────────────────────────────────────
   let isSetup = null;
@@ -286,15 +290,242 @@
   let currentUser = null;
   let cachedEndpoints = [];
   let cachedSyncSets = [];
-  let cachedConfig = null;
+  let editorDirty = false;
+  let editorBaseline = null;
+  let editorSaveState = 'clean';
+  let membershipSelection = '';
+  let editorSaving = false;
+  let editorLoading = false;
+  let membershipConfigReady = false;
+  let editorDisabledControls = [];
+  let privateDMGlobalBaseline = false;
+
+  function syncSetSnapshot() {
+    return {
+      id: inputSyncsetId?.value || '',
+      endpoints: editorEndpoints.map(endpoint => ({ ...endpoint })),
+      fields: Array.from(syncsetSettingsPanel.querySelectorAll('input, select, textarea'))
+        .filter(field => field.id)
+        .map(field => [field.id, field.type === 'checkbox' ? field.checked : field.value])
+    };
+  }
+
+  function setSyncSetSaveState(state, message) {
+    editorSaveState = state;
+    document.querySelectorAll('.syncset-list-item.active [data-syncset-save-status], #syncset-editor-form [data-syncset-save-status], #modal-create-sync-set [data-syncset-save-status], #modal-sync-set-settings [data-syncset-save-status]').forEach(el => {
+      el.dataset.state = state;
+      const text = message || ({ saving: 'Saving changes…', error: 'Save failed. Your changes are still available.' }[state] || '');
+      el.hidden = !text;
+      el.textContent = text;
+    });
+    document.querySelectorAll('.syncset-list-item.active .syncset-save-btn, .syncset-list-item.active .syncset-polished-save, #btn-save-sync-set, #modal-create-sync-set-save, #modal-sync-set-settings-save').forEach(button => {
+      button.disabled = editorSaving || !editorDirty || !membershipConfigReady;
+      button.setAttribute('aria-busy', String(editorSaving));
+    });
+  }
+
+  function markSyncSetDirty() {
+    if (editorLoading || editorSaving) return;
+    editorDirty = !editorBaseline || JSON.stringify(syncSetSnapshot()) !== JSON.stringify(editorBaseline);
+    setSyncSetSaveState(editorDirty ? 'dirty' : 'clean');
+  }
+
+  function updateMembershipFields() {
+    membershipFields.hidden = !membershipReviewEnabled.checked;
+    membershipFields.disabled = !membershipConfigReady;
+  }
+
+  privateDMGlobalEnabled?.addEventListener('change', () => {
+    privateDMGlobalSave.disabled = privateDMGlobalEnabled.checked === privateDMGlobalBaseline;
+    privateDMGlobalError?.classList.add('hidden');
+  });
+  privateDMGlobalSave?.addEventListener('click', async () => {
+    privateDMGlobalSave.disabled = true;
+    privateDMGlobalEnabled.disabled = true;
+    privateDMGlobalError?.classList.add('hidden');
+    try {
+      const updated = await window.API.updateConfig({ privateDMRelayEnabled: privateDMGlobalEnabled.checked });
+      privateDMGlobalBaseline = updated.privateDMRelayEnabled === true;
+      privateDMGlobalEnabled.checked = privateDMGlobalBaseline;
+    } catch (err) {
+      if (privateDMGlobalError) { privateDMGlobalError.textContent = err.message || 'Failed to update private DM relay setting.'; privateDMGlobalError.classList.remove('hidden'); }
+    } finally {
+      privateDMGlobalEnabled.disabled = false;
+      privateDMGlobalSave.disabled = privateDMGlobalEnabled.checked === privateDMGlobalBaseline;
+    }
+  });
+  membershipReviewEnabled?.addEventListener('change', updateMembershipFields);
+
+  function membershipEnabled(id) {
+    return cachedSyncSets.some(set => set.id === id && set.settings?.membershipReviewEnabled === true);
+  }
+
+  function refreshMembershipVisibility() {
+    const enabled = cachedSyncSets.some(set => set.settings?.membershipReviewEnabled === true);
+    navMembership?.classList.toggle('hidden', currentUser?.role !== 'admin' || !enabled);
+  }
+
+  document.addEventListener('input', event => {
+    if (event.target.closest('#syncset-settings-panel, #syncset-privacy-card, .syncset-privacy-panel, .syncset-membership-panel') || event.target.id === 'input-syncset-id' || event.target.id.startsWith('membership-')) markSyncSetDirty();
+  });
+  document.addEventListener('change', event => {
+    if (event.target.closest('#syncset-settings-panel, #syncset-privacy-card, .syncset-privacy-panel, .syncset-membership-panel') || event.target.id.startsWith('membership-')) markSyncSetDirty();
+  });
+  let cachedConnections = [];
   let cachedDiscordChannels = [];
   let cachedDiscordStatus = null;
   let cachedTelegramChats = [];
   let cachedWaGroups = [];
+  const cachedTargetNames = new Map();
+  const activeDiscoveryPromises = new Map();
+
+  function cacheDiscoveredTargets(connId, targets) {
+    if (!connId || !Array.isArray(targets)) return;
+    targets.forEach(item => {
+      if (!item) return;
+      let remoteId = '';
+      let name = '';
+      if (item.jid !== undefined) {
+        remoteId = item.jid;
+        name = item.name || item.jid || '';
+      } else if (item.channelId !== undefined) {
+        remoteId = item.channelId;
+        name = item.channelName || item.channelId || '';
+      } else if (item.chatId !== undefined) {
+        remoteId = String(item.chatId);
+        name = item.title || item.chatId || '';
+      }
+      if (remoteId && name) {
+        const strId = String(remoteId).trim();
+        cachedTargetNames.set(`${connId}:${strId}`, name);
+        const clean = strId.replace(/^-100/, '').replace(/^-/, '');
+        if (clean) {
+          cachedTargetNames.set(`${connId}:${clean}`, name);
+          cachedTargetNames.set(`${connId}:-${clean}`, name);
+          cachedTargetNames.set(`${connId}:-100${clean}`, name);
+        }
+      }
+    });
+  }
+
+  function fetchConnectionDiscovery(connId) {
+    if (!connId) return Promise.resolve([]);
+    if (activeDiscoveryPromises.has(connId)) {
+      return activeDiscoveryPromises.get(connId);
+    }
+    const p = window.API.getConnectionDiscovery(connId)
+      .then(targets => {
+        cacheDiscoveredTargets(connId, targets);
+        updateChipConnectionBadges();
+        return targets;
+      })
+      .catch(() => [])
+      .finally(() => {
+        activeDiscoveryPromises.delete(connId);
+      });
+    activeDiscoveryPromises.set(connId, p);
+    return p;
+  }
+
+  async function ensureConnectionsLoaded() {
+    if (!cachedConnections || cachedConnections.length === 0) {
+      try {
+        const conns = await window.API.listConnections().catch(() => []);
+        if (Array.isArray(conns) && conns.length > 0) {
+          cachedConnections = conns;
+          updateChipConnectionBadges();
+        }
+      } catch (e) { }
+    }
+    return cachedConnections;
+  }
+
+  function getEndpointConnLabel(ep) {
+    if (!ep) return '';
+    const epConn = (cachedConnections || []).find(c => c.id === ep.connectionId);
+    if (epConn && epConn.label && !epConn.label.startsWith('conn_')) {
+      return epConn.label;
+    }
+    if (ep.transport) return ep.transport;
+    if (epConn && epConn.transport) return epConn.transport;
+    return (epConn && epConn.label) || '';
+  }
+
+  function getEndpointBracketContent(ep) {
+    if (!ep) return '';
+    const connLabel = getEndpointConnLabel(ep);
+    const targetName = getEndpointTargetName(ep);
+    if (connLabel && targetName) return `${connLabel}/${targetName}`;
+    return targetName || connLabel || '';
+  }
+
+  async function ensureTargetNamesForEndpoints(endpoints) {
+    await ensureConnectionsLoaded();
+    if (!Array.isArray(endpoints) || endpoints.length === 0) {
+      updateChipConnectionBadges();
+      return;
+    }
+    const connIds = new Set();
+    endpoints.forEach(ep => {
+      if (ep && ep.connectionId && !getEndpointTargetName(ep)) {
+        connIds.add(ep.connectionId);
+      }
+    });
+    if (connIds.size === 0) {
+      updateChipConnectionBadges();
+      return;
+    }
+    await Promise.all(Array.from(connIds).map(id => fetchConnectionDiscovery(id)));
+    updateChipConnectionBadges();
+  }
+
+  function getEndpointTargetName(ep) {
+    if (!ep) return '';
+    if (ep.targetName) return ep.targetName;
+    const strRemote = String(ep.remoteId || '').trim();
+    if (!strRemote) return '';
+    const key = `${ep.connectionId}:${strRemote}`;
+    if (cachedTargetNames.has(key)) return cachedTargetNames.get(key);
+
+    const clean = strRemote.replace(/^-100/, '').replace(/^-/, '');
+    if (clean) {
+      if (cachedTargetNames.has(`${ep.connectionId}:${clean}`)) return cachedTargetNames.get(`${ep.connectionId}:${clean}`);
+      if (cachedTargetNames.has(`${ep.connectionId}:-${clean}`)) return cachedTargetNames.get(`${ep.connectionId}:-${clean}`);
+      if (cachedTargetNames.has(`${ep.connectionId}:-100${clean}`)) return cachedTargetNames.get(`${ep.connectionId}:-100${clean}`);
+    }
+    return '';
+  }
+
+  function updateChipConnectionBadges() {
+    if (!endpointChips) return;
+    endpointChips.querySelectorAll('.endpoint-chip').forEach(chip => {
+      const idx = Number(chip.dataset.idx);
+      const ep = editorEndpoints[idx];
+      if (!ep) return;
+      const bracketContent = getEndpointBracketContent(ep);
+      let badge = chip.querySelector('.chip-conn-label');
+      if (bracketContent) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'chip-conn-label';
+          badge.style.cssText = 'font-size:.7rem;color:var(--text-muted);margin:0 4px;';
+          const aliasEl = chip.querySelector('.chip-alias');
+          if (aliasEl && aliasEl.nextSibling) {
+            chip.insertBefore(badge, aliasEl.nextSibling);
+          } else {
+            chip.appendChild(badge);
+          }
+        }
+        badge.textContent = `(${bracketContent})`;
+      } else if (badge) {
+        badge.remove();
+      }
+    });
+  }
 
   // Sync set editor state
   let editingSyncSetId = null;      // null = new
-  let editorEndpoints  = [];        // { alias, transport, remoteId }[] — pending set
+  let editorEndpoints = [];        // { alias, transport, remoteId }[] — pending set
 
   // WA polling / QR state
   let waPollTimer = null;
@@ -355,7 +586,7 @@
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     const iconMap = {
-      danger:  `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`,
+      danger: `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`,
       warning: `<svg class="icon toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`,
     };
     toast.innerHTML = `${iconMap[type] || iconMap.danger}<div class="toast-message">${escapeHtml(message)}</div>`;
@@ -590,7 +821,7 @@
     setupAlert.classList.add('hidden');
     const username = setupUsernameInput.value.trim();
     const password = setupPasswordInput.value;
-    const confirm  = setupConfirmPasswordInput.value;
+    const confirm = setupConfirmPasswordInput.value;
     if (!username) { setupAlert.textContent = 'Username is required.'; setupAlert.classList.remove('hidden'); return; }
     if (password.length < 8 || password.length > 72) { setupAlert.textContent = 'Password must be 8–72 characters.'; setupAlert.classList.remove('hidden'); return; }
     if (password !== confirm) { setupAlert.textContent = 'Passwords do not match.'; setupAlert.classList.remove('hidden'); return; }
@@ -636,7 +867,7 @@
   }
 
   async function handleLogout() {
-    try { await window.API.logout(); } catch (e) {}
+    try { await window.API.logout(); } catch (e) { }
     isAuthenticated = false;
     currentUser = null;
     updateSessionDisplay();
@@ -659,7 +890,8 @@
     if (sessionRole) sessionRole.textContent = role;
     const isAdmin = role === 'admin';
     if (navUsers) navUsers.classList.toggle('hidden', !isAdmin);
-    if (navMembership) navMembership.classList.toggle('hidden', !isAdmin);
+    refreshMembershipVisibility();
+    if (isAdmin) window.API.getSyncSets().then(sets => { cachedSyncSets = sets; refreshMembershipVisibility(); }).catch(() => { });
     document.querySelectorAll('.admin-only').forEach(el => {
       el.classList.toggle('hidden', !isAdmin);
     });
@@ -678,7 +910,7 @@
       isAuthenticated = true;
       currentUser = res && res.user ? res.user : null;
       if (!currentUser) {
-        try { currentUser = await window.API.getCurrentUser(); } catch (e) {}
+        try { currentUser = await window.API.getCurrentUser(); } catch (e) { }
       }
       updateSessionDisplay();
       showToast('Account created!', 'success');
@@ -743,7 +975,7 @@
         renderDashboardVersion(cachedVersion);
       }
       await refreshDashboardPlatformStatuses();
-    } catch (e) {}
+    } catch (e) { }
     await loadDeliveryStatus();
     startDeliveryPolling();
   }
@@ -954,8 +1186,8 @@
       return;
     }
     const connected = data.status === 'connected' || (data.isConnected && data.isLoggedIn);
-    const pairing   = data.status === 'pairing' || (data.qrCode && data.qrCode.length > 0);
-    const loggedIn  = data.isLoggedIn;
+    const pairing = data.status === 'pairing' || (data.qrCode && data.qrCode.length > 0);
+    const loggedIn = data.isLoggedIn;
     if (connected) {
       setStatusCard(waStatusDot, waStatusText, waStatusDesc, 'connected', 'Connected & Active', '');
     } else if (pairing) {
@@ -999,7 +1231,7 @@
     // Ready transports with no immediate queue/retry work are healthy even
     // when the content-free ledger retains restart/replay history.
     if ((item.transportStatus === 'ready' || item.transportStatus === 'connected') &&
-        item.queueDepth === 0 && item.retrying === 0) {
+      item.queueDepth === 0 && item.retrying === 0) {
       return 'healthy';
     }
     return item.laneState;
@@ -1012,10 +1244,10 @@
       const eps = data && Array.isArray(data.endpoints) ? data.endpoints : [];
       deliveryBody.innerHTML = eps.map(item => {
         const ledger = `Q ${item.queued} · R ${item.retrying} · A ${item.awaitingReplay} · F ${item.failed}`;
-        const queue  = `${item.queueDepth}/${item.queueCapacity}`;
+        const queue = `${item.queueDepth}/${item.queueCapacity}`;
         const displayState = deliveryDisplayState(item);
-        const fail   = displayState !== 'healthy' && item.lastFailureClass ? ` · ${escapeHtml(item.lastFailureClass)}` : '';
-        const state  = deliveryStateLabel[displayState] || 'Unknown';
+        const fail = displayState !== 'healthy' && item.lastFailureClass ? ` · ${escapeHtml(item.lastFailureClass)}` : '';
+        const state = deliveryStateLabel[displayState] || 'Unknown';
         const tBadge = item.transport === 'discord' ? 'badge-discord' : item.transport === 'telegram' ? 'badge-telegram' : 'badge-wa';
         // Endpoint create payload uses: { transport: 'telegram' } | { transport: 'discord' } | { transport: 'whatsapp' }
         return `<tr>
@@ -1088,7 +1320,7 @@
           clearWaQRCode();
           if (window.Router.getRoute() === 'connections') loadConnections();
         }
-      } catch (e) {}
+      } catch (e) { }
     }, ms);
   }
 
@@ -1115,7 +1347,7 @@
   async function requestWaPairing(connId, inline) {
     if (typeof connId !== 'string' || !connId) {
       if (!cachedConnections || cachedConnections.length === 0) {
-        try { cachedConnections = await window.API.listConnections(); } catch (e) {}
+        try { cachedConnections = await window.API.listConnections(); } catch (e) { }
       }
       const waConn = (cachedConnections || []).find(c => c.transport === 'whatsapp');
       if (!waConn) {
@@ -1227,7 +1459,6 @@
   // Connections Page & Secret Management
   // ══════════════════════════════════════════════════════════════
 
-  let cachedConnections = [];
   let addConnTransport = 'whatsapp';
   let replaceTokenConnId = '';
   let discoveryConnId = '';
@@ -1380,6 +1611,7 @@
           </button>`;
 
           if (conn.transport === 'whatsapp') {
+            actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.editDeviceName('${escapeHtml(conn.id)}')">Device name</button>`;
             actionButtons += `<button class="btn btn-ghost btn-sm admin-only" onclick="window.App.pairWhatsApp('${escapeHtml(conn.id)}')">Pair</button>`;
             actionButtons += `<button class="btn btn-ghost btn-sm danger admin-only" onclick="window.App.logoutWhatsApp('${escapeHtml(conn.id)}')">Logout</button>`;
           } else if (conn.transport === 'telegram' && caps.historyRecovery) {
@@ -1406,10 +1638,10 @@
             </div>
             <div class="connection-badges">
               <span class="badge ${conn.transport === 'discord' ? 'badge-discord' : conn.transport === 'telegram' ? 'badge-telegram' : 'badge-wa'}">${escapeHtml(conn.transport)}</span>
-              ${conn.transport === 'discord' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'webhook' ? 'Existing Webhook' : 'Managed Webhook')}</span>` : ''}
-              ${conn.transport === 'telegram' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'mtproto' ? 'Phone / MTProto' : 'Bot API')}</span>` : ''}
               <span class="badge ${conn.enabled ? 'badge-primary' : 'badge-neutral'}">${conn.enabled ? 'Enabled' : 'Disabled'}</span>
               <span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>
+              ${conn.transport === 'discord' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'webhook' ? 'Existing Webhook' : 'Managed Webhook')}</span>` : ''}
+              ${conn.transport === 'telegram' ? `<span class="badge badge-neutral">${escapeHtml(conn.integrationMode === 'mtproto' ? 'Phone / MTProto' : 'Bot API')}</span>` : ''}
             </div>
           </div>
 
@@ -1443,6 +1675,8 @@
     if (addConnPairingView) addConnPairingView.classList.add('hidden');
     if (addConnAlert) addConnAlert.classList.add('hidden');
     if (addConnLabel) addConnLabel.value = '';
+    const deviceNameInput = document.getElementById('add-conn-device-name');
+    if (deviceNameInput) deviceNameInput.value = 'message-sync';
     if (addConnId) addConnId.value = '';
     if (addConnToken) addConnToken.value = '';
     if (addConnDiscordMode) addConnDiscordMode.value = 'managed';
@@ -1489,6 +1723,7 @@
     if (addConnHelpDiscord) addConnHelpDiscord.classList.toggle('hidden', transport !== 'discord');
     if (addConnHelpTelegram) addConnHelpTelegram.classList.toggle('hidden', transport !== 'telegram');
     if (addConnWaHelp) addConnWaHelp.classList.toggle('hidden', transport !== 'whatsapp');
+    document.getElementById('add-conn-device-name-group')?.classList.toggle('hidden', transport !== 'whatsapp');
     if (btnSubmitAddConn) {
       const buttonText = btnSubmitAddConn.querySelector('.btn-text');
       if (buttonText) buttonText.textContent = transport === 'whatsapp' ? 'Create & Pair' : 'Create Connection';
@@ -1542,6 +1777,7 @@
     setButtonLoading(btnSubmitAddConn, true);
     try {
       const payload = { transport: addConnTransport, label, enabled: true };
+      if (addConnTransport === 'whatsapp') payload.whatsappDeviceName = document.getElementById('add-conn-device-name')?.value.trim() || 'message-sync';
       if (id) payload.id = id;
       if (addConnTransport === 'telegram') payload.integrationMode = telegramMode;
       if (addConnTransport === 'discord') payload.integrationMode = discordMode;
@@ -1668,7 +1904,7 @@
     if (!mtprotoConnId) return;
     setButtonLoading(btnMTProtoRequestCode, true);
     try { await window.API.requestTelegramMTProtoCode(mtprotoConnId); await refreshMTProtoModal(); }
-    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Could not request login code.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Could not request login code.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
     finally { setButtonLoading(btnMTProtoRequestCode, false); }
   }
 
@@ -1677,9 +1913,9 @@
     if (mtprotoCode) mtprotoCode.value = '';
     if (!code) return;
     setButtonLoading(btnMTProtoCode, true);
-    try { await window.API.submitTelegramMTProtoCode(mtprotoConnId, code); code=''; await refreshMTProtoModal(); }
-    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram login code was rejected.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
-    finally { code=''; setButtonLoading(btnMTProtoCode, false); }
+    try { await window.API.submitTelegramMTProtoCode(mtprotoConnId, code); code = ''; await refreshMTProtoModal(); }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram login code was rejected.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    finally { code = ''; setButtonLoading(btnMTProtoCode, false); }
   }
 
   async function submitMTProtoPassword() {
@@ -1687,9 +1923,9 @@
     if (mtprotoPassword) mtprotoPassword.value = '';
     if (!password) return;
     setButtonLoading(btnMTProtoPassword, true);
-    try { await window.API.submitTelegramMTProtoPassword(mtprotoConnId, password); password=''; await refreshMTProtoModal(); await loadConnections(); }
-    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram 2FA password was rejected.'; mtprotoAlert.className='alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
-    finally { password=''; setButtonLoading(btnMTProtoPassword, false); }
+    try { await window.API.submitTelegramMTProtoPassword(mtprotoConnId, password); password = ''; await refreshMTProtoModal(); await loadConnections(); }
+    catch (err) { if (mtprotoAlert) { mtprotoAlert.textContent = err.message || 'Telegram 2FA password was rejected.'; mtprotoAlert.className = 'alert alert-danger'; mtprotoAlert.classList.remove('hidden'); } }
+    finally { password = ''; setButtonLoading(btnMTProtoPassword, false); }
   }
 
   async function logoutMTProtoSession() {
@@ -1724,6 +1960,44 @@
         discoveryAlert.classList.remove('hidden');
       }
     } catch (err) { showToast(err.message || 'Topic discovery failed.', 'danger'); }
+  }
+
+  function editDeviceName(connId) {
+    const conn = cachedConnections.find(c => c.id === connId);
+    if (!conn) return;
+    const modal = document.getElementById('modal-device-name');
+    const form = document.getElementById('form-device-name');
+    const input = document.getElementById('connection-device-name');
+    const status = document.getElementById('device-name-status');
+    const button = document.getElementById('save-device-name');
+    input.value = conn.whatsappDeviceName || 'message-sync';
+    let savedName = input.value;
+    status.textContent = '';
+    status.hidden = true;
+    button.disabled = true;
+    input.oninput = () => { status.hidden = true; button.disabled = input.value === savedName; };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      button.disabled = true;
+      input.disabled = true;
+      status.hidden = false;
+      status.textContent = 'Saving changes…';
+      status.dataset.state = 'saving';
+      try {
+        const updated = await window.API.updateConnection(connId, { whatsappDeviceName: input.value });
+        Object.assign(conn, updated);
+        savedName = input.value;
+        status.hidden = true;
+        status.textContent = '';
+      } catch (err) {
+        status.textContent = 'Save failed: ' + err.message;
+        status.dataset.state = 'error';
+      } finally {
+        button.disabled = input.value === savedName;
+        input.disabled = false;
+      }
+    };
+    openModal(modal);
   }
 
   function openReplaceTokenModal(connId, label) {
@@ -1817,6 +2091,7 @@
       const targets = await window.API.getConnectionDiscovery(connId);
       if (discoveryLoading) discoveryLoading.classList.add('hidden');
       discoveredTargets = Array.isArray(targets) ? targets : [];
+      cacheDiscoveredTargets(connId, discoveredTargets);
 
       if (discoveredTargets.length === 0) {
         if (discoveryEmpty) {
@@ -1998,18 +2273,23 @@
   // Sync Sets Page
   // ══════════════════════════════════════════════════════════════
 
-  async function loadSyncSetsPage() {
+  async function loadSyncSetsPage(throwOnError = false) {
     try {
-      const [syncSetsRes, endpointsRes] = await Promise.all([
+      const [syncSetsRes, endpointsRes, connsRes] = await Promise.all([
         window.API.getSyncSets(),
-        window.API.getEndpoints()
+        window.API.getEndpoints(),
+        (!cachedConnections || cachedConnections.length === 0) ? window.API.listConnections().catch(() => []) : Promise.resolve(cachedConnections)
       ]);
-      cachedSyncSets   = Array.isArray(syncSetsRes)  ? syncSetsRes  : [];
-      cachedEndpoints  = Array.isArray(endpointsRes) ? endpointsRes : [];
+      cachedSyncSets = Array.isArray(syncSetsRes) ? syncSetsRes : [];
+      cachedEndpoints = Array.isArray(endpointsRes) ? endpointsRes : [];
+      if (Array.isArray(connsRes) && connsRes.length > 0) cachedConnections = connsRes;
+      ensureTargetNamesForEndpoints(cachedEndpoints);
     } catch (err) {
+      if (throwOnError) throw err;
       showToast(err.message || 'Failed to load sync sets', 'danger');
     }
     if (editingSyncSetId && !cachedSyncSets.some(s => s.id === editingSyncSetId)) editingSyncSetId = null;
+    refreshMembershipVisibility();
     renderSyncSetList();
     showEditorPlaceholder();
   }
@@ -2026,22 +2306,22 @@
     syncsetList.innerHTML = cachedSyncSets.map(set => {
       const count = Array.isArray(set.endpoints) ? set.endpoints.length : 0;
       const isActive = set.id === editingSyncSetId;
-      const anonBadge = set.anonymizeToDiscord ? `<span class="badge badge-discord" title="Anonymize to Discord" style="font-size:0.68rem;margin-left:6px;">anon</span>` : '';
       return `<div class="syncset-list-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(set.id)}">
         <button type="button" class="syncset-card-toggle" aria-expanded="${isActive}">
-          <span class="syncset-item-id">${escapeHtml(set.id)}${anonBadge}</span>
+          <span class="syncset-item-id">${escapeHtml(set.id)}</span>
           <span class="syncset-item-count">${count} ep</span><span class="syncset-chevron" aria-hidden="true"></span>
         </button>
         <button class="syncset-delete-btn" data-id="${escapeHtml(set.id)}" title="Delete">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
         </button>
         <div class="syncset-card-body" ${isActive ? '' : 'hidden'}>
+          <div class="syncset-save-feedback" data-syncset-save-status role="status" aria-live="polite" hidden></div>
           <div class="syncset-conversations"></div>
           <div class="syncset-card-actions">
             <button type="button" class="btn btn-ghost btn-sm syncset-add-btn">Add conversation</button>
             <span class="syncset-card-actions-main">
               <button type="button" class="btn btn-ghost btn-sm syncset-discard-btn">Cancel</button>
-              <button type="button" class="btn btn-primary btn-sm syncset-save-btn">Save</button>
+              <button type="button" class="btn btn-primary btn-sm syncset-save-btn" disabled>Save</button>
             </span>
           </div>
         </div>
@@ -2052,6 +2332,7 @@
     // their quick rename, reassign, and remove actions.
     const activeBody = syncsetList.querySelector('.syncset-list-item.active .syncset-conversations');
     if (activeBody && endpointChips) activeBody.appendChild(endpointChips);
+    setSyncSetSaveState(editorSaving ? 'saving' : editorDirty ? 'dirty' : 'clean');
 
     syncsetList.querySelectorAll('.syncset-card-toggle').forEach(toggle => {
       toggle.addEventListener('click', e => {
@@ -2068,7 +2349,8 @@
     });
     syncsetList.querySelectorAll('.syncset-add-btn').forEach(btn => btn.addEventListener('click', e => {
       e.stopPropagation();
-      openSyncSetEditor(btn.closest('.syncset-list-item').getAttribute('data-id'));
+      const id = btn.closest('.syncset-list-item').getAttribute('data-id');
+      if (editingSyncSetId !== id) openSyncSetEditor(id);
       document.dispatchEvent(new CustomEvent('syncset:add-conversation'));
     }));
     syncsetList.querySelectorAll('.syncset-save-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); btnSaveSyncSet?.click(); }));
@@ -2095,7 +2377,11 @@
     if (syncsetEditorForm) { syncsetEditorForm.classList.remove('hidden'); syncsetEditorForm.style.display = 'flex'; }
   }
 
-  function openSyncSetEditor(id) {
+  function openSyncSetEditor(id, force = false) {
+    if (editorSaving && !force) return;
+    editorLoading = true;
+    editorDirty = false;
+    membershipConfigReady = !id;
     const set = id ? cachedSyncSets.find(s => s.id === id) : null;
     editingSyncSetId = set ? set.id : null;
 
@@ -2113,31 +2399,48 @@
     if (set && Array.isArray(set.endpoints)) {
       set.endpoints.forEach(alias => {
         const ep = cachedEndpoints.find(e => e.alias === alias);
-        if (ep) editorEndpoints.push({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, remoteId: ep.remoteId });
+        if (ep) editorEndpoints.push({ ...ep });
       });
     }
     renderChips();
+    ensureTargetNamesForEndpoints(editorEndpoints);
 
+    populateSettings(set?.settings || defaultSyncSetSettings());
     // Reset add-endpoint form
     resetAddEndpointForm();
-    if (syncsetAnonymizeToDiscord) syncsetAnonymizeToDiscord.checked = !!(set && set.anonymizeToDiscord);
-		if (membershipInstructions) membershipInstructions.value = '';
-		if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
-		if (membershipEvidenceRequired) membershipEvidenceRequired.checked = false;
-		if (membershipCustomFields) membershipCustomFields.value = '';
-		if (set) {
-			window.API.getMembershipConfig(set.id).then(cfg => {
-				if (membershipInstructions) membershipInstructions.value = cfg.applicantInstructions || '';
-				if (membershipReviewerGuidance) membershipReviewerGuidance.value = cfg.reviewerGuidance || '';
-				if (membershipEvidenceRequired) membershipEvidenceRequired.checked = !!cfg.evidenceRequired;
-				if (membershipCustomFields) membershipCustomFields.value = JSON.stringify(cfg.customFields || [], null, 2);
-			}).catch(err => showToast(err.message || 'Failed to load membership configuration', 'danger'));
-		}
+    if (membershipInstructions) membershipInstructions.value = '';
+    if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
+    if (membershipEvidenceInstructions) membershipEvidenceInstructions.value = '';
+    if (membershipEvidenceRequired) membershipEvidenceRequired.checked = false;
+    if (membershipCustomFields) membershipCustomFields.value = '';
+    if (set) {
+      window.API.getMembershipConfig(set.id).then(cfg => {
+        if (editingSyncSetId !== set.id) return;
+        membershipConfigReady = true;
+        if (membershipInstructions) membershipInstructions.value = cfg.applicantInstructions || '';
+        if (membershipReviewerGuidance) membershipReviewerGuidance.value = cfg.reviewerGuidance || '';
+        if (membershipEvidenceInstructions) membershipEvidenceInstructions.value = cfg.evidenceInstructions || '';
+        if (membershipEvidenceRequired) membershipEvidenceRequired.checked = !!cfg.evidenceRequired;
+        if (membershipCustomFields) membershipCustomFields.value = JSON.stringify(cfg.customFields || [], null, 2);
+        // Only the fields loaded by this request become the baseline; retain
+        // changes the user may already have made to other settings.
+        if (editorBaseline) {
+          const loaded = new Map(syncSetSnapshot().fields);
+          editorBaseline.fields = editorBaseline.fields.map(([key, value]) => [key, key.startsWith('membership-') ? loaded.get(key) : value]);
+        }
+        updateMembershipFields();
+        markSyncSetDirty();
+      }).catch(err => showToast(err.message || 'Failed to load membership configuration', 'danger'));
+    }
 
     // Update list selection highlight
     renderSyncSetList();
     if (set) showEditorPlaceholder();
     else { showEditorForm(); document.dispatchEvent(new CustomEvent('syncset:create')); }
+    editorBaseline = syncSetSnapshot();
+    updateMembershipFields();
+    editorLoading = false;
+    setSyncSetSaveState('clean');
   }
 
   function handleDeleteSyncSet(id) {
@@ -2167,6 +2470,7 @@
   let chipRenameIdx = null;
 
   function renderChips() {
+    markSyncSetDirty();
     if (!endpointChips) return;
     if (editorEndpoints.length === 0) {
       endpointChips.innerHTML = '<span class="chips-placeholder">No endpoints yet. Add one below.</span>';
@@ -2189,27 +2493,39 @@
           </span>
         `;
       }
-      const epConn = cachedConnections.find(c => c.id === ep.connectionId);
-      const connLabel = epConn ? epConn.label : (ep.connectionId || '');
-      const connBadge = connLabel ? `<span style="font-size:.7rem;color:var(--text-muted);margin:0 4px;">(${escapeHtml(connLabel)})</span>` : '';
+      const bracketContent = getEndpointBracketContent(ep);
+      const connBadge = bracketContent ? `<span class="chip-conn-label" style="font-size:.7rem;color:var(--text-muted);margin:0 4px;">(${escapeHtml(bracketContent)})</span>` : '';
 
       return `
         <span class="endpoint-chip ${transportClass(ep.transport)}" data-idx="${i}">
           <span class="badge ${transportBadgeClass(ep.transport)}" style="padding:1px 5px;font-size:.68rem;">${escapeHtml(ep.transport)}</span>
           <span class="chip-alias">${escapeHtml(ep.alias)}</span>
           ${connBadge}
-          <button type="button" class="chip-reassign" data-alias="${escapeHtml(ep.alias)}" title="Reassign connection">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
-          </button>
-          <button type="button" class="chip-edit" data-idx="${i}" title="Rename alias">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-          </button>
-          <button type="button" class="chip-remove" data-idx="${i}" title="Remove endpoint">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
+          <span class="chip-anonymity-controls">
+            <label class="chip-anonymity" title="Anonymize all messages delivered to this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeIncoming" ${ep.anonymizeIncoming ? 'checked' : ''}> Anonymize incoming</label>
+            <label class="chip-anonymity" title="Anonymize all messages sent from this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeOutgoing" ${ep.anonymizeOutgoing ? 'checked' : ''}> Anonymize outgoing</label>
+          </span>
+          <span class="chip-actions">
+            <button type="button" class="chip-reassign" data-alias="${escapeHtml(ep.alias)}" title="Reassign connection">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+            </button>
+            <button type="button" class="chip-edit" data-idx="${i}" title="Rename alias">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            </button>
+            <button type="button" class="chip-remove" data-idx="${i}" title="Remove endpoint">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </span>
         </span>
       `;
     }).join('');
+
+    endpointChips.querySelectorAll('.chip-anonymize').forEach(input => {
+      input.addEventListener('change', () => {
+        editorEndpoints[Number(input.dataset.idx)][input.dataset.field] = input.checked;
+        markSyncSetDirty();
+      });
+    });
 
     // Attach chip-reassign listeners
     endpointChips.querySelectorAll('.chip-reassign').forEach(btn => {
@@ -2285,7 +2601,7 @@
       showToast(`Endpoint alias renamed to '${newAlias}'.`, 'success');
       if (editingSyncSetId) {
         const aliases = editorEndpoints.map(e => e.alias);
-        window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases }).catch(() => {});
+        window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases }).catch(() => { });
         const set = cachedSyncSets.find(s => s.id === editingSyncSetId);
         if (set) set.endpoints = aliases;
         renderSyncSetList();
@@ -2400,6 +2716,7 @@
         if (addRemoteHint) addRemoteHint.textContent = '';
         const groups = await window.API.getConnectionDiscovery(selectedConnId).catch(() => []);
         cachedWaGroups = Array.isArray(groups) ? groups : [];
+        cacheDiscoveredTargets(selectedConnId, cachedWaGroups);
         const filtered = cachedWaGroups.filter(g => GROUP_JID_REGEX.test(g.jid));
         if (filtered.length === 0) {
           addRemoteSelect.innerHTML = '<option value="">No joined groups found</option>';
@@ -2439,6 +2756,7 @@
           }
         } else {
           cachedDiscordChannels = Array.isArray(channels) ? channels : [];
+          cacheDiscoveredTargets(selectedConnId, cachedDiscordChannels);
           addRemoteSelect.innerHTML = '<option value="">— select channel —</option>' +
             cachedDiscordChannels.map(c => {
               const inThisSet = editorEndpoints.some(e => e.transport === 'discord' && e.remoteId === c.channelId);
@@ -2478,6 +2796,7 @@
           }
         } else {
           cachedTelegramChats = Array.isArray(chats) ? chats : [];
+          cacheDiscoveredTargets(selectedConnId, cachedTelegramChats);
           addRemoteSelect.innerHTML = '<option value="">— select group —</option>' +
             cachedTelegramChats.map(c => {
               const inThisSet = editorEndpoints.some(e => e.transport === 'telegram' && e.remoteId === c.chatId);
@@ -2563,7 +2882,7 @@
       if (addEndpointAlert) addEndpointAlert.classList.add('hidden');
       const connectionId = addEndpointConnSelect ? addEndpointConnSelect.value.trim() : '';
       const remoteId = addRemoteSelect ? addRemoteSelect.value.trim() : '';
-      const alias    = addAliasInput  ? addAliasInput.value.trim()   : '';
+      const alias = addAliasInput ? addAliasInput.value.trim() : '';
 
       if (!connectionId) {
         if (addEndpointAlert) { addEndpointAlert.textContent = 'Select an owning connection first.'; addEndpointAlert.classList.remove('hidden'); }
@@ -2600,7 +2919,13 @@
         // Existing-set additions stay local until Save, so Cancel can discard
         // them without leaving an orphaned configured endpoint behind.
 
-        editorEndpoints.push({ alias, transport: activeTransport, connectionId, remoteId });
+        const selectedOption = addRemoteSelect ? addRemoteSelect.options[addRemoteSelect.selectedIndex] : null;
+        const targetName = selectedOption ? (selectedOption.dataset.name || '') : '';
+        if (targetName) {
+          cachedTargetNames.set(`${connectionId}:${remoteId}`, targetName);
+          cachedTargetNames.set(`${connectionId}:${String(remoteId)}`, targetName);
+        }
+        editorEndpoints.push({ alias, transport: activeTransport, connectionId, remoteId, targetName });
         renderChips();
         // Reset the add form
         if (addRemoteSelect) addRemoteSelect.value = '';
@@ -2620,74 +2945,94 @@
   // Save sync set
   if (btnSaveSyncSet) {
     btnSaveSyncSet.addEventListener('click', async () => {
+      if (editorSaving || !editorDirty) return;
       const id = editingSyncSetId || (inputSyncsetId ? inputSyncsetId.value.trim() : '');
       if (!SYNC_SET_ID_REGEX.test(id)) {
         showToast('Sync Set ID must start with alphanumeric and be 1–64 chars.', 'warning');
         if (inputSyncsetId) inputSyncsetId.focus();
         return;
       }
+      editorSaving = true;
+      setSyncSetSaveState('saving');
+      editorDisabledControls = Array.from(document.querySelectorAll('#syncset-settings-panel input, #syncset-settings-panel select, #syncset-settings-panel textarea, .syncset-list-item.active input, .syncset-list-item.active textarea, #syncset-editor-form input, #syncset-editor-form textarea, .syncset-list-item.active select, #syncset-editor-form select, #create-sync-set-body input, #create-sync-set-body textarea, #create-sync-set-body select, .syncset-list-item.active button, #syncset-editor-form button, #modal-create-sync-set button, #view-sync-sets button, #modal-sync-set-settings button')).map(el => [el, el.disabled]);
+      editorDisabledControls.forEach(([el]) => { el.disabled = true; });
       setButtonLoading(btnSaveSyncSet, true);
       try {
+        if (!membershipConfigReady) throw new Error('Membership settings are still loading. Please retry.');
+        const settings = readSyncSetSettings();
         const aliases = editorEndpoints.map(e => e.alias);
-			let customFields = [];
-			if (membershipCustomFields && membershipCustomFields.value.trim()) {
-				try { customFields = JSON.parse(membershipCustomFields.value); } catch (_) { throw new Error('Custom fields must be valid JSON.'); }
-				if (!Array.isArray(customFields)) throw new Error('Custom fields must be a JSON array.');
-			}
-			const membershipConfig = {
-				applicantInstructions: membershipInstructions ? membershipInstructions.value : '',
-				reviewerGuidance: membershipReviewerGuidance ? membershipReviewerGuidance.value : '',
-				evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
-				customFields
-			};
-			const anonymizeToDiscord = !!(syncsetAnonymizeToDiscord && syncsetAnonymizeToDiscord.checked);
+        let customFields = [];
+        if (membershipCustomFields && membershipCustomFields.value.trim()) {
+          try { customFields = JSON.parse(membershipCustomFields.value); } catch (_) { throw new Error('Custom fields must be valid JSON.'); }
+          if (!Array.isArray(customFields)) throw new Error('Custom fields must be a JSON array.');
+        }
+        const membershipConfig = {
+          applicantInstructions: membershipInstructions ? membershipInstructions.value : '',
+          evidenceInstructions: membershipEvidenceInstructions ? membershipEvidenceInstructions.value : '',
+          reviewerGuidance: membershipReviewerGuidance ? membershipReviewerGuidance.value : '',
+          evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
+          customFields
+        };
+
         if (editingSyncSetId) {
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
             if (existingEp) {
+              if (existingEp.alias === ep.alias && existingEp.transport === ep.transport && existingEp.connectionId === ep.connectionId && existingEp.remoteId === ep.remoteId && existingEp.syncSetId === editingSyncSetId && !!existingEp.anonymizeIncoming === !!ep.anonymizeIncoming && !!existingEp.anonymizeOutgoing === !!ep.anonymizeOutgoing) continue;
               await window.API.updateEndpoint(existingEp.alias, {
                 alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId,
-                remoteId: ep.remoteId, syncSetId: editingSyncSetId
+                anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: editingSyncSetId
               });
             } else {
               await window.API.createEndpoint({ ...ep, syncSetId: editingSyncSetId });
             }
           }
-          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, anonymizeToDiscord });
-			await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
-          showToast(`Sync set '${editingSyncSetId}' saved.`, 'success');
+          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, settings });
+          await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
         } else {
           // Create set first
-          await window.API.createSyncSet({ id, endpoints: [], anonymizeToDiscord });
+          await window.API.createSyncSet({ id, endpoints: [], settings });
           editingSyncSetId = id;
           // Now create or update all pending endpoints
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.remoteId === ep.remoteId && e.transport === ep.transport);
             if (existingEp) {
-              await window.API.updateEndpoint(existingEp.alias, { alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId || existingEp.connectionId, remoteId: ep.remoteId, syncSetId: id });
+              await window.API.updateEndpoint(existingEp.alias, { alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId || existingEp.connectionId, anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: id });
             } else {
-              await window.API.createEndpoint({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, remoteId: ep.remoteId, syncSetId: id });
+              await window.API.createEndpoint({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: id });
             }
           }
           // Update the sync set with endpoint aliases
-          await window.API.updateSyncSet(id, { endpoints: aliases, anonymizeToDiscord });
-			await window.API.updateMembershipConfig(id, membershipConfig);
+          await window.API.updateSyncSet(id, { endpoints: aliases, settings });
+          await window.API.updateMembershipConfig(id, membershipConfig);
           showToast(`Sync set '${id}' created.`, 'success');
         }
-        await loadSyncSetsPage();
+        await loadSyncSetsPage(true);
         // Re-open editor for the now-saved set
-        openSyncSetEditor(editingSyncSetId);
+        openSyncSetEditor(editingSyncSetId, true);
+        editorDirty = false;
+        setSyncSetSaveState('clean');
         document.dispatchEvent(new CustomEvent('syncset:saved'));
       } catch (err) {
+        // A failed runtime reload can follow a successful database commit.
+        if (err.data?.persisted && err.data.syncSetId === id) editingSyncSetId = id;
+        try { cachedEndpoints = await window.API.getEndpoints(); } catch (_) { /* preserve the draft for retry */ }
+        editorDirty = true;
+        setSyncSetSaveState('error', 'Save failed: ' + (err.message || 'Please retry.'));
         showToast(err.message || 'Failed to save sync set.', 'danger');
       } finally {
+        editorSaving = false;
+        editorDisabledControls.forEach(([el, disabled]) => { el.disabled = disabled; });
         setButtonLoading(btnSaveSyncSet, false);
+        updateMembershipFields();
+        setSyncSetSaveState(editorSaveState);
       }
     });
   }
 
   if (btnNewSyncSet) {
     btnNewSyncSet.addEventListener('click', () => {
+      if (editorSaving) return;
       editingSyncSetId = null;
       editorEndpoints = [];
       openSyncSetEditor(null);
@@ -2713,20 +3058,35 @@
   // ══════════════════════════════════════════════════════════════
 
   async function loadSettings() {
-    if (settingsAlert) settingsAlert.classList.add('hidden');
+    if (currentUser?.role !== 'admin') return;
+    if (privateDMGlobalEnabled) privateDMGlobalEnabled.disabled = true;
     try {
       const cfg = await window.API.getConfig();
-      cachedConfig = cfg;
-      populateSettings(cfg);
-    } catch (err) {
-      showToast(err.message || 'Failed to load settings', 'danger');
-    }
+      privateDMGlobalBaseline = cfg.privateDMRelayEnabled === true;
+      if (privateDMGlobalEnabled) privateDMGlobalEnabled.checked = privateDMGlobalBaseline;
+      if (privateDMGlobalEnabled) privateDMGlobalEnabled.disabled = false;
+      if (privateDMGlobalSave) privateDMGlobalSave.disabled = true;
+      privateDMGlobalError?.classList.add('hidden');
+    } catch (err) { showToast(err.message || 'Failed to load settings.', 'danger'); }
+  }
+
+  function defaultSyncSetSettings() {
+    return {
+      membershipReviewEnabled: false,
+      privateDMRelayEnabled: false,
+      childContextDisplayMode: 'opaque',
+      media: { enabled: true, maxSizeMB: 100 },
+      recovery: { enabled: true, maxAgeHours: 24, maxMessagesPerGroup: 200 },
+      storage: { messageRetentionDays: 90 },
+      polls: { aggregationTrigger: 'aggregate-response' },
+      localPrefix: '', whatsappCleanup: { enabled: false, retentionDays: 30 }
+    };
   }
 
   function setupChipsInput({ containerId, hiddenInputId, textInputId, placeholderEmpty, placeholderFilled }) {
-    const container   = document.getElementById(containerId);
+    const container = document.getElementById(containerId);
     const hiddenInput = document.getElementById(hiddenInputId);
-    const textInput   = document.getElementById(textInputId);
+    const textInput = document.getElementById(textInputId);
     if (!container || !textInput) return null;
 
     let values = [];
@@ -2793,12 +3153,14 @@
       if (changed) {
         render();
       }
+      return changed;
     }
 
     function removeAt(idx) {
       if (idx >= 0 && idx < values.length) {
         values.splice(idx, 1);
         render();
+        markSyncSetDirty();
       }
     }
 
@@ -2808,6 +3170,7 @@
       if (val) {
         addValues(val);
         textInput.value = '';
+        markSyncSetDirty();
       }
     }
 
@@ -2862,6 +3225,7 @@
         e.preventDefault();
         addValues(pasteText);
         textInput.value = '';
+        markSyncSetDirty();
       }
     });
 
@@ -2892,14 +3256,15 @@
 
   function populateSettings(cfg) {
     if (!cfg) return;
-    if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
+    membershipReviewEnabled.checked = cfg.membershipReviewEnabled === true;
+    if (privateDMSetEnabled) privateDMSetEnabled.checked = cfg.privateDMRelayEnabled === true;
     if (settingsChildContextMode) settingsChildContextMode.value = cfg.childContextDisplayMode || 'opaque';
-    if (settingsMediaEnabled)  settingsMediaEnabled.checked = cfg.media ? cfg.media.enabled : false;
-    if (settingsMediaMaxSize)  settingsMediaMaxSize.value  = cfg.media ? cfg.media.maxSizeMB : 50;
+    if (settingsMediaEnabled) settingsMediaEnabled.checked = cfg.media ? cfg.media.enabled : false;
+    if (settingsMediaMaxSize) settingsMediaMaxSize.value = cfg.media ? cfg.media.maxSizeMB : 100;
     if (settingsRecoveryEnabled) settingsRecoveryEnabled.checked = cfg.recovery ? cfg.recovery.enabled : true;
-    if (settingsRecoveryMaxAge)  settingsRecoveryMaxAge.value   = cfg.recovery ? cfg.recovery.maxAgeHours : 72;
-    if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value  = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 1000;
-    if (settingsRetentionDays)   settingsRetentionDays.value    = cfg.storage ? cfg.storage.messageRetentionDays : 14;
+    if (settingsRecoveryMaxAge) settingsRecoveryMaxAge.value = cfg.recovery ? cfg.recovery.maxAgeHours : 24;
+    if (settingsRecoveryMaxMsgs) settingsRecoveryMaxMsgs.value = cfg.recovery ? cfg.recovery.maxMessagesPerGroup : 200;
+    if (settingsRetentionDays) settingsRetentionDays.value = cfg.storage ? cfg.storage.messageRetentionDays : 90;
     if (chipsPollsAggTrigger) {
       chipsPollsAggTrigger.setValues(cfg.polls ? cfg.polls.aggregationTrigger : 'aggregate-response');
     } else if (settingsPollsAggTrigger) {
@@ -2912,67 +3277,38 @@
     }
     if (settingsWaCleanupEnabled) settingsWaCleanupEnabled.checked = cfg.whatsappCleanup ? cfg.whatsappCleanup.enabled : false;
     if (settingsWaCleanupRetention) settingsWaCleanupRetention.value = cfg.whatsappCleanup ? cfg.whatsappCleanup.retentionDays : 30;
-    if (settingsWaDeviceName) settingsWaDeviceName.value = cfg.whatsappDeviceName || 'message-sync';
+
   }
 
-  if (formSettings) {
-    formSettings.addEventListener('submit', async e => {
-      e.preventDefault();
-      if (settingsAlert) settingsAlert.classList.add('hidden');
-
-      const mediaMaxSize   = parseInt(settingsMediaMaxSize ? settingsMediaMaxSize.value : 50, 10);
-      const recovMaxAge    = parseInt(settingsRecoveryMaxAge ? settingsRecoveryMaxAge.value : 72, 10);
-      const recovMaxMsgs   = parseInt(settingsRecoveryMaxMsgs ? settingsRecoveryMaxMsgs.value : 1000, 10);
-      const retentionDays  = parseInt(settingsRetentionDays ? settingsRetentionDays.value : 14, 10);
-      const waRetention    = parseInt(settingsWaCleanupRetention ? settingsWaCleanupRetention.value : 30, 10);
-      const aggTrigger     = chipsPollsAggTrigger ? chipsPollsAggTrigger.getValue() : (settingsPollsAggTrigger ? settingsPollsAggTrigger.value.trim() : '');
-      const localPrefix    = chipsLocalPrefix ? chipsLocalPrefix.getValue() : (settingsLocalPrefix ? settingsLocalPrefix.value : '');
-      const waDeviceName   = settingsWaDeviceName ? settingsWaDeviceName.value.trim() : '';
-
-      if (isNaN(mediaMaxSize) || mediaMaxSize < 1)  { settingsAlert.textContent = 'Media max size must be ≥1 MB.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(recovMaxAge) || recovMaxAge < 1)     { settingsAlert.textContent = 'Recovery max age must be ≥1 hour.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(recovMaxMsgs) || recovMaxMsgs < 1)   { settingsAlert.textContent = 'Recovery max messages must be ≥1.'; settingsAlert.classList.remove('hidden'); return; }
-      if (isNaN(retentionDays) || retentionDays < 1) { settingsAlert.textContent = 'Retention must be ≥1 day.'; settingsAlert.classList.remove('hidden'); return; }
-      if (!aggTrigger) { settingsAlert.textContent = 'Polls aggregation trigger cannot be empty.'; settingsAlert.classList.remove('hidden'); return; }
-
-      const payload = {
-        usernameMode: settingsUsernameMode ? settingsUsernameMode.value : 'push_name',
-        childContextDisplayMode: settingsChildContextMode ? settingsChildContextMode.value : 'opaque',
-        media: { enabled: settingsMediaEnabled ? settingsMediaEnabled.checked : false, maxSizeMB: mediaMaxSize },
-        recovery: { enabled: settingsRecoveryEnabled ? settingsRecoveryEnabled.checked : true, maxAgeHours: recovMaxAge, maxMessagesPerGroup: recovMaxMsgs },
-        storage: { messageRetentionDays: retentionDays },
-        polls: { aggregationTrigger: aggTrigger },
-        whatsappCleanup: { enabled: settingsWaCleanupEnabled ? settingsWaCleanupEnabled.checked : false, retentionDays: isNaN(waRetention) ? 30 : waRetention },
-        localPrefix: localPrefix,
-        whatsappDeviceName: waDeviceName || 'message-sync'
-      };
-
-      setButtonLoading(btnSaveSettings, true);
-      try {
-        const updated = await window.API.updateConfig(payload);
-        cachedConfig = updated;
-        populateSettings(updated);
-        showToast('Settings saved.', 'success');
-      } catch (err) {
-        if (settingsAlert) { settingsAlert.textContent = err.message || 'Failed to save settings.'; settingsAlert.classList.remove('hidden'); }
-      } finally {
-        setButtonLoading(btnSaveSettings, false);
-      }
-    });
+  function readSyncSetSettings() {
+    const value = id => document.getElementById(id)?.value;
+    const integer = (id, min, max, label) => {
+      const n = Number(value(id));
+      if (!Number.isInteger(n) || n < min || n > max) throw new Error(Number.isFinite(max) ? `${label} must be between ${min} and ${max}.` : `${label} must be a positive integer.`);
+      return n;
+    };
+    chipsPollsAggTrigger?.commitPending();
+    chipsLocalPrefix?.commitPending();
+    return {
+      membershipReviewEnabled: membershipReviewEnabled.checked,
+      privateDMRelayEnabled: privateDMSetEnabled?.checked === true,
+      childContextDisplayMode: settingsChildContextMode.value,
+      media: { enabled: settingsMediaEnabled.checked, maxSizeMB: integer('settings-media-max-size', 1, Infinity, 'Media size') },
+      recovery: { enabled: settingsRecoveryEnabled.checked, maxAgeHours: integer('settings-recovery-max-age', 1, Infinity, 'Recovery age'), maxMessagesPerGroup: integer('settings-recovery-max-msgs', 1, Infinity, 'Recovery count') },
+      storage: { messageRetentionDays: integer('settings-retention-days', 1, Infinity, 'Retention') },
+      polls: { aggregationTrigger: chipsPollsAggTrigger?.getValue() || settingsPollsAggTrigger.value || 'aggregate-response' },
+      localPrefix: chipsLocalPrefix?.getValue() || settingsLocalPrefix.value || '',
+      whatsappCleanup: { enabled: settingsWaCleanupEnabled.checked, retentionDays: integer('settings-whatsapp-cleanup-retention-days', 1, Infinity, 'WhatsApp retention') }
+    };
   }
-
-  if (btnResetSettings) {
-    btnResetSettings.addEventListener('click', () => {
-      if (cachedConfig) populateSettings(cachedConfig);
-    });
-  }
+  formSettings?.addEventListener('submit', event => { event.preventDefault(); btnSaveSyncSet?.click(); });
 
   if (formChangePassword) {
     formChangePassword.addEventListener('submit', async e => {
       e.preventDefault();
       if (changePwdAlert) changePwdAlert.classList.add('hidden');
-      const cur  = changePwdCurrent ? changePwdCurrent.value : '';
-      const next = changePwdNew    ? changePwdNew.value    : '';
+      const cur = changePwdCurrent ? changePwdCurrent.value : '';
+      const next = changePwdNew ? changePwdNew.value : '';
       const conf = changePwdConfirm ? changePwdConfirm.value : '';
       if (!cur) { if (changePwdAlert) { changePwdAlert.textContent = 'Current password required.'; changePwdAlert.classList.remove('hidden'); } return; }
       if (next.length < 8 || next.length > 72) { if (changePwdAlert) { changePwdAlert.textContent = 'New password must be 8–72 chars.'; changePwdAlert.classList.remove('hidden'); } return; }
@@ -2982,7 +3318,7 @@
         await window.API.changePassword(cur, next);
         showToast('Password updated.', 'success');
         if (changePwdCurrent) changePwdCurrent.value = '';
-        if (changePwdNew)     changePwdNew.value     = '';
+        if (changePwdNew) changePwdNew.value = '';
         if (changePwdConfirm) changePwdConfirm.value = '';
       } catch (err) {
         if (changePwdAlert) { changePwdAlert.textContent = err.message || 'Failed to change password.'; changePwdAlert.classList.remove('hidden'); }
@@ -3042,21 +3378,45 @@
   // Membership
   // ══════════════════════════════════════════════════════════════
 
-  async function loadMembership() {
-    const isAdmin = currentUser && currentUser.role === 'admin';
-    if (!isAdmin) return;
-    if (membershipPipelines) membershipPipelines.classList.remove('hidden');
-    await refreshMembership();
-    await loadPipelines();
+  async function openMembership(id) {
+    membershipSelection = id;
+    if (window.Router.getRoute() === 'membership') await loadMembership();
+    else window.Router.navigate('membership');
   }
+
+  async function loadMembership() {
+    if (currentUser?.role !== 'admin') return;
+    try {
+      cachedSyncSets = await window.API.getSyncSets();
+      refreshMembershipVisibility();
+      const enabled = cachedSyncSets.filter(set => set.settings?.membershipReviewEnabled === true);
+      if (!enabled.some(set => set.id === membershipSelection)) membershipSelection = enabled[0]?.id || '';
+      membershipSyncSet.innerHTML = enabled.map(set => `<option value="${escapeHtml(set.id)}">${escapeHtml(set.id)}</option>`).join('') || '<option value="">Enable membership review in a sync set’s settings</option>';
+      membershipSyncSet.value = membershipSelection;
+      membershipPipelines?.classList.toggle('hidden', !membershipSelection);
+      if (membershipDetail) membershipDetail.textContent = '';
+      await refreshMembership();
+      await loadPipelines();
+    } catch (err) { showToast(err.message || 'Failed to load membership settings', 'danger'); }
+  }
+
+  membershipSyncSet?.addEventListener('change', () => {
+    membershipSelection = membershipSyncSet.value;
+    if (membershipDetail) membershipDetail.textContent = '';
+    refreshMembership();
+    loadPipelines();
+  });
 
   async function refreshMembership() {
     if (!membershipTableBody) return;
-    const filters = {};
+    if (!membershipSelection) { membershipTableBody.innerHTML = '<tr><td colspan="5">Enable membership review in a sync set’s settings.</td></tr>'; return; }
+    const scope = membershipSelection;
+    const filters = { syncSetId: scope };
     if (membershipStatusFilter && membershipStatusFilter.value) filters.status = membershipStatusFilter.value;
-    if (membershipAgeFilter && membershipAgeFilter.value)     filters.ageHours = membershipAgeFilter.value;
+    if (membershipAgeFilter && membershipAgeFilter.value) filters.ageHours = membershipAgeFilter.value;
     try {
       const data = await window.API.getMembershipRequests(filters);
+      if (membershipSelection !== scope) return;
       const items = Array.isArray(data) ? data : (data && data.requests ? data.requests : []);
       membershipTableBody.innerHTML = items.map(r => `
         <tr>
@@ -3080,7 +3440,10 @@
   async function loadPipelines() {
     if (!pipelineList) return;
     try {
-      const pipelines = await window.API.getVerificationPipelines();
+      if (!membershipSelection) { pipelineList.innerHTML = ''; return; }
+      const scope = membershipSelection;
+      const pipelines = await window.API.getVerificationPipelines(scope);
+      if (membershipSelection !== scope) return;
       pipelineList.innerHTML = (Array.isArray(pipelines) ? pipelines : []).map(p => `
         <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
           <span style="flex:1;font-size:.8rem;">${escapeHtml(p.label || p.id)}</span>
@@ -3089,7 +3452,7 @@
           <button class="btn btn-danger btn-sm" onclick="App.deletePipeline('${escapeHtml(p.id)}')">Delete</button>
         </div>
       `).join('') || '<p style="font-size:.78rem;color:var(--text-muted);padding:8px 0;">No pipelines configured.</p>';
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (membershipRefresh) membershipRefresh.addEventListener('click', refreshMembership);
@@ -3097,10 +3460,12 @@
   if (pipelineCreate) {
     pipelineCreate.addEventListener('click', async () => {
       try {
-        const label    = pipelineLabel    ? pipelineLabel.value.trim()    : '';
-        const transport = pipelineTransport ? pipelineTransport.value     : 'whatsapp';
-        const endpoint  = pipelineEndpoint  ? pipelineEndpoint.value.trim() : '';
-        const roleId    = pipelineRole      ? pipelineRole.value.trim()   : '';
+        const label = pipelineLabel ? pipelineLabel.value.trim() : '';
+        const transport = pipelineTransport ? pipelineTransport.value : 'whatsapp';
+        const endpoint = pipelineEndpoint ? pipelineEndpoint.value.trim() : '';
+        const roleId = pipelineRole ? pipelineRole.value.trim() : '';
+        const set = cachedSyncSets.find(set => set.id === membershipSelection);
+        if (!set?.endpoints.includes(endpoint)) throw new Error('Choose an endpoint in the selected sync set.');
         await window.API.createVerificationPipeline({ label, transport, endpoint, discordRoleId: roleId || undefined });
         showToast('Pipeline created.', 'success');
         await loadPipelines();
@@ -3110,6 +3475,9 @@
 
   // Exposed globals for inline onclick handlers
   window.App = {
+    membershipEnabled,
+    openMembership,
+    editDeviceName,
     openDiscovery,
     selectDiscoveredTarget,
     openReassignModal,
@@ -3165,16 +3533,16 @@
     if (btnLogout) btnLogout.addEventListener('click', handleLogout);
 
     // Auth forms
-    if (formSetup)  formSetup.addEventListener('submit', handleSetupSubmit);
-    if (formLogin)  formLogin.addEventListener('submit', handleLoginSubmit);
+    if (formSetup) formSetup.addEventListener('submit', handleSetupSubmit);
+    if (formLogin) formLogin.addEventListener('submit', handleLoginSubmit);
     if (formInvite) formInvite.addEventListener('submit', handleInviteSubmit);
-    if (formReset)  formReset.addEventListener('submit', handleResetSubmit);
+    if (formReset) formReset.addEventListener('submit', handleResetSubmit);
 
     // Dashboard refresh
     if (btnDashRefresh) btnDashRefresh.addEventListener('click', loadDashboard);
 
     // Platform card menus
-    if (waMenuBtn && waMenu)         waMenuBtn.addEventListener('click', e => { e.stopPropagation(); toggleDropdown(waMenuBtn, waMenu); });
+    if (waMenuBtn && waMenu) waMenuBtn.addEventListener('click', e => { e.stopPropagation(); toggleDropdown(waMenuBtn, waMenu); });
     if (discordMenuBtn && discordMenu) discordMenuBtn.addEventListener('click', e => { e.stopPropagation(); toggleDropdown(discordMenuBtn, discordMenu); });
     if (telegramMenuBtn && telegramMenu) telegramMenuBtn.addEventListener('click', e => { e.stopPropagation(); toggleDropdown(telegramMenuBtn, telegramMenu); });
 
@@ -3185,7 +3553,7 @@
     if (formAddConnection) formAddConnection.addEventListener('submit', handleAddConnectionSubmit);
     if (formReplaceToken) formReplaceToken.addEventListener('submit', handleReplaceTokenSubmit);
     if (addConnDiscordMode) addConnDiscordMode.addEventListener('change', () => selectAddDiscordMode(addConnDiscordMode.value));
-  if (addConnTelegramMode) addConnTelegramMode.addEventListener('change', () => selectAddTelegramMode(addConnTelegramMode.value));
+    if (addConnTelegramMode) addConnTelegramMode.addEventListener('change', () => selectAddTelegramMode(addConnTelegramMode.value));
     if (btnMTProtoSetup) btnMTProtoSetup.addEventListener('click', setupMTProtoSession);
     if (btnMTProtoRequestCode) btnMTProtoRequestCode.addEventListener('click', requestMTProtoCode);
     if (btnMTProtoCode) btnMTProtoCode.addEventListener('click', submitMTProtoCode);
@@ -3205,7 +3573,7 @@
     });
 
     // WA actions
-    if (btnWaPair)   btnWaPair.addEventListener('click', () => openWaPairModal());
+    if (btnWaPair) btnWaPair.addEventListener('click', () => openWaPairModal());
     if (btnWaLogout) btnWaLogout.addEventListener('click', () => handleWaLogout());
     if (btnWaCancelPair) btnWaCancelPair.addEventListener('click', cancelWaPairing);
     if (btnWaRetryPair) btnWaRetryPair.addEventListener('click', retryWaPairing);
@@ -3314,7 +3682,7 @@
           const me = await window.API.getCurrentUser();
           currentUser = me;
           updateSessionDisplay();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // Handle invite/reset deep links
@@ -3328,7 +3696,7 @@
     });
 
     const routeNames = ['dashboard', 'connections', 'sync-sets', 'settings', 'users', 'membership',
-                        'loading', 'setup', 'login', 'invite', 'reset'];
+      'loading', 'setup', 'login', 'invite', 'reset'];
     routeNames.forEach(name => {
       window.Router.addRoute(name, () => switchView(name));
     });
@@ -3352,7 +3720,7 @@
         cachedVersion = res.version;
         renderDashboardVersion(res.version);
       }
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   init();

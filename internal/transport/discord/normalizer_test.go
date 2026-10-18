@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -24,7 +23,7 @@ func (c testWebhookChecker) IsManagedWebhook(channelID, webhookID string) bool {
 	return ok
 }
 
-func testNormalizer(t *testing.T, mode config.UsernameMode) *Normalizer {
+func testNormalizer(t *testing.T) *Normalizer {
 	t.Helper()
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
@@ -32,7 +31,7 @@ func testNormalizer(t *testing.T, mode config.UsernameMode) *Normalizer {
 	}
 	normalizer, err := NewNormalizer(map[string]string{
 		"team-discord": testChannelID,
-	}, hasher, mode)
+	}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +55,7 @@ func testMessage() *discordgo.MessageCreate {
 }
 
 func TestNormalizeConfiguredGuildMessage(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	evt := testMessage()
 	evt.Mentions = []*discordgo.User{{
 		ID:         "523456789012345678",
@@ -100,8 +99,21 @@ func TestNormalizeConfiguredGuildMessage(t *testing.T) {
 	}
 }
 
+func TestDiscordQuoteMentionsRemainStructuredForAliasRendering(t *testing.T) {
+	n := testNormalizer(t)
+	evt := testMessage()
+	id := "523456789012345678"
+	evt.MessageReference = &discordgo.MessageReference{MessageID: "quoted", ChannelID: testChannelID}
+	evt.ReferencedMessage = &discordgo.Message{Content: "Ask <@" + id + ">", Mentions: []*discordgo.User{{ID: id, GlobalName: "Private Bob"}}}
+	in, ok := n.NormalizeMessage(evt, "bot", nil)
+	want := n.hasher.UserID("discord:" + id)
+	if !ok || len(in.Mentions) != 0 || len(in.QuotedMentions) != 1 || in.QuotedMentions[0].RemoteID != want || in.QuotedText != "Ask @"+want {
+		t.Fatalf("quote metadata lost: %+v", in)
+	}
+}
+
 func TestNormalizeDiscordPollVoteKeepsCanonicalIndexesAndHMACsActor(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	hasher, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
@@ -115,19 +127,19 @@ func TestNormalizeDiscordPollVoteKeepsCanonicalIndexesAndHMACsActor(t *testing.T
 	}
 }
 
-func TestNormalizeHashModeDropsDiscordDisplayName(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+func TestNormalizerRetainsDiscordDisplayName(t *testing.T) {
+	normalizer := testNormalizer(t)
 	incoming, ok := normalizer.NormalizeMessage(testMessage(), "", nil)
 	if !ok {
 		t.Fatal("configured Discord message was ignored")
 	}
-	if incoming.Sender.DisplayName != "" {
-		t.Fatalf("hash mode retained Discord display name: %q", incoming.Sender.DisplayName)
+	if incoming.Sender.DisplayName != "Alice Nick" {
+		t.Fatalf("transient Discord display name lost: %q", incoming.Sender.DisplayName)
 	}
 }
 
 func TestNormalizeDiscordActorIDIsStableAndNamespaced(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	first, ok := normalizer.NormalizeMessage(testMessage(), "", nil)
 	if !ok {
 		t.Fatal("first message was ignored")
@@ -152,7 +164,7 @@ func TestNormalizeDiscordActorIDIsStableAndNamespaced(t *testing.T) {
 }
 
 func TestNormalizeFiltersDMUnconfiguredBotAndManagedWebhookMessages(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	managedWebhookID := "923456789012345678"
 	checker := testWebhookChecker{
 		testChannelID + "\x00" + managedWebhookID: {},
@@ -219,7 +231,7 @@ func TestNormalizeFiltersDMUnconfiguredBotAndManagedWebhookMessages(t *testing.T
 }
 
 func TestReplyToUnconfiguredChannelIsNotExposed(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	evt := testMessage()
 	evt.MessageReference = &discordgo.MessageReference{
 		MessageID: "113456789012345678",
@@ -238,7 +250,7 @@ func TestReplyToUnconfiguredChannelIsNotExposed(t *testing.T) {
 }
 
 func TestNormalizeDiscordMentionsUseSafeTextFallbacks(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	evt := testMessage()
 	knownID := "523456789012345678"
 	unknownID := "623456789012345678"
@@ -291,7 +303,7 @@ func TestNormalizeDiscordMentionsUseSafeTextFallbacks(t *testing.T) {
 }
 
 func TestNormalizeUnsupportedDiscordFormatsAreIgnored(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 
 	poll := testMessage()
 	poll.Poll = &discordgo.Poll{Question: discordgo.PollMedia{Text: "private poll"}, Answers: []discordgo.PollAnswer{{AnswerID: 42, Media: &discordgo.PollMedia{Text: "one"}}}}

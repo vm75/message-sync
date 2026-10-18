@@ -46,7 +46,7 @@ func (m *managedWebhookClient) ExecuteInThread(ctx context.Context, channelID, t
 	if !ok || strings.TrimSpace(threadID) == "" {
 		return "", errors.New("Discord managed webhook child scope is unavailable")
 	}
-	params := &discordgo.WebhookParams{Content: message.Content, Username: message.Username, AllowedMentions: &discordgo.MessageAllowedMentions{}}
+	params := &discordgo.WebhookParams{Content: message.Content, Username: message.Username, AllowedMentions: &discordgo.MessageAllowedMentions{Users: message.AllowedUserIDs}}
 	if message.File != nil {
 		params.Files = []*discordgo.File{{Name: message.File.Name, ContentType: message.File.ContentType, Reader: bytes.NewReader(message.File.Data)}}
 	}
@@ -263,7 +263,7 @@ func (m *managedWebhookClient) executeOnce(ctx context.Context, credential manag
 	params := &discordgo.WebhookParams{
 		Content:         message.Content,
 		Username:        message.Username,
-		AllowedMentions: &discordgo.MessageAllowedMentions{},
+		AllowedMentions: &discordgo.MessageAllowedMentions{Users: message.AllowedUserIDs},
 	}
 	if message.File != nil {
 		params.Files = []*discordgo.File{{

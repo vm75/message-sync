@@ -90,6 +90,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	username := sanitizeWebhookUsername(outgoing.Sender.DisplayName)
 	if username == "" {
+		username = sanitizeWebhookUsername(outgoing.Sender.PhoneNumber)
+	}
+	if username == "" {
 		username = sanitizeWebhookUsername(outgoing.Sender.OpaqueID)
 	}
 	if username == "" {
@@ -99,15 +102,17 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		// Friendly mode carries the complete source/group/sender attribution in
 		// the body. Keep its source/sender portion on the webhook APP username
 		// too; this is presentation-only and remains transient.
-		if label := sanitizeWebhookUsername(outgoing.SenderLabel); label != "" {
+		if label := strings.TrimSpace(outgoing.SenderLabel); label != "" {
 			username = label
 		} else if outgoing.OriginEndpoint != "" {
-			username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
+			username = string(outgoing.OriginEndpoint) + "/" + username
 		}
 	} else if outgoing.OriginEndpoint != "" && outgoing.OriginEndpoint != outgoing.Endpoint {
 		// Opaque mode keeps the existing webhook-username attribution.
-		username = sanitizeWebhookUsername(string(outgoing.OriginEndpoint) + "/" + username)
+		username = string(outgoing.OriginEndpoint) + "/" + username
 	}
+
+	username = sanitizeWebhookUsernameWithAlias(username, outgoing.Sender)
 
 	content := outgoing.SourceText
 	if outgoing.RenderedText != "" {
@@ -123,6 +128,24 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		content = discordReplyFallback(outgoing.OriginEndpoint, outgoing.QuotedText, content)
 	}
 	content = sanitizeOutgoingMentions(content, outgoing.Mentions)
+	// Only resolved references with a currently verified destination member
+	// become native mentions; all other tokens remain literal and unpinged.
+	allowedUserIDs := make([]string, 0)
+	content = transport.RewriteCrossReferences(content, outgoing.References, func(ref transport.CrossReference) (string, bool) {
+		// Explicit bridge addressing may mention a verified local Discord
+		// member. Sender and ordinary provider mentions remain anonymized.
+		userID, ok := a.nativeCrossMention(ctx, ref, outgoing.Endpoint, nativeChannelID)
+		if !ok {
+			return "", false
+		}
+		for _, existing := range allowedUserIDs {
+			if existing == userID {
+				return "<@" + userID + ">", true
+			}
+		}
+		allowedUserIDs = append(allowedUserIDs, userID)
+		return "<@" + userID + ">", true
+	})
 	content = discordPresentation(content)
 	if outgoing.Kind == "poll" {
 		var err error
@@ -162,9 +185,10 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 	}
 
 	webhookMessage := WebhookMessage{
-		Username: username,
-		Content:  content,
-		File:     file,
+		Username:       username,
+		Content:        content,
+		File:           file,
+		AllowedUserIDs: allowedUserIDs,
 	}
 	var (
 		remoteID string
@@ -209,7 +233,7 @@ func discordPollAttribution(outgoing transport.Outgoing) string {
 	if displayName := sanitizeWebhookUsername(outgoing.Sender.DisplayName); displayName != "" {
 		label = string(outgoing.OriginEndpoint) + "/" + displayName
 	}
-	return sanitizeWebhookUsername(label) + ":"
+	return sanitizeWebhookUsernameWithAlias(label, outgoing.Sender) + ":"
 }
 
 func (a *Adapter) replyLink(channelID, messageID string) string {
@@ -481,7 +505,12 @@ func (a *Adapter) outboundState(endpoint transport.EndpointID) (string, ChannelW
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	channelID, ok := a.targets[endpoint]
-	return channelID, a.webhook, a.mediaEnabled, a.mediaMaxBytes, a.api, ok
+	enabled, maxBytes := a.mediaEnabled, a.mediaMaxBytes
+	if policy, ok := a.endpointSettings[string(endpoint)]; ok {
+		enabled = policy.Media.Enabled
+		maxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
+	return channelID, a.webhook, enabled, maxBytes, a.api, ok
 }
 
 func sendNativeReplyMarker(ctx context.Context, api discordAPI, channelID, messageID string) error {
@@ -507,6 +536,27 @@ func sendNativeReplyMarker(ctx context.Context, api discordAPI, channelID, messa
 		return classifyDiscordFailure(err)
 	}
 	return nil
+}
+
+// Reserve the full assigned alias before truncating a source prefix or real name.
+func sanitizeWebhookUsernameWithAlias(value string, sender transport.Sender) string {
+	if sender.Alias == "" {
+		return sanitizeWebhookUsername(value)
+	}
+	suffix := " (" + sender.Alias + ")"
+	if sender.Anonymized {
+		suffix = sender.Alias
+	}
+	value = strings.TrimSuffix(value, suffix)
+	value = sanitizeWebhookUsername(value)
+	limit := maxWebhookUsernameRunes - len([]rune(suffix))
+	if limit < 0 {
+		return ""
+	}
+	if runes := []rune(value); len(runes) > limit {
+		value = strings.TrimSpace(string(runes[:limit]))
+	}
+	return value + suffix
 }
 
 func sanitizeWebhookUsername(value string) string {

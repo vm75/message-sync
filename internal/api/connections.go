@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/safelog"
 	discord "github.com/vm75/message-sync/internal/transport/discord"
@@ -14,32 +15,35 @@ import (
 )
 
 type ConnectionDTO struct {
-	ID              string                 `json:"id"`
-	Transport       string                 `json:"transport"`
-	IntegrationMode string                 `json:"integrationMode,omitempty"`
-	Capabilities    *telegram.Capabilities `json:"capabilities,omitempty"`
-	Label           string                 `json:"label"`
-	Enabled         bool                   `json:"enabled"`
-	CreatedAt       int64                  `json:"createdAt"`
-	UpdatedAt       int64                  `json:"updatedAt"`
+	WhatsAppDeviceName string                 `json:"whatsappDeviceName,omitempty"`
+	ID                 string                 `json:"id"`
+	Transport          string                 `json:"transport"`
+	IntegrationMode    string                 `json:"integrationMode,omitempty"`
+	Capabilities       *telegram.Capabilities `json:"capabilities,omitempty"`
+	Label              string                 `json:"label"`
+	Enabled            bool                   `json:"enabled"`
+	CreatedAt          int64                  `json:"createdAt"`
+	UpdatedAt          int64                  `json:"updatedAt"`
 }
 
 type CreateConnectionRequest struct {
-	ID              string `json:"id,omitempty"`
-	Transport       string `json:"transport"`
-	Label           string `json:"label"`
-	Enabled         *bool  `json:"enabled,omitempty"`
-	Token           string `json:"token,omitempty"`
-	IntegrationMode string `json:"integrationMode,omitempty"`
-	WebhookURL      string `json:"webhookUrl,omitempty"`
-	ChannelID       string `json:"channelId,omitempty"`
+	WhatsAppDeviceName string `json:"whatsappDeviceName,omitempty"`
+	ID                 string `json:"id,omitempty"`
+	Transport          string `json:"transport"`
+	Label              string `json:"label"`
+	Enabled            *bool  `json:"enabled,omitempty"`
+	Token              string `json:"token,omitempty"`
+	IntegrationMode    string `json:"integrationMode,omitempty"`
+	WebhookURL         string `json:"webhookUrl,omitempty"`
+	ChannelID          string `json:"channelId,omitempty"`
 }
 
 type UpdateConnectionRequest struct {
-	Label           *string `json:"label,omitempty"`
-	Enabled         *bool   `json:"enabled,omitempty"`
-	Token           *string `json:"token,omitempty"`
-	IntegrationMode *string `json:"integrationMode,omitempty"`
+	WhatsAppDeviceName *string `json:"whatsappDeviceName,omitempty"`
+	Label              *string `json:"label,omitempty"`
+	Enabled            *bool   `json:"enabled,omitempty"`
+	Token              *string `json:"token,omitempty"`
+	IntegrationMode    *string `json:"integrationMode,omitempty"`
 }
 
 func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +52,7 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := s.controlDB.QueryContext(r.Context(), `
-		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at,whatsapp_device_name
 		FROM transport_connections
 		ORDER BY id ASC
 	`)
@@ -62,7 +66,7 @@ func (s *Server) handleListConnections(w http.ResponseWriter, r *http.Request) {
 	conns := make([]ConnectionDTO, 0)
 	for rows.Next() {
 		var dto ConnectionDTO
-		if err := rows.Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt); err != nil {
+		if err := rows.Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt, &dto.WhatsAppDeviceName); err != nil {
 			safelog.Error(s.logger, "scan connection failed", "connection_list", err)
 			WriteError(w, http.StatusInternalServerError, "failed to scan connection")
 			return
@@ -91,10 +95,10 @@ func (s *Server) handleGetConnection(w http.ResponseWriter, r *http.Request) {
 
 	var dto ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at,whatsapp_device_name
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt)
+	`, id).Scan(&dto.ID, &dto.Transport, &dto.IntegrationMode, &dto.Label, &dto.Enabled, &dto.CreatedAt, &dto.UpdatedAt, &dto.WhatsAppDeviceName)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -133,6 +137,19 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	}
 	if err := controlstore.ValidateIntegrationMode(req.Transport, req.IntegrationMode); err != nil {
 		WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if req.Transport == "whatsapp" {
+		if req.WhatsAppDeviceName == "" {
+			req.WhatsAppDeviceName = "message-sync"
+		}
+		if err := config.ValidateWhatsAppDeviceName(req.WhatsAppDeviceName); err != nil {
+			WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	} else if req.WhatsAppDeviceName != "" {
+		WriteError(w, http.StatusBadRequest, "whatsappDeviceName requires a WhatsApp connection")
 		return
 	}
 	req.IntegrationMode = controlstore.NormalizeIntegrationMode(req.Transport, req.IntegrationMode)
@@ -220,6 +237,7 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 	}
 
 	conn := controlstore.Connection{
+		WhatsAppDeviceName:   req.WhatsAppDeviceName,
 		ID:                   req.ID,
 		Transport:            req.Transport,
 		IntegrationMode:      req.IntegrationMode,
@@ -248,9 +266,9 @@ func (s *Server) handleCreateConnection(w http.ResponseWriter, r *http.Request) 
 			nonceVal = nonce
 		}
 		_, err := s.controlDB.ExecContext(r.Context(), `
-			INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
+			INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at,whatsapp_device_name)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt, conn.WhatsAppDeviceName)
 		if err != nil {
 			safelog.Error(s.logger, "insert connection failed", "connection_create", err)
 			WriteError(w, http.StatusInternalServerError, "failed to create connection")
@@ -285,10 +303,10 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	var encCred, nonce []byte
 	var createdBy sql.NullString
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at,whatsapp_device_name
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt, &conn.WhatsAppDeviceName)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -317,12 +335,24 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 	oldNonce := append([]byte(nil), nonce...)
 	oldKeyVersion := conn.CredentialKeyVersion
 	oldUpdatedAt := conn.UpdatedAt
+	oldDeviceName := conn.WhatsAppDeviceName
 	oldLabel := conn.Label
 	oldEnabled := conn.Enabled
 	if createdBy.Valid {
 		conn.CreatedBy = &createdBy.String
 	}
 
+	if req.WhatsAppDeviceName != nil {
+		if conn.Transport != "whatsapp" {
+			WriteError(w, 400, "device name requires a WhatsApp connection")
+			return
+		}
+		if err := config.ValidateWhatsAppDeviceName(*req.WhatsAppDeviceName); err != nil {
+			WriteError(w, 400, err.Error())
+			return
+		}
+		conn.WhatsAppDeviceName = *req.WhatsAppDeviceName
+	}
 	if req.Label != nil {
 		l := strings.TrimSpace(*req.Label)
 		if l == "" {
@@ -401,9 +431,9 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 
 	_, err = s.controlDB.ExecContext(r.Context(), `
 		UPDATE transport_connections
-		SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+		SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?,whatsapp_device_name = ?
 		WHERE id = ?
-	`, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.UpdatedAt, conn.ID)
+	`, conn.Label, conn.Enabled, encVal, nonceVal, conn.CredentialKeyVersion, conn.UpdatedAt, conn.WhatsAppDeviceName, conn.ID)
 	if err != nil {
 		safelog.Error(s.logger, "update connection failed", "connection_update", err)
 		WriteError(w, http.StatusInternalServerError, "failed to update connection")
@@ -420,9 +450,9 @@ func (s *Server) handleUpdateConnection(w http.ResponseWriter, r *http.Request) 
 		}
 		_, rollbackErr := s.controlDB.ExecContext(r.Context(), `
 			UPDATE transport_connections
-			SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+			SET label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?,whatsapp_device_name = ?
 			WHERE id = ?
-		`, oldLabel, oldEnabled, oldEncVal, oldNonceVal, oldKeyVersion, oldUpdatedAt, conn.ID)
+		`, oldLabel, oldEnabled, oldEncVal, oldNonceVal, oldKeyVersion, oldUpdatedAt, oldDeviceName, conn.ID)
 		if rollbackErr != nil {
 			safelog.Error(s.logger, "rollback connection update failed", "connection_update_rollback", rollbackErr)
 		}
@@ -504,10 +534,10 @@ func (s *Server) handleGetConnectionStatus(w http.ResponseWriter, r *http.Reques
 
 	var conn ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at,whatsapp_device_name
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt, &conn.WhatsAppDeviceName)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return
@@ -565,10 +595,10 @@ func (s *Server) handleGetConnectionDiscovery(w http.ResponseWriter, r *http.Req
 
 	var conn ConnectionDTO
 	err := s.controlDB.QueryRowContext(r.Context(), `
-		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, created_at, updated_at,whatsapp_device_name
 		FROM transport_connections
 		WHERE id = ?
-	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt)
+	`, id).Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &conn.CreatedAt, &conn.UpdatedAt, &conn.WhatsAppDeviceName)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "connection not found")
 		return

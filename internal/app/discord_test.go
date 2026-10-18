@@ -73,7 +73,7 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -103,6 +103,7 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
+	seedRoutingConfig(t, dataDir, cfg)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	var gotDiscordOptions discord.Options
@@ -124,7 +125,7 @@ func TestRunStartsAndStopsDiscordGatewayWhenConfigured(t *testing.T) {
 		cancel()
 		t.Fatal("Discord channel filter was not initialized correctly")
 	}
-	if gotDiscordOptions.UsernameMode != config.UsernameModeHash || gotDiscordOptions.Hasher == nil {
+	if gotDiscordOptions.Hasher == nil {
 		cancel()
 		t.Fatal("Discord privacy options were not initialized")
 	}
@@ -174,7 +175,7 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 			"discord": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-1", RemoteID: "123456789012345678"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -201,6 +202,7 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
+	seedRoutingConfig(t, dataDir, cfg)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	for i := 0; i < 100 && !strings.Contains(logBuf.String(), "message-sync started"); i++ {
@@ -214,7 +216,7 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 	wa.events <- transport.Incoming{
 		Endpoint:  "wa",
 		RemoteID:  "wa-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_goinphpotc"},
 		Kind:      "text",
 		Text:      "from whatsapp",
 		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
@@ -240,7 +242,7 @@ func TestRunRoutesWhatsAppAndDiscordIngressThroughOneRouter(t *testing.T) {
 	dc.events <- transport.Incoming{
 		Endpoint:  "discord",
 		RemoteID:  "discord-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_dcactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_s627456bip"},
 		Kind:      "text",
 		Text:      "from discord",
 		Timestamp: time.Unix(1_700_000_001, 0).UTC(),
@@ -280,7 +282,7 @@ func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(
 		Endpoints: map[string]config.Endpoint{
 			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -308,6 +310,7 @@ func TestRunStartsDiscordGatewayForDiscoveryWhenTokenConfiguredWithoutEndpoints(
 	logger := slog.New(slog.NewTextHandler(&safeBuffer{}, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
+	seedRoutingConfig(t, dataDir, cfg)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	select {

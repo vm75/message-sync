@@ -117,8 +117,8 @@ func TestAdapter_EndpointOwnershipAndFiltering(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"g1": "111111111@g.us",
 		},
-		Hasher:           hasher,
-		UsernameMode:     config.UsernameModeHash,
+		Hasher: hasher,
+
 		Logger:           logger,
 		EnableTerminalQR: false,
 	})
@@ -133,8 +133,8 @@ func TestAdapter_EndpointOwnershipAndFiltering(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"g2": "222222222@g.us",
 		},
-		Hasher:           hasher,
-		UsernameMode:     config.UsernameModeHash,
+		Hasher: hasher,
+
 		Logger:           logger,
 		EnableTerminalQR: false,
 	})
@@ -176,7 +176,6 @@ func TestAdapter_EndpointOwnershipAndFiltering(t *testing.T) {
 				RemoteID:     "333333333@g.us",
 			},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := a1.UpdateConfig(newCfg); err != nil {
@@ -209,8 +208,8 @@ func TestAdapter_GlobalPairingSerializationAndBusyConflict(t *testing.T) {
 		ConnectionID: "conn-wa-1",
 		DatabasePath: dbPath1,
 		Hasher:       hasher,
-		UsernameMode: config.UsernameModeHash,
-		Logger:       logger,
+
+		Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -221,8 +220,8 @@ func TestAdapter_GlobalPairingSerializationAndBusyConflict(t *testing.T) {
 		ConnectionID: "conn-wa-2",
 		DatabasePath: dbPath2,
 		Hasher:       hasher,
-		UsernameMode: config.UsernameModeHash,
-		Logger:       logger,
+
+		Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -281,9 +280,9 @@ func TestMultiAdmin_MembershipVerificationRouting(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"team-a": "111111111@g.us",
 		},
-		Hasher:       hasher,
-		UsernameMode: config.UsernameModeHash,
-		Logger:       logger,
+		Hasher: hasher,
+
+		Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -296,9 +295,9 @@ func TestMultiAdmin_MembershipVerificationRouting(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"team-b": "222222222@g.us",
 		},
-		Hasher:       hasher,
-		UsernameMode: config.UsernameModeHash,
-		Logger:       logger,
+		Hasher: hasher,
+
+		Logger: logger,
 	})
 	if err != nil {
 		t.Fatal(err)

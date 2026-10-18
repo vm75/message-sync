@@ -8,6 +8,9 @@ Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packag
 
 ## Repository map
 
+- `internal/commands/` — built-in conversation commands and shared help.
+- `internal/privatedm/` — opt-in anonymous private relay, outside canonical group routing.
+
 - `cmd/message-sync/` — CLI entry point (`run`, `validate-config`, and `version`).
 - `internal/app/` — process wiring and the single ordered ingress worker.
 - `internal/api/` — authenticated HTTP API and embedded Web UI.
@@ -24,7 +27,7 @@ Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packag
 
 Start with targeted search and read only what the task needs:
 
-1. [`README.md`](README.md) for current scope, setup, and user-facing behavior.
+1. [`README.md`](README.md) for scope, setup, and everyday use; [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for settings, environment variables, and Discord setup.
 2. [`ARCHITECTURE.md`](ARCHITECTURE.md) for boundaries, data flow, and invariants.
 3. [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md) before changing sender attribution, WhatsApp PN/LID identity handling, Discord threads/forum posts, Telegram topics, reactions, polls, replies, edits, or any rendered bridge header.
 4. The package being changed and its tests.
@@ -69,7 +72,7 @@ podman compose -f compose.yml config
 
 ## Architecture invariants
 
-- Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out (with optional route-aware one-way Discord anonymization `anonymizeToDiscord`).
+- Preserve `Connection -> Endpoint -> ChildScope -> Sync Set`: connections authenticate, endpoints address configured parent conversations, child scopes represent Discord threads or Telegram topics, and sync sets define fan-out (with optional per-endpoint `anonymizeIncoming` and `anonymizeOutgoing` policies).
 - Endpoint aliases must match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}`, be safe to display, reference their owning connection, and belong to exactly one validated sync set.
 - Provider message IDs are never global canonical IDs. `message_copies` owns bidirectional lookup and idempotent fan-out.
 - Keep ingress deterministic with one canonical router worker. All three transports use the same router for creates, replies, reactions, polls, edits, deletes, and recovery.
@@ -78,7 +81,10 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
-- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. When `anonymizeToDiscord` is enabled on a sync set, Discord destinations use deterministic pseudonyms (e.g. `Silent Falcon Q7M5K`) derived from HMAC actor IDs, strip phone numbers, and pseudonymize mentions and quotes, while non-Discord destinations retain normal push names. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Treat synchronized message presentation as a compatibility contract. Ordinary attribution is `<group>/<name> (<assigned-alias>)`; child attribution is `<group>/<child>/<name> (<assigned-alias>)`. Routes whose source endpoint has `anonymizeOutgoing` or destination has `anonymizeIncoming` use only the assigned alias and strip phone numbers; other routes retain ordinary names with aliases. Display name wins over phone; phone is a fallback only. There is no username-mode selector or configurable discriminator. Opaque child IDs and `[contexts ...]` never appear in forwarded text. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Assign aliases only to accepted group-message authors, using `(sync_set_id, HMAC actor_id)` and a permanent instance-wide ordinal. Freeze the 256×256 vocabulary and bijective 16-bit slot permutation for new installations; pin and preserve the original ordering of existing installations; numeric tiers begin at ordinal 65,537. Never reuse aliases/ordinals after deletion, change actor IDs, enroll from mentions/private traffic, or lose assignments during a settings save. Retain full aliases when truncating Discord names. WhatsApp assignment requires a verified canonical LID; unresolved PN-only authors fail safely before canonical/create state and checkpoint advancement.
+- Built-in `/local` and `/summary` supplement editable prefixes/triggers and cannot be removed through settings. `/help` stays local; private help reveals configured values only after current, scoped membership verification.
+- Sync-set settings use a shared create/edit modal. `membershipReviewEnabled` is a persisted per-set UI flag, not a browser preference or authorization boundary. Save tracks actual draft differences; preserve existing membership processing and private control-store data.
 - Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
 ## SQLite and Go conventions
@@ -110,7 +116,13 @@ podman compose -f compose.yml config
 
 AI agents MUST keep all repository documentation in sync with the implementation for any changes to the project. When introducing, modifying, or deprecating features, settings, API endpoints, schema fields, UI capabilities, or container behaviors, update the corresponding documentation files as part of the same change set. Never leave documentation stale or out of sync.
 
-- `README.md`: Setup, configuration (environment variables and runtime settings), core capabilities, key features, and user-facing workflows.
+- Keep `README.md` and `DOCKERHUB.md` in sync for all user-visible features,
+  supported providers, anonymity directions, DM relay limits, privacy claims and
+  Docker/rootful Podman/rootless Podman support. Update both in the same change;
+  keep their **Key features** sections identical. README owns everyday usage;
+  Docker Hub adds image/deployment details. Link to focused docs for references.
+- `README.md`: Quick start, all product features, and everyday workflows.
+- `docs/CONFIGURATION.md`: Environment variables, runtime/API settings, Discord setup, and upgrade guidance.
 - `DOCKERHUB.md`: Public container overview, key features, image names, tags, environment variables, volume layouts, compose usage, and security hardening.
 - `ARCHITECTURE.md`: Components, dependency direction, data flow, schema definitions, privacy boundaries, lifecycle flow, failure/retry semantics, and REST API surface.
 - `AGENTS.md`: Agent workflow, repository map, definition of done, and mandatory constraints.
@@ -119,3 +131,45 @@ AI agents MUST keep all repository documentation in sync with the implementation
 - `RELEASING.md`: Maintainer-only release preparation, tagging, publication, immutability, and verification procedure.
 - `TESTING.md` / `docs/TESTING_GUIDE.md`: Automated test commands, test coverage, manual provider testing steps, and troubleshooting.
 - `docs/FEATURE_COMPARISON.md`: Capability or architectural comparisons with upstream or alternative designs.
+
+
+## Cross-group reference invariants
+
+Private DM relays reuse this resolver and require both the global and sync-set
+administrator switches (default off). Native reply mappings authorize only the
+recorded addressee in the exact owning connection/private chat, expire after
+24 hours and recheck current membership on every hop. No private content or
+native inbox identity enters `sync.db`, logs, metrics or admin JSON. Persist
+only encrypted content-free routing/inbox/cleanup tokens in `control.db`.
+Private edits/deletes/revokes are ignored. WhatsApp cleanup may use only a
+per-message Delete for Me AppState operation on feature-owned private copies.
+Never substitute group deletion, REVOKE, whole-chat cleanup, Discord deletion
+or Telegram Bot API deleteMessage. MTProto personal inboxes remain unmanaged.
+
+Cross-group participant syntax is only `@{Amber Badger}` (with optional numeric
+tier), separate from provider-native `@user`. Aliases are globally unique but
+identify actors within one sync set. Users learn addresses from forwarded author
+attribution; read tracking, directories and mention-only enrollment are out of
+scope. Case-insensitive lookup must still enforce source-set ownership. Public
+`Pn`, real-name, discriminator and endpoint-qualified lookup are removed.
+Use `sync_set_actors` for assigned HMAC actor/alias/ordinal state and
+`participant_addresses` for endpoint observations. Never persist names, phones,
+raw user identities or content. Each actual destination verifies current
+membership before native rendering. Preserve the exact authored token whenever
+native rendering is unavailable, including on anonymized routes. Destination
+adapters own native identity lookup without cross-provider guessing.
+WhatsApp requires matching verified LID text and metadata and must not expose a
+PN. Discord and Telegram Bot API retain native user bindings only in memory.
+Discord verifies channel access/private-thread membership and uses an explicit
+user allowlist. Verified explicit references may tag Discord members on
+anonymized routes; author and ordinary mention anonymization remain active.
+Live ingress and accepted history restore Discord observations. A cold-cache
+lookup may compare the authorized HMAC actor with paginated current guild
+identities under a bounded timeout, never by display name. It requires optional
+Server Members Intent and stays literal when unavailable; do not add a privileged
+gateway intent. Telegram MTProto and edits stay literal and non-notifying.
+Private lookup selects the alias's owning set globally, then requires current
+sender membership and existing author assignments for both sides. Deduplicate
+only equivalent routes to the same verified inbox; fail on distinct inboxes.
+Native reply mapping, current membership and exact account/inbox bindings remain
+mandatory on every hop. No private content or inbox identity enters `sync.db`.

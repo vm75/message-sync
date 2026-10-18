@@ -110,8 +110,8 @@ func (a *MTProtoAdapter) Recover(ctx context.Context, request transport.Recovery
 		return nil
 	}
 	maxEvents := request.MaxEvents
-	if maxEvents > 1000 {
-		maxEvents = 1000
+	if maxEvents > 5000 {
+		maxEvents = 5000
 	}
 	peer, liveClient, err := a.resolveMTProtoPeer(ctx, endpoint)
 	if err != nil {
@@ -225,6 +225,10 @@ func (a *MTProtoAdapter) recoveredMTProtoIncoming(ctx context.Context, entities 
 	if !ok {
 		return transport.Incoming{}, false
 	}
+	if policy, ok := normalizer.endpointSettings[string(incoming.Endpoint)]; ok {
+		mediaEnabled = policy.Media.Enabled
+		mediaMax = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
+	}
 	incoming.FromSelf = msg.Out
 	topicID, _ := mtprotoTopicAndReply(msg)
 	if incoming.ChildScope != nil && topicID > 0 {
@@ -292,3 +296,16 @@ func (c *gotdAuthClient) History(ctx context.Context, peer mtprotoPeerState, min
 }
 
 func mtprotoMessageID(s string) int { v, _ := strconv.Atoi(strings.TrimSpace(s)); return v }
+
+func (a *MTProtoAdapter) RecoveryPolicy(stream string) (bool, int, time.Duration) {
+	endpoint, ok := a.recoveryEndpoint(stream)
+	if !ok {
+		return false, 0, 0
+	}
+	a.live.mu.RLock()
+	defer a.live.mu.RUnlock()
+	if policy, ok := a.live.endpointSettings[string(endpoint)]; ok {
+		return policy.Recovery.Enabled, policy.Recovery.MaxMessagesPerGroup, time.Duration(policy.Recovery.MaxAgeHours) * time.Hour
+	}
+	return true, 200, 24 * time.Hour
+}

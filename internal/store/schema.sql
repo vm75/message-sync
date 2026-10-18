@@ -2,6 +2,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS canonical_messages (
     canonical_id TEXT PRIMARY KEY,
+    sync_set_id TEXT,
     created_at INTEGER NOT NULL,
     tombstoned_at INTEGER
 );
@@ -69,12 +70,15 @@ CREATE TABLE IF NOT EXISTS global_config (
     whatsapp_chat_retention_days INTEGER NOT NULL DEFAULT 30,
     local_message_prefix TEXT NOT NULL DEFAULT '',
     whatsapp_device_name TEXT NOT NULL DEFAULT 'message-sync',
-    child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly'))
+    show_discriminator BOOLEAN NOT NULL DEFAULT 0,
+    child_context_display_mode TEXT NOT NULL DEFAULT 'opaque' CHECK (child_context_display_mode IN ('opaque', 'friendly')),
+    private_dm_relay_enabled BOOLEAN NOT NULL DEFAULT 0 CHECK (private_dm_relay_enabled IN (0, 1))
 );
 INSERT OR IGNORE INTO global_config (id) VALUES (1);
 
 CREATE TABLE IF NOT EXISTS sync_sets (
     id TEXT PRIMARY KEY,
+    settings_json TEXT,
     anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0
 );
 
@@ -84,6 +88,8 @@ CREATE TABLE IF NOT EXISTS endpoints (
     connection_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
+    anonymize_incoming BOOLEAN NOT NULL DEFAULT 0 CHECK (anonymize_incoming IN (0, 1)),
+    anonymize_outgoing BOOLEAN NOT NULL DEFAULT 0 CHECK (anonymize_outgoing IN (0, 1)),
     UNIQUE (transport, remote_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);
@@ -96,6 +102,17 @@ CREATE TABLE IF NOT EXISTS poll_options (
     PRIMARY KEY (canonical_id, option_index)
 );
 CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
+
+-- Original source labels can differ from alias-projected forwarded labels.
+-- Persist hashes only, so WhatsApp votes still resolve to the same option index.
+CREATE TABLE IF NOT EXISTS poll_source_option_hashes (
+    canonical_id TEXT NOT NULL,
+    endpoint_id TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
+    option_hash TEXT NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, option_index),
+    FOREIGN KEY (canonical_id, option_index) REFERENCES poll_options(canonical_id, option_index) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS poll_endpoint_sources (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
@@ -188,3 +205,36 @@ CREATE TABLE IF NOT EXISTS delivery_create_steps (
     PRIMARY KEY (canonical_id, endpoint_id, operation_revision, step_kind)
 );
 CREATE INDEX IF NOT EXISTS idx_delivery_create_steps_state ON delivery_create_steps(state, updated_at);
+
+-- Stable, group-local reference handles. The actor is an irreversible HMAC ID;
+-- raw provider identities, names, and message bodies are intentionally absent.
+CREATE TABLE IF NOT EXISTS participant_addresses (
+    endpoint_id TEXT NOT NULL REFERENCES endpoints(alias) ON DELETE CASCADE ON UPDATE CASCADE,
+    actor_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+    PRIMARY KEY (endpoint_id, actor_id),
+    UNIQUE (endpoint_id, ordinal)
+);
+
+-- Instance-wide sequence is deliberately independent of deletable routing rows.
+CREATE TABLE IF NOT EXISTS alias_sequence (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    next_ordinal INTEGER NOT NULL CHECK (next_ordinal >= 1),
+    exhausted BOOLEAN NOT NULL DEFAULT 0 CHECK (exhausted IN (0, 1))
+);
+INSERT INTO alias_sequence(singleton, next_ordinal) VALUES (1, 1) ON CONFLICT(singleton) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS sync_set_actors (
+    sync_set_id TEXT NOT NULL REFERENCES sync_sets(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal > 0),
+    alias TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    PRIMARY KEY (sync_set_id, actor_id)
+);
+
+
+-- Pin the installation's issued alias ordering across upgrades and deletions.
+CREATE TABLE IF NOT EXISTS alias_order (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    ordering TEXT NOT NULL CHECK (ordering IN ('sequential', 'scrambled'))
+);

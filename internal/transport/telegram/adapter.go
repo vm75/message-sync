@@ -29,11 +29,13 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
-	ConnectionID           string
-	Token                  string
-	ChatIDs                map[string]string
-	Hasher                 *identity.Hasher
-	UsernameMode           config.UsernameMode
+	PrivateDMEnabled bool
+	EndpointSettings map[string]config.SyncSetSettings
+	ConnectionID     string
+	Token            string
+	ChatIDs          map[string]string
+	Hasher           *identity.Hasher
+
 	Logger                 *slog.Logger
 	MediaEnabled           bool
 	MediaMaxBytes          uint64
@@ -49,15 +51,19 @@ type Options struct {
 }
 
 type Adapter struct {
-	connectionID string
-	client       botClient
-	normalizer   *Normalizer
-	hasher       *identity.Hasher
-	events       chan transport.Incoming
-	logger       *slog.Logger
-	botUserID    int64
-	token        string
-	httpClient   *http.Client
+	privateDMEnabled bool
+	privateEvents    chan transport.PrivateIncoming
+	privateInboxes   map[string]privateInboxObservation
+	endpointSettings map[string]config.SyncSetSettings
+	connectionID     string
+	client           botClient
+	normalizer       *Normalizer
+	hasher           *identity.Hasher
+	events           chan transport.Incoming
+	logger           *slog.Logger
+	botUserID        int64
+	token            string
+	httpClient       *http.Client
 
 	mediaEnabled           bool
 	mediaMaxBytes          uint64
@@ -66,6 +72,7 @@ type Adapter struct {
 	resolvePollEndpoint    func(context.Context, string) (transport.EndpointID, bool)
 	observeChildScopeLabel transport.ChildScopeLabelObserver
 	messageKinds           map[messageKindKey]string
+	observedParticipants   map[transport.EndpointID]map[string]int64 // transient actor->user
 
 	mu                 sync.RWMutex
 	lastUpdateID       int64
@@ -104,7 +111,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
 		return nil, err
 	}
-	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID)
+	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.ConnectionID, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -115,8 +122,12 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		httpClient = http.DefaultClient
 	}
 	adapter := &Adapter{
+		privateDMEnabled:       opts.PrivateDMEnabled,
+		privateEvents:          make(chan transport.PrivateIncoming, eventBufferSize),
+		privateInboxes:         make(map[string]privateInboxObservation),
 		connectionID:           strings.TrimSpace(opts.ConnectionID),
 		normalizer:             normalizer,
+		endpointSettings:       opts.EndpointSettings,
 		hasher:                 opts.Hasher,
 		events:                 make(chan transport.Incoming, eventBufferSize),
 		logger:                 opts.Logger,
@@ -260,13 +271,18 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			chatIDs[alias] = endpoint.RemoteID
 		}
 	}
-	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, cfg.Identity.UsernameMode, a.connectionID)
+	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, a.connectionID, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
+	a.privateDMEnabled = cfg.PrivateDMConnectionEnabled(a.connectionID)
+	if !a.privateDMEnabled {
+		a.privateInboxes = make(map[string]privateInboxObservation)
+	}
 	a.mediaEnabled = cfg.Media.Enabled
 	a.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	a.mu.Unlock()
@@ -277,8 +293,17 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 	if a == nil || update == nil || !a.acceptUpdateID(update.ID) {
 		return
 	}
-	a.observeUpdate(update)
 	checkpoint := transport.Checkpoint{StreamKey: a.checkpointStreamKey(), Position: update.ID, EventTimestamp: telegramUpdateTimestamp(update), Valid: update.ID > 0}
+	if update.Message != nil && update.Message.Chat.Type == models.ChatTypePrivate {
+		a.handlePrivateMessage(update.Message)
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
+		return
+	}
+	if update.EditedMessage != nil && update.EditedMessage.Chat.Type == models.ChatTypePrivate {
+		a.emit(transport.Incoming{Kind: "other", Checkpoint: checkpoint})
+		return
+	}
+	a.observeUpdate(update)
 
 	a.mu.RLock()
 	normalizer := a.normalizer
@@ -302,6 +327,9 @@ func (a *Adapter) handleUpdate(ctx context.Context, _ *telegrambot.Bot, update *
 		}
 		incoming, ok = normalizer.NormalizeMessage(update.Message, botUserID)
 		if ok {
+			if update.Message.From != nil {
+				a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, update.Message.From.ID)
+			}
 			incoming = a.withObservedTopicLabel(update.Message, incoming)
 			incoming, ok = a.withTelegramMedia(incoming, update.Message)
 		} else {

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -80,7 +79,7 @@ func TestHandleUpdateObservesUnconfiguredGroupBeforeIngressFiltering(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

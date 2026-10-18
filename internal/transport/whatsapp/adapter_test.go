@@ -130,7 +130,7 @@ func TestWhatsAppAdapterLiveEditEventDoesNotSetRecoveryCheckpoint(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestWhatsAppAdapterSelfOriginatedEditEmitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestWhatsAppAdapterBridgeEditEchoSuppressed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,8 +383,8 @@ func TestAdapterUnauthenticatedStartupDoesNotBlock(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"g1": "123456789@g.us",
 		},
-		Hasher:           hasher,
-		UsernameMode:     config.UsernameModePushName,
+		Hasher: hasher,
+
 		Logger:           slog.Default(),
 		EnableTerminalQR: false,
 	}
@@ -485,7 +485,7 @@ func TestAdapterUpdateConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	norm, err := NewNormalizer(map[string]string{}, hasher, config.UsernameModePushName)
+	norm, err := NewNormalizer(map[string]string{}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestAdapterUpdateConfig(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "ss", Endpoints: []string{"t1", "t2"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 50, Enabled: true},
 		Recovery: config.Recovery{MaxAgeHours: 12, MaxMessagesPerGroup: 100},
 	}
@@ -573,8 +573,8 @@ func TestAdapterLogout(t *testing.T) {
 		GroupJIDs: map[string]string{
 			"g1": "123456789@g.us",
 		},
-		Hasher:           hasher,
-		UsernameMode:     config.UsernameModePushName,
+		Hasher: hasher,
+
 		Logger:           slog.Default(),
 		EnableTerminalQR: false,
 	}

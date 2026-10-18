@@ -794,3 +794,101 @@ func TestAnonymizeToDiscordOldSchemaUpgrade(t *testing.T) {
 		t.Fatalf("expected value to remain 0 after second open, got %d", val)
 	}
 }
+
+func TestDiscriminatorSettingUpgradeAndReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldSchema := strings.Replace(schemaSQL, "    show_discriminator BOOLEAN NOT NULL DEFAULT 0,\n", "", 1)
+	if oldSchema == schemaSQL {
+		t.Fatal("old schema fixture did not remove new column")
+	}
+	if _, err := raw.ExecContext(ctx, oldSchema); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.ExecContext(ctx, `UPDATE global_config SET username_mode='hash', storage_message_retention_days=37 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		db, err := Open(ctx, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var show bool
+		var mode string
+		var retention int
+		if err := db.DB().QueryRowContext(ctx, `SELECT show_discriminator, username_mode, storage_message_retention_days FROM global_config WHERE id=1`).Scan(&show, &mode, &retention); err != nil {
+			t.Fatal(err)
+		}
+		if show != (attempt == 1) || mode != "hash" || retention != 37 {
+			t.Fatalf("upgrade/reopen lost settings: show=%t mode=%s retention=%d", show, mode, retention)
+		}
+		if _, err := db.DB().ExecContext(ctx, `UPDATE global_config SET show_discriminator=1 WHERE id=1`); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestEndpointAnonymityUpgrade(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.Exec(`CREATE TABLE sync_sets(id TEXT PRIMARY KEY, anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0);
+ INSERT INTO sync_sets VALUES('legacy',1);
+ CREATE TABLE endpoints(alias TEXT PRIMARY KEY,transport TEXT NOT NULL,connection_id TEXT NOT NULL,remote_id TEXT NOT NULL,sync_set_id TEXT REFERENCES sync_sets(id));
+ INSERT INTO endpoints VALUES('dc','discord','connection','123','legacy'),('wa','whatsapp','connection-wa','123@g.us','legacy');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var incoming, outgoing, legacy bool
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming,anonymize_outgoing FROM endpoints WHERE alias='dc'`).Scan(&incoming, &outgoing); err != nil {
+		t.Fatal(err)
+	}
+	if !incoming || outgoing {
+		t.Fatal("legacy Discord policy was not converted")
+	}
+	if err := db.DB().QueryRow(`SELECT anonymize_to_discord FROM sync_sets WHERE id='legacy'`).Scan(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy {
+		t.Fatal("legacy flag still overrides endpoint edits")
+	}
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming FROM endpoints WHERE alias='wa'`).Scan(&incoming); err != nil {
+		t.Fatal(err)
+	}
+	if incoming {
+		t.Fatal("upgrade anonymized an ordinary destination")
+	}
+	if _, err := db.DB().Exec(`UPDATE endpoints SET anonymize_incoming=0 WHERE alias='dc'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming FROM endpoints WHERE alias='dc'`).Scan(&incoming); err != nil {
+		t.Fatal(err)
+	}
+	if incoming {
+		t.Fatal("reopening undid endpoint edit")
+	}
+}

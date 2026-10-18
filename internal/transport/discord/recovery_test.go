@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -50,7 +49,7 @@ func newRecoveryAdapter(t *testing.T, api discordAPI) *Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"team-discord": testChannelID}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"team-discord": testChannelID}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

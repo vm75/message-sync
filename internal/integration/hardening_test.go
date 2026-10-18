@@ -20,6 +20,7 @@ import (
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -141,7 +142,6 @@ func TestHardening_MultiConnectionMixedTopology(t *testing.T) {
 			{ID: "ss-family", Endpoints: []string{"wa-family", "dc-community", "tg-family"}},
 			{ID: "ss-work", Endpoints: []string{"wa-work", "dc-work", "tg-work"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	adapters := map[string]*recordingAdapter{
@@ -162,7 +162,7 @@ func TestHardening_MultiConnectionMixedTopology(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -175,7 +175,7 @@ func TestHardening_MultiConnectionMixedTopology(t *testing.T) {
 		RemoteID:  "fam-msg-1",
 		Kind:      "text",
 		Text:      "family announcement",
-		Sender:    transport.Sender{OpaqueID: "u_family_sender"},
+		Sender:    transport.Sender{OpaqueID: "u_6ojaxnf2ge"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func TestHardening_MultiConnectionMixedTopology(t *testing.T) {
 		RemoteID:  "work-msg-1",
 		Kind:      "text",
 		Text:      "work announcement",
-		Sender:    transport.Sender{OpaqueID: "u_work_sender"},
+		Sender:    transport.Sender{OpaqueID: "u_2mmeewbeai"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -247,7 +247,6 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 			{ID: "ss-1", Endpoints: []string{"dc-comm", "tg-fam"}},
 			{ID: "ss-2", Endpoints: []string{"dc-work", "tg-work"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	adapters := map[string]*recordingAdapter{
@@ -266,7 +265,7 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -283,7 +282,7 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 			Kind:     transport.ScopeKindDiscordThread,
 			RemoteID: "th-99",
 		},
-		Sender:    transport.Sender{OpaqueID: "u_dc_user"},
+		Sender:    transport.Sender{OpaqueID: "u_nuf3faqnpm"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -301,7 +300,7 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 		Kind:      "text",
 		Text:      "reply to thread",
 		ReplyTo:   &transport.MessageRef{Endpoint: "tg-fam", RemoteMessageID: "tg-fam-msg-1"},
-		Sender:    transport.Sender{OpaqueID: "u_tg_user"},
+		Sender:    transport.Sender{OpaqueID: "u_honwurney4"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -323,7 +322,7 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 			Kind:     transport.ScopeKindTelegramTopic,
 			RemoteID: "topic-42",
 		},
-		Sender:    transport.Sender{OpaqueID: "u_tg_worker"},
+		Sender:    transport.Sender{OpaqueID: "u_xj2zq7hody"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -339,7 +338,7 @@ func TestHardening_CrossConnectionThreadAndTopicLineage(t *testing.T) {
 		Kind:      "text",
 		Text:      "reply to topic",
 		ReplyTo:   &transport.MessageRef{Endpoint: "dc-work", RemoteMessageID: "dc-work-msg-1"},
-		Sender:    transport.Sender{OpaqueID: "u_dc_worker"},
+		Sender:    transport.Sender{OpaqueID: "u_kpgrc3jrr7"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -379,7 +378,6 @@ func TestHardening_DeliveryLanesFailureIsolationAndEndpointReassignment(t *testi
 		SyncSets: []config.SyncSet{
 			{ID: "ss-main", Endpoints: []string{"dc-comm", "tg-fam"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	// d1 has simulated transient failure
@@ -398,7 +396,7 @@ func TestHardening_DeliveryLanesFailureIsolationAndEndpointReassignment(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -411,7 +409,7 @@ func TestHardening_DeliveryLanesFailureIsolationAndEndpointReassignment(t *testi
 		RemoteID:  "msg-fail-test",
 		Kind:      "text",
 		Text:      "isolated failure test",
-		Sender:    transport.Sender{OpaqueID: "u_tester"},
+		Sender:    transport.Sender{OpaqueID: "u_wwkhap5ljj"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -448,7 +446,7 @@ func TestHardening_DeliveryLanesFailureIsolationAndEndpointReassignment(t *testi
 		RemoteID:  "msg-after-reassign",
 		Kind:      "text",
 		Text:      "after reassign",
-		Sender:    transport.Sender{OpaqueID: "u_tester"},
+		Sender:    transport.Sender{OpaqueID: "u_wwkhap5ljj"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -491,9 +489,7 @@ func TestHardening_LocalOnlyMessageFiltering(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "ss-main", Endpoints: []string{"dc-comm", "tg-fam"}},
 		},
-		Identity: config.Identity{
-			UsernameMode: config.UsernameModeHash,
-		},
+
 		LocalPrefix: "#local",
 	}
 
@@ -504,6 +500,7 @@ func TestHardening_LocalOnlyMessageFiltering(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -520,7 +517,7 @@ func TestHardening_LocalOnlyMessageFiltering(t *testing.T) {
 			Kind:     transport.ScopeKindDiscordThread,
 			RemoteID: "thread-abc",
 		},
-		Sender:    transport.Sender{OpaqueID: "u_local_author"},
+		Sender:    transport.Sender{OpaqueID: "u_ansgihyxnz"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -541,7 +538,7 @@ func TestHardening_LocalOnlyMessageFiltering(t *testing.T) {
 			Kind:     transport.ScopeKindDiscordThread,
 			RemoteID: "thread-abc",
 		},
-		Sender:    transport.Sender{OpaqueID: "u_local_author"},
+		Sender:    transport.Sender{OpaqueID: "u_ansgihyxnz"},
 		Timestamp: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -822,12 +819,12 @@ func TestHardening_PrivacyAndSecretAudit(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "ss-1", Endpoints: []string{"dc-comm", "dc-other"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 	adOther := newRecordingAdapter("ad-other", "conn-dc-other")
 	registry, _ := router.NewAdapterRegistry(cfg, map[string]router.OutboundAdapter{
 		"conn-dc-other": adOther,
 	})
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.NewWithHasher(cfg, syncStore, registry, hasher)
 	if err != nil {
 		t.Fatal(err)
@@ -840,7 +837,7 @@ func TestHardening_PrivacyAndSecretAudit(t *testing.T) {
 		RemoteID: "msg-canary",
 		Kind:     "text",
 		Text:     "Call me at +15551234567",
-		Sender:   transport.Sender{OpaqueID: "transient-id-1234", DisplayName: "Alice Walker"},
+		Sender:   transport.Sender{OpaqueID: hasher.UserID("discord:transient-id-1234"), DisplayName: "Alice Walker"},
 	})
 	_ = err
 
@@ -889,7 +886,7 @@ func TestHardening_ResourceLifecycleSanity(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
-
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, _ := router.New(cfg, syncStore, registry)
 	defer mesh.Close()
 	coordinator, _ := recovery.NewCoordinator(syncStore, mesh)
@@ -942,8 +939,8 @@ func TestHardening_PollIsolationAndCompanionsAcrossConnections(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "ss-main", Endpoints: []string{"dc-comm", "tg-fam"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
-		Polls:    config.Polls{AggregationTrigger: "vote_event"},
+
+		Polls: config.Polls{AggregationTrigger: "vote_event"},
 	}
 
 	d1 := newRecordingAdapter("dc-comm", "d1")
@@ -953,6 +950,7 @@ func TestHardening_PollIsolationAndCompanionsAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -971,7 +969,7 @@ func TestHardening_PollIsolationAndCompanionsAcrossConnections(t *testing.T) {
 		},
 		PollOptions:         []string{"Morning", "Afternoon"},
 		PollSelectableCount: 1,
-		Sender:              transport.Sender{OpaqueID: "u_poll_creator"},
+		Sender:              transport.Sender{OpaqueID: "u_35243jd2wx"},
 		Timestamp:           time.Now().UTC(),
 	}
 
@@ -1047,7 +1045,6 @@ func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
 			Endpoints:          []string{"wa-fam", "dc-fam", "tg-fam"},
 			AnonymizeToDiscord: true,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 
 	registry, err := router.NewAdapterRegistry(cfg, map[string]router.OutboundAdapter{
@@ -1062,6 +1059,7 @@ func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.NewWithHasher(cfg, syncStore, registry, hasher)
 	if err != nil {
 		t.Fatal(err)
@@ -1107,7 +1105,7 @@ func TestAnonymizeToDiscordEndToEndCanary(t *testing.T) {
 	}
 
 	// Discord destination must NOT contain canary PII in any user-facing field
-	pseudonym := identity.Pseudonym("u_abcdefghij")
+	pseudonym := "Amber Badger"
 	dcMsg := dcSent[0]
 	for _, forbidden := range []string{canaryRealName, canaryPhone, "15551234567", canaryMentionName} {
 		if strings.Contains(dcMsg.Text, forbidden) {

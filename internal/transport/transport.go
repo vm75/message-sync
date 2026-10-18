@@ -61,14 +61,43 @@ type ChildScope struct {
 type ChildScopeLabelObserver func(context.Context, EndpointID, ChildScope)
 
 type Sender struct {
-	DisplayName string // transient only; never persist
-	PhoneNumber string // transient only; never persist
-	OpaqueID    string // HMAC-derived application identity
+	Alias               string // permanent alias assigned within the owning sync set
+	Anonymized          bool   // route-specific presentation; alias only when true
+	IdentityUnavailable bool   // adapter could not establish a stable canonical author
+	DisplayName         string // transient only; never persist
+	PhoneNumber         string // transient only; never persist
+	OpaqueID            string // HMAC-derived application identity
+}
+
+// NameWithAlias preserves the assigned address in every rendered author label.
+func (s Sender) NameWithAlias(name string) string {
+	if s.Anonymized {
+		return s.Alias
+	}
+	if s.Alias == "" {
+		return name
+	}
+	if name == "" {
+		return s.Alias
+	}
+	return name + " (" + s.Alias + ")"
 }
 
 type Mention struct {
+	Alias    string // router-resolved assignment; empty for unassigned mentions
+	ActorID  string // authoritative normalized actor, if different from the transient text token
 	RemoteID string
 	Name     string
+}
+
+// CrossReference is a resolved bridge-only address. ActorID is a HMAC actor
+// identity; no native provider ID is persisted or passed through the router.
+// Each destination independently verifies membership before notifying.
+type CrossReference struct {
+	Token   string // exact authored token, preserved whenever native rendering is unavailable
+	ActorID string
+	Alias   string
+	Name    string // optional transient display name
 }
 
 type Incoming struct {
@@ -82,6 +111,7 @@ type Incoming struct {
 	Mentions              []Mention
 	ReplyTo               *MessageRef
 	ChildScope            *ChildScope
+	QuotedMentions        []Mention // transient metadata for identities occurring only in a reply quote
 	QuotedText            string
 	Timestamp             time.Time
 	MediaLoader           func(context.Context) ([]byte, error)
@@ -117,6 +147,8 @@ type Outgoing struct {
 	// the question/options as structured fields.
 	PollAttribution     string
 	Mentions            []Mention
+	References          []CrossReference
+	ReferenceAnonymized bool // suppress display-name references on anonymized routes
 	ReplyTo             *MessageRef
 	ChildScope          *ChildScope
 	QuotedText          string
@@ -144,4 +176,74 @@ type Adapter interface {
 	Edit(context.Context, MessageRef, string) error
 	Delete(context.Context, MessageRef) error
 	Close() error
+}
+
+// PrivateInbox is an opaque, transient provider address for one private chat.
+// Token may contain provider-native IDs and must be encrypted before storage,
+// and must never be logged or returned through the API.
+type PrivateInbox struct {
+	ConnectionID string
+	Transport    string
+	OwnerID      string // HMAC proof of the authenticated account behind this connection
+	ChatID       string // sensitive canonical private-chat identity, encrypted before storage
+	Token        []byte
+}
+
+// PrivateCopy identifies one message in the sync account's own private-chat
+// view. Its token may contain provider-native IDs and is sensitive.
+type PrivateCopy struct {
+	ConnectionID string
+	Transport    string
+	OwnerID      string
+	Token        []byte
+}
+
+// PrivateSendOptions carries transient presentation and native reply metadata.
+type PrivateSendOptions struct {
+	ReplyToMessageID string
+	Attribution      string
+}
+
+type PrivateSendResult struct {
+	RemoteMessageID string
+	LocalCopy       PrivateCopy
+}
+
+// PrivateIncoming is deliberately separate from Incoming: it bypasses the
+// canonical group router and carries sensitive provider-private addresses
+// only in memory. Text must never be persisted. Native IDs may be stored only
+// as encrypted operational tokens or keyed digests, and must never be logged.
+type PrivateIncoming struct {
+	ConnectionID     string
+	Transport        string
+	Inbox            PrivateInbox
+	LocalCopy        PrivateCopy
+	ActorID          string   // HMAC actor identity, never the provider-native ID
+	ActorAliases     []string // authenticated PN/LID-equivalent HMAC identities, transient only
+	RemoteMessageID  string   // provider-private message ID, transient only
+	ReplyToMessageID string   // structured native reply ID, never inferred from text
+	DisplayName      string   // transient only; never persisted
+	Text             string   // transient only
+	Kind             string   // text or unsupported
+	Timestamp        time.Time
+	FromSelf         bool
+}
+
+type PrivateEventsSource interface {
+	PrivateEvents() <-chan PrivateIncoming
+}
+
+// PrivateMessenger is an optional adapter capability for direct, non-routed
+// messages. Implementations must verify endpoint membership on each call.
+type PrivateMessenger interface {
+	VerifyPrivateMember(context.Context, EndpointID, string) bool
+	VerifyPrivateInboxMember(context.Context, EndpointID, string, PrivateInbox) bool
+	ResolvePrivateInbox(context.Context, EndpointID, string) (PrivateInbox, bool)
+	SendPrivate(context.Context, PrivateInbox, string, ...PrivateSendOptions) (PrivateSendResult, error)
+	DeletePrivateCopyForMe(context.Context, PrivateCopy) error
+}
+
+// RecoveryPolicyProvider supplies the policy owned by a recovery stream's sync set.
+type RecoveryPolicyProvider interface {
+	RecoveryPolicy(string) (bool, int, time.Duration)
 }

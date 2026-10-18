@@ -16,6 +16,7 @@ import (
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -72,9 +73,9 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 						"telegram": {Transport: config.TransportTelegram, RemoteID: "-444"},
 					},
 					SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"source", "discord", "whatsapp", "telegram"}}},
-					Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 				}
 				sender := &editPipelineSender{creates: make(chan transport.Outgoing, 10), edits: make(chan pipelineEdit, 10)}
+				testutil.SeedRouting(t, db.DB(), cfg)
 				mesh, err := router.New(cfg, db, sender)
 				if err != nil {
 					t.Fatal(err)
@@ -88,7 +89,7 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				normalizer, err := NewNormalizer(map[string]string{"source": "111@g.us"}, hasher, config.UsernameModePushName)
+				normalizer, err := NewNormalizer(map[string]string{"source": "111@g.us"}, hasher)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -100,9 +101,10 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 				}
 				timestamp := time.Now().UTC().Truncate(time.Second)
 				info := types.MessageInfo{
-					MessageSource: types.MessageSource{Chat: types.NewJID("111", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), IsGroup: true, IsFromMe: fromSelf},
+					MessageSource: types.MessageSource{Chat: types.NewJID("111", types.GroupServer), Sender: types.NewJID("15551234567", types.DefaultUserServer), SenderAlt: types.NewJID("987654321012345", types.HiddenUserServer), IsGroup: true, IsFromMe: fromSelf},
 					ID:            "original", PushName: "Alice", Timestamp: timestamp,
 				}
+				adapter.client.Store = &waStore.Device{LIDs: &pipelineSecretStore{sender: info.Sender, lid: info.SenderAlt}}
 				adapter.handleEvent((&events.Message{Info: info, RawMessage: &waE2E.Message{Conversation: proto.String("before")}}).UnwrapRaw())
 				original := receivePipelineIncoming(t, adapter)
 				if _, err := coordinator.Handle(ctx, original); err != nil {
@@ -116,7 +118,7 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 					}
 				}
 				// Wait for copy commits and then accept the original checkpoint.
-				deadline := time.Now().Add(time.Second)
+				deadline := time.Now().Add(5 * time.Second)
 				for {
 					outcome, err := coordinator.Handle(ctx, original)
 					if err != nil {
@@ -140,7 +142,7 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 				}
 				if shape == "live secret" || shape == "history secret" {
 					secret := sha256.Sum256([]byte("synthetic original message secret"))
-					protocolStore := &pipelineSecretStore{secret: secret[:], sender: info.Sender}
+					protocolStore := &pipelineSecretStore{secret: secret[:], sender: info.Sender, lid: info.SenderAlt}
 					adapter.client.Store = &waStore.Device{MsgSecrets: protocolStore, LIDs: protocolStore}
 					raw = encryptedPipelineEdit(t, key, info.Sender, secret[:], raw.ProtocolMessage.EditedMessage)
 				}
@@ -174,7 +176,7 @@ func TestWhatsAppPlainTextEditPipeline(t *testing.T) {
 						if call.ref.RemoteMessageID != string(call.ref.Endpoint)+"-copy" {
 							t.Fatalf("wrong edit target: %+v", call.ref)
 						}
-						if call.text != "*_source/Alice_*: after" {
+						if call.text != "*_source/Alice (Amber Badger)_*: after" {
 							t.Fatalf("edit text = %q", call.text)
 						}
 					case <-time.After(time.Second):
@@ -213,16 +215,23 @@ type pipelineSecretStore struct {
 	waStore.LIDStore
 	secret []byte
 	sender types.JID
+	lid    types.JID
 	err    error
 }
 
 func (s *pipelineSecretStore) GetMessageSecret(context.Context, types.JID, types.JID, types.MessageID) ([]byte, types.JID, error) {
 	return s.secret, s.sender, s.err
 }
-func (*pipelineSecretStore) GetLIDForPN(context.Context, types.JID) (types.JID, error) {
+func (s *pipelineSecretStore) GetLIDForPN(_ context.Context, jid types.JID) (types.JID, error) {
+	if jid.ToNonAD() == s.sender.ToNonAD() {
+		return s.lid, nil
+	}
 	return types.EmptyJID, nil
 }
-func (*pipelineSecretStore) GetPNForLID(context.Context, types.JID) (types.JID, error) {
+func (s *pipelineSecretStore) GetPNForLID(_ context.Context, jid types.JID) (types.JID, error) {
+	if !s.lid.IsEmpty() && jid.ToNonAD() == s.lid.ToNonAD() {
+		return s.sender, nil
+	}
 	return types.EmptyJID, nil
 }
 
@@ -265,7 +274,7 @@ func TestEncryptedEditFailureDoesNotEmitOrLogProviderData(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			normalizer, err := NewNormalizer(map[string]string{"source": "111@g.us"}, hasher, config.UsernameModePushName)
+			normalizer, err := NewNormalizer(map[string]string{"source": "111@g.us"}, hasher)
 			if err != nil {
 				t.Fatal(err)
 			}

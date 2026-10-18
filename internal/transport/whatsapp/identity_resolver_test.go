@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
 	waE2E "go.mau.fi/whatsmeow/proto/waE2E"
@@ -105,7 +104,7 @@ func TestNormalizeMessage_OpaqueIDConsistencyAcrossRepresentations(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +254,7 @@ func TestNormalizePollVote_OpaqueIDConsistency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +431,7 @@ func TestExtractMentions_FullJIDPreservation(t *testing.T) {
 		return types.ContactInfo{Found: false}
 	}
 
-	mentions := extractMentions([]string{pnJID.String()}, mockContactGetter, resolver)
+	mentions := extractMentions([]string{pnJID.String()}, mockContactGetter, resolver, nil)
 	if len(mentions) != 1 {
 		t.Fatalf("expected 1 mention, got %d", len(mentions))
 	}
@@ -450,7 +449,7 @@ func TestNormalizeMessage_MentionTextPreservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

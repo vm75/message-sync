@@ -571,7 +571,95 @@
     height: 34px;
   }
 
-  .endpoint-chip > span[style*="font-size:.7rem"] {
-    display: none;
+  .endpoint-chip > span[style*="font-size:.7rem"],
+  .endpoint-chip > .chip-conn-label {
+    display: inline-flex !important;
   }
 }
+
+/* Keep save feedback visible in both the accordion and create dialog. */
+.syncset-save-feedback {padding:10px 14px;margin:10px 0;border-left:3px solid var(--border-strong);background:var(--bg-secondary);font-size:.85rem;border-radius:4px;}
+.syncset-save-feedback[data-state="dirty"] {border-color:#d97706;background:color-mix(in srgb,#d97706 12%,var(--bg-secondary));font-weight:600;}
+.syncset-save-feedback[data-state="saving"] {border-color:#2563eb;}
+.syncset-save-feedback[data-state="error"] {border-color:#dc2626;background:color-mix(in srgb,#dc2626 12%,var(--bg-secondary));}
+.syncset-settings-panel {margin:16px 0;min-width:0;}
+.syncset-settings-panel .settings-section {max-width:none;padding:0;}
+
+.syncset-polished-footer {flex-wrap:wrap;}
+.syncset-polished-footer > .syncset-save-feedback {flex-basis:100%;margin:0;}
+
+/* Settings share one modal panel for creation and editing. */
+.syncset-settings-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-width: 760px;
+}
+.syncset-settings-dialog > .modal-body {
+  overflow-y: auto;
+  padding: 24px;
+}
+.syncset-settings-dialog > .modal-footer {
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 24px;
+}
+.syncset-settings-dialog .modal-footer [data-syncset-save-status] {
+  margin: 0 auto 0 0;
+}
+#syncset-settings-panel {
+  margin: 0;
+  width: 100%;
+}
+#syncset-settings-panel .settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin: 0;
+  padding: 0;
+  max-width: none;
+}
+#syncset-settings-panel .settings-card {
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+#syncset-settings-panel .settings-card-header {
+  padding: 18px 20px;
+}
+#syncset-settings-panel .settings-card-body {
+  padding: 20px;
+  gap: 16px;
+}
+#syncset-settings-panel .form-group {
+  margin: 0;
+}
+#syncset-privacy-card,
+#syncset-membership-section {
+  padding: 20px;
+}
+#syncset-privacy-card > .section-label,
+#syncset-membership-section > .section-label {
+  margin-bottom: 16px;
+}
+#syncset-membership-fields {
+  border: 0;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+#syncset-membership-fields[hidden],
+.syncset-save-feedback[hidden] {
+  display: none !important;
+}
+@media (max-width: 600px) {
+  .syncset-settings-dialog > .modal-body { padding: 16px; }
+  .syncset-settings-dialog > .modal-footer { padding: 14px 16px; }
+  #syncset-settings-panel .settings-section { gap: 16px; }
+  #syncset-settings-panel .settings-card-header,
+  #syncset-settings-panel .settings-card-body,
+  #syncset-privacy-card,
+  #syncset-membership-section { padding: 16px; }
+  .syncset-polished-footer-main { flex-wrap: wrap; }
+}
+.syncset-review-membership[hidden] { display: none !important; }

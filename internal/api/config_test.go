@@ -4,196 +4,164 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/vm75/message-sync/internal/config"
 )
 
-func TestConfigAuthRequired(t *testing.T) {
+func TestGlobalPrivateDMRelayToggle(t *testing.T) {
 	db := setupTestDB(t)
 	srv := setupTestServer(t, db)
-
-	endpoints := []struct {
-		method string
-		url    string
-		body   string
-	}{
-		{http.MethodGet, "/api/config", ""},
-		{http.MethodPut, "/api/config", `{"usernameMode":"hash"}`},
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, ep := range endpoints {
-		var req *http.Request
-		if ep.body != "" {
-			req = httptest.NewRequest(ep.method, ep.url, bytes.NewReader([]byte(ep.body)))
-		} else {
-			req = httptest.NewRequest(ep.method, ep.url, nil)
-		}
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s %s expected 401 Unauthorized, got %d", ep.method, ep.url, rec.Code)
-		}
+	unauthorized := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthorized GET status = %d", unauthorized.Code)
+	}
+	get := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	get.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, get)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"privateDMRelayEnabled":false`) {
+		t.Fatalf("initial global setting response = %d %s", response.Code, response.Body.String())
+	}
+	update := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{"privateDMRelayEnabled":true}`))
+	update.Header.Set("Authorization", "Bearer "+token)
+	updated := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"privateDMRelayEnabled":true`) {
+		t.Fatalf("update response = %d %s", updated.Code, updated.Body.String())
+	}
+	var enabled bool
+	if err := db.QueryRow(`SELECT private_dm_relay_enabled FROM global_config WHERE id=1`).Scan(&enabled); err != nil || !enabled {
+		t.Fatalf("persisted global setting = %t, error = %v", enabled, err)
+	}
+	invalid := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewBufferString(`{"usernameMode":"hash"}`))
+	invalid.Header.Set("Authorization", "Bearer "+token)
+	invalidResponse := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("legacy setting payload status = %d", invalidResponse.Code)
 	}
 }
 
-func TestConfigGetAndUpdate(t *testing.T) {
+func TestPrivateDMEnablementRequiresAdministrator(t *testing.T) {
 	db := setupTestDB(t)
-	configChanges := 0
-	secret := []byte("01234567890123456789012345678901")
-	srv := NewServer(Options{
-		DB:     db,
-		Secret: secret,
-		OnConfigChange: func(ctx context.Context) error {
-			configChanges++
-			return nil
-		},
-	})
+	srv := setupTestServer(t, db)
+	admin, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := srv.controlDB.Exec(`INSERT INTO users(id,username,password_hash,role,active,created_at,updated_at) VALUES('operator','operator','hash','operator',1,1,1)`); err != nil {
+		t.Fatal(err)
+	}
+	operator, err := srv.sessions.createSession(context.Background(), "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		if rec := request(t, srv, method, "/api/config", map[string]bool{"privateDMRelayEnabled": true}, operator); rec.Code != http.StatusForbidden {
+			t.Fatalf("operator global %s=%d", method, rec.Code)
+		}
+	}
+	create := map[string]any{"id": "private-set", "endpoints": []string{}, "settings": map[string]bool{"privateDMRelayEnabled": true}}
+	if rec := request(t, srv, http.MethodPost, "/api/sync-sets", create, operator); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator enabled new set: %d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPost, "/api/sync-sets", create, admin); rec.Code != http.StatusCreated {
+		t.Fatalf("administrator create=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]bool{"privateDMRelayEnabled": false}}, operator); rec.Code != http.StatusForbidden {
+		t.Fatalf("operator changed set gate=%d", rec.Code)
+	}
+	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]bool{"membershipReviewEnabled": true}}, operator); rec.Code != http.StatusOK {
+		t.Fatalf("unrelated operator settings behavior changed=%d", rec.Code)
+	}
+}
 
+func TestSyncSetSettingsIsolationAndPartialUpdates(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
 	token, err := srv.sessions.CreateToken()
 	if err != nil {
-		t.Fatalf("create token failed: %v", err)
+		t.Fatal(err)
 	}
-	authHeader := "Bearer " + token
-
-	// 1. GET /api/config initial values
-	{
-		req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-		req.Header.Set("Authorization", authHeader)
+	send := func(method, path, body string, status int) SyncSetDTO {
+		t.Helper()
+		req := httptest.NewRequest(method, path, bytes.NewBufferString(body))
+		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
 		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("GET /api/config status = %d, want 200", rec.Code)
+		if rec.Code != status {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
 		}
-		var cfg GlobalConfigDTO
-		if err := json.NewDecoder(rec.Body).Decode(&cfg); err != nil {
-			t.Fatalf("decode config: %v", err)
-		}
-		if cfg.UsernameMode != config.UsernameModePushName {
-			t.Errorf("default usernameMode = %q, want push_name", cfg.UsernameMode)
-		}
-		if cfg.Media.MaxSizeMB != 100 {
-			t.Errorf("default media MaxSizeMB = %d, want 100", cfg.Media.MaxSizeMB)
-		}
-		if cfg.Storage.MessageRetentionDays != 90 {
-			t.Errorf("default retention days = %d, want 90", cfg.Storage.MessageRetentionDays)
-		}
-		if cfg.WhatsAppCleanup.Enabled {
-			t.Errorf("default whatsappCleanup.enabled = true, want false")
-		}
-		if cfg.WhatsAppCleanup.RetentionDays != 30 {
-			t.Errorf("default whatsappCleanup.retentionDays = %d, want 30", cfg.WhatsAppCleanup.RetentionDays)
-		}
-		if cfg.WhatsAppDeviceName != "message-sync" {
-			t.Errorf("default whatsappDeviceName = %q, want message-sync", cfg.WhatsAppDeviceName)
-		}
-		if cfg.ChildContextDisplayMode != config.ChildContextDisplayOpaque {
-			t.Errorf("default childContextDisplayMode = %q, want opaque", cfg.ChildContextDisplayMode)
-		}
-	}
-
-	// 2. PUT validation errors
-	invalidCases := []struct {
-		name string
-		body string
-	}{
-		{"invalid username mode", `{"usernameMode":"invalid"}`},
-		{"negative media maxSizeMB", `{"media":{"enabled":true,"maxSizeMB":0}}`},
-		{"negative recovery maxAgeHours", `{"recovery":{"enabled":true,"maxAgeHours":-1,"maxMessagesPerGroup":100}}`},
-		{"negative recovery maxMessagesPerGroup", `{"recovery":{"enabled":true,"maxAgeHours":24,"maxMessagesPerGroup":0}}`},
-		{"negative storage retention", `{"storage":{"messageRetentionDays":0}}`},
-		{"negative whatsapp cleanup retention", `{"whatsappCleanup":{"enabled":true,"retentionDays":0}}`},
-		{"invalid control char whatsapp device name", "{\"whatsappDeviceName\":\"bad\\nname\"}"},
-		{"invalid child context display mode", `{"childContextDisplayMode":"invalid"}`},
-	}
-
-	for _, tc := range invalidCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader([]byte(tc.body)))
-			req.Header.Set("Authorization", authHeader)
-			rec := httptest.NewRecorder()
-			srv.Handler().ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("PUT /api/config expected 400 for %s, got %d", tc.name, rec.Code)
+		var dto SyncSetDTO
+		if status < 300 {
+			if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+				t.Fatal(err)
 			}
-		})
+		}
+		return dto
 	}
+	first := send("POST", "/api/sync-sets", `{"id":"work","anonymizeToDiscord":true}`, 201)
+	if !reflect.DeepEqual(*first.Settings, config.DefaultSyncSetSettings()) {
+		t.Fatalf("defaults: %+v", first.Settings)
+	}
+	family := send("POST", "/api/sync-sets", `{"id":"family","settings":{"storage":{"messageRetentionDays":50}}}`, 201)
+	changed := send("PUT", "/api/sync-sets/work", `{"settings":{"membershipReviewEnabled":true,"media":{"enabled":false},"childContextDisplayMode":"friendly","recovery":{"enabled":false},"storage":{"messageRetentionDays":12},"polls":{"aggregationTrigger":"/votes"},"whatsappCleanup":{"enabled":true,"retentionDays":8},"localPrefix":"!local"}}`, 200)
+	if !changed.AnonymizeToDiscord || changed.Settings.Media.Enabled || changed.Settings.Media.MaxSizeMB != 100 {
+		t.Fatalf("partial merge lost fields: %+v", changed)
+	}
+	send("PUT", "/api/sync-sets/work", `{"settings":{"membershipReviewEnabled":false}}`, 200)
+	loaded := send("GET", "/api/sync-sets/family", "", 200)
+	if !reflect.DeepEqual(family, loaded) {
+		t.Fatalf("another set changed: %+v != %+v", family, loaded)
+	}
+	loaded = send("GET", "/api/sync-sets/work", "", 200)
+	expected := *changed.Settings
+	expected.MembershipReviewEnabled = false
+	if !reflect.DeepEqual(expected, *loaded.Settings) {
+		t.Fatalf("settings not preserved: %+v", loaded.Settings)
+	}
+	for _, body := range []string{`{"settings":{"codeLength":4}}`, `{"settings":{"codeLength":11}}`, `{"settings":{"codeLength":6.5}}`, `{"settings":null}`, `{"settings":{"unknown":true}}`, `{"settings":{"usernameMode":"hash"}}`, `{"settings":{"usernameMode":"push_name"}}`, `{"settings":{"showDiscriminator":false}}`, `{"settings":{"media":{"maxSizeMB":0}}}`} {
+		send("PUT", "/api/sync-sets/work", body, 400)
+	}
+	loaded = send("GET", "/api/sync-sets/work", "", 200)
+	if !reflect.DeepEqual(expected, *loaded.Settings) {
+		t.Fatal("invalid update mutated persisted settings")
+	}
+}
 
-	// 3. PUT valid update
-	{
-		updateBody := `{
-			"usernameMode": "hash",
-			"media": {
-				"enabled": false,
-				"maxSizeMB": 50
-			},
-			"recovery": {
-				"enabled": true,
-				"maxAgeHours": 12,
-				"maxMessagesPerGroup": 150
-			},
-			"storage": {
-				"messageRetentionDays": 30
-			},
-			"whatsappCleanup": {
-				"enabled": true,
-				"retentionDays": 14
-			},
-			"whatsappDeviceName": "CustomSync",
-			"childContextDisplayMode": "friendly"
-		}`
-		req := httptest.NewRequest(http.MethodPut, "/api/config", bytes.NewReader([]byte(updateBody)))
-		req.Header.Set("Authorization", authHeader)
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("PUT /api/config status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
-		}
-		var updated GlobalConfigDTO
-		if err := json.NewDecoder(rec.Body).Decode(&updated); err != nil {
-			t.Fatalf("decode updated config: %v", err)
-		}
-		if updated.UsernameMode != config.UsernameModeHash {
-			t.Errorf("got usernameMode %q, want hash", updated.UsernameMode)
-		}
-		if updated.Media.MaxSizeMB != 50 || updated.Media.Enabled != false {
-			t.Errorf("got media %+v", updated.Media)
-		}
-		if updated.Recovery.MaxAgeHours != 12 || updated.Recovery.MaxMessagesPerGroup != 150 {
-			t.Errorf("got recovery %+v", updated.Recovery)
-		}
-		if updated.Storage.MessageRetentionDays != 30 {
-			t.Errorf("got storage %+v", updated.Storage)
-		}
-		if !updated.WhatsAppCleanup.Enabled || updated.WhatsAppCleanup.RetentionDays != 14 {
-			t.Errorf("got whatsappCleanup %+v, want enabled=true, retentionDays=14", updated.WhatsAppCleanup)
-		}
-		if updated.WhatsAppDeviceName != "CustomSync" {
-			t.Errorf("got whatsappDeviceName %q, want CustomSync", updated.WhatsAppDeviceName)
-		}
-		if updated.ChildContextDisplayMode != config.ChildContextDisplayFriendly {
-			t.Errorf("got childContextDisplayMode %q, want friendly", updated.ChildContextDisplayMode)
-		}
-		if configChanges != 1 {
-			t.Fatalf("expected 1 config change notification, got %d", configChanges)
-		}
-
-		// 4. Verify GET returns updated values
-		reqGet := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-		reqGet.Header.Set("Authorization", authHeader)
-		recGet := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(recGet, reqGet)
-		if recGet.Code != http.StatusOK {
-			t.Fatalf("GET /api/config status = %d, want 200", recGet.Code)
-		}
-		var loaded GlobalConfigDTO
-		if err := json.NewDecoder(recGet.Body).Decode(&loaded); err != nil {
-			t.Fatalf("decode config: %v", err)
-		}
-		if loaded.UsernameMode != config.UsernameModeHash || loaded.Media.MaxSizeMB != 50 || loaded.Storage.MessageRetentionDays != 30 || !loaded.WhatsAppCleanup.Enabled || loaded.WhatsAppCleanup.RetentionDays != 14 || loaded.WhatsAppDeviceName != "CustomSync" {
-			t.Fatalf("loaded config mismatch: %+v", loaded)
-		}
+func TestSyncSetSaveReportsReloadFailure(t *testing.T) {
+	db := setupTestDB(t)
+	srv := NewServer(Options{DB: db, Secret: []byte("01234567890123456789012345678901"), OnConfigChange: func(context.Context) error { return errors.New("reload failed") }})
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("POST", "/api/sync-sets", bytes.NewBufferString(`{"id":"work"}`))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != 500 {
+		t.Fatalf("reload failure returned %d", rec.Code)
+	}
+	var result struct {
+		Persisted bool   `json:"persisted"`
+		SyncSetID string `json:"syncSetId"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.Persisted || result.SyncSetID != "work" {
+		t.Fatalf("retry metadata missing: %+v", result)
 	}
 }

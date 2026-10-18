@@ -4,6 +4,18 @@ A Telegram connection uses exactly one integration method: **Bot API** or **Phon
 
 ## Choosing a method
 
+The opt-in [private DM relay](PRIVATE_MESSAGING.md) supports Bot API only.
+Users must first privately contact the same bot with `/start`, which returns
+`/help`. Native Reply on an active relayed bot message routes the next turn;
+unattached private text receives help. Verified operational inbox tokens are
+encrypted in `control.db` for 24 hours and renewed on private contact. Expired
+reachability requires contacting the bot again. Current group membership must
+be verifiable on every hop; blocked DMs fail privately with no group fallback.
+Private edits are ignored. Bot API `deleteMessage` is never used for private
+cleanup because it deletes the participant's copy too. Reply metadata expires
+even when provider messages remain. MTProto personal inboxes are unsupported,
+not auto-answered, and never touched by private cleanup.
+
 | Capability | Bot API | Phone / MTProto |
 |---|---|---|
 | Authentication | BotFather token | Telegram API ID/hash + phone login code + optional 2FA |
@@ -81,3 +93,20 @@ This keeps bot/user sessions, peer caches, poll provider references, recovery cu
 - **MTProto send after restart cannot resolve a group:** run discovery once if the account has never observed/discovered that peer; resolved peer/access-hash metadata is thereafter kept inside encrypted connection state.
 - **Backfill unavailable:** only Phone / MTProto advertises arbitrary history recovery, and the connection must be authenticated with a configured endpoint and explicit bounds.
 - **Endpoint cannot be created/reassigned:** confirm its transport matches the selected connection and that the target is a supported group.
+
+Automatic recovery uses the endpoint’s sync-set `recovery.enabled`,
+`recovery.maxAgeHours`, and `recovery.maxMessagesPerGroup` settings. Bot API
+availability remains limited by Telegram's retained update queue. MTProto
+history is capped at 5,000 messages per request; manual backfill uses its
+explicit request bounds. Media and alias presentation policies also belong
+to the endpoint's sync set, even when one connection serves several sets.
+
+
+Cross-group references use assigned `@{Amber Badger}` aliases within the source
+sync set. Bot API native rendering requires current destination-chat membership
+and an available transient native identity binding; otherwise the exact authored
+token stays literal. MTProto and edits do not add native reference notifications.
+Private Bot API `/dm @{Amber Badger} text` requires existing author aliases,
+current set membership and prior private contact with the owning bot (`/start`).
+The DM header shows only the sender's assigned set alias. MTProto personal
+inboxes remain unmanaged. See [private messaging](PRIVATE_MESSAGING.md).

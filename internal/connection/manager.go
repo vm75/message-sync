@@ -41,15 +41,16 @@ type Adapter interface {
 
 // Manager owns active connection adapter instances by opaque connection ID.
 type Manager struct {
-	mu          sync.RWMutex
-	ctx         context.Context
-	cancel      context.CancelFunc
-	logger      *slog.Logger
-	registry    *router.AdapterRegistry
-	coordinator *recovery.Coordinator
-	events      chan transport.Incoming
-	entries     map[string]*entry
-	closed      bool
+	mu            sync.RWMutex
+	ctx           context.Context
+	cancel        context.CancelFunc
+	logger        *slog.Logger
+	registry      *router.AdapterRegistry
+	coordinator   *recovery.Coordinator
+	events        chan transport.Incoming
+	privateEvents chan transport.PrivateIncoming
+	entries       map[string]*entry
+	closed        bool
 }
 
 type entry struct {
@@ -68,19 +69,25 @@ func NewManager(ctx context.Context, logger *slog.Logger, registry *router.Adapt
 		logger = slog.Default()
 	}
 	return &Manager{
-		ctx:         managerCtx,
-		cancel:      cancel,
-		logger:      logger,
-		registry:    registry,
-		coordinator: coordinator,
-		events:      make(chan transport.Incoming, 100),
-		entries:     make(map[string]*entry),
+		ctx:           managerCtx,
+		cancel:        cancel,
+		logger:        logger,
+		registry:      registry,
+		coordinator:   coordinator,
+		events:        make(chan transport.Incoming, 100),
+		privateEvents: make(chan transport.PrivateIncoming, 100),
+		entries:       make(map[string]*entry),
 	}
 }
 
 // Events returns the unified shared ingress channel fed by all active connections.
 func (m *Manager) Events() <-chan transport.Incoming {
 	return m.events
+}
+
+// PrivateEvents returns a separate ingress stream that never enters the group router.
+func (m *Manager) PrivateEvents() <-chan transport.PrivateIncoming {
+	return m.privateEvents
 }
 
 // Register registers and starts an adapter for the given connection ID.
@@ -130,6 +137,9 @@ func (m *Manager) Register(ctx context.Context, id string, transportType config.
 	}
 
 	go m.forwardEvents(connCtx, id, adapter.Events())
+	if source, ok := adapter.(transport.PrivateEventsSource); ok {
+		go m.forwardPrivateEvents(connCtx, id, source.PrivateEvents())
+	}
 	return nil
 }
 
@@ -225,6 +235,9 @@ func (m *Manager) Restart(ctx context.Context, id string, newAdapter Adapter) er
 
 	_ = transportType
 	go m.forwardEvents(newConnCtx, id, newAdapter.Events())
+	if source, ok := newAdapter.(transport.PrivateEventsSource); ok {
+		go m.forwardPrivateEvents(newConnCtx, id, source.PrivateEvents())
+	}
 	return nil
 }
 
@@ -324,6 +337,35 @@ func (m *Manager) forwardEvents(connCtx context.Context, connID string, stream <
 			}
 			select {
 			case m.events <- ev:
+			case <-connCtx.Done():
+				return
+			case <-m.ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (m *Manager) forwardPrivateEvents(connCtx context.Context, connID string, stream <-chan transport.PrivateIncoming) {
+	if stream == nil {
+		return
+	}
+	for {
+		select {
+		case <-connCtx.Done():
+			return
+		case <-m.ctx.Done():
+			return
+		case ev, ok := <-stream:
+			if !ok {
+				return
+			}
+			if ev.Inbox.ConnectionID != connID {
+				continue
+			}
+			ev.ConnectionID = connID
+			select {
+			case m.privateEvents <- ev:
 			case <-connCtx.Done():
 				return
 			case <-m.ctx.Done():

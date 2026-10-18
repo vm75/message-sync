@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vm75/message-sync/internal/config"
 )
 
 var connectionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
@@ -85,6 +87,7 @@ func NewConnectionID() (string, error) {
 }
 
 type Connection struct {
+	WhatsAppDeviceName   string  `json:"whatsappDeviceName,omitempty"`
 	ID                   string  `json:"id"`
 	Transport            string  `json:"transport"`
 	IntegrationMode      string  `json:"integrationMode,omitempty"`
@@ -107,6 +110,11 @@ func (c Connection) Validate() error {
 	}
 	switch c.Transport {
 	case "whatsapp":
+		if c.WhatsAppDeviceName != "" {
+			if err := config.ValidateWhatsAppDeviceName(c.WhatsAppDeviceName); err != nil {
+				return err
+			}
+		}
 		if len(c.EncryptedCredential) > 0 || len(c.CredentialNonce) > 0 {
 			return errors.New("whatsapp connections must not store credentials")
 		}
@@ -157,9 +165,9 @@ func (s *Store) CreateConnection(ctx context.Context, conn Connection) error {
 	}
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt)
+		INSERT INTO transport_connections (id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at, whatsapp_device_name)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, conn.ID, conn.Transport, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.CreatedBy, conn.CreatedAt, conn.UpdatedAt, conn.WhatsAppDeviceName)
 	if err != nil {
 		return fmt.Errorf("insert connection: %w", err)
 	}
@@ -171,14 +179,14 @@ func (s *Store) GetConnection(ctx context.Context, id string) (*Connection, erro
 		return nil, errors.New("control database is required")
 	}
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at, whatsapp_device_name
 		FROM transport_connections
 		WHERE id = ?
 	`, id)
 	var conn Connection
 	var encCred, nonce []byte
 	var createdBy sql.NullString
-	if err := row.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
+	if err := row.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt, &conn.WhatsAppDeviceName); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errors.New("connection not found")
 		}
@@ -198,7 +206,7 @@ func (s *Store) ListConnections(ctx context.Context) ([]Connection, error) {
 		return nil, errors.New("control database is required")
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at
+		SELECT id, transport, integration_mode, label, enabled, encrypted_credential, credential_nonce, credential_key_version, created_by, created_at, updated_at, whatsapp_device_name
 		FROM transport_connections
 		ORDER BY id ASC
 	`)
@@ -212,7 +220,7 @@ func (s *Store) ListConnections(ctx context.Context) ([]Connection, error) {
 		var conn Connection
 		var encCred, nonce []byte
 		var createdBy sql.NullString
-		if err := rows.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt); err != nil {
+		if err := rows.Scan(&conn.ID, &conn.Transport, &conn.IntegrationMode, &conn.Label, &conn.Enabled, &encCred, &nonce, &conn.CredentialKeyVersion, &createdBy, &conn.CreatedAt, &conn.UpdatedAt, &conn.WhatsAppDeviceName); err != nil {
 			return nil, fmt.Errorf("scan connection: %w", err)
 		}
 		conn.EncryptedCredential = encCred
@@ -271,9 +279,9 @@ func (s *Store) UpdateConnection(ctx context.Context, conn Connection) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE transport_connections
-		SET integration_mode = ?, label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?
+		SET integration_mode = ?, label = ?, enabled = ?, encrypted_credential = ?, credential_nonce = ?, credential_key_version = ?, updated_at = ?, whatsapp_device_name = ?
 		WHERE id = ?
-	`, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.UpdatedAt, conn.ID)
+	`, conn.IntegrationMode, conn.Label, conn.Enabled, encCred, nonce, conn.CredentialKeyVersion, conn.UpdatedAt, conn.WhatsAppDeviceName, conn.ID)
 	if err != nil {
 		return fmt.Errorf("update connection: %w", err)
 	}
@@ -285,4 +293,17 @@ func (s *Store) UpdateConnection(ctx context.Context, conn Connection) error {
 		return errors.New("connection not found")
 	}
 	return nil
+}
+
+// ImportWhatsAppDeviceNames fills only pre-upgrade connections. Explicit names
+// are never overwritten by the former global setting on later restarts.
+func (s *Store) ImportWhatsAppDeviceNames(ctx context.Context, name string) error {
+	if name == "" {
+		name = "message-sync"
+	}
+	if err := config.ValidateWhatsAppDeviceName(name); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE transport_connections SET whatsapp_device_name=? WHERE transport='whatsapp' AND whatsapp_device_name=''`, name)
+	return err
 }

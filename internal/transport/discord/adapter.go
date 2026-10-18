@@ -17,11 +17,13 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
-	ConnectionID             string
-	Token                    string
-	ChannelIDs               map[string]string
-	Hasher                   *identity.Hasher
-	UsernameMode             config.UsernameMode
+	PrivateDMEnabled bool
+	EndpointSettings map[string]config.SyncSetSettings
+	ConnectionID     string
+	Token            string
+	ChannelIDs       map[string]string
+	Hasher           *identity.Hasher
+
 	Logger                   *slog.Logger
 	Webhook                  ChannelWebhook
 	ExplicitWebhookURL       string
@@ -31,6 +33,9 @@ type Options struct {
 }
 
 type Adapter struct {
+	privateDMEnabled      bool
+	privateEvents         chan transport.PrivateIncoming
+	endpointSettings      map[string]config.SyncSetSettings
 	connectionID          string
 	session               *discordgo.Session
 	api                   discordAPI
@@ -48,6 +53,7 @@ type Adapter struct {
 	reactionState     map[reactionKey]string
 	suppressedDeletes map[string]struct{}
 	pollSelections    map[pollActorKey]map[int]struct{}
+	observedMembers   map[transport.EndpointID]map[string]string // transient actor -> native ID
 
 	mu              sync.RWMutex
 	connected       bool
@@ -91,7 +97,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	default:
 	}
 
-	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.UsernameMode)
+	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -101,10 +107,8 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	}
 	session.ShouldRetryOnRateLimit = true
 
-	// Request only the guild message and reaction events needed by the bridge.
-	// DMs are intentionally not subscribed, and the normalizer still rejects
-	// any DM event defensively.
-	session.Identify.Intents = discordGatewayIntents()
+	// Private events are requested only for explicitly enabled relay connections.
+	session.Identify.Intents = discordGatewayIntents(opts.PrivateDMEnabled)
 
 	// DiscordGo's default logger may include protocol identifiers and arbitrary
 	// server error text. Replace it with a fixed-field classifier and keep only
@@ -126,11 +130,14 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		}
 	}
 	adapter := &Adapter{
+		privateDMEnabled:      opts.PrivateDMEnabled,
+		privateEvents:         make(chan transport.PrivateIncoming, eventBufferSize),
 		connectionID:          strings.TrimSpace(opts.ConnectionID),
 		session:               session,
 		api:                   session,
 		adminAPI:              session,
 		normalizer:            normalizer,
+		endpointSettings:      opts.EndpointSettings,
 		hasher:                opts.Hasher,
 		webhook:               webhook,
 		fixedWebhookChannelID: explicitWebhookChannelID,
@@ -184,8 +191,12 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	return adapter, nil
 }
 
-func discordGatewayIntents() discordgo.Intent {
-	return discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent | discordgo.IntentGuildMessagePolls
+func discordGatewayIntents(privateEnabled ...bool) discordgo.Intent {
+	intents := discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsGuildMessageReactions | discordgo.IntentsMessageContent | discordgo.IntentGuildMessagePolls
+	if len(privateEnabled) > 0 && privateEnabled[0] {
+		intents |= discordgo.IntentsDirectMessages
+	}
+	return intents
 }
 
 func installSafeDiscordLogger(logger *slog.Logger) {
@@ -319,7 +330,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			}
 		}
 	}
-	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.Identity.UsernameMode)
+	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}
@@ -339,6 +350,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 
 	a.mu.Lock()
 	a.normalizer = normalizer
+	a.endpointSettings = cfg.EndpointSettings(a.connectionID)
 	a.targets = targets
 	if a.historyStatus == nil {
 		a.historyStatus = make(map[string]HistoryStatus)
@@ -367,6 +379,9 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	if evt == nil || evt.Message == nil {
 		return
 	}
+	if evt.GuildID == "" && a.handlePrivateMessage(session, evt.Message) {
+		return
+	}
 	routeChannelID := configuredIngressChannelID(session, normalizer, evt.Message.ChannelID)
 	if routeChannelID == "" {
 		return
@@ -379,6 +394,9 @@ func (a *Adapter) handleMessageCreate(session *discordgo.Session, evt *discordgo
 	incoming, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: routedMessage}, botUserID, webhooks)
 	if !ok {
 		return
+	}
+	if evt.Message.Author != nil {
+		a.rememberCrossMentionParticipant(incoming.Endpoint, incoming.Sender.OpaqueID, evt.Message.Author.ID)
 	}
 	incoming.ChildScope = discordChildScope(session, evt.Message.ChannelID, routeChannelID)
 	incoming, ok = a.withDiscordMedia(incoming, evt.Message)

@@ -15,8 +15,8 @@ func validConfig() Config {
 			"a": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "1@g.us"},
 			"b": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "2@g.us"},
 		},
-		SyncSets:           []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
-		Identity:           Identity{UsernameMode: UsernameModeHash},
+		SyncSets: []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
+
 		Media:              Media{MaxSizeMB: 100},
 		Recovery:           Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:            Storage{MessageRetentionDays: 90},
@@ -101,29 +101,6 @@ func TestValidateWhatsAppDeviceName(t *testing.T) {
 		if err := ValidateWhatsAppDeviceName(name); err == nil {
 			t.Fatalf("ValidateWhatsAppDeviceName(%q) accepted invalid name", name)
 		}
-	}
-}
-
-func TestValidateUsernameModeEnum(t *testing.T) {
-	cfg := validConfig()
-	cfg.Identity.UsernameMode = UsernameModePushName
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() with push_name failed: %v", err)
-	}
-
-	cfg.Identity.UsernameMode = UsernameModeHash
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() with hash failed: %v", err)
-	}
-
-	cfg.Identity.UsernameMode = "invalid_mode"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() expected error for invalid usernameMode")
-	}
-
-	cfg.Identity.UsernameMode = ""
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() expected error for empty usernameMode")
 	}
 }
 
@@ -237,7 +214,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := validConfig()
-	cfg.Identity.UsernameMode = UsernameModePushName
+
 	cfg.LocalPrefix = "!local"
 	cfg.WhatsAppDeviceName = "CustomBridge"
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
@@ -249,9 +226,6 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if loaded.Identity.UsernameMode != UsernameModePushName {
-		t.Errorf("got usernameMode %q, want %q", loaded.Identity.UsernameMode, UsernameModePushName)
-	}
 	if loaded.LocalPrefix != "!local" {
 		t.Errorf("got localPrefix %q, want %q", loaded.LocalPrefix, "!local")
 	}
@@ -323,9 +297,6 @@ func TestLoadDefaultsWhenEmpty(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if loaded.Identity.UsernameMode != UsernameModePushName {
-		t.Errorf("default usernameMode = %q, want push_name", loaded.Identity.UsernameMode)
-	}
 	if loaded.Media.MaxSizeMB != 100 {
 		t.Errorf("default media MaxSizeMB = %d, want 100", loaded.Media.MaxSizeMB)
 	}
@@ -531,5 +502,34 @@ func TestSyncSetAnonymizeToDiscordPersistenceAndDefaults(t *testing.T) {
 	}
 	if loaded.SyncSets[0].AnonymizeToDiscord {
 		t.Fatal("expected loaded AnonymizeToDiscord to be false")
+	}
+}
+
+func TestSavePreservesOnlyPerSetFriendlyLabels(t *testing.T) {
+	ctx := context.Background()
+	st := openTestStore(t)
+	cfg := validConfig()
+	friendly, opaque := DefaultSyncSetSettings(), DefaultSyncSetSettings()
+	friendly.ChildContextDisplayMode = ChildContextDisplayFriendly
+	cfg.Endpoints["c"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "3@g.us"}
+	cfg.Endpoints["d"] = Endpoint{Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "4@g.us"}
+	cfg.SyncSets = []SyncSet{{ID: "work", Endpoints: []string{"a", "c"}, Settings: &friendly}, {ID: "family", Endpoints: []string{"b", "d"}, Settings: &opaque}}
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, ep := range []string{"a", "b"} {
+		if err := st.UpsertChildScopeLabel(ctx, ep, "discord_thread", "thread-1", "Synthetic"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Save(ctx, st.DB(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := st.DB().QueryRow(`SELECT count(*) FROM child_scope_labels WHERE endpoint_id='a'`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("friendly labels=%d err=%v", count, err)
+	}
+	if err := st.DB().QueryRow(`SELECT count(*) FROM child_scope_labels WHERE endpoint_id='b'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("opaque labels=%d err=%v", count, err)
 	}
 }
