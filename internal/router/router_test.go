@@ -1660,10 +1660,10 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 	if err := r.Handle(ctx, pollInc); err != nil {
 		t.Fatalf("Handle poll creation error: %v", err)
 	}
-	// A queued poll create must complete before clearing fake.sent. Otherwise
-	// the background destination send can arrive during the next trigger and
-	// make this otherwise synchronous summary assertion flaky.
-	waitForSent(t, fake, 1)
+	// Wait for the destination poll copy and both endpoints' result companions.
+	// Waiting only for the poll copy lets background companion sends leak into
+	// the otherwise synchronous summary assertions after fake.sent is cleared.
+	waitForSent(t, fake, 3)
 
 	// Configured triggers and the non-removable built-in use the same live path.
 	triggers := []string{"aggregate-response", "/poll-results", "#agg", "/summary"}

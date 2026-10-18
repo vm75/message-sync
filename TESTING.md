@@ -118,6 +118,8 @@ names retain the entire assigned alias.
 Poll mention tests verify alias-projected question/options and equivalent source
 and forwarded vote counts. Store tests verify the source option-hash mapping
 survives restart, rejects unrecognized hashes and cascades on poll deletion.
+The multiple-trigger aggregation test waits for the forwarded poll and both
+result companions before isolating each trigger's summary sends.
 
 Private tests cover nine provider pairings, preexisting assignments, global
 lookup with set-local authorization, equivalent inbox deduplication, distinct
