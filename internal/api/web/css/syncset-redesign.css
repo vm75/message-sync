@@ -581,15 +581,25 @@
     font-size: .74rem !important;
   }
 
-  .chip-anonymity {
+  .chip-anonymity-controls {
     order: 4;
-    flex: 1 1 calc(50% - 6px);
+    flex: 0 0 100%;
+    min-width: 0;
+  }
+
+  .chip-actions {
+    order: 5;
+    flex: 0 0 100%;
+  }
+
+  .chip-anonymity-controls .chip-anonymity {
+    flex: 1 1 0;
     min-width: 0;
     display: inline-flex;
     align-items: center;
     gap: 5px;
     font-size: .72rem;
-    white-space: nowrap;
+    white-space: normal;
   }
 
   .chip-anonymity input[type="checkbox"] {
@@ -926,7 +936,13 @@
   #modal-add-conversation .add-endpoint-row { grid-template-columns: 1fr; }
 }
 
-/* Directional anonymity stays beside each conversation's actions. */
+/* Keep each control group together when a conversation row wraps. */
+.chip-anonymity-controls,
+.chip-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .endpoint-chip { flex-wrap: wrap; }
 .chip-anonymity {
   display: inline-flex;

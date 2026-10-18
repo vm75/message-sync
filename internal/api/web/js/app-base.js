@@ -2501,17 +2501,21 @@
           <span class="badge ${transportBadgeClass(ep.transport)}" style="padding:1px 5px;font-size:.68rem;">${escapeHtml(ep.transport)}</span>
           <span class="chip-alias">${escapeHtml(ep.alias)}</span>
           ${connBadge}
-          <label class="chip-anonymity" title="Anonymize all messages delivered to this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeIncoming" ${ep.anonymizeIncoming ? 'checked' : ''}> Anonymize incoming</label>
-          <label class="chip-anonymity" title="Anonymize all messages sent from this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeOutgoing" ${ep.anonymizeOutgoing ? 'checked' : ''}> Anonymize outgoing</label>
-          <button type="button" class="chip-reassign" data-alias="${escapeHtml(ep.alias)}" title="Reassign connection">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
-          </button>
-          <button type="button" class="chip-edit" data-idx="${i}" title="Rename alias">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-          </button>
-          <button type="button" class="chip-remove" data-idx="${i}" title="Remove endpoint">
-            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          </button>
+          <span class="chip-anonymity-controls">
+            <label class="chip-anonymity" title="Anonymize all messages delivered to this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeIncoming" ${ep.anonymizeIncoming ? 'checked' : ''}> Anonymize incoming</label>
+            <label class="chip-anonymity" title="Anonymize all messages sent from this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeOutgoing" ${ep.anonymizeOutgoing ? 'checked' : ''}> Anonymize outgoing</label>
+          </span>
+          <span class="chip-actions">
+            <button type="button" class="chip-reassign" data-alias="${escapeHtml(ep.alias)}" title="Reassign connection">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
+            </button>
+            <button type="button" class="chip-edit" data-idx="${i}" title="Rename alias">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            </button>
+            <button type="button" class="chip-remove" data-idx="${i}" title="Remove endpoint">
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+          </span>
         </span>
       `;
     }).join('');
