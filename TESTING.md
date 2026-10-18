@@ -66,7 +66,7 @@ podman build -f Containerfile -t message-sync:dev .
 timeout 4s podman run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m -v "$tmpdir:/data:Z" -e DATA_DIR=/data -e API_ADDR=127.0.0.1:0 -e IDENTITY_SECRET=0123456789abcdef0123456789abcdef message-sync:dev run
 ```
 
-Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover removal of retired display settings, preservation of unrelated policies, and conversion of the legacy Discord anonymity flag into endpoint outgoing settings. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
+Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover removal of retired display settings, preservation of unrelated policies, and conversion of the legacy Discord anonymity flag into endpoint incoming settings. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
 
 The control-plane retention test verifies bounded deletion of expired auth
 artifacts and terminal membership requests while returning only opaque evidence
@@ -124,7 +124,7 @@ no enrollment and unchanged provider cleanup restrictions. No native private
 content or inbox identity may enter canonical routing state or admin output.
 
 For real client rendering, follow [the manual guide](docs/TESTING_GUIDE.md):
-check alias-only anonymity wherever source Incoming or destination Outgoing is enabled, and name-plus-alias attribution elsewhere,
+check alias-only anonymity wherever source Outgoing or destination Incoming is enabled, and name-plus-alias attribution elsewhere,
 LID-only WhatsApp chips, Telegram links, revoked permissions, cold caches and
 escaped `\@{Amber Badger}` literals. Legacy username-mode/discriminator API fields
 must be rejected; their inert schema columns are only upgrade compatibility data.

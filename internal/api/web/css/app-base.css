@@ -406,8 +406,10 @@ code, .font-mono {
   border-radius: var(--radius-lg);
   padding: 18px;
   display: flex;
-  flex-direction: column;
-  gap: 14px;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-height: auto;
   transition: border-color var(--dur) var(--ease);
 }
 
@@ -416,7 +418,13 @@ code, .font-mono {
 .platform-card-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.platform-card > div:last-child {
+  flex: 1;
+  min-width: 0;
 }
 
 .platform-card-icon {

@@ -237,7 +237,7 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	}
 	// Convert the former set-wide policy into editable destination policies.
 	// Clearing the retired flag makes this idempotent and preserves later edits.
-	if _, err := tx.ExecContext(ctx, `UPDATE endpoints SET anonymize_outgoing=1 WHERE transport='discord' AND sync_set_id IN (SELECT id FROM sync_sets WHERE anonymize_to_discord=1)`); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE endpoints SET anonymize_incoming=1 WHERE transport='discord' AND sync_set_id IN (SELECT id FROM sync_sets WHERE anonymize_to_discord=1)`); err != nil {
 		return fmt.Errorf("migrate legacy anonymity: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sync_sets SET anonymize_to_discord=0 WHERE anonymize_to_discord=1`); err != nil {

@@ -269,7 +269,7 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 	set, _ := findSetByID(cfg, mapping.SyncSetID)
 	source := cfg.Endpoints[mapping.Author.Endpoint]
 	destination := cfg.Endpoints[mapping.Recipient.Endpoint]
-	anonymized := source.AnonymizeIncoming || destination.AnonymizeOutgoing || (mapping.Recipient.Inbox.Transport == "discord" && set.AnonymizeToDiscord)
+	anonymized := source.AnonymizeOutgoing || destination.AnonymizeIncoming || (mapping.Recipient.Inbox.Transport == "discord" && set.AnonymizeToDiscord)
 	if name != "" && !anonymized {
 		attribution = mapping.Author.Endpoint + "/" + name + " (" + alias + ")"
 	}

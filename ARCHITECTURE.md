@@ -121,18 +121,18 @@ Telegram basic-group to supergroup migrations are handled as addressing maintena
 
 Directional endpoint anonymization uses the assigned sync-set actor alias for
 author, structured-mention and reaction presentation and strips phone numbers
-and quoted bridge headers whenever the source has `anonymizeIncoming=true` or
-the destination has `anonymizeOutgoing=true`. This applies to every transport.
+and quoted bridge headers whenever the source has `anonymizeOutgoing=true` or
+the destination has `anonymizeIncoming=true`. This applies to every transport.
 Other routes retain ordinary names with their assigned aliases. There is no
 selectable username mode or computed HMAC pseudonym; HMAC actor identity remains
 unchanged and real names stay transient.
 
 Endpoint anonymity is stored in `endpoints.anonymize_incoming` and
 `endpoints.anonymize_outgoing` (booleans, default false). Initialization converts
-legacy `sync_sets.anonymize_to_discord` policies into outgoing flags on their
+legacy `sync_sets.anonymize_to_discord` policies into incoming flags on their
 Discord endpoints and clears the legacy flag, transactionally and idempotently.
 The old sync-set API field is deprecated compatibility input; new clients use
-endpoint flags. The router combines source incoming with destination outgoing
+endpoint flags. The router combines source outgoing with destination incoming
 for creates, edits, reply/mention presentation and reaction fallbacks; runtime
 reload rebuilds this route matrix. Private relay attribution uses the same
 source/destination endpoint policies.
@@ -147,7 +147,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 
 - safe endpoint aliases, connection IDs, and provider target IDs needed for addressing;
 - per-sync-set routing policies in `sync_sets.settings_json`; `global_config` retains legacy initialization data and the default-off global private DM safety switch;
-- sync set definitions and endpoint membership, including boolean `anonymize_incoming` and `anonymize_outgoing` endpoint policiess;
+- sync set definitions and endpoint membership, including boolean `anonymize_incoming` and `anonymize_outgoing` endpoint policies;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
 - HMAC actor IDs and permanent sync-set alias/ordinal assignments, reaction emoji, poll option indexes/hashes and aggregate counts;

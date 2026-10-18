@@ -423,13 +423,13 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 - [ ] Check application logs: Verify zero tokens or raw protocol update dumps appear in stdout.
 
 ### Scenario 14: Directional conversation anonymization
-- [ ] In Sync Sets, enable **Anonymize outgoing** beside a conversation’s move/rename/remove controls and Save. Repeat for WhatsApp, Discord and Telegram destinations.
+- [ ] In Sync Sets, enable **Anonymize incoming** beside a conversation’s move/rename/remove controls and Save. Repeat for WhatsApp, Discord and Telegram destinations.
 - [ ] Send from each other conversation. Only deliveries to that destination use alias-only authors, anonymized structured mentions and sanitized quote attribution.
-- [ ] Disable Outgoing, enable **Anonymize incoming** on the source, and Save. Messages from it must use alias-only attribution at every destination; messages from other sources retain ordinary attribution.
+- [ ] Disable Incoming, enable **Anonymize outgoing** on the source, and Save. Messages from it must use alias-only attribution at every destination; messages from other sources retain ordinary attribution.
 - [ ] Enable both flags and verify both directions. Disable both and verify ordinary name-plus-alias attribution returns.
 - [ ] Repeat with edits, reaction fallbacks, replies, media captions, child threads/topics and polls. Explicit verified cross-group references keep their existing native-reference exception.
 - [ ] Toggle a flag back before Save: the draft should become clean. Save changes, reopen the editor and restart: both checkbox values must persist independently. Rename or move the conversation and save unrelated settings: the values must remain intact.
-- [ ] Upgrade a database with the old Discord policy enabled: affected Discord endpoints start with Outgoing enabled and Incoming disabled. Turn Outgoing off and restart; it must stay off.
+- [ ] Upgrade a database with the old Discord policy enabled: affected Discord endpoints start with Incoming enabled and Outgoing disabled. Turn Incoming off and restart; it must stay off.
 
 ---
 

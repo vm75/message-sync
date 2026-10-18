@@ -155,15 +155,51 @@ func (a *Adapter) refreshPrivacyMode(ctx context.Context) {
 	a.mu.Unlock()
 }
 
-func (a *Adapter) DiscoverChats(_ context.Context) ([]DiscoveredChat, error) {
+func (a *Adapter) DiscoverChats(ctx context.Context) ([]DiscoveredChat, error) {
 	if a == nil {
 		return nil, errors.New("Telegram transport is not initialized")
 	}
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.polling {
+	running := a.polling
+	client := a.client
+	var unobservedIDs []int64
+	if a.normalizer != nil {
+		for chatID := range a.normalizer.endpoints {
+			if _, ok := a.observed[chatID]; !ok {
+				unobservedIDs = append(unobservedIDs, chatID)
+			}
+		}
+	}
+	a.mu.RUnlock()
+	if !running {
 		return nil, errors.New("Telegram long polling is not running")
 	}
+
+	if len(unobservedIDs) > 0 && client != nil {
+		if getter, ok := client.(interface {
+			GetChat(context.Context, *telegrambot.GetChatParams) (*models.ChatFullInfo, error)
+		}); ok {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			for _, chatID := range unobservedIDs {
+				chat, err := getter.GetChat(ctx, &telegrambot.GetChatParams{
+					ChatID: chatID,
+				})
+				if err == nil && chat != nil {
+					a.observeChat(models.Chat{
+						ID:       chat.ID,
+						Title:    chat.Title,
+						Username: chat.Username,
+						Type:     models.ChatType(chat.Type),
+					})
+				}
+			}
+		}
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	chats := make([]DiscoveredChat, 0, len(a.observed))
 	for _, entry := range a.observed {
 		chats = append(chats, entry.chat)

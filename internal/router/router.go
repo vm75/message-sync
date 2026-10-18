@@ -168,7 +168,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := epConfig.AnonymizeOutgoing || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
+			anonymize := epConfig.AnonymizeIncoming || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
 				Endpoint:   transport.EndpointID(alias),
 				SyncSetID:  set.ID,
@@ -177,7 +177,7 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		}
 		for _, target := range targets {
 			sourceTargets := append([]routeTarget(nil), targets...)
-			if cfg.Endpoints[string(target.Endpoint)].AnonymizeIncoming {
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeOutgoing {
 				for i := range sourceTargets {
 					sourceTargets[i].Anonymized = true
 				}
@@ -242,7 +242,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := epConfig.AnonymizeOutgoing || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
+			anonymize := epConfig.AnonymizeIncoming || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
 				Endpoint:   transport.EndpointID(alias),
 				SyncSetID:  set.ID,
@@ -251,7 +251,7 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 		}
 		for _, target := range targets {
 			sourceTargets := append([]routeTarget(nil), targets...)
-			if cfg.Endpoints[string(target.Endpoint)].AnonymizeIncoming {
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeOutgoing {
 				for i := range sourceTargets {
 					sourceTargets[i].Anonymized = true
 				}

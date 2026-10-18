@@ -571,8 +571,9 @@
     height: 34px;
   }
 
-  .endpoint-chip > span[style*="font-size:.7rem"] {
-    display: none;
+  .endpoint-chip > span[style*="font-size:.7rem"],
+  .endpoint-chip > .chip-conn-label {
+    display: inline-flex !important;
   }
 }
 

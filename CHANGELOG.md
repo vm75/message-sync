@@ -14,7 +14,7 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   WhatsApp copies receive Delete for Me cleanup; private edits/deletes are ignored.
 - Independent incoming/outgoing anonymization for every conversation endpoint
   and transport, editable beside Move/Rename/Remove. Existing Discord policies
-  migrate to outgoing endpoint settings; changes reload without restarting.
+  migrate to incoming endpoint settings; changes reload without restarting.
 
 ### Changed
 
@@ -36,6 +36,8 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Correct directional anonymity: Outgoing anonymizes messages sent from a
+  conversation; Incoming anonymizes messages delivered to it.
 - Preserve aliases, counters and retained routing state during configuration saves
   with differential upserts; initialization preserves unrelated settings.
 - Require verified canonical WhatsApp LIDs before author enrollment or delivery.

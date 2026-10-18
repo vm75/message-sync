@@ -16,8 +16,8 @@ import (
 
 func TestEndpointDirectionalAnonymity(t *testing.T) {
 	for _, sourceTransport := range []config.Transport{config.TransportWhatsApp, config.TransportDiscord, config.TransportTelegram} {
-		for _, incoming := range []bool{false, true} {
-			for _, outgoing := range []bool{false, true} {
+		for _, outgoing := range []bool{false, true} {
+			for _, incoming := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/in=%v/out=%v", sourceTransport, incoming, outgoing), func(t *testing.T) {
 					ctx := context.Background()
 					db, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
@@ -26,10 +26,10 @@ func TestEndpointDirectionalAnonymity(t *testing.T) {
 					}
 					defer db.Close()
 					cfg := &config.Config{Endpoints: map[string]config.Endpoint{
-						"source":   {Transport: sourceTransport, RemoteID: "source", AnonymizeIncoming: incoming},
-						"wa":       {Transport: config.TransportWhatsApp, RemoteID: "wa", AnonymizeOutgoing: outgoing},
-						"dc":       {Transport: config.TransportDiscord, RemoteID: "dc", AnonymizeOutgoing: outgoing},
-						"tg":       {Transport: config.TransportTelegram, RemoteID: "tg", AnonymizeOutgoing: outgoing},
+						"source":   {Transport: sourceTransport, RemoteID: "source", AnonymizeOutgoing: outgoing, AnonymizeIncoming: true},
+						"wa":       {Transport: config.TransportWhatsApp, RemoteID: "wa", AnonymizeIncoming: incoming, AnonymizeOutgoing: true},
+						"dc":       {Transport: config.TransportDiscord, RemoteID: "dc", AnonymizeIncoming: incoming, AnonymizeOutgoing: true},
+						"tg":       {Transport: config.TransportTelegram, RemoteID: "tg", AnonymizeIncoming: incoming, AnonymizeOutgoing: true},
 						"ordinary": {Transport: config.TransportTelegram, RemoteID: "ordinary"},
 					}, SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"source", "wa", "dc", "tg", "ordinary"}}}}
 					persistRouterConfig(t, db, cfg)
@@ -47,7 +47,7 @@ func TestEndpointDirectionalAnonymity(t *testing.T) {
 					waitForSent(t, fake, 4)
 					for _, sent := range fake.sent {
 						out := sent.outgoing
-						want := incoming || (out.Endpoint != "ordinary" && outgoing)
+						want := outgoing || (out.Endpoint != "ordinary" && incoming)
 						if out.Sender.Anonymized != want || out.ReferenceAnonymized != want {
 							t.Fatalf("%s anonymity=%v references=%v want=%v", out.Endpoint, out.Sender.Anonymized, out.ReferenceAnonymized, want)
 						}
@@ -69,7 +69,7 @@ func TestEndpointDirectionalAnonymity(t *testing.T) {
 					}
 					waitForMutations(t, fake, 4, 0, 0)
 					for _, edit := range fake.edited {
-						want := incoming || (edit.ref.Endpoint != "ordinary" && outgoing)
+						want := outgoing || (edit.ref.Endpoint != "ordinary" && incoming)
 						if strings.Contains(edit.text, "Alice") == want {
 							t.Fatalf("%s edit anonymity wrong: %s", edit.ref.Endpoint, edit.text)
 						}
@@ -82,7 +82,7 @@ func TestEndpointDirectionalAnonymity(t *testing.T) {
 					}
 					waitForMutations(t, fake, 0, 4, 0)
 					for _, reaction := range fake.reacted {
-						want := incoming || (reaction.Endpoint != "ordinary" && outgoing)
+						want := outgoing || (reaction.Endpoint != "ordinary" && incoming)
 						if strings.Contains(reaction.FallbackText, "Alice") == want {
 							t.Fatalf("%s reaction anonymity wrong: %s", reaction.Endpoint, reaction.FallbackText)
 						}

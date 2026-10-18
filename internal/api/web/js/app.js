@@ -460,7 +460,7 @@
   document.getElementById('add-conn-id')?.closest('.form-group')?.classList.add('hidden');
 
   const controller = document.createElement('script');
-  controller.src = '/js/app-base.js?v=10';
+  controller.src = '/js/app-base.js?v=13';
   controller.async = false;
   controller.addEventListener('load', () => {
     installWhatsAppPairCompletion();

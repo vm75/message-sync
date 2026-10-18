@@ -514,7 +514,7 @@ func TestPrivateSenderPresentation(t *testing.T) {
 		t.Run(fmt.Sprint(anonymous), func(t *testing.T) {
 			r, f, cfg, now, alice, _ := fixture(t, "telegram", "discord")
 			ep := cfg.Endpoints["a"]
-			ep.AnonymizeIncoming = anonymous
+			ep.AnonymizeOutgoing = anonymous
 			cfg.Endpoints["a"] = ep
 			in := input(f.inboxes["a"+alice], alice, "named", "/dm @{Pale Poppy} hello", "", *now)
 			in.DisplayName = "Alice"

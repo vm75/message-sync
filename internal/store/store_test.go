@@ -861,7 +861,7 @@ func TestEndpointAnonymityUpgrade(t *testing.T) {
 	if err := db.DB().QueryRow(`SELECT anonymize_incoming,anonymize_outgoing FROM endpoints WHERE alias='dc'`).Scan(&incoming, &outgoing); err != nil {
 		t.Fatal(err)
 	}
-	if incoming || !outgoing {
+	if !incoming || outgoing {
 		t.Fatal("legacy Discord policy was not converted")
 	}
 	if err := db.DB().QueryRow(`SELECT anonymize_to_discord FROM sync_sets WHERE id='legacy'`).Scan(&legacy); err != nil {
@@ -870,13 +870,13 @@ func TestEndpointAnonymityUpgrade(t *testing.T) {
 	if legacy {
 		t.Fatal("legacy flag still overrides endpoint edits")
 	}
-	if err := db.DB().QueryRow(`SELECT anonymize_outgoing FROM endpoints WHERE alias='wa'`).Scan(&outgoing); err != nil {
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming FROM endpoints WHERE alias='wa'`).Scan(&incoming); err != nil {
 		t.Fatal(err)
 	}
-	if outgoing {
+	if incoming {
 		t.Fatal("upgrade anonymized an ordinary destination")
 	}
-	if _, err := db.DB().Exec(`UPDATE endpoints SET anonymize_outgoing=0 WHERE alias='dc'`); err != nil {
+	if _, err := db.DB().Exec(`UPDATE endpoints SET anonymize_incoming=0 WHERE alias='dc'`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -885,10 +885,10 @@ func TestEndpointAnonymityUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	if err := db.DB().QueryRow(`SELECT anonymize_outgoing FROM endpoints WHERE alias='dc'`).Scan(&outgoing); err != nil {
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming FROM endpoints WHERE alias='dc'`).Scan(&incoming); err != nil {
 		t.Fatal(err)
 	}
-	if outgoing {
+	if incoming {
 		t.Fatal("reopening undid endpoint edit")
 	}
 }

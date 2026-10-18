@@ -21,7 +21,7 @@ The release workflow publishes the same multi-architecture `message-sync` image 
 - **Full Message Lifecycle**: Synchronizes text with provenance attribution, transient in-memory media (images, video, audio/voice notes, documents, stickers), native replies with fallback attribution, emoji reactions, edits (including plain text edits from the linked WhatsApp account's phone), and deletions/revocations.
 - **Polls & Live Aggregation**: Native polls with source labels included in cross-endpoint Discord/Telegram poll presentation, aggregate-only live-result companions, and live on-demand aggregate summaries that update with poll changes via configurable reply triggers (e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions/options survive server restarts while remaining outside the PII-free routing database.
 - **Source-Local Message Suppression**: Configurable message prefix filtering (e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before transmission or media loading.
-- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Per-conversation `anonymizeIncoming` and `anonymizeOutgoing` settings independently anonymize messages from or delivered to each endpoint on every transport, using assigned aliases. The alias registry stores only HMAC actors, safe aliases and ordinals.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Per-conversation `anonymizeIncoming` and `anonymizeOutgoing` settings independently anonymize messages delivered to or sent from each endpoint on every transport, using assigned aliases. The alias registry stores only HMAC actors, safe aliases and ordinals.
 - **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
 - **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
@@ -163,7 +163,7 @@ Maintainers should follow [RELEASING.md](RELEASING.md); do not create release ta
   inboxes fail closed. See [private messaging](docs/PRIVATE_MESSAGING.md).
 
 Username-mode and discriminator controls have been removed. Alias display is
-always present; source Incoming or destination Outgoing anonymization controls
+always present; source Outgoing or destination Incoming anonymization controls
 whether a route shows real names alongside aliases on every transport. Existing unrelated settings and routing metadata are
 preserved. WhatsApp requires a verified canonical LID before author allocation;
 if unavailable, forwarding fails safely and later recovery depends on provider

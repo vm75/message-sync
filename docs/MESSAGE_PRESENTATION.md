@@ -92,9 +92,9 @@ labels. Group/child labels never select an actor or route.
 ## Directional endpoint anonymization
 
 Each endpoint has independent `anonymizeIncoming` and `anonymizeOutgoing`
-booleans, both defaulting to false. Incoming covers messages originating from
-that conversation; outgoing covers messages delivered to it. If either the
-source Incoming or destination Outgoing flag is true, the route uses alias-only
+booleans, both defaulting to false. Outgoing covers messages sent from
+that conversation; incoming covers messages delivered to it. If either the
+source Outgoing or destination Incoming flag is true, the route uses alias-only
 author presentation and clears phone fields, on every transport. Otherwise it
 retains ordinary names with aliases. Both can be enabled together. These
 checkboxes sit alongside move/rename/remove in the sync-set conversation editor

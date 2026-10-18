@@ -27,8 +27,8 @@ checks run again on every hop.
 
 Only the addressed person's private inbox receives the message. It has a
 source header `DM from <group>/<name> (<alias>)`, body, and native-Reply instruction.
-The attribution is bold-italic; missing names, source Incoming anonymity or
-destination Outgoing anonymity use `DM from <group>/<alias>`. Names are transient and never stored. Responses
+The attribution is bold-italic; missing names, source Outgoing anonymity or
+destination Incoming anonymity use `DM from <group>/<alias>`. Names are transient and never stored. Responses
 natively reference the sender’s preceding message when available. To answer,
 use the platform's native **Reply** on the bot's relayed message. Plain text
 after a conversation does not imply a current conversation. Multiple
