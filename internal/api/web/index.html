@@ -512,12 +512,12 @@
               </div>
               <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-polls-aggregation-trigger-input" class="form-label">Aggregation Trigger</label>
+                  <label for="settings-polls-aggregation-trigger-input" class="form-label">Additional Aggregation Triggers</label>
                   <input type="hidden" id="settings-polls-aggregation-trigger" name="polls-aggregation-trigger">
                   <div class="chips-input-container form-input" id="settings-polls-aggregation-trigger-chips" tabindex="-1">
                     <input type="text" id="settings-polls-aggregation-trigger-input" class="chips-input-text" placeholder="Add trigger...">
                   </div>
-                  <div class="form-hint">Reply to a poll with any of these triggers to request an aggregated summary. Use Space, Enter, or Tab to add values.</div>
+                  <div class="form-hint">Built-in <code>/summary</code> is always available and cannot be removed. Reply to a poll with it or any additional trigger to request an aggregated summary. Use Space, Enter, or Tab to add values.</div>
                 </div>
               </div>
             </div>
@@ -532,12 +532,12 @@
               </div>
               <div class="settings-card-body">
                 <div class="form-group">
-                  <label for="settings-local-prefix-input" class="form-label">Local-only Prefix</label>
+                  <label for="settings-local-prefix-input" class="form-label">Additional Local-only Prefixes</label>
                   <input type="hidden" id="settings-local-prefix" name="local-prefix">
                   <div class="chips-input-container form-input" id="settings-local-prefix-chips" tabindex="-1">
                     <input type="text" id="settings-local-prefix-input" class="chips-input-text" placeholder="Add prefix...">
                   </div>
-                  <div class="form-hint">New messages beginning with any of these exact, case-sensitive prefixes stay in their source conversation. Leave empty to disable. Use Space, Enter, or Tab to add values.</div>
+                  <div class="form-hint">Built-in <code>/local</code> is always available and cannot be removed. Additional exact, case-sensitive prefixes also keep messages in their source conversation. Leave empty to use only <code>/local</code>. Use Space, Enter, or Tab to add values.</div>
                 </div>
               </div>
             </div>

@@ -301,6 +301,21 @@ The tag-driven workflow verifies a release-mode binary reports the validated ver
 Package and integration tests cover configuration validation, HMAC stability, schema constraints, canonical lookup, duplicate/loop prevention, partial fan-out and replay, lifecycle propagation, media bounds, recovery gaps, dynamic connections, and privacy canaries. Run the commands in [TESTING.md](TESTING.md) before release-relevant changes.
 
 
+## Conversation commands
+
+`internal/commands` owns the built-in `/local` and `/summary` aliases and shared
+help text. They supplement editable per-set local prefixes and poll triggers;
+clearing settings cannot remove them. Existing configured prefix matching and
+default `aggregate-response` behavior remain intact.
+
+The router handles `/help` locally before author allocation and canonical create
+state. Content-free suppression markers cover the request and accepted response,
+preventing replay/echo fan-out and later mutation forwarding. Help uses the source
+child scope. Group help includes only that set’s configured commands. Private
+help keeps relay gates/rate limits and reveals configured values only after
+current membership verification for the exact connection and private inbox.
+`/summary` uses the existing synchronized-poll aggregation and live-update path.
+
 ## Cross-group participant addressing
 
 `sync_set_actors` stores `(sync_set_id, actor_id, ordinal, alias)`, keyed by

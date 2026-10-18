@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vm75/message-sync/internal/commands"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/delivery"
 	"github.com/vm75/message-sync/internal/identity"
@@ -385,6 +386,30 @@ func (r *Router) Handle(ctx context.Context, incoming transport.Incoming) error 
 		localPrefix = r.localPrefix
 	}
 	r.mu.RUnlock()
+	if incoming.Kind == "text" && existingCanonical == "" && strings.TrimSpace(incoming.Text) == "/help" {
+		r.mu.RLock()
+		settings := r.endpointSettings[incoming.Endpoint]
+		r.mu.RUnlock()
+		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
+			return fmt.Errorf("mark local help command: %w", err)
+		}
+		ref, err := r.sender.Send(ctx, transport.Outgoing{
+			Endpoint: incoming.Endpoint, Kind: "text", ChildScope: incoming.ChildScope,
+			Text: commands.Describe(commands.Settings{
+				LocalPrefixes: settings.LocalPrefix, AggregationTriggers: settings.Polls.AggregationTrigger,
+			}),
+		})
+		if err != nil {
+			return fmt.Errorf("send command help: %w", err)
+		}
+		if ref.Endpoint != incoming.Endpoint || strings.TrimSpace(ref.RemoteMessageID) == "" {
+			return errors.New("help transport returned invalid message reference")
+		}
+		if err := r.store.SuppressedLocalMessage(ctx, string(ref.Endpoint), ref.RemoteMessageID, time.Now().UTC()); err != nil {
+			return fmt.Errorf("mark local help response: %w", err)
+		}
+		return nil
+	}
 	if incoming.Kind != "edit" && incoming.Kind != "delete" && incoming.Kind != "revoke" && incoming.Kind != "reaction" && matchLocalPrefix(incoming.Text, localPrefix) {
 		if err := r.store.SuppressedLocalMessage(ctx, string(incoming.Endpoint), incoming.RemoteID, incoming.Timestamp); err != nil {
 			return fmt.Errorf("suppress local message: %w", err)
@@ -1783,25 +1808,9 @@ func newCanonicalID() (string, error) {
 }
 
 func matchLocalPrefix(text string, localPrefixConfig string) bool {
-	prefixes := strings.Fields(localPrefixConfig)
-	for _, prefix := range prefixes {
-		if prefix != "" && strings.HasPrefix(text, prefix) {
-			return true
-		}
-	}
-	return false
+	return commands.MatchLocal(text, localPrefixConfig)
 }
 
 func matchAggregationTrigger(text string, aggTriggerConfig string) bool {
-	triggers := strings.Fields(aggTriggerConfig)
-	if len(triggers) == 0 {
-		triggers = []string{"aggregate-response"}
-	}
-	trimmed := strings.TrimSpace(text)
-	for _, trigger := range triggers {
-		if trimmed == trigger {
-			return true
-		}
-	}
-	return false
+	return commands.MatchSummary(text, aggTriggerConfig)
 }

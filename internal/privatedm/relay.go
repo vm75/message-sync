@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/vm75/message-sync/internal/commands"
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/controlstore"
 	"github.com/vm75/message-sync/internal/identity"
@@ -22,7 +23,9 @@ import (
 
 const MaxBodyBytes = 1600
 
-const Help = "message-sync private messaging\n/dm @{Amber Badger} <message> — send a private message\n/help — show this help\nTo continue a conversation, use Reply on the bot's relayed message.\nOrdinary messages without a valid reply do not get forwarded. Text only, at most 1600 UTF-8 bytes.\nDM edits and deletes are not synchronized; the recipient keeps the original relayed message.\nReplies expire after 24 hours. The relay may remove only its own local chat copies, never the recipient's messages. Discord and Telegram Bot API cannot remove bot-local copies separately, so their messages remain. Delivery requires the recipient to be reachable via this sync account; Telegram recipients must first /start this bot."
+const privateHelpDetails = "Ordinary messages without a valid reply do not get forwarded. Text only, at most 1600 UTF-8 bytes.\nDM edits and deletes are not synchronized; the recipient keeps the original relayed message.\nReplies expire after 24 hours. The relay may remove only its own local chat copies, never the recipient's messages. Discord and Telegram Bot API cannot remove bot-local copies separately, so their messages remain. Delivery requires the recipient to be reachable via this sync account; Telegram recipients must first /start this bot."
+
+const Help = commands.Help + "\n" + privateHelpDetails
 
 type Runtime interface {
 	VerifyPrivateMember(context.Context, transport.EndpointID, string) bool
@@ -175,6 +178,20 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 		}
 	}
 	text := strings.TrimSpace(in.Text)
+	if in.Kind == "text" && (text == "/help" || (in.Transport == "telegram" && text == "/start")) {
+		var settings []commands.Settings
+		for alias, ep := range cfg.Endpoints {
+			if ep.ConnectionID != in.ConnectionID || string(ep.Transport) != in.Transport || !cfg.SettingsForEndpoint(alias).PrivateDMRelayEnabled {
+				continue
+			}
+			if r.observedSourceActor(ctx, alias, in) == "" {
+				continue
+			}
+			policy := cfg.SettingsForEndpoint(alias)
+			settings = append(settings, commands.Settings{LocalPrefixes: policy.LocalPrefix, AggregationTriggers: policy.Polls.AggregationTrigger})
+		}
+		return r.sendHelp(ctx, in.Inbox, commands.Describe(settings...)+"\n"+privateHelpDetails)
+	}
 	if in.Kind != "text" || !utf8.ValidString(text) || len(text) > 4096 || text == "/help" || (in.Transport == "telegram" && text == "/start") {
 		return r.help(ctx, in.Inbox, "")
 	}
@@ -367,6 +384,10 @@ func (r *Relay) help(ctx context.Context, inbox transport.PrivateInbox, prefix s
 	if prefix != "" {
 		text = prefix + "\n\n" + text
 	}
+	return r.sendHelp(ctx, inbox, text)
+}
+
+func (r *Relay) sendHelp(ctx context.Context, inbox transport.PrivateInbox, text string) error {
 	result, err := r.Runtime.SendPrivate(ctx, inbox, text)
 	if err != nil {
 		return errors.New("send private DM help")

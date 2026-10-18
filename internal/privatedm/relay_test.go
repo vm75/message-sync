@@ -531,3 +531,29 @@ func TestPrivateSenderPresentation(t *testing.T) {
 		})
 	}
 }
+
+func TestHelpListsConfiguredCommandsOnlyForCurrentMembers(t *testing.T) {
+	r, f, cfg, now, alice, _ := fixture(t, "telegram", "discord")
+	cfg.SyncSets[0].Settings.LocalPrefix = "!private-local"
+	cfg.SyncSets[0].Settings.Polls.AggregationTrigger = "/private-votes"
+	in := input(f.inboxes["a"+alice], alice, "help-1", "/help", "", *now)
+	if err := r.Handle(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/help", "/start", "/dm", "/local", "/summary", "!private-local", "/private-votes"} {
+		if !strings.Contains(f.sent[0].text, want) {
+			t.Fatalf("help missing %s", want)
+		}
+	}
+	f.members["a"+alice] = false
+	in.RemoteMessageID = "help-2"
+	if err := r.Handle(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.sent) != 2 {
+		t.Fatal("expected generic help after membership removal")
+	}
+	if strings.Contains(f.sent[1].text, "!private-local") || strings.Contains(f.sent[1].text, "/private-votes") {
+		t.Fatal("private settings exposed after membership removal")
+	}
+}

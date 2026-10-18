@@ -9,6 +9,9 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Built-in `/local` and `/summary` commands supplement configured prefixes and
+  triggers. `/help` lists all commands and authorized configured values, with
+  source-only group help and membership-scoped private help.
 - Permanent, globally unique participant aliases scoped to each sync-set actor,
   using a frozen 256×256 vocabulary with numeric overflow tiers. Assignments
   survive restarts and are never reused. Same-set `@{Amber Badger}` references

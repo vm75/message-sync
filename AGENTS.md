@@ -8,6 +8,7 @@ Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packag
 
 ## Repository map
 
+- `internal/commands/` — built-in conversation commands and shared help.
 - `internal/privatedm/` — opt-in anonymous private relay, outside canonical group routing.
 
 - `cmd/message-sync/` — CLI entry point (`run`, `validate-config`, and `version`).
@@ -26,7 +27,7 @@ Use KISS and YAGNI. Prefer standard-library Go, explicit data flow, small packag
 
 Start with targeted search and read only what the task needs:
 
-1. [`README.md`](README.md) for current scope, setup, and user-facing behavior.
+1. [`README.md`](README.md) for scope, setup, and everyday use; [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) for settings, environment variables, and Discord setup.
 2. [`ARCHITECTURE.md`](ARCHITECTURE.md) for boundaries, data flow, and invariants.
 3. [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md) before changing sender attribution, WhatsApp PN/LID identity handling, Discord threads/forum posts, Telegram topics, reactions, polls, replies, edits, or any rendered bridge header.
 4. The package being changed and its tests.
@@ -82,6 +83,7 @@ podman compose -f compose.yml config
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
 - Treat synchronized message presentation as a compatibility contract. Ordinary attribution is `<group>/<name> (<assigned-alias>)`; child attribution is `<group>/<child>/<name> (<assigned-alias>)`. Routes whose source endpoint has `anonymizeOutgoing` or destination has `anonymizeIncoming` use only the assigned alias and strip phone numbers; other routes retain ordinary names with aliases. Display name wins over phone; phone is a fallback only. There is no username-mode selector or configurable discriminator. Opaque child IDs and `[contexts ...]` never appear in forwarded text. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
 - Assign aliases only to accepted group-message authors, using `(sync_set_id, HMAC actor_id)` and a permanent instance-wide ordinal. Freeze the 256×256 vocabulary and bijective 16-bit slot permutation for new installations; pin and preserve the original ordering of existing installations; numeric tiers begin at ordinal 65,537. Never reuse aliases/ordinals after deletion, change actor IDs, enroll from mentions/private traffic, or lose assignments during a settings save. Retain full aliases when truncating Discord names. WhatsApp assignment requires a verified canonical LID; unresolved PN-only authors fail safely before canonical/create state and checkpoint advancement.
+- Built-in `/local` and `/summary` supplement editable prefixes/triggers and cannot be removed through settings. `/help` stays local; private help reveals configured values only after current, scoped membership verification.
 - Sync-set settings use a shared create/edit modal. `membershipReviewEnabled` is a persisted per-set UI flag, not a browser preference or authorization boundary. Save tracks actual draft differences; preserve existing membership processing and private control-store data.
 - Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
@@ -114,7 +116,13 @@ podman compose -f compose.yml config
 
 AI agents MUST keep all repository documentation in sync with the implementation for any changes to the project. When introducing, modifying, or deprecating features, settings, API endpoints, schema fields, UI capabilities, or container behaviors, update the corresponding documentation files as part of the same change set. Never leave documentation stale or out of sync.
 
-- `README.md`: Setup, configuration (environment variables and runtime settings), core capabilities, key features, and user-facing workflows.
+- Keep `README.md` and `DOCKERHUB.md` in sync for all user-visible features,
+  supported providers, anonymity directions, DM relay limits, privacy claims and
+  Docker/rootful Podman/rootless Podman support. Update both in the same change;
+  keep their **Key features** sections identical. README owns everyday usage;
+  Docker Hub adds image/deployment details. Link to focused docs for references.
+- `README.md`: Quick start, all product features, and everyday workflows.
+- `docs/CONFIGURATION.md`: Environment variables, runtime/API settings, Discord setup, and upgrade guidance.
 - `DOCKERHUB.md`: Public container overview, key features, image names, tags, environment variables, volume layouts, compose usage, and security hardening.
 - `ARCHITECTURE.md`: Components, dependency direction, data flow, schema definitions, privacy boundaries, lifecycle flow, failure/retry semantics, and REST API surface.
 - `AGENTS.md`: Agent workflow, repository map, definition of done, and mandatory constraints.

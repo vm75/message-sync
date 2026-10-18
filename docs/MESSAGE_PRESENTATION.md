@@ -27,7 +27,7 @@ phone beside an available display name. Username-mode and discriminator controls
 are removed; HMAC hashing still provides internal canonical actor identities.
 
 The router allocates only for accepted group-message creates, after validity,
-configuration, echo and local-prefix checks. Allocation and lookup failures stop
+configuration, echo, help-command and local-prefix checks. Allocation and lookup failures stop
 delivery rather than substituting a missing or unrelated author alias. Edits,
 reaction fallbacks and other author presentation require an existing assignment.
 Structured mentions and private commands never enroll a new actor.

@@ -8,7 +8,10 @@
 [![Privacy](https://img.shields.io/badge/privacy-zero%20PII%2FPHI-success?style=flat-square&logo=shield)](https://github.com/vm75/message-sync#privacy-model)
 [![Security](https://img.shields.io/badge/container-rootless%20%2F%20non--root-blueviolet?style=flat-square)](https://github.com/vm75/message-sync#rootless-podman)
 
-`message-sync` is a self-hosted, privacy-first service that synchronizes configured WhatsApp groups, Discord channels, and Telegram groups or supergroups. Multiple accounts and bots participate in alias-based sync sets while a transport-neutral canonical router owns message identity, fan-out, and lifecycle behavior without storing PII/PHI.
+`message-sync` connects WhatsApp groups, Discord channels, and Telegram groups
+so people can talk across platforms. It is self-hosted and managed through a
+Web UI, with support for multiple accounts and bots. Run it with Docker, rootful
+Podman or **rootless Podman**.
 
 The release workflow publishes the same multi-architecture `message-sync` image to:
 
@@ -17,18 +20,103 @@ The release workflow publishes the same multi-architecture `message-sync` image 
 
 ## Key features
 
-- **Multi-Transport Synchronization**: Seamless bidirectional sync across WhatsApp (groups and community subgroups), Discord (channels and threads/forums), and Telegram (groups, supergroups, and topics).
-- **Full Message Lifecycle**: Synchronizes text with provenance attribution, transient in-memory media (images, video, audio/voice notes, documents, stickers), native replies with fallback attribution, emoji reactions, edits (including plain text edits from the linked WhatsApp account's phone), and deletions/revocations.
-- **Polls & Live Aggregation**: Native polls with source labels included in cross-endpoint Discord/Telegram poll presentation, aggregate-only live-result companions, and live on-demand aggregate summaries that update with poll changes via configurable reply triggers (e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions/options survive server restarts while remaining outside the PII-free routing database.
-- **Source-Local Message Suppression**: Configurable message prefix filtering (e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before transmission or media loading.
-- **Zero-PII Privacy & Route-Aware Anonymization**: Core routing database (`sync.db`) and application logs store zero message content, credentials, phone numbers, or user IDs; actor identities are HMAC-derived from `IDENTITY_SECRET`. Per-conversation `anonymizeIncoming` and `anonymizeOutgoing` settings independently anonymize messages delivered to or sent from each endpoint on every transport, using assigned aliases. The alias registry stores only HMAC actors, safe aliases and ordinals.
-- **Reliable Ordered Delivery**: Single-worker deterministic ingress loop, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring.
-- **Embedded Web Management Console**: Zero-dependency embedded Web UI and REST API for dynamic connection setup, serialized WhatsApp QR pairing, atomic endpoint alias renaming, sync set mesh configuration, and live runtime configuration reloads.
-- **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens, session revocation, one-time invite tokens, audit logging, and AES-256-GCM encrypted bot tokens.
-- **Membership Intake Pipeline (Experimental)**: Sync-set bound public intake forms, automated email verification challenges, private evidence handling (mode 0600 with automatic purge), optional advisory AI image analysis (zero-training), and human review with automated fulfillment.
-- **Security & Hardening**: Static non-root container (UID 1000), read-only root filesystem, dropped capabilities, no extra privileges required, and fully compatible with Docker, rootful Podman, and rootless Podman.
+- **Multi-account synchronization:** connect WhatsApp groups and community
+  subgroups, Discord channels, threads and forums, and Telegram groups,
+  supergroups and topics across multiple accounts or bots.
+- **Message lifecycle:** forward text, images, video, voice notes, audio,
+  documents and stickers, plus replies, emoji reactions, edits and deletes.
+  Provider limits and text fallbacks apply.
+- **Polls and live results:** native polls where supported, aggregate result
+  companions, and on-demand summaries via built-in `/summary` or additional
+  configured triggers. Encrypted poll presentation survives restarts outside the routing database.
+- **Permanent participant aliases:** unique aliases such as `Amber Badger`
+  identify authors within each sync set, survive restarts and are never reused.
+  `@{Amber Badger}` references use verified destination membership for native tags.
+- **Directional anonymity:** independently anonymize messages sent from
+  (**Outgoing**) or delivered to (**Incoming**) each conversation, on every transport.
+- **Private DM relay:** optional `/dm @{Amber Badger} message` delivery between
+  verified members on WhatsApp, Discord bots and Telegram Bot API, with native
+  replies and 24-hour reply mappings. Global and per-set enablement are required.
+- **Local-only messages:** built-in `/local` and additional configured prefixes
+  such as `!local` keep messages and their later changes out of synchronization.
+- **Per-set settings:** control media limits, recovery, retention, polls and
+  thread/topic label storage independently, with live reload and no restart.
+- **Reliable delivery:** ordered forwarding, independent destination queues,
+  bounded retries and recovery, and delivery health monitoring. Uncertain creates
+  are not blindly retried.
+- **Web UI and REST API:** pair accounts, discover conversations, edit sync sets
+  and connection names, and manage administrators/operators, invitations and sessions.
+- **Privacy boundaries:** routing state and logs exclude message content, real
+  participant identities and credentials. Media remains transient; sensitive
+  credentials and private routing tokens are encrypted in separate control storage.
+- **Membership review (experimental):** per-set intake forms, email verification,
+  private evidence, optional advisory AI analysis with training disabled, human
+  review and fulfillment.
+- **WhatsApp cleanup:** configurable scheduled group-chat cleanup, plus
+  feature-owned private-relay cleanup using only **Delete for Me**.
+- **Hardened containers:** non-root images for `linux/amd64` and `linux/arm64`,
+  a read-only root filesystem, dropped capabilities and no privileged mode.
+  Run with Docker, rootful Podman or **rootless Podman**.
 
-See the [README](https://github.com/vm75/message-sync#readme) for detailed product setup and provider requirements. This page is limited to image behavior, runtime configuration, and container deployment.
+## Commands
+
+Send `/help` in a configured group for the command list and that sync set’s
+additional local-only prefixes and poll triggers. The help reply stays in the
+source conversation. In an enabled private relay, `/help` lists additional values
+only for sets where your current membership is verified.
+
+| Command | Use |
+|---|---|
+| `/help` | List commands and authorized configured prefixes/triggers. |
+| `/local <message>` | Keep a group message and its later changes local. |
+| `/summary` | Reply to a synchronized poll for live aggregated results. |
+| `/dm @{Amber Badger} <message>` | Send privately through an enabled relay. |
+| `/start` | Telegram private-chat help and bot reachability. |
+
+`/local` and `/summary` are built in and cannot be edited or removed. Settings
+add extra prefixes and triggers; they do not replace these commands. Continue
+private conversations with native **Reply**, not a separate reply command.
+
+## Private DM relay
+
+The relay is **off by default**. An administrator must enable both
+**Settings → Allow private DM relays** and the matching switch under
+**Sync Sets → Edit settings**.
+
+In a private chat with the owning WhatsApp account, Discord bot or Telegram
+Bot API bot, send:
+
+```text
+/dm @{Amber Badger} Can you help with this?
+```
+
+Both people need existing group-author aliases and currently verified membership
+in the alias’s sync set. Telegram recipients must first contact the same bot with
+`/start`. Use native **Reply** on a relayed message to respond.
+
+Text only, up to 1600 UTF-8 bytes per body; reply mappings expire after 24 hours.
+Private edits/deletes do not propagate. WhatsApp cleanup uses only **Delete for
+Me** on feature-owned sync-account copies; recipient copies may remain. Discord
+and Telegram Bot API do not offer equivalent self-only cleanup. MTProto personal
+inboxes are unmanaged. See [private messaging](https://github.com/vm75/message-sync/blob/main/docs/PRIVATE_MESSAGING.md) for reachability and privacy rules.
+
+## Configure conversations
+
+Use **Edit settings** on each sync set for media, recovery, retention, polls,
+local-only prefixes, thread/topic labels, cleanup and membership-review visibility.
+Changes reload without restarting. Edit WhatsApp linked-device names under
+**Connections → Device name**.
+
+Ordinary attribution is `group/Alice (Amber Badger)`; anonymized attribution is
+`group/Amber Badger`. Enable **Anonymize outgoing** for messages sent from a
+conversation and **Anonymize incoming** for deliveries there, beside its
+Move/Rename/Remove controls. Both may be enabled together. Existing Discord-only
+policies migrate to Incoming. WhatsApp author identity requires a verified LID;
+unresolved messages fail safely and later recovery depends on provider windows.
+Aliases do not provide absolute anonymity or end-to-end encryption.
+
+See the [configuration guide](https://github.com/vm75/message-sync/blob/main/docs/CONFIGURATION.md)
+for settings, defaults and provider setup.
 
 ## Tags and platforms
 
@@ -71,7 +159,7 @@ Open `http://localhost:8080`, create the first administrator, then add connectio
 
 ## Compose
 
-The repository's [`compose.yml`](compose.yml) builds `message-sync:dev` locally. To use the published image, remove its `build` block and set:
+The repository's [`compose.yml`](https://github.com/vm75/message-sync/blob/main/compose.yml) builds `message-sync:dev` locally. To use the published image, remove its `build` block and set:
 
 ```yaml
 services:
@@ -86,6 +174,23 @@ docker compose up -d
 ```
 
 Podman users can use `podman compose up -d` with the same file.
+
+## Rootless Podman
+
+The image supports Docker, rootful Podman and **rootless Podman**. Run Podman as
+an ordinary user, without `sudo`, privileged mode, host namespaces or extra
+capabilities. With the published-image Compose configuration above and a newly
+created `data` directory:
+
+```sh
+podman unshare chown 1000:1000 data
+podman compose up -d
+```
+
+The image runs as UID/GID 1000. Ensure the `data` bind mount is writable by that
+user inside Podman’s user namespace; host ownership alone may not match. On
+SELinux systems use `:Z`, as the repository’s Compose file does. Keep the
+read-only root filesystem, dropped capabilities and bounded `/tmp` tmpfs.
 
 ## Runtime interface
 
@@ -141,54 +246,4 @@ Stable versions publish both the exact version and `latest` to Docker Hub and GH
 
 The GitHub repository must provide `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` secrets. GHCR authentication uses the workflow `GITHUB_TOKEN`; the publish job receives only `contents: read` and `packages: write`, while the final GitHub Release job receives `contents: write`. No registry credentials belong in the repository.
 
-Maintainers should follow [RELEASING.md](RELEASING.md); do not create release tags by editing this document or by rebuilding an old exact version.
-
-
-- **Participant aliases**: Every accepted group author has a persistent,
-  installation-wide unique address belonging to its sync set. There are 65,536
-  frozen two-word aliases (scrambled order on new installations; existing addresses
-  and ordering survive upgrades), followed by numeric
-  tiers. Ordinary attribution is
-  `group/Alice (Amber Badger)`; anonymized attribution is
-  `group/Amber Badger`. Aliases are never reused, including after deletion.
-- **Cross-group references**: `@{Amber Badger}` addresses an already observed
-  author within the sender's sync set. Each actual destination independently
-  verifies membership before a native mention; otherwise the exact token stays
-  literal. Escaping with a backslash prevents notification attempts. Discord
-  can use optional Server Members Intent for HMAC-based cold-cache roster lookup.
-  Telegram MTProto and edits keep literal references.
-- **Private references**: `/dm @{Amber Badger} message` requires the global and
-  owning-set relay gates, existing author aliases for both parties, current
-  set-local membership and one verified recipient inbox. Ambiguous distinct
-  inboxes fail closed. See [private messaging](docs/PRIVATE_MESSAGING.md).
-
-Username-mode and discriminator controls have been removed. Alias display is
-always present; source Outgoing or destination Incoming anonymization controls
-whether a route shows real names alongside aliases on every transport. Existing unrelated settings and routing metadata are
-preserved. WhatsApp requires a verified canonical LID before author allocation;
-if unavailable, forwarding fails safely and later recovery depends on provider
-availability. No message-content queue or extra identity environment variable is
-introduced. Aliases link presentations within their owning set; they do not
-provide absolute anonymity or end-to-end encryption.
-
-All routing/runtime policies are configured per sync set, including media,
-recovery, retention, polls, local prefixes and child-label persistence. Open **Edit settings** on a sync set to configure it in a modal with spaced
-sections. Save is enabled only for pending changes; saving and error
-feedback remains visible. Membership review is enabled separately per sync set
-with a persisted `membershipReviewEnabled` setting, replacing the old browser
-switch. The review page scopes requests and pipelines to the selected enabled set. User/account and admin-security settings remain global. WhatsApp
-linked-device names are connection settings shared by all sets using that
-connection; edit them in Connections → Device name. Existing connections import
-their old name once. `/api/config` now exposes only the administrator's global
-`privateDMRelayEnabled` safety switch.
-
-Optional private DMs require that default-off global switch and the matching
-per-sync-set switch. No new port, environment variable, volume or public
-participant endpoint is required. `/dm @{Amber Badger} text` in a private bot chat
-sends to one verified member; native Reply continues the conversation.
-Private edits/deletes do not propagate. Encrypted content-free reply mappings
-expire after 24 hours in `/data/control.db`. WhatsApp attempts only per-message
-Delete for Me; Discord and Telegram Bot API retain provider messages because
-their delete APIs affect the recipient too. No provider-local cleanliness is
-promised for those bots. MTProto personal inboxes remain unmanaged. See the
-[private messaging contract](https://github.com/vm75/message-sync/blob/main/docs/PRIVATE_MESSAGING.md).
+Maintainers should follow [RELEASING.md](https://github.com/vm75/message-sync/blob/main/RELEASING.md); do not create release tags by editing this document or by rebuilding an old exact version.

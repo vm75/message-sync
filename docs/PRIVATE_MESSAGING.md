@@ -34,8 +34,10 @@ use the platform's native **Reply** on the bot's relayed message. Plain text
 after a conversation does not imply a current conversation. Multiple
 conversations remain separate through their exact structured reply IDs.
 
-`/help` explains usage and limitations. Telegram `/start` returns that same
-help. Ordinary text without an active native reply, unknown commands,
+`/help` lists all commands: `/help`, `/dm`, Telegram `/start`, group-local
+`/local` and poll `/summary`, plus usage and limitations. It includes additional
+local-only prefixes and poll triggers only for currently verified relay-enabled
+sets on this connection. Telegram `/start` returns that same help. Ordinary text without an active native reply, unknown commands,
 attachments, malformed commands, and replies to help/status/expired messages
 receive private help. `/dm` takes priority over an existing reply context.
 Commands are case sensitive. Input is at most 4096 UTF-8 bytes and relayed

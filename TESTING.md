@@ -145,3 +145,11 @@ spacing at desktop/mobile sizes, and existing WhatsApp connection names.
 Membership list tests assert sync-set filtering before the request limit and
 independent persisted review flags. Browser checks cover enabling membership
 review per set, conditional fields, scoped navigation and list selection.
+
+## Built-in command regression checks
+
+`go test ./internal/commands ./internal/router ./internal/privatedm` covers
+non-removable `/local` and `/summary`, unchanged configured matching and default
+triggers, local media/lifecycle suppression, poll aggregation through `/summary`,
+source-only `/help` without author enrollment, help replay/echo suppression, and
+private-help configuration isolation after membership revocation.

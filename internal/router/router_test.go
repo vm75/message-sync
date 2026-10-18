@@ -1665,8 +1665,8 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 	// make this otherwise synchronous summary assertion flaky.
 	waitForSent(t, fake, 1)
 
-	// Test each configured trigger
-	triggers := []string{"aggregate-response", "/poll-results", "#agg"}
+	// Configured triggers and the non-removable built-in use the same live path.
+	triggers := []string{"aggregate-response", "/poll-results", "#agg", "/summary"}
 	for _, tr := range triggers {
 		fake.mu.Lock()
 		fake.sent = nil

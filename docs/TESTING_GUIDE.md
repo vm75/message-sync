@@ -720,3 +720,17 @@ WhatsApp linked-device deletion check as verified.
 Private DM reply check: alternate three native replies across transports and verify
 each delivered response references the preceding author message in that inbox.
 Check alias-only headers on anonymized destinations and named headers elsewhere.
+
+## Built-in commands
+
+- Clear additional local prefixes, then send `/local keep this here` with media.
+  No other endpoint should receive it or later edits/reactions/deletes.
+- Set a custom local prefix and poll trigger. Confirm they still work alongside
+  `/local` and `/summary`; neither built-in is removable in the settings UI.
+- Reply `/summary` to a synchronized poll. Verify aggregate summaries appear and
+  continue updating as votes change; configured triggers must still work.
+- Send `/help` in each configured group/thread/topic. Verify all five commands
+  and only that set’s extra prefixes/triggers are listed, without fan-out.
+- Use private `/help` or Telegram `/start` with the relay enabled. Verify custom
+  values are listed only for currently verified sets on the owning connection;
+  revoke membership and confirm private settings disappear from help.
