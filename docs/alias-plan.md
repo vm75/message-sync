@@ -22,7 +22,7 @@ Cross-group addressing and discriminator behavior on this branch are unreleased.
 | Identity scope | `(sync_set_id, actor_id)`. A platform actor in two sets has two records and two aliases. No cross-platform person linking. |
 | Alias uniqueness | Instance-wide, case-insensitive, enforced in SQL. Never reuse aliases or ordinals. |
 | Allocation | One durable instance-wide, monotonic `int64` ordinal, transactionally allocated, not reset by sync-set/endpoint deletion. |
-| Vocabulary | Exactly 256 unique adjectives and 256 unique nouns; frozen lists and ordering. 65,536 pairs. |
+| Vocabulary | Exactly 256 unique adjectives and 256 unique nouns; frozen lists and a fixed bijective slot permutation. 65,536 pairs. |
 | Overflow | Tier suffix beginning with `2` at ordinal 65,537. |
 | Display, anonymize=false | `Alice (Amber Badger)`; include source endpoint where existing attribution format requires it: `group/Alice (Amber Badger)`. |
 | Display, anonymize=true | `Amber Badger`; existing endpoint prefix retained only where attribution uses it: `group/Amber Badger`. |
@@ -125,7 +125,12 @@ const nounCount = 256
 const aliasPoolSize = adjectiveCount * nounCount // 65536
 
 zero := n - 1
-slot := zero % aliasPoolSize
+slot := uint16(zero % aliasPoolSize)
+slot ^= slot >> 7
+slot *= 0x9e37 // intentional uint16 wrap; odd multiplier
+slot ^= slot >> 9
+slot *= 0x85eb // intentional uint16 wrap; odd multiplier
+slot ^= slot >> 8
 adjIndex := slot / nounCount
 nounIndex := slot % nounCount
 tier := zero/aliasPoolSize + 1
@@ -137,16 +142,18 @@ if tier > 1 {
 
 | Ordinal | Alias shape |
 |---|---|
-| 1 | `adjectives[0] nouns[0]` |
-| 256 | `adjectives[0] nouns[255]` |
-| 257 | `adjectives[1] nouns[0]` |
-| 65,536 | `adjectives[255] nouns[255]` |
-| 65,537 | `adjectives[0] nouns[0] 2` |
-| 131,073 | `adjectives[0] nouns[0] 3` |
+| 1 | `Amber Badger` |
+| 2 | `Pale Poppy` |
+| 3 | `Jolly Coconut` |
+| 256 | `Everglade Narwhal` |
+| 257 | `Grand Larch` |
+| 65,536 | `Star Toucan` |
+| 65,537 | `Amber Badger 2` |
+| 131,073 | `Amber Badger 3` |
 
 Therefore **65,536 distinct aliases have exactly two words**; all subsequent allocations have an unambiguous integer suffix. No random collision estimates apply: allocation is mathematically collision-free when the vocabulary is unique and the mapping remains fixed. Persist strings as an additional safeguard. Reject ordinals outside the positive `int64` range.
 
-**Optional future enhancement, not a prerequisite:** a *fixed bijective permutation* of slots could vary the first adjective more rapidly; if adopted, specify and lock it **before** creating any aliases. Do not introduce a permutation casually during implementation.
+**Deterministic scrambling:** XOR shifts and odd multiplication modulo 65,536 are invertible; their composition visits every pair once per tier while spreading successive allocations across both word lists. Freeze the constants, operation order and 16-bit arithmetic alongside the vocabulary. This hides the obvious visual allocation sequence, not the ordinal from someone who knows the mapping; it is not cryptographic secrecy. This mapping change assumes a fresh database; no conversion of previously issued mappings is provided.
 
 ### 2c. Alias parsing and formatting
 
@@ -400,8 +407,9 @@ Stop and report a blocker rather than weakening membership checks, substituting 
 
 ## Implementation verification
 
-- Frozen-vocabulary and exhaustive pair-uniqueness tests cover all 65,536 unsuffixed aliases, tier boundaries and the maximum ordinal.
+- Frozen-vocabulary and exhaustive pair-uniqueness tests cover all 65,536 unsuffixed aliases, tier boundaries and the maximum ordinal. A full ordering checksum freezes the slot permutation; every pair is checked to repeat with the correct tier suffix.
 - Store/config tests cover concurrent allocation, cancellation, rollback, restart, permanent exhaustion, deleted-set nonreuse and preservation across settings/binding changes.
 - Router/adapter/private-relay tests cover author-only enrollment, canonical LID requirements, scoped lookup, current destination authorization, reassigned route snapshots, quote/poll mention privacy, all supported private network pairings and ambiguous-inbox rejection. Poll option projection preserves source hash-to-index mappings in the content-free `poll_source_option_hashes` table; original and forwarded votes contribute to the same canonical indexes after restart.
 - Passed `make fmt`, `make test`, `make vet`, `make build`, `go test -race ./... -timeout 150s`, JavaScript syntax checks for `app-base.js` and `app.js`, and `git diff --check`. The built binary reports `development`; `VERSION` is unchanged.
 - Live provider testing requires configured external accounts and was not performed. Manual scenarios remain documented in `docs/TESTING_GUIDE.md`. No container/runtime packaging changed, so container checks were not required.
+- The subsequent fresh-database scrambled-order revision passes `make fmt`, `make test`, `make vet`, `git diff --check` and race tests for `internal/identity` and `internal/store`. The full ordering checksum and exhaustive tier checks lock the new mapping; no existing-mapping migration is included.

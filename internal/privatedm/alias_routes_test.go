@@ -33,7 +33,7 @@ func TestPrivateAliasRoutingDeduplicatesOnlyEquivalentInboxes(t *testing.T) {
 				candidate.OwnerID = "second-owner"
 			}
 			f.inboxes["c"+bob] = candidate
-			if err := r.Handle(ctx, input(f.inboxes["a"+alice], alice, "command", "/dm @{Amber Bear} body", "", *now)); err != nil {
+			if err := r.Handle(ctx, input(f.inboxes["a"+alice], alice, "command", "/dm @{Pale Poppy} body", "", *now)); err != nil {
 				t.Fatal(err)
 			}
 			if len(f.sent) != 1 {
@@ -56,7 +56,7 @@ func TestPrivateAliasDoesNotBootstrapUnassignedSender(t *testing.T) {
 	if _, err := r.Sync.DB().Exec(`DELETE FROM sync_set_actors WHERE actor_id=?`, alice); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.Handle(ctx, input(f.inboxes["a"+alice], alice, "command", "/dm @{Amber Bear} body", "", *now)); err != nil {
+	if err := r.Handle(ctx, input(f.inboxes["a"+alice], alice, "command", "/dm @{Pale Poppy} body", "", *now)); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.sent) != 1 || strings.HasPrefix(f.sent[0].text, "DM from ") {

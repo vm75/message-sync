@@ -146,7 +146,8 @@ Maintainers should follow [RELEASING.md](RELEASING.md); do not create release ta
 
 - **Participant aliases**: Every accepted group author has a persistent,
   installation-wide unique address belonging to its sync set. There are 65,536
-  frozen two-word aliases, followed by numeric tiers. Ordinary attribution is
+  frozen two-word aliases allocated in a fixed scrambled order, followed by numeric
+  tiers. Ordinary attribution is
   `group/Alice (Amber Badger)`; anonymized Discord attribution is
   `group/Amber Badger`. Aliases are never reused, including after deletion.
 - **Cross-group references**: `@{Amber Badger}` addresses an already observed

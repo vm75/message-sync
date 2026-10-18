@@ -29,6 +29,7 @@ func TestAliasVocabularyFrozenAndBijective(t *testing.T) {
 		t.Fatal("alias vocabulary changed: issued addresses must remain frozen")
 	}
 	seen := make(map[string]bool)
+	var ordered []string
 	for ordinal := int64(1); ordinal <= AliasPoolSize; ordinal++ {
 		alias, err := SyncSetAlias(ordinal)
 		key := strings.ToLower(alias)
@@ -36,10 +37,20 @@ func TestAliasVocabularyFrozenAndBijective(t *testing.T) {
 			t.Fatalf("invalid/nonunique pair at %d: %q %v", ordinal, alias, err)
 		}
 		seen[key] = true
+		ordered = append(ordered, alias)
+		nextTier, err := SyncSetAlias(ordinal + AliasPoolSize)
+		if err != nil || nextTier != alias+" 2" {
+			t.Fatalf("permutation changed across tiers at %d: %q %v", ordinal, nextTier, err)
+		}
 		// Reserve ample room within Discord's 80-rune username for every tier.
 		if len(alias)+1+15 > 48 {
 			t.Fatalf("alias exceeds presentation budget: %q", alias)
 		}
+	}
+	// Lock the entire ordering, not just the vocabulary and a few boundary names.
+	orderingChecksum := fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(ordered, "\n"))))
+	if orderingChecksum != "25045ae722822c178f31300902ac9976adac953c0566fd973bb0cafc9aeb829a" {
+		t.Fatal("alias slot permutation changed: issued addresses must remain frozen")
 	}
 }
 
@@ -48,9 +59,11 @@ func TestAliasBoundariesAndTokens(t *testing.T) {
 		ordinal int64
 		want    string
 	}{
-		{1, "Amber Badger"}, {256, "Amber Rainbow"}, {257, "Azure Badger"},
-		{65536, "Spring Rainbow"}, {65537, "Amber Badger 2"},
-		{131072, "Spring Rainbow 2"}, {131073, "Amber Badger 3"},
+		{1, "Amber Badger"}, {2, "Pale Poppy"}, {3, "Jolly Coconut"},
+		{255, "Maple Fox"}, {256, "Everglade Narwhal"}, {257, "Grand Larch"},
+		{65535, "Hopeful Cranberry"},
+		{65536, "Star Toucan"}, {65537, "Amber Badger 2"},
+		{131072, "Star Toucan 2"}, {131073, "Amber Badger 3"},
 	} {
 		got, err := SyncSetAlias(tc.ordinal)
 		if err != nil || got != tc.want {

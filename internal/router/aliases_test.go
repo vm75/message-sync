@@ -211,9 +211,9 @@ func TestQuoteOnlyMentionRetainsItsAssignedAliasAndPrivacy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := "Ask @Private Bob (Amber Bear)"
+		want := "Ask @Private Bob (Pale Poppy)"
 		if anon {
-			want = "Ask @Amber Bear"
+			want = "Ask @Pale Poppy"
 		}
 		if quote != want {
 			t.Fatalf("anonymous=%t quote=%q want %q", anon, quote, want)

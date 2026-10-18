@@ -112,7 +112,7 @@ func TestTelegramAliasAddressAfterRouterRestart(t *testing.T) {
 			if len(sent.outgoing.References) != 1 || sent.outgoing.References[0].ActorID != incoming.Sender.OpaqueID {
 				t.Fatalf("code failed to resolve after restart: %+v", sent.outgoing.References)
 			}
-			author := "source/Bob (Amber Bear)"
+			author := "source/Bob (Pale Poppy)"
 			if !strings.Contains(sent.text, author) {
 				t.Fatalf("Telegram sender attribution = %q, want %q", sent.text, author)
 			}

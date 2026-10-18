@@ -136,7 +136,7 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 				r, f, _, now, alice, bob := fixture(t, from, to)
 				ctx := context.Background()
 				a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-				if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Amber Bear} hello\nsecond line", "", *now)); err != nil {
+				if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Pale Poppy} hello\nsecond line", "", *now)); err != nil {
 					t.Fatal(err)
 				}
 				if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") || !strings.Contains(f.sent[0].text, "hello\nsecond line") {
@@ -145,7 +145,7 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 				if err := r.Handle(ctx, input(b, bob, "b1", "answer", f.sent[0].id, *now)); err != nil {
 					t.Fatal(err)
 				}
-				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from Amber Bear\n") {
+				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from Pale Poppy\n") {
 					t.Fatalf("return relay=%+v", f.sent)
 				}
 				if err := r.Handle(ctx, input(a, alice, "a2", "next", f.sent[1].id, *now)); err != nil {
@@ -170,7 +170,7 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 }
 
 func TestInvalidPrivateInputsOnlySendHelp(t *testing.T) {
-	for _, text := range []string{"hello", "@{Amber Bear}", "/foo", "/dm", "/dm @{Amber Bear}", "/dm @{Amber Bear} ", "/dm @{Amber Bear} @{Amber Bear}", "/dm \\@{Amber Bear} hello"} {
+	for _, text := range []string{"hello", "@{Pale Poppy}", "/foo", "/dm", "/dm @{Pale Poppy}", "/dm @{Pale Poppy} ", "/dm @{Pale Poppy} @{Pale Poppy}", "/dm \\@{Pale Poppy} hello"} {
 		t.Run(text, func(t *testing.T) {
 			r, f, _, now, alice, _ := fixture(t, "discord", "whatsapp")
 			a := f.inboxes["a"+alice]
@@ -190,7 +190,7 @@ func TestReplyOwnershipExpiryAndMembershipChangesFailClosed(t *testing.T) {
 			r, f, cfg, now, alice, bob := fixture(t, "discord", "whatsapp")
 			ctx := context.Background()
 			a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-			if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Amber Bear} first", "", *now)); err != nil {
+			if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Pale Poppy} first", "", *now)); err != nil {
 				t.Fatal(err)
 			}
 			in := input(b, bob, "b1", "reply", f.sent[0].id, *now)
@@ -237,14 +237,14 @@ func TestLifecycleEventsIgnoredAndLocalCleanupDoesNotDeleteRecipientCopy(t *test
 	r, f, _, now, alice, bob := fixture(t, "discord", "whatsapp")
 	ctx := context.Background()
 	a := f.inboxes["a"+alice]
-	initial := input(a, alice, "a1", "/dm @{Amber Bear} original", "", *now)
+	initial := input(a, alice, "a1", "/dm @{Pale Poppy} original", "", *now)
 	if err := r.Handle(ctx, initial); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"edit", "delete", "revoke"} {
 		event := initial
 		event.Kind = kind
-		event.Text = "/dm @{Amber Bear} changed"
+		event.Text = "/dm @{Pale Poppy} changed"
 		event.RemoteMessageID = kind
 		if err := r.Handle(ctx, event); err != nil {
 			t.Fatal(err)
@@ -283,7 +283,7 @@ func TestCommandsOverrideRepliesAndSeparateConversations(t *testing.T) {
 	ctx := context.Background()
 	a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
 	for _, id := range []string{"one", "two"} {
-		if err := r.Handle(ctx, input(a, alice, id, "/dm @{Amber Bear} "+id, "", *now)); err != nil {
+		if err := r.Handle(ctx, input(a, alice, id, "/dm @{Pale Poppy} "+id, "", *now)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -302,7 +302,7 @@ func TestCommandsOverrideRepliesAndSeparateConversations(t *testing.T) {
 	if !ok || back.ConversationID != m1.ConversationID {
 		t.Fatal("native reply crossed conversations")
 	}
-	if err := r.Handle(ctx, input(a, alice, "new-command", "/dm @{Amber Bear} fresh", f.sent[2].id, *now)); err != nil {
+	if err := r.Handle(ctx, input(a, alice, "new-command", "/dm @{Pale Poppy} fresh", f.sent[2].id, *now)); err != nil {
 		t.Fatal(err)
 	}
 	newConversation, ok, _ := r.State.Reply(ctx, b, f.sent[3].id, *now)
@@ -363,7 +363,7 @@ func TestPrivateBodySanitizationAndAmbiguousSendNoRetry(t *testing.T) {
 	r, f, _, now, alice, _ := fixture(t, "telegram", "discord")
 	ctx := context.Background()
 	a := f.inboxes["a"+alice]
-	if err := r.Handle(ctx, input(a, alice, "one", "/dm @{Amber Bear} hello @everyone <@12345> 15551234567@s.whatsapp.net https://t.me/private_user", "", *now)); err != nil {
+	if err := r.Handle(ctx, input(a, alice, "one", "/dm @{Pale Poppy} hello @everyone <@12345> 15551234567@s.whatsapp.net https://t.me/private_user", "", *now)); err != nil {
 		t.Fatal(err)
 	}
 	for _, sensitive := range []string{"@everyone", "12345", "15551234567", "private_user", "private-native-alice"} {
@@ -372,7 +372,7 @@ func TestPrivateBodySanitizationAndAmbiguousSendNoRetry(t *testing.T) {
 		}
 	}
 	f.fail = transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("sensitive-provider-error"))
-	_ = r.Handle(ctx, input(a, alice, "ambiguous", "/dm @{Amber Bear} next", "", *now))
+	_ = r.Handle(ctx, input(a, alice, "ambiguous", "/dm @{Pale Poppy} next", "", *now))
 	if len(f.sent) != 3 || f.sent[1].inbox.ConnectionID != "to" || f.sent[2].inbox.ConnectionID != "from" || !strings.Contains(f.sent[2].text, "could not be confirmed") {
 		t.Fatal("ambiguous send retried or claimed delivery")
 	}
@@ -406,7 +406,7 @@ func TestTrustedPNLIDAliasesPreserveObservedActorAndCanonicalChat(t *testing.T) 
 	r, f, _, now, alice, bob := fixture(t, "whatsapp", "whatsapp")
 	ctx := context.Background()
 	a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-	start := input(a, "u_newlid1234", "first", "/dm @{Amber Bear} hello", "", *now)
+	start := input(a, "u_newlid1234", "first", "/dm @{Pale Poppy} hello", "", *now)
 	start.ActorAliases = []string{alice}
 	if err := r.Handle(ctx, start); err != nil {
 		t.Fatal(err)

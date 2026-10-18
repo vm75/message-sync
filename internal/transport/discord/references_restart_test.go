@@ -124,9 +124,9 @@ func TestForwardedDiscordNameCanBeAddressedAfterRestart(t *testing.T) {
 				waitForWebhookSends(t, api, i+1)
 				_, _, messages, _, _, _, _ := api.snapshot()
 				message := messages[i]
-				senderName := "Sender (Amber Bear)"
+				senderName := "Sender (Pale Poppy)"
 				if anonymized {
-					senderName = "Amber Bear"
+					senderName = "Pale Poppy"
 				}
 				if message.Username != "wg1/"+senderName {
 					t.Errorf("webhook sender = %q, want %q", message.Username, "wg1/"+senderName)

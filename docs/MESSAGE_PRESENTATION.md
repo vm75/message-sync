@@ -7,7 +7,9 @@ opaque identities and explicit aliases; rendered headers never authorize routing
 
 Every accepted group-message author receives a permanent, globally unique alias
 belonging to its `(sync set, HMAC actor)` record. The vocabulary has exactly 256
-adjectives and 256 nouns, with a frozen order. The first 65,536 assignments use
+adjectives and 256 nouns, with a fixed scrambled pair order. Successive assignments
+span both word lists (for example `Amber Badger`, `Pale Poppy`, `Jolly Coconut`).
+The first 65,536 assignments use
 two words; ordinal 65,537 starts `Amber Badger 2`. Aliases and ordinals are never
 reused, even when their set is deleted. The same account in another set receives
 a different alias. Names, phone numbers and provider user identities are not

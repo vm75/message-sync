@@ -286,7 +286,7 @@ func TestMixedTransportWebhookSenderRenderingAndCanonicalLifecycle(t *testing.T)
 	if executeCalls != 3 || len(messagesSnapshot) != 3 {
 		t.Fatalf("Discord webhook sends=%d messages=%d, want 3", executeCalls, len(messagesSnapshot))
 	}
-	wantUsers := []string{"wa-one/Vidhya Private (Amber Badger)", "wa-one/Ravi Private (Amber Bear)", "wa-one/u_cdefg23456 (Amber Beaver)"}
+	wantUsers := []string{"wa-one/Vidhya Private (Amber Badger)", "wa-one/Ravi Private (Pale Poppy)", "wa-one/u_cdefg23456 (Jolly Coconut)"}
 	for i, want := range wantUsers {
 		if got := messagesSnapshot[i].Username; got != want {
 			t.Fatalf("webhook username[%d]=%q, want %q", i, got, want)

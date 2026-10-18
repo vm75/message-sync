@@ -239,7 +239,8 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 Each accepted group-message author receives a persistent alias, such as
 `Amber Badger`, scoped to that actor and sync set. Aliases are unique across
 this installation: the same platform account in another set receives a different
-alias. There are 65,536 frozen two-word names; subsequent allocations add a
+alias. New aliases follow a fixed scrambled order spread across both word lists.
+There are 65,536 frozen two-word names; subsequent allocations add a
 numeric tier, such as `Amber Badger 2`. Deletion never makes an alias reusable.
 
 Ordinary attribution is `group/Alice (Amber Badger)`; anonymized Discord

@@ -79,7 +79,8 @@ The integration gate combines the three transports with deterministic fake outco
 ## Cross-group references regression gate
 
 `go test ./internal/store ./internal/router ./internal/transport/...`
-includes global alias uniqueness, exhaustive 65,536-pair vocabulary bijection,
+includes global alias uniqueness, exhaustive 65,536-pair vocabulary bijection, a frozen scrambled-order checksum
+and per-pair overflow-tier checks,
 checksums, tier/int64 boundaries, restart stability, SQL contention across store
 connections, rollback and permanent nonreuse after set deletion. Settings-only
 saves preserve assignments, counters, observations and friendly labels; changed

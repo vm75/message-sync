@@ -15,6 +15,8 @@
 - Replace unreleased pseudonym/discriminator addressing with persistent,
   globally unique aliases scoped to each sync-set actor. Freeze a 256×256
   vocabulary with numeric overflow tiers; never reuse deleted aliases/ordinals.
+  Allocate in a fixed collision-free scrambled order rather than walking adjacent
+  words, assuming a fresh alias database.
 - Show `group/Alice (Amber Badger)` normally and `group/Amber Badger` on
   anonymized Discord routes. Preserve aliases in truncated webhook names.
 - Project native poll mentions to safe aliases while preserving original source

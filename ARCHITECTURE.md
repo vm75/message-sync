@@ -288,7 +288,12 @@ Package and integration tests cover configuration validation, HMAC stability, sc
 `(sync_set_id, actor_id)` with global unique ordinal and `alias COLLATE NOCASE`.
 An actor receives a distinct address in each set. The unrelated platform accounts
 of one real person are never linked. The frozen 256×256 vocabulary maps 65,536
-ordinals to unsuffixed two-word names, then appends a numeric tier from `2`.
+ordinals to unsuffixed two-word names through a fixed 16-bit bijective permutation,
+then appends a numeric tier from `2`. XOR shifts (`7`, `9`, `8`) and odd
+multipliers (`0x9e37`, `0x85eb`) scramble the slot with intentional uint16 wrap.
+Every pair occurs once per tier; successive allocations spread across both word lists.
+The vocabulary and entire ordering are frozen by checksum tests. This obscures
+the visual sequence without providing cryptographic secrecy.
 Persisted alias strings are validated against the frozen ordinal mapping.
 
 `alias_sequence` has one row with positive `next_ordinal` and an `exhausted` flag.

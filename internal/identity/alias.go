@@ -22,12 +22,25 @@ func SyncSetAlias(ordinal int64) (string, error) {
 		return "", errors.New("alias ordinal must be positive")
 	}
 	zero := ordinal - 1
-	slot := zero % AliasPoolSize
+	slot := scrambledAliasSlot(uint16(zero % AliasPoolSize))
 	alias := aliasAdjectives[slot/256] + " " + aliasNouns[slot%256]
 	if tier := zero/AliasPoolSize + 1; tier > 1 {
 		alias += " " + strconv.FormatInt(tier, 10)
 	}
 	return alias, nil
+}
+
+// scrambledAliasSlot is a frozen permutation of all 16-bit slots. XOR shifts
+// and multiplication by odd numbers are individually invertible, so composition
+// scrambles consecutive ordinals without collisions. uint16 overflow is deliberate.
+// This obscures the visual sequence; it is not a secret or cryptographic identity.
+func scrambledAliasSlot(slot uint16) uint16 {
+	slot ^= slot >> 7
+	slot *= 0x9e37
+	slot ^= slot >> 9
+	slot *= 0x85eb
+	slot ^= slot >> 8
+	return slot
 }
 
 // ParseAliasToken accepts an entire explicit reference, never a substring or
