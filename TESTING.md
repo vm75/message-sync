@@ -50,7 +50,7 @@ GitHub Actions also runs `.github/workflows/ci.yml` for every pull request targe
 
 The actual publication workflow is tag-only and enforces tag == `VERSION` before registry authentication or publishing. See [RELEASING.md](RELEASING.md) for stable, pre-release, mismatch, and immutability scenarios.
 
-`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, route-aware Discord anonymization and alias canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.
+`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, directional endpoint anonymization and alias canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.
 
 For a runtime/container smoke test, use a fresh data directory and no provider credentials:
 
@@ -66,7 +66,7 @@ podman build -f Containerfile -t message-sync:dev .
 timeout 4s podman run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m -v "$tmpdir:/data:Z" -e DATA_DIR=/data -e API_ADDR=127.0.0.1:0 -e IDENTITY_SECRET=0123456789abcdef0123456789abcdef message-sync:dev run
 ```
 
-Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover removal of retired display settings, preservation of unrelated policies, and the Discord anonymization flag. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
+Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover removal of retired display settings, preservation of unrelated policies, and conversion of the legacy Discord anonymity flag into endpoint outgoing settings. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
 
 The control-plane retention test verifies bounded deletion of expired auth
 artifacts and terminal membership requests while returning only opaque evidence
@@ -87,11 +87,10 @@ The integration gate combines the three transports with deterministic fake outco
 
 ## Cross-group references regression gate
 
-`go test ./internal/store ./internal/router ./internal/transport/...`
-includes global alias uniqueness, exhaustive 65,536-pair vocabulary bijection, a frozen scrambled-order checksum
-and per-pair overflow-tier checks,
-checksums, tier/int64 boundaries, restart stability, SQL contention across store
-connections, rollback and permanent nonreuse after set deletion. Settings-only
+`go test ./internal/identity ./internal/store ./internal/config ./internal/router ./internal/transport/... ./internal/privatedm`
+covers global alias uniqueness, the exhaustive 65,536-pair bijection, frozen
+vocabulary/ordering checksums, overflow and int64 boundaries, restart stability,
+SQL contention across connections, rollback and permanent nonreuse after deletion. Settings-only
 saves preserve assignments, counters, observations and friendly labels; changed
 bindings invalidate stale endpoint state. Upgrade tests strip retired display
 settings while preserving all unrelated policies.
@@ -125,7 +124,7 @@ no enrollment and unchanged provider cleanup restrictions. No native private
 content or inbox identity may enter canonical routing state or admin output.
 
 For real client rendering, follow [the manual guide](docs/TESTING_GUIDE.md):
-check alias-only Discord anonymity, name-plus-alias attribution elsewhere,
+check alias-only anonymity wherever source Incoming or destination Outgoing is enabled, and name-plus-alias attribution elsewhere,
 LID-only WhatsApp chips, Telegram links, revoked permissions, cold caches and
 escaped `\@{Amber Badger}` literals. Legacy username-mode/discriminator API fields
 must be rejected; their inert schema columns are only upgrade compatibility data.

@@ -422,16 +422,14 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 - [ ] Query `control.db`: Verify `transport_connections` stores only AES-256-GCM ciphertext and nonces; no plaintext token appears anywhere in database strings.
 - [ ] Check application logs: Verify zero tokens or raw protocol update dumps appear in stdout.
 
-### Scenario 14: Route-Aware Discord Anonymization (`anonymizeToDiscord`)
-- [ ] In the **Sync Sets** view, edit your sync set to enable **Anonymize sender presentation when forwarding to Discord** and save.
-- [ ] Send a message from WhatsApp: `Hello from WhatsApp!`.
-  - **Verify Discord**: The message attribution uses the assigned alias (e.g., `*_wa_test/Amber Badger_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
-  - **Verify Telegram**: The message attribution retains the real WhatsApp push name with its assigned alias (e.g., `*_wa_test/Alice (Amber Badger)_*: Hello from WhatsApp!`).
-- [ ] Send a message from WhatsApp containing a mention and reply quote.
-  - **Verify Discord**: Assigned structured mentions use their aliases, unassigned mentions use non-identifying text, and quoted text has real sender names stripped.
-  - **Verify Telegram**: Assigned structured mentions retain normal names with their aliases; quote attribution follows the ordinary name-plus-alias contract.
-- [ ] Add a reaction to a bridged message in WhatsApp.
-  - **Verify Discord**: The fallback attribution or reaction uses the assigned alias without leaking the WhatsApp user's name or phone number.
+### Scenario 14: Directional conversation anonymization
+- [ ] In Sync Sets, enable **Anonymize outgoing** beside a conversation’s move/rename/remove controls and Save. Repeat for WhatsApp, Discord and Telegram destinations.
+- [ ] Send from each other conversation. Only deliveries to that destination use alias-only authors, anonymized structured mentions and sanitized quote attribution.
+- [ ] Disable Outgoing, enable **Anonymize incoming** on the source, and Save. Messages from it must use alias-only attribution at every destination; messages from other sources retain ordinary attribution.
+- [ ] Enable both flags and verify both directions. Disable both and verify ordinary name-plus-alias attribution returns.
+- [ ] Repeat with edits, reaction fallbacks, replies, media captions, child threads/topics and polls. Explicit verified cross-group references keep their existing native-reference exception.
+- [ ] Toggle a flag back before Save: the draft should become clean. Save changes, reopen the editor and restart: both checkbox values must persist independently. Rename or move the conversation and save unrelated settings: the values must remain intact.
+- [ ] Upgrade a database with the old Discord policy enabled: affected Discord endpoints start with Outgoing enabled and Incoming disabled. Turn Outgoing off and restart; it must stay off.
 
 ---
 
@@ -581,7 +579,7 @@ You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_
 
 Have participant A post an ordinary group message and note the assigned alias,
 such as `Amber Badger`. Normal destinations show `group/Alice (Amber Badger)`;
-anonymized Discord destinations show `group/Amber Badger`. Confirm that username
+anonymized destinations show `group/Amber Badger`. Confirm that username
 mode, discriminator visibility and code-length controls are absent from the shared
 settings modal. Media captions/companions, child-context headers, polls, edits and
 reaction fallbacks retain the same alias. Long Discord webhook names preserve it.
@@ -721,4 +719,4 @@ WhatsApp linked-device deletion check as verified.
 
 Private DM reply check: alternate three native replies across transports and verify
 each delivered response references the preceding author message in that inbox.
-Check alias-only headers on anonymized Discord destinations and named headers elsewhere.
+Check alias-only headers on anonymized destinations and named headers elsewhere.

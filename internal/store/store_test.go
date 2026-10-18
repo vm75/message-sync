@@ -837,3 +837,58 @@ func TestDiscriminatorSettingUpgradeAndReopen(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointAnonymityUpgrade(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sync.db")
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = raw.Exec(`CREATE TABLE sync_sets(id TEXT PRIMARY KEY, anonymize_to_discord BOOLEAN NOT NULL DEFAULT 0);
+ INSERT INTO sync_sets VALUES('legacy',1);
+ CREATE TABLE endpoints(alias TEXT PRIMARY KEY,transport TEXT NOT NULL,connection_id TEXT NOT NULL,remote_id TEXT NOT NULL,sync_set_id TEXT REFERENCES sync_sets(id));
+ INSERT INTO endpoints VALUES('dc','discord','connection','123','legacy'),('wa','whatsapp','connection-wa','123@g.us','legacy');`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Close()
+	db, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var incoming, outgoing, legacy bool
+	if err := db.DB().QueryRow(`SELECT anonymize_incoming,anonymize_outgoing FROM endpoints WHERE alias='dc'`).Scan(&incoming, &outgoing); err != nil {
+		t.Fatal(err)
+	}
+	if incoming || !outgoing {
+		t.Fatal("legacy Discord policy was not converted")
+	}
+	if err := db.DB().QueryRow(`SELECT anonymize_to_discord FROM sync_sets WHERE id='legacy'`).Scan(&legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy {
+		t.Fatal("legacy flag still overrides endpoint edits")
+	}
+	if err := db.DB().QueryRow(`SELECT anonymize_outgoing FROM endpoints WHERE alias='wa'`).Scan(&outgoing); err != nil {
+		t.Fatal(err)
+	}
+	if outgoing {
+		t.Fatal("upgrade anonymized an ordinary destination")
+	}
+	if _, err := db.DB().Exec(`UPDATE endpoints SET anonymize_outgoing=0 WHERE alias='dc'`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	db, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.DB().QueryRow(`SELECT anonymize_outgoing FROM endpoints WHERE alias='dc'`).Scan(&outgoing); err != nil {
+		t.Fatal(err)
+	}
+	if outgoing {
+		t.Fatal("reopening undid endpoint edit")
+	}
+}

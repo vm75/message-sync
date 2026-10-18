@@ -59,7 +59,7 @@ Child messages retain the same slash-separated context:
 *_developers/Backend API/Alice (Amber Badger)_*: deployed the fix
 ```
 
-On anonymized Discord routes, the assigned alias replaces the name entirely:
+On anonymized routes, the assigned alias replaces the name entirely:
 
 ```text
 developers/Amber Badger: deployed the fix
@@ -89,11 +89,16 @@ Both use `<group>/<child>/<sender>`. Opaque child IDs and `[contexts ...]`
 preambles never enter rendered messages. Switching to opaque clears stored
 labels. Group/child labels never select an actor or route.
 
-## Route-aware Discord anonymization
+## Directional endpoint anonymization
 
-With `anonymizeToDiscord=true`, only Discord destinations use alias-only author
-presentation and clear phone fields. Other destinations retain ordinary names
-with aliases. Structured verified mentions reuse the mentioned author's existing
+Each endpoint has independent `anonymizeIncoming` and `anonymizeOutgoing`
+booleans, both defaulting to false. Incoming covers messages originating from
+that conversation; outgoing covers messages delivered to it. If either the
+source Incoming or destination Outgoing flag is true, the route uses alias-only
+author presentation and clears phone fields, on every transport. Otherwise it
+retains ordinary names with aliases. Both can be enabled together. These
+checkboxes sit alongside move/rename/remove in the sync-set conversation editor
+and take effect on Save without restarting. Structured verified mentions reuse the mentioned author's existing
 set alias. A missing assignment uses safe non-identifying mention text on an
 anonymized route; ordinary destinations retain safe normal mention presentation.
 No invented HMAC pseudonym or separate mention hash domain is used. Mention
@@ -155,7 +160,7 @@ Reply to this message to respond privately.
 
 The attribution after `DM from ` is bold-italic. Names come from the current
 private event and remain transient. With no available name, or for an anonymized
-Discord destination, use `DM from <group>/<alias>`. The group is the source
+route, use `DM from <group>/<alias>`. The group is the source
 endpoint alias. Both parties need existing group-author assignments; `/dm`
 does not allocate. Each response natively references the original author message
 in the destination inbox; missing provider copies may fall back to an unthreaded

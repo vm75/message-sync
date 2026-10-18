@@ -178,14 +178,17 @@ type Config struct {
 }
 
 type Endpoint struct {
-	Transport    Transport `json:"transport"`
-	ConnectionID string    `json:"connectionId"`
-	RemoteID     string    `json:"remoteId"`
+	AnonymizeIncoming bool      `json:"anonymizeIncoming"`
+	AnonymizeOutgoing bool      `json:"anonymizeOutgoing"`
+	Transport         Transport `json:"transport"`
+	ConnectionID      string    `json:"connectionId"`
+	RemoteID          string    `json:"remoteId"`
 }
 
 type SyncSet struct {
-	ID                 string           `json:"id"`
-	Endpoints          []string         `json:"endpoints"`
+	ID        string   `json:"id"`
+	Endpoints []string `json:"endpoints"`
+	// Deprecated: compatibility for older configuration clients; use endpoint directional flags.
 	AnonymizeToDiscord bool             `json:"anonymizeToDiscord"`
 	Settings           *SyncSetSettings `json:"settings,omitempty"`
 }
@@ -266,7 +269,7 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 
 	applyDefaults(cfg)
 
-	endpointRows, err := db.QueryContext(ctx, `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
+	endpointRows, err := db.QueryContext(ctx, `SELECT alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing FROM endpoints ORDER BY alias ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("read endpoints: %w", err)
 	}
@@ -275,11 +278,13 @@ func LoadRaw(ctx context.Context, db *sql.DB) (*Config, error) {
 	for endpointRows.Next() {
 		var alias, transportName, connectionID, remoteID string
 		var syncSetID sql.NullString
-		if err := endpointRows.Scan(&alias, &transportName, &connectionID, &remoteID, &syncSetID); err != nil {
+		var incoming, outgoing bool
+		if err := endpointRows.Scan(&alias, &transportName, &connectionID, &remoteID, &syncSetID, &incoming, &outgoing); err != nil {
 			endpointRows.Close()
 			return nil, fmt.Errorf("scan endpoint: %w", err)
 		}
 		cfg.Endpoints[alias] = Endpoint{
+			AnonymizeIncoming: incoming, AnonymizeOutgoing: outgoing,
 			Transport:    Transport(transportName),
 			ConnectionID: connectionID,
 			RemoteID:     remoteID,

@@ -52,8 +52,8 @@ func saveRoutingRows(ctx context.Context, tx *sql.Tx, cfg *Config, endpointSets 
 		}
 	}
 	for alias, ep := range cfg.Endpoints {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id) VALUES(?,?,?,?,?)
-			ON CONFLICT(alias) DO UPDATE SET sync_set_id=excluded.sync_set_id`, alias, string(ep.Transport), ep.ConnectionID, ep.RemoteID, endpointSets[alias]); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO endpoints(alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing) VALUES(?,?,?,?,?,?,?)
+			ON CONFLICT(alias) DO UPDATE SET sync_set_id=excluded.sync_set_id, anonymize_incoming=excluded.anonymize_incoming, anonymize_outgoing=excluded.anonymize_outgoing`, alias, string(ep.Transport), ep.ConnectionID, ep.RemoteID, endpointSets[alias], ep.AnonymizeIncoming, ep.AnonymizeOutgoing); err != nil {
 			return fmt.Errorf("save endpoint: %w", err)
 		}
 	}

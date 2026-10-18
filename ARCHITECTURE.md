@@ -73,7 +73,7 @@ lookup identifies the owning set, then current source membership and a unique
 verified recipient inbox authorize delivery. Equivalent endpoint routes to that
 inbox are deduplicated; distinct inboxes fail closed. Source attribution is
 `DM from <group>/<name> (<alias>)` with bold-italic attribution, or
-`DM from <group>/<alias>` when names are unavailable or Discord anonymization applies.
+`DM from <group>/<alias>` when names are unavailable or directional anonymization applies.
 Names remain transient; encrypted mappings retain the author message token for
 native back-references on responses. Both
 parties require prior group-author assignments; private traffic never allocates.
@@ -109,7 +109,7 @@ The application preserves four distinct concepts:
 - **Connection** authenticates one WhatsApp account, Discord bot, or Telegram bot.
 - **Endpoint** gives a safe alias to one configured parent conversation owned by a connection.
 - **ChildScope** carries an opaque Discord thread/forum-post or Telegram topic context for a message.
-- **Sync Set** groups endpoint aliases for all-to-all fan-out, with optional route-aware one-way Discord anonymization (`anonymizeToDiscord`).
+- **Sync Set** groups endpoint aliases for all-to-all fan-out, with optional incoming/outgoing anonymization per endpoint.
 
 Endpoint aliases are operational routing identifiers safe for display and logging. They match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and must not encode a person, phone number, JID, group subject, guild, or channel name. Provider target IDs are retained only for operational addressing and are never canonical IDs.
 
@@ -119,12 +119,23 @@ Flattened child messages use one human-facing attribution header: `<group-alias>
 
 Telegram basic-group to supergroup migrations are handled as addressing maintenance: the adapter recognizes the migration service message and transactionally updates only the matching endpoint's `remote_id` in `sync.db`, preserving the alias, sync set, and canonical lineage. Telegram mentions are sanitized at the adapter boundary: `text_mention` entities are reduced to HMAC actor IDs plus transient display labels, and `@username` entities are rewritten to the generic `@mention` fallback to keep raw usernames out of canonical state.
 
-Route-aware Discord anonymization: `anonymizeToDiscord=true` uses the assigned
-sync-set actor alias for Discord author, structured-mention and reaction
-presentation and strips phone numbers and quoted bridge headers. Other
-transports retain ordinary names with their assigned aliases. There is no
+Directional endpoint anonymization uses the assigned sync-set actor alias for
+author, structured-mention and reaction presentation and strips phone numbers
+and quoted bridge headers whenever the source has `anonymizeIncoming=true` or
+the destination has `anonymizeOutgoing=true`. This applies to every transport.
+Other routes retain ordinary names with their assigned aliases. There is no
 selectable username mode or computed HMAC pseudonym; HMAC actor identity remains
 unchanged and real names stay transient.
+
+Endpoint anonymity is stored in `endpoints.anonymize_incoming` and
+`endpoints.anonymize_outgoing` (booleans, default false). Initialization converts
+legacy `sync_sets.anonymize_to_discord` policies into outgoing flags on their
+Discord endpoints and clears the legacy flag, transactionally and idempotently.
+The old sync-set API field is deprecated compatibility input; new clients use
+endpoint flags. The router combines source incoming with destination outgoing
+for creates, edits, reply/mention presentation and reaction fallbacks; runtime
+reload rebuilds this route matrix. Private relay attribution uses the same
+source/destination endpoint policies.
 
 ## Persistence and trust boundaries
 
@@ -136,7 +147,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 
 - safe endpoint aliases, connection IDs, and provider target IDs needed for addressing;
 - per-sync-set routing policies in `sync_sets.settings_json`; `global_config` retains legacy initialization data and the default-off global private DM safety switch;
-- sync set definitions (including the boolean `anonymize_to_discord` flag) and endpoint memberships;
+- sync set definitions and endpoint membership, including boolean `anonymize_incoming` and `anonymize_outgoing` endpoint policiess;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
 - HMAC actor IDs and permanent sync-set alias/ordinal assignments, reaction emoji, poll option indexes/hashes and aggregate counts;
@@ -257,8 +268,8 @@ The daemon hosts both the embedded SPA and the authenticated HTTP REST API on po
 | `/api/connections/{id}/discovery`| `GET` | Authenticated | Returns transient discovered targets (channels, chats, groups). |
 | `/api/connections/{id}/pair`, `/logout` | `POST` | Admin | Serialized WhatsApp QR pairing lifecycle and session logout. |
 | `/api/endpoints` | `GET`, `POST` | Authenticated | Lists or creates safe endpoint aliases mapping to connection targets. |
-| `/api/endpoints/{alias}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates alias, sync set, or deletes endpoint. |
-| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets with `anonymizeToDiscord` and nested `settings` policies for fan-out. |
+| `/api/endpoints/{alias}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates alias, sync set, directional anonymity (`anonymizeIncoming`, `anonymizeOutgoing`), or deletes endpoint. |
+| `/api/sync-sets` | `GET`, `POST` | Authenticated | Lists or creates sync sets with nested `settings` policies (`anonymizeToDiscord` is deprecated compatibility input) for fan-out. |
 | `/api/sync-sets/{id}` | `GET`, `PUT`, `DELETE`| Authenticated | Updates endpoints, anonymization, and nested runtime `settings`, or deletes the set. Omitted update fields are preserved. |
 | `/api/config` | `GET`, `PUT` | Admin | Reads/updates only global `privateDMRelayEnabled`. Legacy global runtime fields are rejected. |
 | `/api/delivery/status` | `GET` | Authenticated | Real-time content-free delivery health, lane depth, and failure classes. |
@@ -376,7 +387,7 @@ missing bindings and unavailable membership checks retain literal references.
 WhatsApp resolves from provider-owned target rosters without querying protocol
 SQLite. Aliases identify a platform actor within a set, not a global person.
 
-Runtime policies remain per-set. Their shared create/edit modal saves actual
+Runtime policies remain per-set; directional anonymity belongs to endpoints. Their shared create/edit modal saves actual
 draft differences and reports reload failures after database commit. Canonical
 messages retain original set ownership for retention; orphan history and
 suppression markers expire after 90 days. Friendly-label persistence remains

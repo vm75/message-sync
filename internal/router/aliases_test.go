@@ -49,7 +49,7 @@ func TestAssignedAliasPresentationAndMentionFallback(t *testing.T) {
 	inc.Text = "Ask @" + mentioned.ActorID + " and @u_aaaaaaaaaa"
 	inc.QuotedText = "*_c1g2/Private Name_*: quoted"
 	for _, anon := range []bool{false, true} {
-		sender, mentions, text, quote, err := r.presentationForTarget(ctx, inc, routeTarget{Endpoint: "c1g2", AnonymizeToDiscord: anon})
+		sender, mentions, text, quote, err := r.presentationForTarget(ctx, inc, routeTarget{Endpoint: "c1g2", Anonymized: anon})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -207,7 +207,7 @@ func TestQuoteOnlyMentionRetainsItsAssignedAliasAndPrivacy(t *testing.T) {
 	in.QuotedText = "Ask @u_234567abcd"
 	in.QuotedMentions = []transport.Mention{{RemoteID: "u_234567abcd", Name: "Private Bob"}}
 	for _, anon := range []bool{false, true} {
-		_, _, _, quote, err := r.presentationForTarget(ctx, in, routeTarget{AnonymizeToDiscord: anon})
+		_, _, _, quote, err := r.presentationForTarget(ctx, in, routeTarget{Anonymized: anon})
 		if err != nil {
 			t.Fatal(err)
 		}

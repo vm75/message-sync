@@ -12,27 +12,33 @@ import (
 )
 
 type EndpointDTO struct {
-	Alias        string           `json:"alias"`
-	Transport    config.Transport `json:"transport"`
-	ConnectionID string           `json:"connectionId"`
-	RemoteID     string           `json:"remoteId"`
-	SyncSetID    *string          `json:"syncSetId,omitempty"`
+	AnonymizeIncoming bool             `json:"anonymizeIncoming"`
+	AnonymizeOutgoing bool             `json:"anonymizeOutgoing"`
+	Alias             string           `json:"alias"`
+	Transport         config.Transport `json:"transport"`
+	ConnectionID      string           `json:"connectionId"`
+	RemoteID          string           `json:"remoteId"`
+	SyncSetID         *string          `json:"syncSetId,omitempty"`
 }
 
 type CreateEndpointRequest struct {
-	Alias        string           `json:"alias"`
-	Transport    config.Transport `json:"transport"`
-	ConnectionID string           `json:"connectionId"`
-	RemoteID     string           `json:"remoteId"`
-	SyncSetID    *string          `json:"syncSetId,omitempty"`
+	AnonymizeIncoming bool             `json:"anonymizeIncoming"`
+	AnonymizeOutgoing bool             `json:"anonymizeOutgoing"`
+	Alias             string           `json:"alias"`
+	Transport         config.Transport `json:"transport"`
+	ConnectionID      string           `json:"connectionId"`
+	RemoteID          string           `json:"remoteId"`
+	SyncSetID         *string          `json:"syncSetId,omitempty"`
 }
 
 type UpdateEndpointRequest struct {
-	Alias        string           `json:"alias,omitempty"`
-	Transport    config.Transport `json:"transport"`
-	ConnectionID string           `json:"connectionId"`
-	RemoteID     string           `json:"remoteId"`
-	SyncSetID    *string          `json:"syncSetId,omitempty"`
+	AnonymizeIncoming *bool            `json:"anonymizeIncoming,omitempty"`
+	AnonymizeOutgoing *bool            `json:"anonymizeOutgoing,omitempty"`
+	Alias             string           `json:"alias,omitempty"`
+	Transport         config.Transport `json:"transport"`
+	ConnectionID      string           `json:"connectionId"`
+	RemoteID          string           `json:"remoteId"`
+	SyncSetID         *string          `json:"syncSetId,omitempty"`
 }
 
 func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
@@ -41,7 +47,7 @@ func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints ORDER BY alias ASC`)
+	rows, err := s.db.QueryContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing FROM endpoints ORDER BY alias ASC`)
 	if err != nil {
 		safelog.Error(s.logger, "query endpoints failed", "endpoint_list", err)
 		WriteError(w, http.StatusInternalServerError, "failed to query endpoints")
@@ -54,7 +60,7 @@ func (s *Server) handleListEndpoints(w http.ResponseWriter, r *http.Request) {
 		var dto EndpointDTO
 		var transportName string
 		var syncSetID sql.NullString
-		if err := rows.Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID); err != nil {
+		if err := rows.Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID, &dto.AnonymizeIncoming, &dto.AnonymizeOutgoing); err != nil {
 			safelog.Error(s.logger, "scan endpoint failed", "endpoint_list", err)
 			WriteError(w, http.StatusInternalServerError, "failed to read endpoints")
 			return
@@ -91,9 +97,9 @@ func (s *Server) handleGetEndpoint(w http.ResponseWriter, r *http.Request) {
 	var transportName string
 	var syncSetID sql.NullString
 	err := s.db.QueryRowContext(r.Context(),
-		`SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints WHERE alias = ?`,
+		`SELECT alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing FROM endpoints WHERE alias = ?`,
 		alias,
-	).Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID)
+	).Scan(&dto.Alias, &transportName, &dto.ConnectionID, &dto.RemoteID, &syncSetID, &dto.AnonymizeIncoming, &dto.AnonymizeOutgoing)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -215,8 +221,8 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = s.db.ExecContext(r.Context(),
-		`INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id) VALUES (?, ?, ?, ?, ?)`,
-		req.Alias, string(req.Transport), req.ConnectionID, req.RemoteID, syncSetValue,
+		`INSERT INTO endpoints (alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		req.Alias, string(req.Transport), req.ConnectionID, req.RemoteID, syncSetValue, req.AnonymizeIncoming, req.AnonymizeOutgoing,
 	)
 	if err != nil {
 		safelog.Error(s.logger, "insert endpoint failed", "endpoint_create", err)
@@ -226,6 +232,7 @@ func (s *Server) handleCreateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 	_ = WriteJSON(w, http.StatusCreated, EndpointDTO{
+		AnonymizeIncoming: req.AnonymizeIncoming, AnonymizeOutgoing: req.AnonymizeOutgoing,
 		Alias:        req.Alias,
 		Transport:    req.Transport,
 		ConnectionID: req.ConnectionID,
@@ -270,7 +277,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	var existing string
 	var existingAlias, existingTransport, existingConnID, existingRemoteID string
 	var existingSyncSet sql.NullString
-	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID, &existingSyncSet)
+	var incoming, outgoing bool
+	err := s.db.QueryRowContext(r.Context(), `SELECT alias, transport, connection_id, remote_id, sync_set_id, anonymize_incoming, anonymize_outgoing FROM endpoints WHERE alias = ?`, alias).Scan(&existingAlias, &existingTransport, &existingConnID, &existingRemoteID, &existingSyncSet, &incoming, &outgoing)
 	if errors.Is(err, sql.ErrNoRows) {
 		WriteError(w, http.StatusNotFound, "endpoint not found")
 		return
@@ -384,6 +392,12 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.AnonymizeIncoming != nil {
+		incoming = *req.AnonymizeIncoming
+	}
+	if req.AnonymizeOutgoing != nil {
+		outgoing = *req.AnonymizeOutgoing
+	}
 	tx, err := s.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		safelog.Error(s.logger, "begin tx failed", "endpoint_update", err)
@@ -393,8 +407,8 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.ExecContext(r.Context(),
-		`UPDATE endpoints SET alias = ?, transport = ?, connection_id = ?, remote_id = ?, sync_set_id = ? WHERE alias = ?`,
-		newAlias, string(req.Transport), targetConnID, req.RemoteID, syncSetValue, alias,
+		`UPDATE endpoints SET alias = ?, transport = ?, connection_id = ?, remote_id = ?, sync_set_id = ?, anonymize_incoming = ?, anonymize_outgoing = ? WHERE alias = ?`,
+		newAlias, string(req.Transport), targetConnID, req.RemoteID, syncSetValue, incoming, outgoing, alias,
 	)
 	if err != nil {
 		safelog.Error(s.logger, "update endpoint failed", "endpoint_update", err)
@@ -434,6 +448,7 @@ func (s *Server) handleUpdateEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	s.notifyConfigChange(r.Context())
 	_ = WriteJSON(w, http.StatusOK, EndpointDTO{
+		AnonymizeIncoming: incoming, AnonymizeOutgoing: outgoing,
 		Alias:        newAlias,
 		Transport:    req.Transport,
 		ConnectionID: targetConnID,

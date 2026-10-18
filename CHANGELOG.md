@@ -1,66 +1,50 @@
 # Changelog
 
-
-### Unreleased — cross-group participant addressing
-
-- Add an anonymous, default-off private `/dm` relay for WhatsApp, Discord bot
-  and Telegram Bot API accounts, with global and per-sync-set administrator gates.
-- Chain private responses to the preceding author message and show bold-italic
-  `DM from group/name (alias)` attribution, respecting Discord anonymization.
-- Fix WhatsApp phone-only private commands and replies with a cold PN/LID cache
-  by verifying explicit identity pairs against current DM-enabled group rosters.
-- Continue private conversations only through exact native reply mappings;
-  verify observed actors, current membership and owning connections on every hop.
-- Encrypt content-free 24-hour reply/inbox state and bounded WhatsApp local
-  cleanup metadata in `control.db`; keep private content outside group routing.
-- Ignore private edits/deletes. Use only WhatsApp per-message Delete for Me;
-  never delete Discord/Bot API participant-visible messages or MTProto personal chats.
-
-- Replace unreleased pseudonym/discriminator addressing with persistent,
-  globally unique aliases scoped to each sync-set actor. Freeze a 256×256
-  vocabulary with numeric overflow tiers; never reuse deleted aliases/ordinals.
-  Allocate in a fixed collision-free scrambled order rather than walking adjacent
-  words on new installations. Preserve existing assigned aliases by pinning
-  each installation’s original ordering; fix private DM rejection after upgrade.
-- Show `group/Alice (Amber Badger)` normally and `group/Amber Badger` on
-  anonymized Discord routes. Preserve aliases in truncated webhook names.
-- Project native poll mentions to safe aliases while preserving original source
-  vote hashes and common option indexes, including after restart.
-- Use only `@{Amber Badger}` and `/dm @{Amber Badger} text` addresses. Require
-  preexisting author assignments, set-local authorization and actual destination
-  membership. Reject ambiguous distinct DM inboxes; deduplicate equivalent routes.
-- Remove username modes and discriminator API/UI/settings controls while
-  preserving unrelated persisted policies and HMAC actor identities.
-- Require verified canonical LIDs before WhatsApp author alias allocation;
-  unresolved PN-only messages fail before delivery/checkpoint advancement.
-- Save configuration with differential upserts, preserving retained alias,
-  participant and child-label state instead of cascading whole-table rewrites.
-- Move routing/runtime policies into sync-set settings, with live reload and
-  independent media, recovery, retention, polls, local-prefix and child-label
-  policies. Preserve existing settings during initialization; retire the global
-  runtime fields from `/api/config`, which now exposes only the DM safety gate.
-- Move WhatsApp linked-device names to connections, with one-time import and
-  editing for existing connections. Keep accounts and admin security global.
-- Move runtime, privacy and membership settings into an **Edit settings** modal
-  with consistent section spacing. Enable Save only for changed drafts, disable
-  it on revert/save, and show saving/error feedback without clean-state banners.
-- Make membership review visibility a saved per-sync-set setting; replace the
-  browser-only switch and scope review requests/pipelines to the selected set.
-- Preserve chip removal/paste tracking and report runtime reload failures.
-- Retain exact authored reference text when native membership cannot be verified;
-  Discord still checks guild/channel/private-thread permissions and allowlists
-  users, while WhatsApp uses LID-only metadata and Bot API checks membership.
-- Restore Discord native observations from live ingress, accepted history and
-  optional bounded HMAC-based guild-roster lookup; denied lookups stay literal.
-- Add vocabulary, concurrent allocation, rollback, restart, configuration-save,
-  inbox ambiguity, native payload and privacy regression coverage. No version bump.
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes are documented here, following [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
+and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Added
+
+- Optional text-only private `/dm @{Amber Badger} message` relay for WhatsApp,
+  Discord bots and Telegram Bot API, gated globally and per sync set. Native
+  replies continue conversations with current membership and exact inbox checks;
+  encrypted, content-free mappings expire after 24 hours. Only feature-owned
+  WhatsApp copies receive Delete for Me cleanup; private edits/deletes are ignored.
+- Independent incoming/outgoing anonymization for every conversation endpoint
+  and transport, editable beside Move/Rename/Remove. Existing Discord policies
+  migrate to outgoing endpoint settings; changes reload without restarting.
+
+### Changed
+
+- Replace unreleased pseudonym/discriminator addresses with permanent, globally
+  unique aliases scoped to each sync-set actor. Freeze the 256×256 vocabulary,
+  scrambled allocation order and numeric overflow tiers; preserve existing
+  installations’ ordering and never reuse deleted aliases or ordinals.
+- Use only `@{Amber Badger}` group references and the same alias for private
+  addressing. Require existing author assignments and owning-set authorization;
+  verify native mentions at each actual destination. Unavailable mentions stay
+  literal; distinct private inboxes fail closed and equivalent routes deduplicate.
+- Show `group/name (alias)` ordinarily and `group/alias` on anonymized routes,
+  including private relay headers. Preserve full aliases in Discord webhook names.
+  Remove username-mode/discriminator controls while retaining HMAC actor identities.
+- Move runtime policies and membership-review visibility into persisted per-set
+  settings with a shared create/edit modal, dirty-only Save and reload error
+  feedback. `/api/config` retains only the global private-relay safety gate;
+  WhatsApp device names are editable per connection.
+
+### Fixed
+
+- Preserve aliases, counters and retained routing state during configuration saves
+  with differential upserts; initialization preserves unrelated settings.
+- Require verified canonical WhatsApp LIDs before author enrollment or delivery.
+  Resolve phone-only private traffic against current DM-enabled rosters when the
+  PN/LID cache is cold; unresolved identities leave recovery checkpoints replayable.
+- Keep poll mentions privacy-safe after restart without losing original option
+  hash mappings or aggregate votes. Restore Discord mention observations from
+  accepted history and optional bounded HMAC guild-roster lookup; denied checks
+  retain authored literals.
 
 ## [0.3.3] - 2026-10-09
 

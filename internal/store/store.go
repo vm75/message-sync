@@ -228,6 +228,21 @@ func initialize(ctx context.Context, db *sql.DB) error {
 			return fmt.Errorf("migrate sync_sets schema: %w", err)
 		}
 	}
+	for _, column := range []string{"anonymize_incoming", "anonymize_outgoing"} {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE endpoints ADD COLUMN "+column+" BOOLEAN NOT NULL DEFAULT 0 CHECK ("+column+" IN (0,1))"); err != nil {
+			if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				return fmt.Errorf("migrate endpoint anonymity: %w", err)
+			}
+		}
+	}
+	// Convert the former set-wide policy into editable destination policies.
+	// Clearing the retired flag makes this idempotent and preserves later edits.
+	if _, err := tx.ExecContext(ctx, `UPDATE endpoints SET anonymize_outgoing=1 WHERE transport='discord' AND sync_set_id IN (SELECT id FROM sync_sets WHERE anonymize_to_discord=1)`); err != nil {
+		return fmt.Errorf("migrate legacy anonymity: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sync_sets SET anonymize_to_discord=0 WHERE anonymize_to_discord=1`); err != nil {
+		return fmt.Errorf("retire legacy anonymity: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE global_config ADD COLUMN show_discriminator BOOLEAN NOT NULL DEFAULT 0`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
 			return fmt.Errorf("migrate discriminator display setting: %w", err)

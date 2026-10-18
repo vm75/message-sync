@@ -513,7 +513,9 @@ func TestPrivateSenderPresentation(t *testing.T) {
 	for _, anonymous := range []bool{false, true} {
 		t.Run(fmt.Sprint(anonymous), func(t *testing.T) {
 			r, f, cfg, now, alice, _ := fixture(t, "telegram", "discord")
-			cfg.SyncSets[0].AnonymizeToDiscord = anonymous
+			ep := cfg.Endpoints["a"]
+			ep.AnonymizeIncoming = anonymous
+			cfg.Endpoints["a"] = ep
 			in := input(f.inboxes["a"+alice], alice, "named", "/dm @{Pale Poppy} hello", "", *now)
 			in.DisplayName = "Alice"
 			if err := r.Handle(context.Background(), in); err != nil {

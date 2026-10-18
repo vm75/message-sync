@@ -73,9 +73,9 @@ type pendingReaction struct {
 }
 
 type routeTarget struct {
-	SyncSetID          string
-	Endpoint           transport.EndpointID
-	AnonymizeToDiscord bool
+	SyncSetID  string
+	Endpoint   transport.EndpointID
+	Anonymized bool
 }
 
 func endpointIDs(targets []routeTarget) []transport.EndpointID {
@@ -155,6 +155,9 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
 	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
 	for alias, ep := range cfg.Endpoints {
+		if (ep.AnonymizeIncoming || ep.AnonymizeOutgoing) && hasher == nil {
+			return nil, errors.New("identity hasher is required for anonymization")
+		}
 		endpoints = append(endpoints, transport.EndpointID(alias))
 		endpointTransports[transport.EndpointID(alias)] = ep.Transport
 	}
@@ -165,15 +168,21 @@ func newRouter(cfg *config.Config, syncStore *store.Store, transportSender sende
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord
+			anonymize := epConfig.AnonymizeOutgoing || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
-				Endpoint:           transport.EndpointID(alias),
-				SyncSetID:          set.ID,
-				AnonymizeToDiscord: anonymize,
+				Endpoint:   transport.EndpointID(alias),
+				SyncSetID:  set.ID,
+				Anonymized: anonymize,
 			})
 		}
 		for _, target := range targets {
-			routes[target.Endpoint] = targets
+			sourceTargets := append([]routeTarget(nil), targets...)
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeIncoming {
+				for i := range sourceTargets {
+					sourceTargets[i].Anonymized = true
+				}
+			}
+			routes[target.Endpoint] = sourceTargets
 		}
 	}
 
@@ -224,21 +233,30 @@ func (r *Router) UpdateConfig(cfg *config.Config) error {
 	routes := make(map[transport.EndpointID][]routeTarget, len(cfg.Endpoints))
 	endpointTransports := make(map[transport.EndpointID]config.Transport, len(cfg.Endpoints))
 	for alias, ep := range cfg.Endpoints {
+		if (ep.AnonymizeIncoming || ep.AnonymizeOutgoing) && r.scopeHasher == nil {
+			return errors.New("identity hasher is required for anonymization")
+		}
 		endpointTransports[transport.EndpointID(alias)] = ep.Transport
 	}
 	for _, set := range cfg.SyncSets {
 		targets := make([]routeTarget, 0, len(set.Endpoints))
 		for _, alias := range set.Endpoints {
 			epConfig := cfg.Endpoints[alias]
-			anonymize := set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord
+			anonymize := epConfig.AnonymizeOutgoing || (set.AnonymizeToDiscord && epConfig.Transport == config.TransportDiscord)
 			targets = append(targets, routeTarget{
-				Endpoint:           transport.EndpointID(alias),
-				SyncSetID:          set.ID,
-				AnonymizeToDiscord: anonymize,
+				Endpoint:   transport.EndpointID(alias),
+				SyncSetID:  set.ID,
+				Anonymized: anonymize,
 			})
 		}
 		for _, target := range targets {
-			routes[target.Endpoint] = targets
+			sourceTargets := append([]routeTarget(nil), targets...)
+			if cfg.Endpoints[string(target.Endpoint)].AnonymizeIncoming {
+				for i := range sourceTargets {
+					sourceTargets[i].Anonymized = true
+				}
+			}
+			routes[target.Endpoint] = sourceTargets
 		}
 	}
 	endpoints := make([]transport.EndpointID, 0, len(cfg.Endpoints))
@@ -1075,7 +1093,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 					SenderLabel: senderLabel,
 					SourceText:  incoming.Text, AttributionOnly: true,
 					ReplyFallback: incoming.ReplyTo != nil && replyTo == nil, Kind: "text", Text: destinationText,
-					References: references, ReferenceAnonymized: target.AnonymizeToDiscord,
+					References: references, ReferenceAnonymized: target.Anonymized,
 					RenderedText:    childAwareRenderedText(r.getChildContextMode(incoming.Endpoint), incoming.ChildScope, destinationText),
 					PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(incoming.Endpoint), incoming, incoming.ChildScope, targetSender),
 					ReplyTo:         replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
@@ -1110,7 +1128,7 @@ func (r *Router) enqueueCreate(ctx context.Context, canonicalID string, incoming
 				PollAttribution: r.childAwarePollAttributionFor(jobCtx, r.getChildContextMode(incoming.Endpoint), incoming, incoming.ChildScope, targetSender),
 				MediaBytes:      mediaBytes, ReplyTo: replyTo, ChildScope: childScope, QuotedText: targetQuotedText,
 				PollOptions: incoming.PollOptions, PollSelectableCount: incoming.PollSelectableCount,
-				PollDurationHours: incoming.PollDurationHours, ReferenceAnonymized: target.AnonymizeToDiscord,
+				PollDurationHours: incoming.PollDurationHours, ReferenceAnonymized: target.Anonymized,
 			})
 			if err != nil {
 				if transport.Classify(err).Certainty == transport.SendUnknown {
@@ -1613,7 +1631,7 @@ func (r *Router) presentationForTarget(ctx context.Context, incoming transport.I
 			return transport.Sender{}, nil, "", "", err
 		}
 	}
-	sender.Anonymized = target.AnonymizeToDiscord
+	sender.Anonymized = target.Anonymized
 	if sender.Anonymized {
 		sender.DisplayName = sender.Alias
 		sender.PhoneNumber = ""

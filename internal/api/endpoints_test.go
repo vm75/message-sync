@@ -419,3 +419,43 @@ func TestEndpointsRenameAlias(t *testing.T) {
 		t.Fatalf("message_copies endpoint_id = %s, want new_alias", copyEndpoint)
 	}
 }
+
+func TestEndpointDirectionalAnonymityCRUD(t *testing.T) {
+	db := setupTestDB(t)
+	srv := setupTestServer(t, db)
+	token, err := srv.sessions.CreateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := func(method, path, body string) EndpointDTO {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if rec.Code != 200 && rec.Code != 201 {
+			t.Fatalf("%s %s: %d %s", method, path, rec.Code, rec.Body.String())
+		}
+		var dto EndpointDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &dto); err != nil {
+			t.Fatal(err)
+		}
+		return dto
+	}
+	dto := send("POST", "/api/endpoints", `{"alias":"anon","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","anonymizeIncoming":true,"anonymizeOutgoing":true}`)
+	if !dto.AnonymizeIncoming || !dto.AnonymizeOutgoing {
+		t.Fatalf("create: %+v", dto)
+	}
+	dto = send("PUT", "/api/endpoints/anon", `{"alias":"renamed","transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","anonymizeIncoming":false}`)
+	if dto.AnonymizeIncoming || !dto.AnonymizeOutgoing {
+		t.Fatalf("partial edit: %+v", dto)
+	}
+	dto = send("GET", "/api/endpoints/renamed", "")
+	if dto.AnonymizeIncoming || !dto.AnonymizeOutgoing {
+		t.Fatalf("get: %+v", dto)
+	}
+	dto = send("PUT", "/api/endpoints/renamed", `{"transport":"discord","connectionId":"conn-dc-1","remoteId":"123456789012345678","anonymizeOutgoing":false}`)
+	if dto.AnonymizeIncoming || dto.AnonymizeOutgoing {
+		t.Fatalf("disable: %+v", dto)
+	}
+}

@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS endpoints (
     connection_id TEXT NOT NULL,
     remote_id TEXT NOT NULL,
     sync_set_id TEXT REFERENCES sync_sets(id) ON DELETE SET NULL,
+    anonymize_incoming BOOLEAN NOT NULL DEFAULT 0 CHECK (anonymize_incoming IN (0, 1)),
+    anonymize_outgoing BOOLEAN NOT NULL DEFAULT 0 CHECK (anonymize_outgoing IN (0, 1)),
     UNIQUE (transport, remote_id)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_endpoints_remote ON endpoints(transport, remote_id);

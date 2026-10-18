@@ -886,3 +886,14 @@
   #modal-add-conversation .modal-card { max-height: calc(100dvh - 24px); }
   #modal-add-conversation .add-endpoint-row { grid-template-columns: 1fr; }
 }
+
+/* Directional anonymity stays beside each conversation's actions. */
+.endpoint-chip { flex-wrap: wrap; }
+.chip-anonymity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: .75rem;
+  white-space: nowrap;
+  cursor: pointer;
+}

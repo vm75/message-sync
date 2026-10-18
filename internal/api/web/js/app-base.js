@@ -205,7 +205,6 @@
   const syncsetEditorIdDisplay = document.getElementById('syncset-editor-id-display');
   const inputSyncsetId      = document.getElementById('input-syncset-id');
   const syncsetIdField      = document.getElementById('syncset-id-field');
-  const syncsetAnonymizeToDiscord = document.getElementById('syncset-anonymize-to-discord');
   const endpointChips       = document.getElementById('endpoint-chips');
   const btnDeleteSyncSet    = document.getElementById('btn-delete-sync-set');
   const btnSaveSyncSet      = document.getElementById('btn-save-sync-set');
@@ -2157,10 +2156,9 @@
     syncsetList.innerHTML = cachedSyncSets.map(set => {
       const count = Array.isArray(set.endpoints) ? set.endpoints.length : 0;
       const isActive = set.id === editingSyncSetId;
-      const anonBadge = set.anonymizeToDiscord ? `<span class="badge badge-discord" title="Anonymize to Discord" style="font-size:0.68rem;margin-left:6px;">anon</span>` : '';
       return `<div class="syncset-list-item ${isActive ? 'active' : ''}" data-id="${escapeHtml(set.id)}">
         <button type="button" class="syncset-card-toggle" aria-expanded="${isActive}">
-          <span class="syncset-item-id">${escapeHtml(set.id)}${anonBadge}</span>
+          <span class="syncset-item-id">${escapeHtml(set.id)}</span>
           <span class="syncset-item-count">${count} ep</span><span class="syncset-chevron" aria-hidden="true"></span>
         </button>
         <button class="syncset-delete-btn" data-id="${escapeHtml(set.id)}" title="Delete">
@@ -2251,7 +2249,7 @@
     if (set && Array.isArray(set.endpoints)) {
       set.endpoints.forEach(alias => {
         const ep = cachedEndpoints.find(e => e.alias === alias);
-        if (ep) editorEndpoints.push({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, remoteId: ep.remoteId });
+        if (ep) editorEndpoints.push({ ...ep });
       });
     }
     renderChips();
@@ -2259,7 +2257,6 @@
     populateSettings(set?.settings || defaultSyncSetSettings());
     // Reset add-endpoint form
     resetAddEndpointForm();
-    if (syncsetAnonymizeToDiscord) syncsetAnonymizeToDiscord.checked = !!(set && set.anonymizeToDiscord);
 		if (membershipInstructions) membershipInstructions.value = '';
 		if (membershipReviewerGuidance) membershipReviewerGuidance.value = '';
     if (membershipEvidenceInstructions) membershipEvidenceInstructions.value = '';
@@ -2354,6 +2351,8 @@
           <span class="badge ${transportBadgeClass(ep.transport)}" style="padding:1px 5px;font-size:.68rem;">${escapeHtml(ep.transport)}</span>
           <span class="chip-alias">${escapeHtml(ep.alias)}</span>
           ${connBadge}
+          <label class="chip-anonymity" title="Anonymize all messages from this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeIncoming" ${ep.anonymizeIncoming ? 'checked' : ''}> Anonymize incoming</label>
+          <label class="chip-anonymity" title="Anonymize all messages delivered to this conversation"><input type="checkbox" class="chip-anonymize" data-idx="${i}" data-field="anonymizeOutgoing" ${ep.anonymizeOutgoing ? 'checked' : ''}> Anonymize outgoing</label>
           <button type="button" class="chip-reassign" data-alias="${escapeHtml(ep.alias)}" title="Reassign connection">
             <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" y1="20" x2="21" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" y1="15" x2="21" y2="21"></line><line x1="4" y1="4" x2="9" y2="9"></line></svg>
           </button>
@@ -2366,6 +2365,13 @@
         </span>
       `;
     }).join('');
+
+    endpointChips.querySelectorAll('.chip-anonymize').forEach(input => {
+      input.addEventListener('change', () => {
+        editorEndpoints[Number(input.dataset.idx)][input.dataset.field] = input.checked;
+        markSyncSetDirty();
+      });
+    });
 
     // Attach chip-reassign listeners
     endpointChips.querySelectorAll('.chip-reassign').forEach(btn => {
@@ -2804,37 +2810,37 @@
 				evidenceRequired: !!(membershipEvidenceRequired && membershipEvidenceRequired.checked),
 				customFields
 			};
-			const anonymizeToDiscord = !!(syncsetAnonymizeToDiscord && syncsetAnonymizeToDiscord.checked);
+
         if (editingSyncSetId) {
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.alias === ep.alias || (e.remoteId === ep.remoteId && e.transport === ep.transport));
             if (existingEp) {
-              if (existingEp.alias === ep.alias && existingEp.transport === ep.transport && existingEp.connectionId === ep.connectionId && existingEp.remoteId === ep.remoteId && existingEp.syncSetId === editingSyncSetId) continue;
+              if (existingEp.alias === ep.alias && existingEp.transport === ep.transport && existingEp.connectionId === ep.connectionId && existingEp.remoteId === ep.remoteId && existingEp.syncSetId === editingSyncSetId && !!existingEp.anonymizeIncoming === !!ep.anonymizeIncoming && !!existingEp.anonymizeOutgoing === !!ep.anonymizeOutgoing) continue;
               await window.API.updateEndpoint(existingEp.alias, {
                 alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId,
-                remoteId: ep.remoteId, syncSetId: editingSyncSetId
+                anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: editingSyncSetId
               });
             } else {
               await window.API.createEndpoint({ ...ep, syncSetId: editingSyncSetId });
             }
           }
-          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, anonymizeToDiscord, settings });
+          await window.API.updateSyncSet(editingSyncSetId, { endpoints: aliases, settings });
 			await window.API.updateMembershipConfig(editingSyncSetId, membershipConfig);
         } else {
           // Create set first
-          await window.API.createSyncSet({ id, endpoints: [], anonymizeToDiscord, settings });
+          await window.API.createSyncSet({ id, endpoints: [], settings });
           editingSyncSetId = id;
           // Now create or update all pending endpoints
           for (const ep of editorEndpoints) {
             const existingEp = cachedEndpoints.find(e => e.remoteId === ep.remoteId && e.transport === ep.transport);
             if (existingEp) {
-              await window.API.updateEndpoint(existingEp.alias, { alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId || existingEp.connectionId, remoteId: ep.remoteId, syncSetId: id });
+              await window.API.updateEndpoint(existingEp.alias, { alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId || existingEp.connectionId, anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: id });
             } else {
-              await window.API.createEndpoint({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, remoteId: ep.remoteId, syncSetId: id });
+              await window.API.createEndpoint({ alias: ep.alias, transport: ep.transport, connectionId: ep.connectionId, anonymizeIncoming: !!ep.anonymizeIncoming, anonymizeOutgoing: !!ep.anonymizeOutgoing, remoteId: ep.remoteId, syncSetId: id });
             }
           }
           // Update the sync set with endpoint aliases
-          await window.API.updateSyncSet(id, { endpoints: aliases, anonymizeToDiscord, settings });
+          await window.API.updateSyncSet(id, { endpoints: aliases, settings });
 			await window.API.updateMembershipConfig(id, membershipConfig);
           showToast(`Sync set '${id}' created.`, 'success');
         }
