@@ -187,11 +187,15 @@ Private messaging requires **Settings → Allow private DM relays** and the
 matching switch in each sync set's **Edit settings** modal. In a private chat
 with the owning sync account/bot, `/dm @{Amber Badger} message` addresses one observed,
 currently verified member of the same set. Continue only with native **Reply**
-on the bot's relayed message. `/help` and Telegram `/start` explain usage.
+on the bot's relayed message. Responses reference the preceding author message.
+Headers show bold-italic `group/name (alias)`, or `group/alias` when no name is
+available or the Discord destination is anonymized. `/help` and Telegram `/start` explain usage.
 Text only, 1600 UTF-8 bytes per relayed body. Reply mappings expire after 24
 hours. Private edits and deletes never propagate. WhatsApp attempts per-message
 **Delete for Me** only; Discord and Telegram Bot API retain provider copies
 because their delete APIs would also remove the participant's message.
+WhatsApp phone-only private events can use verified current group-roster PN/LID
+pairs when its protocol identity cache is cold.
 MTProto personal inboxes are not intercepted. See [private messaging](docs/PRIVATE_MESSAGING.md)
 for reachability, privacy, cleanup and restart limits.
 
@@ -239,7 +243,8 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 Each accepted group-message author receives a persistent alias, such as
 `Amber Badger`, scoped to that actor and sync set. Aliases are unique across
 this installation: the same platform account in another set receives a different
-alias. New aliases follow a fixed scrambled order spread across both word lists.
+alias. New installations use a fixed scrambled order spread across both word lists.
+Existing installations retain their issued ordering and addresses across upgrades.
 There are 65,536 frozen two-word names; subsequent allocations add a
 numeric tier, such as `Amber Badger 2`. Deletion never makes an alias reusable.
 

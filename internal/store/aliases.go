@@ -26,12 +26,12 @@ type aliasScanner interface {
 	Scan(...any) error
 }
 
-func scanAlias(row aliasScanner) (AliasRecord, error) {
+func (s *Store) scanAlias(row aliasScanner) (AliasRecord, error) {
 	var record AliasRecord
 	if err := row.Scan(&record.SyncSetID, &record.ActorID, &record.Ordinal, &record.Alias); err != nil {
 		return AliasRecord{}, err
 	}
-	expected, err := identity.SyncSetAlias(record.Ordinal)
+	expected, err := s.aliasForOrdinal(record.Ordinal)
 	if err != nil || expected != record.Alias || !actorPattern.MatchString(record.ActorID) || strings.TrimSpace(record.SyncSetID) == "" {
 		return AliasRecord{}, errors.New("inconsistent alias assignment")
 	}
@@ -50,7 +50,7 @@ func (s *Store) ObserveSyncSetActor(ctx context.Context, setID, actorID string) 
 		return AliasRecord{}, errors.New("invalid alias identity")
 	}
 	lookup := s.db.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE sync_set_id=? AND actor_id=?`, setID, actorID)
-	if record, err := scanAlias(lookup); !errors.Is(err, sql.ErrNoRows) {
+	if record, err := s.scanAlias(lookup); !errors.Is(err, sql.ErrNoRows) {
 		return record, err
 	}
 	allocationCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -95,7 +95,7 @@ func (s *Store) allocateAlias(ctx context.Context, setID, actorID string) (Alias
 		return AliasRecord{}, err
 	}
 	// A competing writer may already have assigned this actor.
-	if record, err := scanAlias(conn.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE sync_set_id=? AND actor_id=?`, setID, actorID)); !errors.Is(err, sql.ErrNoRows) {
+	if record, err := s.scanAlias(conn.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE sync_set_id=? AND actor_id=?`, setID, actorID)); !errors.Is(err, sql.ErrNoRows) {
 		return record, err
 	}
 	var ordinal int64
@@ -106,7 +106,7 @@ func (s *Store) allocateAlias(ctx context.Context, setID, actorID string) (Alias
 	if exhausted {
 		return AliasRecord{}, ErrAliasExhausted
 	}
-	alias, err := identity.SyncSetAlias(ordinal)
+	alias, err := s.aliasForOrdinal(ordinal)
 	if err != nil {
 		return AliasRecord{}, err
 	}
@@ -131,7 +131,7 @@ func (s *Store) AliasByActor(ctx context.Context, setID, actorID string) (string
 	if s == nil || s.db == nil {
 		return "", errors.New("sync store is required")
 	}
-	record, err := scanAlias(s.db.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE sync_set_id=? AND actor_id=?`, setID, actorID))
+	record, err := s.scanAlias(s.db.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE sync_set_id=? AND actor_id=?`, setID, actorID))
 	return record.Alias, err
 }
 
@@ -142,7 +142,7 @@ func (s *Store) ActorByAlias(ctx context.Context, alias string) (AliasRecord, er
 	if !identity.ValidAlias(alias) {
 		return AliasRecord{}, sql.ErrNoRows
 	}
-	return scanAlias(s.db.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE alias=? COLLATE NOCASE`, alias))
+	return s.scanAlias(s.db.QueryRowContext(ctx, `SELECT `+aliasColumns+` FROM sync_set_actors WHERE alias=? COLLATE NOCASE`, alias))
 }
 
 func (s *Store) ActorInSyncSetByAlias(ctx context.Context, setID, alias string) (AliasRecord, error) {
@@ -176,4 +176,62 @@ func (s *Store) ActorEndpoints(ctx context.Context, setID, actorID string) ([]st
 		endpoints = append(endpoints, endpoint)
 	}
 	return endpoints, rows.Err()
+}
+
+// aliasForOrdinal uses the permanent order selected for this installation.
+func (s *Store) aliasForOrdinal(ordinal int64) (string, error) {
+	if s.sequentialAliases {
+		return identity.SequentialSyncSetAlias(ordinal)
+	}
+	return identity.SyncSetAlias(ordinal)
+}
+
+// initializeAliasOrder records the order once, before any further allocation.
+// Retain an existing installation's issued addresses and retired ordinals.
+func initializeAliasOrder(ctx context.Context, tx *sql.Tx) error {
+	var ordering string
+	err := tx.QueryRowContext(ctx, `SELECT ordering FROM alias_order WHERE singleton=1`).Scan(&ordering)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var next int64
+	if err := tx.QueryRowContext(ctx, `SELECT next_ordinal FROM alias_sequence WHERE singleton=1`).Scan(&next); err != nil {
+		return err
+	}
+	sequential, scrambled := true, true
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,alias FROM sync_set_actors`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var ordinal int64
+		var alias string
+		if err := rows.Scan(&ordinal, &alias); err != nil {
+			rows.Close()
+			return err
+		}
+		old, oldErr := identity.SequentialSyncSetAlias(ordinal)
+		current, currentErr := identity.SyncSetAlias(ordinal)
+		sequential = sequential && oldErr == nil && alias == old
+		scrambled = scrambled && currentErr == nil && alias == current
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if !sequential && !scrambled {
+		return errors.New("inconsistent alias ordering")
+	}
+	ordering = "scrambled"
+	// With no distinguishing surviving records, an advanced sequence may
+	// contain retired addresses from the original ordering. Preserve it.
+	if sequential && (!scrambled || next > 1) {
+		ordering = "sequential"
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO alias_order(singleton,ordering) VALUES(1,?)`, ordering)
+	return err
 }

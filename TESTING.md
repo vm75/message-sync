@@ -5,15 +5,24 @@
 Run `go test ./internal/privatedm ./internal/controlstore ./internal/connection
 ./internal/transport/... ./internal/app ./internal/api` in addition to the full
 gate below. Private relay tests cover all nine provider pairings, owning
-connections, native reply correlation, concurrent conversations, command
+connections, three-turn native reply chains, named and anonymized DM headers,
+concurrent conversations, command
 precedence, invalid inputs, duplicate creates, expiry, membership changes,
 endpoint reassignment, ignored lifecycle events and zero canonical group copies.
-Control-store tests check ciphertext, inbox-bound lookup, restart persistence
+Control-store tests check ciphertext (including author message tokens),
+inbox-bound lookup, restart persistence
 and bounded cleanup retries. Adapter tests inspect WhatsApp per-message Delete
 for Me operations, Discord bot DM payloads/intents, Telegram bootstrap and
-structured replies, suppressed previews/pings and absence of shared-message
+structured replies, bold-italic attribution (including UTF-16 entity offsets), suppressed previews/pings and absence of shared-message
 deletion. Real-provider cleanup behavior requires the documented manual checks;
 fake tests do not claim live linked-device deletion has been verified.
+The WhatsApp adapter-to-relay regression uses phone-only private events and an
+empty protocol identity cache, exercising command delivery and a three-turn native
+reply chain. Roster lookup checks disabled endpoints, missing pairs, unrelated
+phone numbers and conflicting identities without private alias enrollment.
+
+Alias upgrade regression checks cover private delivery to an original issued
+address, ordering detection, subsequent allocation and restart persistence.
 
 The automated reliability gate is:
 

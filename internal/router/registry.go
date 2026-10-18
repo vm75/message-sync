@@ -194,12 +194,12 @@ func (r *AdapterRegistry) ResolvePrivateInbox(ctx context.Context, endpoint tran
 	return inbox, true
 }
 
-func (r *AdapterRegistry) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+func (r *AdapterRegistry) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string, options ...transport.PrivateSendOptions) (transport.PrivateSendResult, error) {
 	messenger, err := r.privateMessengerForConnection(inbox.ConnectionID)
 	if err != nil {
 		return transport.PrivateSendResult{}, err
 	}
-	return messenger.SendPrivate(ctx, inbox, text)
+	return messenger.SendPrivate(ctx, inbox, text, options...)
 }
 
 func (r *AdapterRegistry) DeletePrivateCopyForMe(ctx context.Context, copy transport.PrivateCopy) error {

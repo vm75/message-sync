@@ -41,9 +41,12 @@ func TestPrivateDiscordBotSendAndNativeReplyWithoutDeletion(t *testing.T) {
 	a := &Adapter{session: session, connectionID: "owner", privateDMEnabled: true, hasher: hasher, privateEvents: make(chan transport.PrivateIncoming, 5)}
 	token, _ := json.Marshal(privateInboxKey{Channel: "100", User: "42"})
 	inbox := transport.PrivateInbox{ConnectionID: "owner", Transport: "discord", OwnerID: a.privateOwnerID(), ChatID: "100", Token: token}
-	result, err := a.SendPrivate(context.Background(), inbox, "DM from group/Anonymous\nhello")
+	result, err := a.SendPrivate(context.Background(), inbox, "DM from group/Anonymous\nhello", transport.PrivateSendOptions{Attribution: "group/Anonymous", ReplyToMessageID: "199"})
 	if err != nil || result.RemoteMessageID != "200" {
 		t.Fatalf("private send=%+v %v", result, err)
+	}
+	if sent["content"] != "DM from ***group/Anonymous***\nhello" || sent["message_reference"].(map[string]any)["message_id"] != "199" {
+		t.Fatalf("missing formatting or reference: %+v", sent)
 	}
 	allowed := sent["allowed_mentions"].(map[string]any)
 	if len(allowed["parse"].([]any)) != 0 || sent["flags"] != float64(discordgo.MessageFlagsSuppressEmbeds) {

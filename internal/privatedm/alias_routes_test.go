@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/vm75/message-sync/internal/config"
+	"github.com/vm75/message-sync/internal/router"
+	"github.com/vm75/message-sync/internal/store"
 )
 
 func TestPrivateAliasRoutingDeduplicatesOnlyEquivalentInboxes(t *testing.T) {
@@ -43,7 +45,7 @@ func TestPrivateAliasRoutingDeduplicatesOnlyEquivalentInboxes(t *testing.T) {
 				if strings.HasPrefix(f.sent[0].text, "DM from ") || f.sent[0].inbox.ConnectionID != "from" {
 					t.Fatal("ambiguous inbox was selected")
 				}
-			} else if f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") {
+			} else if f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from a/Amber Badger\n") {
 				t.Fatal("equivalent routes failed")
 			}
 		})
@@ -112,5 +114,42 @@ func TestPrivateAliasLookupIntegrityErrorIsNotReportedAsAbsence(t *testing.T) {
 	}
 	if len(f.sent) != 2 || f.sent[0].text != f.sent[1].text {
 		t.Fatal("private response disclosed alias existence/integrity")
+	}
+}
+
+// An installation that issued aliases before the slot-order change must still
+// be able to address its existing recipient without rewriting that address.
+func TestPrivateDMExistingAssignedAddressAfterUpdate(t *testing.T) {
+	r, f, cfg, now, alice, bob := fixture(t, "discord", "telegram")
+	if _, err := r.Sync.DB().Exec("UPDATE sync_set_actors SET alias='Amber Bear' WHERE actor_id=?", bob); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate an upgrade from the database schema before ordering was pinned.
+	var seq int
+	var dbName, path string
+	if err := r.Sync.DB().QueryRow("PRAGMA database_list").Scan(&seq, &dbName, &path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Sync.DB().Exec("DROP TABLE IF EXISTS alias_order"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Sync.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Open(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { reopened.Close() })
+	r.Sync = reopened
+	mesh, err := router.NewWithHasher(cfg, reopened, f, r.Hasher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(mesh.Close)
+	r.Resolver = mesh
+	err = r.Handle(context.Background(), input(f.inboxes["a"+alice], alice, "existing-address", "/dm @{Amber Bear} hello", "", *now))
+	if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from ") {
+		t.Fatalf("existing address rejected: err=%v deliveries=%+v", err, f.sent)
 	}
 }

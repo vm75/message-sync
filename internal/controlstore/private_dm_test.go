@@ -64,7 +64,7 @@ func TestPrivateDMMappingEncryptedBoundToInboxAndRestart(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	inbox := transport.PrivateInbox{ConnectionID: "conn-one", Transport: "discord", ChatID: "sensitive-private-chat-id", Token: []byte("sensitive-private-chat-id")}
-	mapping := PrivateDMMapping{ConversationID: "opaque", SyncSetID: "mesh", Author: PrivateDMSide{Endpoint: "group-a", ActorID: "u_abcdefghij", Inbox: transport.PrivateInbox{ConnectionID: "conn-two", Transport: "whatsapp", Token: []byte("sensitive-user@s.whatsapp.net")}}, Recipient: PrivateDMSide{Endpoint: "group-b", ActorID: "u_0123456789", Inbox: inbox}}
+	mapping := PrivateDMMapping{AuthorMessageID: "sensitive-author-message", ConversationID: "opaque", SyncSetID: "mesh", Author: PrivateDMSide{Endpoint: "group-a", ActorID: "u_abcdefghij", Inbox: transport.PrivateInbox{ConnectionID: "conn-two", Transport: "whatsapp", Token: []byte("sensitive-user@s.whatsapp.net")}}, Recipient: PrivateDMSide{Endpoint: "group-b", ActorID: "u_0123456789", Inbox: inbox}}
 	if err := state.PutReply(ctx, "sensitive-native-message", mapping, now); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestPrivateDMMappingEncryptedBoundToInboxAndRestart(t *testing.T) {
 	if err := db.DB().QueryRow(`SELECT lookup_key,ciphertext,nonce FROM private_dm_reply_mappings`).Scan(&lookup, &cipher, &nonce); err != nil {
 		t.Fatal(err)
 	}
-	for _, sensitive := range []string{"sensitive-private-chat-id", "sensitive-user@s.whatsapp.net", "sensitive-native-message", "group-a"} {
+	for _, sensitive := range []string{"sensitive-private-chat-id", "sensitive-user@s.whatsapp.net", "sensitive-native-message", "sensitive-author-message", "group-a"} {
 		if bytes.Contains(cipher, []byte(sensitive)) || bytes.Contains([]byte(lookup), []byte(sensitive)) {
 			t.Fatal("plaintext routing data in persistent private mapping")
 		}
@@ -100,7 +100,7 @@ func TestPrivateDMMappingEncryptedBoundToInboxAndRestart(t *testing.T) {
 		t.Fatal("operational inbox did not expire")
 	}
 	got, ok, err := state.Reply(ctx, inbox, "sensitive-native-message", now.Add(time.Hour))
-	if err != nil || !ok || got.Author.Inbox.ConnectionID != "conn-two" {
+	if err != nil || !ok || got.Author.Inbox.ConnectionID != "conn-two" || got.AuthorMessageID != "sensitive-author-message" {
 		t.Fatalf("restart mapping failed: %v %v", ok, err)
 	}
 	alternate := inbox

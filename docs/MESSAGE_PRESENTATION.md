@@ -7,7 +7,8 @@ opaque identities and explicit aliases; rendered headers never authorize routing
 
 Every accepted group-message author receives a permanent, globally unique alias
 belonging to its `(sync set, HMAC actor)` record. The vocabulary has exactly 256
-adjectives and 256 nouns, with a fixed scrambled pair order. Successive assignments
+adjectives and 256 nouns. New installations use a fixed scrambled pair order;
+existing installations retain their original issued order and addresses. Successive assignments
 span both word lists (for example `Amber Badger`, `Pale Poppy`, `Jolly Coconut`).
 The first 65,536 assignments use
 two words; ordinal 65,537 starts `Amber Badger 2`. Aliases and ordinals are never
@@ -144,17 +145,21 @@ notifications. Database failures are errors, not proof an alias is absent.
 
 ## Private relay presentation
 
-The opt-in private relay uses the same assigned set alias, independent of group
-anonymization:
+The opt-in private relay uses ordinary source attribution:
 
 ```text
-DM from Amber Badger
+DM from <group>/<name> (<alias>)
 <sanitized private body>
 Reply to this message to respond privately.
 ```
 
-Both parties need existing group-author assignments; `/dm` does not allocate.
-The header includes no group prefix, display name, phone, username or native ID.
+The attribution after `DM from ` is bold-italic. Names come from the current
+private event and remain transient. With no available name, or for an anonymized
+Discord destination, use `DM from <group>/<alias>`. The group is the source
+endpoint alias. Both parties need existing group-author assignments; `/dm`
+does not allocate. Each response natively references the original author message
+in the destination inbox; missing provider copies may fall back to an unthreaded
+delivery. Old mappings without a source message token also remain unthreaded.
 Reply routing uses the exact structured inbox/message binding, never this text.
 Native mentions and embedded bridge references are neutralized. Private edits
 and deletes do not change the delivered original. See [private messaging](PRIVATE_MESSAGING.md).

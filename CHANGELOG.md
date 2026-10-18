@@ -5,6 +5,10 @@
 
 - Add an anonymous, default-off private `/dm` relay for WhatsApp, Discord bot
   and Telegram Bot API accounts, with global and per-sync-set administrator gates.
+- Chain private responses to the preceding author message and show bold-italic
+  `DM from group/name (alias)` attribution, respecting Discord anonymization.
+- Fix WhatsApp phone-only private commands and replies with a cold PN/LID cache
+  by verifying explicit identity pairs against current DM-enabled group rosters.
 - Continue private conversations only through exact native reply mappings;
   verify observed actors, current membership and owning connections on every hop.
 - Encrypt content-free 24-hour reply/inbox state and bounded WhatsApp local
@@ -16,7 +20,8 @@
   globally unique aliases scoped to each sync-set actor. Freeze a 256×256
   vocabulary with numeric overflow tiers; never reuse deleted aliases/ordinals.
   Allocate in a fixed collision-free scrambled order rather than walking adjacent
-  words, assuming a fresh alias database.
+  words on new installations. Preserve existing assigned aliases by pinning
+  each installation’s original ordering; fix private DM rejection after upgrade.
 - Show `group/Alice (Amber Badger)` normally and `group/Amber Badger` on
   anonymized Discord routes. Preserve aliases in truncated webhook names.
 - Project native poll mentions to safe aliases while preserving original source

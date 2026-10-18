@@ -42,12 +42,15 @@ func TestPrivateTelegramStartReachabilityReplyAndNoDelete(t *testing.T) {
 	if !ok || string(inbox.Token) != "123" {
 		t.Fatal("started bot was not privately reachable")
 	}
-	result, err := a.SendPrivate(context.Background(), inbox, "anonymous body")
+	result, err := a.SendPrivate(context.Background(), inbox, "DM from group/A😀 (Amber Badger)\nbody", transport.PrivateSendOptions{Attribution: "group/A😀 (Amber Badger)", ReplyToMessageID: "99"})
 	if err != nil || result.RemoteMessageID == "" {
 		t.Fatal("private Bot API send failed")
 	}
-	if api.sent.ChatID != int64(123) || api.sent.ParseMode != "" || api.sent.LinkPreviewOptions == nil || api.sent.LinkPreviewOptions.IsDisabled == nil || !*api.sent.LinkPreviewOptions.IsDisabled || len(api.sent.Entities) != 0 {
+	if api.sent.ChatID != int64(123) || api.sent.ParseMode != "" || api.sent.LinkPreviewOptions == nil || api.sent.LinkPreviewOptions.IsDisabled == nil || !*api.sent.LinkPreviewOptions.IsDisabled || len(api.sent.Entities) != 2 {
 		t.Fatal("private message used group delivery, markup, pings or previews")
+	}
+	if api.sent.ReplyParameters == nil || api.sent.ReplyParameters.MessageID != 99 || api.sent.Entities[0].Offset != 8 || api.sent.Entities[0].Length != 24 || api.sent.Entities[0].Type != "bold" || api.sent.Entities[1].Type != "italic" {
+		t.Fatalf("missing native reference or UTF-16 formatting: %+v", api.sent)
 	}
 	reply := *message
 	reply.ID = 2

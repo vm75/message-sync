@@ -18,11 +18,24 @@ var aliasToken = regexp.MustCompile(`^` + AliasTokenPattern + `$`)
 // SyncSetAlias maps a permanent instance-wide ordinal to a collision-free name.
 // Its assignment belongs to one (sync set, actor), even though ordinals are global.
 func SyncSetAlias(ordinal int64) (string, error) {
+	return syncSetAlias(ordinal, true)
+}
+
+// SequentialSyncSetAlias preserves the original issued ordering for databases
+// that allocated aliases before the scrambled ordering was introduced.
+func SequentialSyncSetAlias(ordinal int64) (string, error) {
+	return syncSetAlias(ordinal, false)
+}
+
+func syncSetAlias(ordinal int64, scrambled bool) (string, error) {
 	if ordinal < 1 {
 		return "", errors.New("alias ordinal must be positive")
 	}
 	zero := ordinal - 1
-	slot := scrambledAliasSlot(uint16(zero % AliasPoolSize))
+	slot := uint16(zero % AliasPoolSize)
+	if scrambled {
+		slot = scrambledAliasSlot(slot)
+	}
 	alias := aliasAdjectives[slot/256] + " " + aliasNouns[slot%256]
 	if tier := zero/AliasPoolSize + 1; tier > 1 {
 		alias += " " + strconv.FormatInt(tier, 10)

@@ -29,6 +29,7 @@ type fakeRuntime struct {
 	deleted    []transport.PrivateCopy
 	fail       error
 	groupCalls int
+	options    []transport.PrivateSendOptions
 }
 
 func (f *fakeRuntime) VerifyPrivateMember(_ context.Context, e transport.EndpointID, a string) bool {
@@ -41,7 +42,12 @@ func (f *fakeRuntime) ResolvePrivateInbox(_ context.Context, e transport.Endpoin
 	inbox, ok := f.inboxes[string(e)+a]
 	return inbox, ok
 }
-func (f *fakeRuntime) SendPrivate(_ context.Context, in transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+func (f *fakeRuntime) SendPrivate(_ context.Context, in transport.PrivateInbox, text string, options ...transport.PrivateSendOptions) (transport.PrivateSendResult, error) {
+	o := transport.PrivateSendOptions{}
+	if len(options) > 0 {
+		o = options[0]
+	}
+	f.options = append(f.options, o)
 	id := fmt.Sprintf("bot-%d", len(f.sent)+1)
 	f.sent = append(f.sent, privateSend{in, text, id})
 	if f.fail != nil {
@@ -139,13 +145,13 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 				if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Pale Poppy} hello\nsecond line", "", *now)); err != nil {
 					t.Fatal(err)
 				}
-				if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") || !strings.Contains(f.sent[0].text, "hello\nsecond line") {
+				if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from a/Amber Badger\n") || !strings.Contains(f.sent[0].text, "hello\nsecond line") {
 					t.Fatalf("initial relay=%+v", f.sent)
 				}
 				if err := r.Handle(ctx, input(b, bob, "b1", "answer", f.sent[0].id, *now)); err != nil {
 					t.Fatal(err)
 				}
-				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from Pale Poppy\n") {
+				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from b/Pale Poppy\n") {
 					t.Fatalf("return relay=%+v", f.sent)
 				}
 				if err := r.Handle(ctx, input(a, alice, "a2", "next", f.sent[1].id, *now)); err != nil {
@@ -153,6 +159,9 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 				}
 				if len(f.sent) != 3 || f.sent[2].inbox.ConnectionID != "to" {
 					t.Fatal("third turn did not reach recorded peer")
+				}
+				if f.options[0].ReplyToMessageID != "" || f.options[1].ReplyToMessageID != "a1" || f.options[2].ReplyToMessageID != "b1" {
+					t.Fatalf("reply chain: %+v", f.options)
 				}
 				var copies int
 				if err := r.Sync.DB().QueryRow(`SELECT COUNT(*) FROM message_copies`).Scan(&copies); err != nil || copies != 0 || f.groupCalls != 0 {
@@ -325,7 +334,7 @@ func TestPrivateAddressingUsesAssignedAliasesCaseInsensitively(t *testing.T) {
 			if err := r.Handle(context.Background(), input(f.inboxes["a"+alice], alice, "one", "/dm @{"+label+"} body", "", *now)); err != nil {
 				t.Fatal(err)
 			}
-			if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") {
+			if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from a/Amber Badger\n") {
 				t.Fatal("assigned alias did not resolve")
 			}
 		})
@@ -474,7 +483,7 @@ func TestConcurrentPeersAndSourceAliasStayWithinTargetSyncSet(t *testing.T) {
 	if len(f.sent) != 2 {
 		t.Fatal("two peer conversations did not start")
 	}
-	if !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") || !strings.HasPrefix(f.sent[1].text, "DM from Amber Badger\n") {
+	if !strings.HasPrefix(f.sent[0].text, "DM from a/Amber Badger\n") || !strings.HasPrefix(f.sent[1].text, "DM from a/Amber Badger\n") {
 		t.Fatal("source alias was selected outside the target set or without sorting")
 	}
 	if err := r.Handle(ctx, input(b, bob, "b-reply", "B response", f.sent[0].id, *now)); err != nil {
@@ -497,5 +506,26 @@ func TestConcurrentPeersAndSourceAliasStayWithinTargetSyncSet(t *testing.T) {
 		if f.sent[i].inbox.ConnectionID != connection {
 			t.Fatalf("message %d crossed peer conversations", i)
 		}
+	}
+}
+
+func TestPrivateSenderPresentation(t *testing.T) {
+	for _, anonymous := range []bool{false, true} {
+		t.Run(fmt.Sprint(anonymous), func(t *testing.T) {
+			r, f, cfg, now, alice, _ := fixture(t, "telegram", "discord")
+			cfg.SyncSets[0].AnonymizeToDiscord = anonymous
+			in := input(f.inboxes["a"+alice], alice, "named", "/dm @{Pale Poppy} hello", "", *now)
+			in.DisplayName = "Alice"
+			if err := r.Handle(context.Background(), in); err != nil {
+				t.Fatal(err)
+			}
+			want := "a/Alice (Amber Badger)"
+			if anonymous {
+				want = "a/Amber Badger"
+			}
+			if len(f.sent) != 1 || f.options[0].Attribution != want || !strings.HasPrefix(f.sent[0].text, "DM from "+want+"\n") {
+				t.Fatalf("presentation: %+v %+v", f.sent, f.options)
+			}
+		})
 	}
 }

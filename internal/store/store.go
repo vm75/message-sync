@@ -25,7 +25,8 @@ var (
 )
 
 type Store struct {
-	db *sql.DB
+	db                *sql.DB
+	sequentialAliases bool
 }
 
 func (s *Store) DB() *sql.DB {
@@ -183,7 +184,12 @@ func Open(ctx context.Context, path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("secure sync database permissions: %w", err)
 	}
-	return &Store{db: db}, nil
+	var ordering string
+	if err := db.QueryRowContext(ctx, `SELECT ordering FROM alias_order WHERE singleton=1`).Scan(&ordering); err != nil {
+		db.Close()
+		return nil, errors.New("read alias ordering")
+	}
+	return &Store{db: db, sequentialAliases: ordering == "sequential"}, nil
 }
 
 func markDeliveryOperationsAwaitingReplay(ctx context.Context, db *sql.DB) (int64, error) {
@@ -259,6 +265,9 @@ func initialize(ctx context.Context, db *sql.DB) error {
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE canonical_messages SET sync_set_id=(SELECT MIN(e.sync_set_id) FROM message_copies c JOIN endpoints e ON e.alias=c.endpoint_id WHERE c.canonical_id=canonical_messages.canonical_id HAVING COUNT(DISTINCT e.sync_set_id)=1) WHERE sync_set_id IS NULL`); err != nil {
 		return fmt.Errorf("import retention ownership: %w", err)
+	}
+	if err := initializeAliasOrder(ctx, tx); err != nil {
+		return fmt.Errorf("initialize alias ordering: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sync schema initialization: %w", err)

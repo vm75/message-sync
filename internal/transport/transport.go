@@ -198,6 +198,12 @@ type PrivateCopy struct {
 	Token        []byte
 }
 
+// PrivateSendOptions carries transient presentation and native reply metadata.
+type PrivateSendOptions struct {
+	ReplyToMessageID string
+	Attribution      string
+}
+
 type PrivateSendResult struct {
 	RemoteMessageID string
 	LocalCopy       PrivateCopy
@@ -216,6 +222,7 @@ type PrivateIncoming struct {
 	ActorAliases     []string // authenticated PN/LID-equivalent HMAC identities, transient only
 	RemoteMessageID  string   // provider-private message ID, transient only
 	ReplyToMessageID string   // structured native reply ID, never inferred from text
+	DisplayName      string   // transient only; never persisted
 	Text             string   // transient only
 	Kind             string   // text or unsupported
 	Timestamp        time.Time
@@ -232,7 +239,7 @@ type PrivateMessenger interface {
 	VerifyPrivateMember(context.Context, EndpointID, string) bool
 	VerifyPrivateInboxMember(context.Context, EndpointID, string, PrivateInbox) bool
 	ResolvePrivateInbox(context.Context, EndpointID, string) (PrivateInbox, bool)
-	SendPrivate(context.Context, PrivateInbox, string) (PrivateSendResult, error)
+	SendPrivate(context.Context, PrivateInbox, string, ...PrivateSendOptions) (PrivateSendResult, error)
 	DeletePrivateCopyForMe(context.Context, PrivateCopy) error
 }
 

@@ -72,8 +72,16 @@ recorded peer; rendered text and aliases never authorize routing. Global alias
 lookup identifies the owning set, then current source membership and a unique
 verified recipient inbox authorize delivery. Equivalent endpoint routes to that
 inbox are deduplicated; distinct inboxes fail closed. Source attribution is
-`DM from <assigned set alias>`, with no endpoint or real-name prefix. Both
+`DM from <group>/<name> (<alias>)` with bold-italic attribution, or
+`DM from <group>/<alias>` when names are unavailable or Discord anonymization applies.
+Names remain transient; encrypted mappings retain the author message token for
+native back-references on responses. Both
 parties require prior group-author assignments; private traffic never allocates.
+WhatsApp private commands and native replies reconcile phone-only ingress using
+explicit PN/LID pairs in current DM-enabled group rosters when protocol mappings
+are unavailable. The existing five-second ingress context bounds this lookup;
+conflicting pairs fail closed. The resulting LID binds the existing actor and
+canonical inbox, while the native send address remains adapter-owned and transient.
 
 `control.db.private_dm_reply_mappings` stores encrypted, content-free paired
 inboxes for 24 hours after each send. `private_dm_seen_messages` stores only
@@ -294,7 +302,15 @@ multipliers (`0x9e37`, `0x85eb`) scramble the slot with intentional uint16 wrap.
 Every pair occurs once per tier; successive allocations spread across both word lists.
 The vocabulary and entire ordering are frozen by checksum tests. This obscures
 the visual sequence without providing cryptographic secrecy.
-Persisted alias strings are validated against the frozen ordinal mapping.
+Persisted alias strings are validated against the installation's frozen ordinal
+mapping. `alias_order` pins `sequential` or `scrambled` independently of deletable
+routing rows. Initialization identifies the original sequential assignments or
+the scrambled assignments from existing records, rejecting incompatible mixtures.
+An advanced sequence with no distinguishing records retains the original
+sequential ordering; a fresh sequence uses scrambled ordering. This narrowly
+scoped initialization preserves original issued aliases and continues allocation
+in their original namespace rather than rewriting addresses. Once pinned, the
+ordering survives restarts and deletion of every actor or set.
 
 `alias_sequence` has one row with positive `next_ordinal` and an `exhausted` flag.
 It has no routing foreign key and survives set deletion. Allocation obtains a

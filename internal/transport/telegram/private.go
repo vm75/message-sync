@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf16"
 
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
@@ -56,7 +58,7 @@ func (a *Adapter) handlePrivateMessage(message *models.Message) {
 	}
 	a.mu.Unlock()
 	text, _ := normalizeTelegramMentions(message.Text, message.Entities, a.hasher)
-	in := transport.PrivateIncoming{ConnectionID: a.connectionID, Transport: "telegram", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "telegram", OwnerID: a.privateOwnerID(), ChatID: strconv.FormatInt(message.Chat.ID, 10), Token: []byte(strconv.FormatInt(message.Chat.ID, 10))}, ActorID: actor, RemoteMessageID: strconv.Itoa(message.ID), Kind: "text", Text: text, Timestamp: time.Unix(int64(message.Date), 0)}
+	in := transport.PrivateIncoming{DisplayName: strings.TrimSpace(message.From.FirstName + " " + message.From.LastName), ConnectionID: a.connectionID, Transport: "telegram", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "telegram", OwnerID: a.privateOwnerID(), ChatID: strconv.FormatInt(message.Chat.ID, 10), Token: []byte(strconv.FormatInt(message.Chat.ID, 10))}, ActorID: actor, RemoteMessageID: strconv.Itoa(message.ID), Kind: "text", Text: text, Timestamp: time.Unix(int64(message.Date), 0)}
 	if message.Text == "" || message.Photo != nil || message.Document != nil || message.Video != nil || message.Audio != nil || message.Voice != nil || message.Sticker != nil || message.Poll != nil {
 		in.Kind = "unsupported"
 	}
@@ -134,7 +136,7 @@ func (a *Adapter) ResolvePrivateInbox(ctx context.Context, endpoint transport.En
 	return transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "telegram", OwnerID: a.privateOwnerID(), ChatID: strconv.FormatInt(chatID, 10), Token: []byte(strconv.FormatInt(chatID, 10))}, true
 }
 
-func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string, options ...transport.PrivateSendOptions) (transport.PrivateSendResult, error) {
 	a.mu.RLock()
 	client, enabled := a.client, a.privateDMEnabled
 	a.mu.RUnlock()
@@ -151,9 +153,24 @@ func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox,
 	if !ok {
 		return transport.PrivateSendResult{}, errors.New("private Telegram client unavailable")
 	}
-	// A single send attempt, no parse mode or mention entities, and no previews.
+	// A single send attempt with explicit attribution entities and no previews.
 	disablePreviews := true
-	message, err := api.SendMessage(ctx, &telegrambot.SendMessageParams{ChatID: chatID, Text: text, LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &disablePreviews}})
+	params := &telegrambot.SendMessageParams{ChatID: chatID, Text: text, LinkPreviewOptions: &models.LinkPreviewOptions{IsDisabled: &disablePreviews}}
+	if len(options) > 0 {
+		o := options[0]
+		if o.Attribution != "" {
+			length := len(utf16.Encode([]rune(o.Attribution)))
+			params.Entities = []models.MessageEntity{{Type: "bold", Offset: 8, Length: length}, {Type: "italic", Offset: 8, Length: length}}
+		}
+		if o.ReplyToMessageID != "" {
+			id, err := strconv.Atoi(o.ReplyToMessageID)
+			if err != nil || id <= 0 {
+				return transport.PrivateSendResult{}, errors.New("invalid private reply ID")
+			}
+			params.ReplyParameters = &models.ReplyParameters{MessageID: id, AllowSendingWithoutReply: true}
+		}
+	}
+	message, err := api.SendMessage(ctx, params)
 	if err != nil {
 		return transport.PrivateSendResult{}, classifyTelegramFailure(err)
 	}

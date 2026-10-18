@@ -27,10 +27,12 @@ type PrivateDMSide struct {
 }
 
 type PrivateDMMapping struct {
-	ConversationID string
-	SyncSetID      string
-	Author         PrivateDMSide
-	Recipient      PrivateDMSide
+	// AuthorMessageID is an encrypted routing token in the author inbox.
+	AuthorMessageID string
+	ConversationID  string
+	SyncSetID       string
+	Author          PrivateDMSide
+	Recipient       PrivateDMSide
 }
 
 type PrivateDMCleanup struct {

@@ -153,7 +153,7 @@ if tier > 1 {
 
 Therefore **65,536 distinct aliases have exactly two words**; all subsequent allocations have an unambiguous integer suffix. No random collision estimates apply: allocation is mathematically collision-free when the vocabulary is unique and the mapping remains fixed. Persist strings as an additional safeguard. Reject ordinals outside the positive `int64` range.
 
-**Deterministic scrambling:** XOR shifts and odd multiplication modulo 65,536 are invertible; their composition visits every pair once per tier while spreading successive allocations across both word lists. Freeze the constants, operation order and 16-bit arithmetic alongside the vocabulary. This hides the obvious visual allocation sequence, not the ordinal from someone who knows the mapping; it is not cryptographic secrecy. This mapping change assumes a fresh database; no conversion of previously issued mappings is provided.
+**Deterministic scrambling:** XOR shifts and odd multiplication modulo 65,536 are invertible; their composition visits every pair once per tier while spreading successive allocations across both word lists. Freeze the constants, operation order and 16-bit arithmetic alongside the vocabulary. This hides the obvious visual allocation sequence, not the ordinal from someone who knows the mapping; it is not cryptographic secrecy. New databases select the scrambled mapping. An installation-level `alias_order` record preserves original sequential assignments and their allocation namespace across upgrades without rewriting issued addresses.
 
 ### 2c. Alias parsing and formatting
 
@@ -306,7 +306,7 @@ Do not create a cross-set address book. Lookup is global, but permission is stil
 
 ### 7c. DM privacy and lifecycle
 
-- Change the DM header to `DM from Amber Badger` (sender's existing stored alias in `mapping.SyncSetID`), not a separately HMAC-derived pseudonym. If the assignment is missing, fail generically before delivery; do not bootstrap it from private traffic. Do not reveal sender real name or group prefix in the DM header.
+- Use `DM from group/name (alias)` with bold-italic attribution, or `DM from group/alias` when the name is unavailable or Discord anonymization applies. Use the existing stored alias in `mapping.SyncSetID`; missing assignments fail generically without private enrollment. Keep display names transient. Encrypt the author message routing token with the reply mapping so responses reference the preceding author message.
 - Preserve text-only scope, 1,600-byte body cap, rate limits, current native reply mapping, 24-hour mapping expiry, anti-spoofing checks and uncertainty-aware delivery failures.
 - Preserve WhatsApp **delete-for-me only** semantics on the bot account. Do not claim equivalent self-only deletion for Discord or Telegram Bot API; do not support DM delete/edit propagation.
 - Configuration updates and restarts must not silently invalidate aliases or broaden private-message permissions. Disablement/revocation fails closed.
@@ -412,4 +412,4 @@ Stop and report a blocker rather than weakening membership checks, substituting 
 - Router/adapter/private-relay tests cover author-only enrollment, canonical LID requirements, scoped lookup, current destination authorization, reassigned route snapshots, quote/poll mention privacy, all supported private network pairings and ambiguous-inbox rejection. Poll option projection preserves source hash-to-index mappings in the content-free `poll_source_option_hashes` table; original and forwarded votes contribute to the same canonical indexes after restart.
 - Passed `make fmt`, `make test`, `make vet`, `make build`, `go test -race ./... -timeout 150s`, JavaScript syntax checks for `app-base.js` and `app.js`, and `git diff --check`. The built binary reports `development`; `VERSION` is unchanged.
 - Live provider testing requires configured external accounts and was not performed. Manual scenarios remain documented in `docs/TESTING_GUIDE.md`. No container/runtime packaging changed, so container checks were not required.
-- The subsequent fresh-database scrambled-order revision passes `make fmt`, `make test`, `make vet`, `git diff --check` and race tests for `internal/identity` and `internal/store`. The full ordering checksum and exhaustive tier checks lock the new mapping; no existing-mapping migration is included.
+- The subsequent fresh-database scrambled-order revision passes `make fmt`, `make test`, `make vet`, `git diff --check` and race tests for `internal/identity` and `internal/store`. The full ordering checksum and exhaustive tier checks lock the new mapping; ordering initialization now preserves original issued mappings and pins the allocation namespace.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -43,7 +44,10 @@ func (a *Adapter) handlePrivateMessage(session *discordgo.Session, message *disc
 		return true
 	}
 	token, _ := json.Marshal(privateInboxKey{Channel: channel.ID, User: message.Author.ID})
-	in := transport.PrivateIncoming{ConnectionID: a.connectionID, Transport: "discord", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "discord", OwnerID: a.privateOwnerID(), ChatID: channel.ID, Token: token}, ActorID: a.hasher.UserID("discord:" + message.Author.ID), RemoteMessageID: message.ID, Text: message.Content, Kind: "text", Timestamp: time.Time(message.Timestamp)}
+	in := transport.PrivateIncoming{DisplayName: message.Author.GlobalName, ConnectionID: a.connectionID, Transport: "discord", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "discord", OwnerID: a.privateOwnerID(), ChatID: channel.ID, Token: token}, ActorID: a.hasher.UserID("discord:" + message.Author.ID), RemoteMessageID: message.ID, Text: message.Content, Kind: "text", Timestamp: time.Time(message.Timestamp)}
+	if in.DisplayName == "" {
+		in.DisplayName = message.Author.Username
+	}
 	if len(message.Attachments) > 0 || len(message.StickerItems) > 0 || message.Poll != nil {
 		in.Kind = "unsupported"
 	}
@@ -99,7 +103,7 @@ func (a *Adapter) ResolvePrivateInbox(ctx context.Context, endpoint transport.En
 	return transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "discord", OwnerID: a.privateOwnerID(), ChatID: channel.ID, Token: token}, true
 }
 
-func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string, options ...transport.PrivateSendOptions) (transport.PrivateSendResult, error) {
 	if inbox.ConnectionID != a.connectionID || inbox.Transport != "discord" || inbox.OwnerID == "" || inbox.OwnerID != a.privateOwnerID() || !a.privateDMEnabled || a.session == nil {
 		return transport.PrivateSendResult{}, errors.New("private Discord connection unavailable")
 	}
@@ -111,7 +115,18 @@ func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox,
 	if err != nil || channel == nil || channel.Type != discordgo.ChannelTypeDM || channel.ID != key.Channel {
 		return transport.PrivateSendResult{}, transport.NewFailure(transport.FailureDestinationMissing, 0, errors.New("private Discord inbox unavailable"))
 	}
-	message, err := a.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{Content: text, AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}, Flags: discordgo.MessageFlagsSuppressEmbeds}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
+	var reference *discordgo.MessageReference
+	if len(options) > 0 {
+		o := options[0]
+		if o.Attribution != "" {
+			text = strings.Replace(text, "DM from "+o.Attribution, "DM from ***"+strings.NewReplacer("*", "", "_", "", "\n", " ").Replace(o.Attribution)+"***", 1)
+		}
+		if o.ReplyToMessageID != "" {
+			fail := false
+			reference = &discordgo.MessageReference{MessageID: o.ReplyToMessageID, ChannelID: channel.ID, FailIfNotExists: &fail}
+		}
+	}
+	message, err := a.session.ChannelMessageSendComplex(channel.ID, &discordgo.MessageSend{Content: text, Reference: reference, AllowedMentions: &discordgo.MessageAllowedMentions{Parse: []discordgo.AllowedMentionType{}}, Flags: discordgo.MessageFlagsSuppressEmbeds}, discordgo.WithContext(ctx), discordgo.WithRestRetries(0), discordgo.WithRetryOnRatelimit(false))
 	if err != nil {
 		return transport.PrivateSendResult{}, classifyDiscordFailure(err)
 	}

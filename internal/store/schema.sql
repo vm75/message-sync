@@ -229,3 +229,10 @@ CREATE TABLE IF NOT EXISTS sync_set_actors (
     alias TEXT NOT NULL COLLATE NOCASE UNIQUE,
     PRIMARY KEY (sync_set_id, actor_id)
 );
+
+
+-- Pin the installation's issued alias ordering across upgrades and deletions.
+CREATE TABLE IF NOT EXISTS alias_order (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    ordering TEXT NOT NULL CHECK (ordering IN ('sequential', 'scrambled'))
+);

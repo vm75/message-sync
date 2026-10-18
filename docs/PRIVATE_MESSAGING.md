@@ -26,8 +26,10 @@ currently verified member of an endpoint in that set. All membership/inbox
 checks run again on every hop.
 
 Only the addressed person's private inbox receives the message. It has an
-assigned set alias (`DM from Amber Badger`), body, and native-Reply instruction. It never adds
-the sender's display name, phone, provider user ID, or username. To answer,
+source header `DM from <group>/<name> (<alias>)`, body, and native-Reply instruction.
+The attribution is bold-italic; missing names and anonymized Discord destinations
+use `DM from <group>/<alias>`. Names are transient and never stored. Responses
+natively reference the sender’s preceding message when available. To answer,
 use the platform's native **Reply** on the bot's relayed message. Plain text
 after a conversation does not imply a current conversation. Multiple
 conversations remain separate through their exact structured reply IDs.
@@ -63,7 +65,11 @@ WhatsApp new destinations require a verified PN from the current group roster;
 a group-observed LID alone cannot initiate a relay. Native private replies can
 use an already proven private inbox with matching current group membership.
 Provider-proven operational PN/LID forms bind to the existing canonical LID
-actor and private chat identity. A PN fallback never creates a new participant
+actor and private chat identity. If a private command or native reply omits its
+LID and the protocol mapping cache is cold, the WhatsApp adapter may resolve
+its explicit PN/LID pair from current, DM-enabled group rosters within the
+bounded ingress lookup. Unknown or conflicting pairs remain unavailable.
+A PN fallback never creates a new participant
 alias. The roster PN needed to initiate delivery remains an adapter-owned send
 address, separate from the assigned alias.
 Discord sends use the bot account, with explicit empty allowed mentions, never

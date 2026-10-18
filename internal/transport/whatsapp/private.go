@@ -80,19 +80,26 @@ func (a *Adapter) handlePrivateMessage(evt *events.Message) {
 	if sender.IsEmpty() {
 		sender = evt.Info.Chat
 	}
-	canonical, phone := CanonicalSenderIdentity(ctx, sender, evt.Info.SenderAlt, a.resolveAltJID)
+	resolver := a.resolveAltJID
+	// Private events may omit SenderAlt even when the current group roster
+	// proves the PN/LID pair. Resolve commands and native replies through that
+	// roster when the provider's mapping cache is cold.
+	if strings.HasPrefix(strings.TrimSpace(text), "/dm") || getContextInfo(evt.Message).GetStanzaID() != "" {
+		resolver = a.resolvePrivateAltJID
+	}
+	canonical, phone := CanonicalSenderIdentity(ctx, sender, evt.Info.SenderAlt, resolver)
 	if !privateUserJID(canonical) {
 		return
 	}
 	chatJID := normalizeWhatsAppIdentityJID(evt.Info.Chat)
 	if chatJID != normalizeWhatsAppIdentityJID(sender) && chatJID != normalizeWhatsAppIdentityJID(evt.Info.SenderAlt) {
-		chatActor, _ := CanonicalSenderIdentity(ctx, chatJID, types.EmptyJID, a.resolveAltJID)
+		chatActor, _ := CanonicalSenderIdentity(ctx, chatJID, types.EmptyJID, resolver)
 		if chatActor != canonical {
 			return
 		}
 	}
 	chat := normalizeWhatsAppIdentityJID(evt.Info.Chat).String()
-	in := transport.PrivateIncoming{ConnectionID: a.connectionID, Transport: "whatsapp", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "whatsapp", OwnerID: a.privateOwnerID(), ChatID: canonical.String(), Token: []byte(chat)}, ActorID: normalizer.hasher.UserID(canonical.String()), RemoteMessageID: string(evt.Info.ID), Text: text, Kind: kind, Timestamp: evt.Info.Timestamp}
+	in := transport.PrivateIncoming{DisplayName: evt.Info.PushName, ConnectionID: a.connectionID, Transport: "whatsapp", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "whatsapp", OwnerID: a.privateOwnerID(), ChatID: canonical.String(), Token: []byte(chat)}, ActorID: normalizer.hasher.UserID(canonical.String()), RemoteMessageID: string(evt.Info.ID), Text: text, Kind: kind, Timestamp: evt.Info.Timestamp}
 	for _, jid := range []types.JID{sender, evt.Info.SenderAlt, canonical} {
 		jid = normalizeWhatsAppIdentityJID(jid)
 		if privateUserJID(jid) {
@@ -111,6 +118,66 @@ func (a *Adapter) handlePrivateMessage(evt *events.Message) {
 	case a.privateEvents <- in:
 	default:
 	}
+}
+
+// resolvePrivateAltJID supplements the protocol mapping with current,
+// feature-enabled group rosters. Only explicit PN/LID pairs count; never infer
+// a phone from a LID, display name, or historical application observation.
+func (a *Adapter) resolvePrivateAltJID(ctx context.Context, jid types.JID) (types.JID, error) {
+	if alt, err := a.resolveAltJID(ctx, jid); err == nil && !alt.IsEmpty() {
+		return alt, err
+	}
+	jid = normalizeWhatsAppIdentityJID(jid)
+	if !privateUserJID(jid) {
+		return types.EmptyJID, nil
+	}
+	a.mu.Lock()
+	client := a.privateAPI()
+	targets := make([]types.JID, 0, len(a.targets))
+	for endpoint, target := range a.targets {
+		if a.endpointSettings[string(endpoint)].PrivateDMRelayEnabled {
+			targets = append(targets, target)
+		}
+	}
+	a.mu.Unlock()
+	if client == nil || !client.IsLoggedIn() {
+		return types.EmptyJID, nil
+	}
+	var resolved types.JID
+	for _, target := range targets {
+		if err := ctx.Err(); err != nil {
+			return types.EmptyJID, err
+		}
+		group, err := client.GetGroupInfo(ctx, target)
+		if err != nil || group == nil {
+			continue
+		}
+		for _, p := range group.Participants {
+			lid, _ := CanonicalSenderIdentity(ctx, p.JID, p.LID, a.resolveAltJID)
+			if !isLIDJID(lid) || lid.User == "" {
+				continue
+			}
+			for _, pn := range []types.JID{p.PhoneNumber, p.JID} {
+				pn = normalizeWhatsAppIdentityJID(pn)
+				if pn.Server != types.DefaultUserServer || pn.User == "" {
+					continue
+				}
+				var candidate types.JID
+				if jid == pn {
+					candidate = lid
+				} else if jid == lid {
+					candidate = pn
+				} else {
+					continue
+				}
+				if !resolved.IsEmpty() && resolved != candidate {
+					return types.EmptyJID, errors.New("ambiguous private WhatsApp identity")
+				}
+				resolved = candidate
+			}
+		}
+	}
+	return resolved, nil
 }
 
 func (a *Adapter) privateMember(ctx context.Context, endpoint transport.EndpointID, actor string) (types.GroupParticipant, bool) {
@@ -191,7 +258,7 @@ func (a *Adapter) ResolvePrivateInbox(ctx context.Context, endpoint transport.En
 	return transport.PrivateInbox{}, false
 }
 
-func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string) (transport.PrivateSendResult, error) {
+func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox, text string, options ...transport.PrivateSendOptions) (transport.PrivateSendResult, error) {
 	client := a.privateAPI()
 	if inbox.ConnectionID != a.connectionID || inbox.Transport != "whatsapp" || inbox.OwnerID == "" || inbox.OwnerID != a.privateOwnerID() || client == nil || !client.IsLoggedIn() {
 		return transport.PrivateSendResult{}, errors.New("private WhatsApp connection unavailable")
@@ -201,7 +268,18 @@ func (a *Adapter) SendPrivate(ctx context.Context, inbox transport.PrivateInbox,
 	if err != nil || !privateUserJID(jid) || strings.ContainsAny(string(inbox.Token), "\r\n\x00") {
 		return transport.PrivateSendResult{}, errors.New("invalid private WhatsApp inbox")
 	}
-	result, err := client.SendMessage(ctx, jid, &waE2E.Message{Conversation: proto.String(text)})
+	message := &waE2E.Message{Conversation: proto.String(text)}
+	if len(options) > 0 {
+		o := options[0]
+		if o.Attribution != "" {
+			text = strings.Replace(text, "DM from "+o.Attribution, "DM from *_"+strings.NewReplacer("*", "", "_", "", "\n", " ").Replace(o.Attribution)+"_*", 1)
+			message.Conversation = proto.String(text)
+		}
+		if o.ReplyToMessageID != "" {
+			message = &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: &waE2E.ContextInfo{StanzaID: proto.String(o.ReplyToMessageID), Participant: proto.String(jid.String()), QuotedMessage: &waE2E.Message{Conversation: proto.String("")}}}}
+		}
+	}
+	result, err := client.SendMessage(ctx, jid, message)
 	if err != nil {
 		return transport.PrivateSendResult{}, classifyWhatsAppFailure(err)
 	}

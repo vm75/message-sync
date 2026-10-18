@@ -28,7 +28,7 @@ type Runtime interface {
 	VerifyPrivateMember(context.Context, transport.EndpointID, string) bool
 	VerifyPrivateInboxMember(context.Context, transport.EndpointID, string, transport.PrivateInbox) bool
 	ResolvePrivateInbox(context.Context, transport.EndpointID, string) (transport.PrivateInbox, bool)
-	SendPrivate(context.Context, transport.PrivateInbox, string) (transport.PrivateSendResult, error)
+	SendPrivate(context.Context, transport.PrivateInbox, string, ...transport.PrivateSendOptions) (transport.PrivateSendResult, error)
 	DeletePrivateCopyForMe(context.Context, transport.PrivateCopy) error
 }
 
@@ -179,6 +179,7 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 		return r.help(ctx, in.Inbox, "")
 	}
 	var mapping controlstore.PrivateDMMapping
+	var replyTo string
 	if text == "/dm" || strings.HasPrefix(text, "/dm ") || strings.HasPrefix(text, "/dm\t") || strings.HasPrefix(text, "/dm\n") {
 		parts := command.FindStringSubmatch(text)
 		if len(parts) != 4 || strings.TrimSpace(parts[3]) == "" || references.MatchString(parts[3]) {
@@ -240,6 +241,7 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 		if !ok || !incomingActor(in, previous.Recipient.ActorID) || !sameInbox(previous.Recipient.Inbox, in.Inbox) {
 			return r.help(ctx, in.Inbox, "")
 		}
+		replyTo = previous.AuthorMessageID
 		mapping = controlstore.PrivateDMMapping{ConversationID: previous.ConversationID, SyncSetID: previous.SyncSetID, Author: previous.Recipient, Recipient: previous.Author}
 	}
 	if len(text) > MaxBodyBytes || !r.authorized(ctx, cfg, mapping) {
@@ -262,8 +264,15 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 	if err != nil {
 		return r.aliasFailure(ctx, in.Inbox, err)
 	}
-	header := "DM from " + alias + "\n"
-	result, err := r.Runtime.SendPrivate(ctx, mapping.Recipient.Inbox, header+body+"\nReply to this message to respond privately.")
+	name := strings.Join(strings.Fields(sanitize(in.DisplayName)), " ")
+	attribution := mapping.Author.Endpoint + "/" + alias
+	set, _ := findSetByID(cfg, mapping.SyncSetID)
+	if name != "" && !(mapping.Recipient.Inbox.Transport == "discord" && set.AnonymizeToDiscord) {
+		attribution = mapping.Author.Endpoint + "/" + name + " (" + alias + ")"
+	}
+	header := "DM from " + attribution + "\n"
+	mapping.AuthorMessageID = in.RemoteMessageID
+	result, err := r.Runtime.SendPrivate(ctx, mapping.Recipient.Inbox, header+body+"\nReply to this message to respond privately.", transport.PrivateSendOptions{ReplyToMessageID: replyTo, Attribution: attribution})
 	if err != nil {
 		message := "Private delivery unavailable. The recipient must allow DMs and Telegram recipients must first /start this bot."
 		failure := transport.Classify(err)

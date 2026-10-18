@@ -669,7 +669,8 @@ outside the test participants. No live provider secrets are required by tests.
    missing participant. For Telegram Bot API, privately `/start` the exact owning bot;
    verify the response is help. Do not switch Telegram accounts as a fallback.
 3. From a Discord bot DM, send `/dm @{Amber Badger} hello`. Only the addressed
-   WhatsApp private chat should receive `DM from <sender-assigned-alias>` and the
+   WhatsApp private chat should receive `DM from <group>/<name> (<sender-assigned-alias>)` (bold-italic attribution,
+   alias-only when the name is unavailable) and the
    Reply instruction. Check every synced group/channel/topic for zero copies.
    Reply natively from WhatsApp, then natively from Discord. Repeat WA↔WA,
    Discord↔Discord, Bot API↔Bot API and the remaining mixed directions, including
@@ -717,3 +718,7 @@ outside the test participants. No live provider secrets are required by tests.
 Automated tests inspect operation types and fake-provider behavior. Record live
 provider/version observations separately; do not describe an unperformed live
 WhatsApp linked-device deletion check as verified.
+
+Private DM reply check: alternate three native replies across transports and verify
+each delivered response references the preceding author message in that inbox.
+Check alias-only headers on anonymized Discord destinations and named headers elsewhere.
