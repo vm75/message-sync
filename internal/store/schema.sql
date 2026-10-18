@@ -202,3 +202,19 @@ CREATE TABLE IF NOT EXISTS participant_addresses (
     PRIMARY KEY (endpoint_id, actor_id),
     UNIQUE (endpoint_id, ordinal)
 );
+
+-- Instance-wide sequence is deliberately independent of deletable routing rows.
+CREATE TABLE IF NOT EXISTS alias_sequence (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    next_ordinal INTEGER NOT NULL CHECK (next_ordinal >= 1),
+    exhausted BOOLEAN NOT NULL DEFAULT 0 CHECK (exhausted IN (0, 1))
+);
+INSERT INTO alias_sequence(singleton, next_ordinal) VALUES (1, 1) ON CONFLICT(singleton) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS sync_set_actors (
+    sync_set_id TEXT NOT NULL REFERENCES sync_sets(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL UNIQUE CHECK (ordinal > 0),
+    alias TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    PRIMARY KEY (sync_set_id, actor_id)
+);
