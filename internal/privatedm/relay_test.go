@@ -14,6 +14,7 @@ import (
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -95,16 +96,21 @@ func fixture(t *testing.T, from, to string) (*Relay, *fakeRuntime, *config.Confi
 			return "-123"
 		}
 	}
-	cfg := &config.Config{PrivateDMRelayEnabled: true, Endpoints: map[string]config.Endpoint{"a": {Transport: config.Transport(from), ConnectionID: "from", RemoteID: remote(from)}, "b": {Transport: config.Transport(to), ConnectionID: "to", RemoteID: strings.Replace(remote(to), "1", "2", 1)}}, SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"b", "a"}, Settings: &settings}}, Identity: config.Identity{UsernameMode: config.UsernameModePushName}}
+	cfg := &config.Config{PrivateDMRelayEnabled: true, Endpoints: map[string]config.Endpoint{"a": {Transport: config.Transport(from), ConnectionID: "from", RemoteID: remote(from)}, "b": {Transport: config.Transport(to), ConnectionID: "to", RemoteID: strings.Replace(remote(to), "1", "2", 1)}}, SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"b", "a"}, Settings: &settings}}}
 	if err := config.Save(ctx, sync.DB(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	for ep, actor := range map[string]string{"a": alice, "b": bob} {
+	for _, ep := range []string{"a", "b"} {
+		actor := map[string]string{"a": alice, "b": bob}[ep]
 		if _, err := sync.ObserveParticipant(ctx, ep, actor); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sync.ObserveSyncSetActor(ctx, "mesh", actor); err != nil {
 			t.Fatal(err)
 		}
 	}
 	f := &fakeRuntime{inboxes: map[string]transport.PrivateInbox{"a" + alice: {ConnectionID: "from", Transport: from, OwnerID: "owner-from", ChatID: "chat-from", Token: []byte("private-native-alice")}, "b" + bob: {ConnectionID: "to", Transport: to, OwnerID: "owner-to", ChatID: "chat-to", Token: []byte("private-native-bob")}}, members: map[string]bool{"a" + alice: true, "b" + bob: true}}
+	testutil.SeedRouting(t, sync.DB(), cfg)
 	mesh, err := router.NewWithHasher(cfg, sync, f, hasher)
 	if err != nil {
 		t.Fatal(err)
@@ -130,16 +136,16 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 				r, f, _, now, alice, bob := fixture(t, from, to)
 				ctx := context.Background()
 				a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-				if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{b/P1} hello\nsecond line", "", *now)); err != nil {
+				if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Amber Bear} hello\nsecond line", "", *now)); err != nil {
 					t.Fatal(err)
 				}
-				if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from a/") || !strings.Contains(f.sent[0].text, "hello\nsecond line") {
+				if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") || !strings.Contains(f.sent[0].text, "hello\nsecond line") {
 					t.Fatalf("initial relay=%+v", f.sent)
 				}
 				if err := r.Handle(ctx, input(b, bob, "b1", "answer", f.sent[0].id, *now)); err != nil {
 					t.Fatal(err)
 				}
-				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from b/") {
+				if len(f.sent) != 2 || f.sent[1].inbox.ConnectionID != "from" || !strings.HasPrefix(f.sent[1].text, "DM from Amber Bear\n") {
 					t.Fatalf("return relay=%+v", f.sent)
 				}
 				if err := r.Handle(ctx, input(a, alice, "a2", "next", f.sent[1].id, *now)); err != nil {
@@ -164,7 +170,7 @@ func TestAllPlatformsUseNativeRepliesAndOwningConnections(t *testing.T) {
 }
 
 func TestInvalidPrivateInputsOnlySendHelp(t *testing.T) {
-	for _, text := range []string{"hello", "@{b/P1}", "/foo", "/dm", "/dm @{b/P1}", "/dm @{b/P1} ", "/dm @{b/P1} @{b/P1}", "/dm \\@{b/P1} hello"} {
+	for _, text := range []string{"hello", "@{Amber Bear}", "/foo", "/dm", "/dm @{Amber Bear}", "/dm @{Amber Bear} ", "/dm @{Amber Bear} @{Amber Bear}", "/dm \\@{Amber Bear} hello"} {
 		t.Run(text, func(t *testing.T) {
 			r, f, _, now, alice, _ := fixture(t, "discord", "whatsapp")
 			a := f.inboxes["a"+alice]
@@ -184,7 +190,7 @@ func TestReplyOwnershipExpiryAndMembershipChangesFailClosed(t *testing.T) {
 			r, f, cfg, now, alice, bob := fixture(t, "discord", "whatsapp")
 			ctx := context.Background()
 			a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-			if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{b/P1} first", "", *now)); err != nil {
+			if err := r.Handle(ctx, input(a, alice, "a1", "/dm @{Amber Bear} first", "", *now)); err != nil {
 				t.Fatal(err)
 			}
 			in := input(b, bob, "b1", "reply", f.sent[0].id, *now)
@@ -231,14 +237,14 @@ func TestLifecycleEventsIgnoredAndLocalCleanupDoesNotDeleteRecipientCopy(t *test
 	r, f, _, now, alice, bob := fixture(t, "discord", "whatsapp")
 	ctx := context.Background()
 	a := f.inboxes["a"+alice]
-	initial := input(a, alice, "a1", "/dm @{b/P1} original", "", *now)
+	initial := input(a, alice, "a1", "/dm @{Amber Bear} original", "", *now)
 	if err := r.Handle(ctx, initial); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"edit", "delete", "revoke"} {
 		event := initial
 		event.Kind = kind
-		event.Text = "/dm @{b/P1} changed"
+		event.Text = "/dm @{Amber Bear} changed"
 		event.RemoteMessageID = kind
 		if err := r.Handle(ctx, event); err != nil {
 			t.Fatal(err)
@@ -277,7 +283,7 @@ func TestCommandsOverrideRepliesAndSeparateConversations(t *testing.T) {
 	ctx := context.Background()
 	a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
 	for _, id := range []string{"one", "two"} {
-		if err := r.Handle(ctx, input(a, alice, id, "/dm @{b/P1} "+id, "", *now)); err != nil {
+		if err := r.Handle(ctx, input(a, alice, id, "/dm @{Amber Bear} "+id, "", *now)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -296,7 +302,7 @@ func TestCommandsOverrideRepliesAndSeparateConversations(t *testing.T) {
 	if !ok || back.ConversationID != m1.ConversationID {
 		t.Fatal("native reply crossed conversations")
 	}
-	if err := r.Handle(ctx, input(a, alice, "new-command", "/dm @{b/P1} fresh", f.sent[2].id, *now)); err != nil {
+	if err := r.Handle(ctx, input(a, alice, "new-command", "/dm @{Amber Bear} fresh", f.sent[2].id, *now)); err != nil {
 		t.Fatal(err)
 	}
 	newConversation, ok, _ := r.State.Reply(ctx, b, f.sent[3].id, *now)
@@ -305,26 +311,22 @@ func TestCommandsOverrideRepliesAndSeparateConversations(t *testing.T) {
 	}
 }
 
-func TestPrivateAddressingUsesExistingPseudonymsAndCodes(t *testing.T) {
-	for _, form := range []string{"full", "stem", "code5", "code8", "code10"} {
+func TestPrivateAddressingUsesAssignedAliasesCaseInsensitively(t *testing.T) {
+	for _, form := range []string{"canonical", "lowercase"} {
 		t.Run(form, func(t *testing.T) {
 			r, f, _, now, alice, bob := fixture(t, "discord", "telegram")
-			label := identity.Pseudonym(bob)
-			switch form {
-			case "stem":
-				label = identity.PseudonymName(bob)
-			case "code5":
-				label = strings.ToLower(identity.DiscriminatorForLength(bob, 5))
-			case "code8":
-				label = identity.DiscriminatorForLength(bob, 8)
-			case "code10":
-				label = identity.DiscriminatorForLength(bob, 10)
-			}
-			if err := r.Handle(context.Background(), input(f.inboxes["a"+alice], alice, "one", "/dm @{b/  "+label+"  } body", "", *now)); err != nil {
+			label, err := r.Sync.AliasByActor(context.Background(), "mesh", bob)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from a/") {
-				t.Fatal("existing address form was not reused")
+			if form == "lowercase" {
+				label = strings.ToLower(label)
+			}
+			if err := r.Handle(context.Background(), input(f.inboxes["a"+alice], alice, "one", "/dm @{"+label+"} body", "", *now)); err != nil {
+				t.Fatal(err)
+			}
+			if len(f.sent) != 1 || f.sent[0].inbox.ConnectionID != "to" || !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") {
+				t.Fatal("assigned alias did not resolve")
 			}
 		})
 	}
@@ -361,7 +363,7 @@ func TestPrivateBodySanitizationAndAmbiguousSendNoRetry(t *testing.T) {
 	r, f, _, now, alice, _ := fixture(t, "telegram", "discord")
 	ctx := context.Background()
 	a := f.inboxes["a"+alice]
-	if err := r.Handle(ctx, input(a, alice, "one", "/dm @{b/P1} hello @everyone <@12345> 15551234567@s.whatsapp.net https://t.me/private_user", "", *now)); err != nil {
+	if err := r.Handle(ctx, input(a, alice, "one", "/dm @{Amber Bear} hello @everyone <@12345> 15551234567@s.whatsapp.net https://t.me/private_user", "", *now)); err != nil {
 		t.Fatal(err)
 	}
 	for _, sensitive := range []string{"@everyone", "12345", "15551234567", "private_user", "private-native-alice"} {
@@ -370,7 +372,7 @@ func TestPrivateBodySanitizationAndAmbiguousSendNoRetry(t *testing.T) {
 		}
 	}
 	f.fail = transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("sensitive-provider-error"))
-	_ = r.Handle(ctx, input(a, alice, "ambiguous", "/dm @{b/P1} next", "", *now))
+	_ = r.Handle(ctx, input(a, alice, "ambiguous", "/dm @{Amber Bear} next", "", *now))
 	if len(f.sent) != 3 || f.sent[1].inbox.ConnectionID != "to" || f.sent[2].inbox.ConnectionID != "from" || !strings.Contains(f.sent[2].text, "could not be confirmed") {
 		t.Fatal("ambiguous send retried or claimed delivery")
 	}
@@ -404,7 +406,7 @@ func TestTrustedPNLIDAliasesPreserveObservedActorAndCanonicalChat(t *testing.T) 
 	r, f, _, now, alice, bob := fixture(t, "whatsapp", "whatsapp")
 	ctx := context.Background()
 	a, b := f.inboxes["a"+alice], f.inboxes["b"+bob]
-	start := input(a, "u_newlid1234", "first", "/dm @{b/P1} hello", "", *now)
+	start := input(a, "u_newlid1234", "first", "/dm @{Amber Bear} hello", "", *now)
 	start.ActorAliases = []string{alice}
 	if err := r.Handle(ctx, start); err != nil {
 		t.Fatal(err)
@@ -447,6 +449,10 @@ func TestConcurrentPeersAndSourceAliasStayWithinTargetSyncSet(t *testing.T) {
 		if _, err := r.Sync.ObserveParticipant(ctx, ep, actor); err != nil {
 			t.Fatal(err)
 		}
+		set, _ := findSet(cfg, ep)
+		if _, err := r.Sync.ObserveSyncSetActor(ctx, set.ID, actor); err != nil {
+			t.Fatal(err)
+		}
 		f.members[ep+actor] = true
 	}
 	c := transport.PrivateInbox{ConnectionID: "third", Transport: "whatsapp", OwnerID: "owner-third", ChatID: "third-chat", Token: []byte("third-native-address")}
@@ -456,15 +462,19 @@ func TestConcurrentPeersAndSourceAliasStayWithinTargetSyncSet(t *testing.T) {
 	if err := r.Resolver.(*router.Router).UpdateConfig(cfg); err != nil {
 		t.Fatal(err)
 	}
-	for i, target := range []string{"b", "c"} {
-		if err := r.Handle(ctx, input(a, alice, fmt.Sprint("start", i), "/dm @{"+target+"/P1} hello", "", *now)); err != nil {
+	for i, target := range []string{bob, charlie} {
+		label, err := r.Sync.AliasByActor(ctx, "mesh", target)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := r.Handle(ctx, input(a, alice, fmt.Sprint("start", i), "/dm @{"+label+"} hello", "", *now)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if len(f.sent) != 2 {
 		t.Fatal("two peer conversations did not start")
 	}
-	if !strings.HasPrefix(f.sent[0].text, "DM from a/") || !strings.HasPrefix(f.sent[1].text, "DM from a/") {
+	if !strings.HasPrefix(f.sent[0].text, "DM from Amber Badger\n") || !strings.HasPrefix(f.sent[1].text, "DM from Amber Badger\n") {
 		t.Fatal("source alias was selected outside the target set or without sorting")
 	}
 	if err := r.Handle(ctx, input(b, bob, "b-reply", "B response", f.sent[0].id, *now)); err != nil {

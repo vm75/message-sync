@@ -12,6 +12,7 @@ import (
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -157,7 +158,6 @@ func reliabilityConfig() *config.Config {
 			"tg": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-333"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "dc", "tg"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 }
 
@@ -181,6 +181,7 @@ func TestThreeTransportHarnessIsolatesDeliveryAndPreservesLifecycleOrder(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), reliabilityConfig())
 	mesh, err := router.New(reliabilityConfig(), syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +217,9 @@ func TestThreeTransportHarnessIsolatesDeliveryAndPreservesLifecycleOrder(t *test
 	// Lifecycle operations are serialized behind the create on every copy.
 	edit := transport.Incoming{Endpoint: "wa", RemoteID: "edit-1", Kind: "edit", Text: "edited body", Sender: transport.Sender{OpaqueID: "u_abcdefghij"}, ReplyTo: &transport.MessageRef{Endpoint: "wa", RemoteMessageID: "wa-message-1"}, Timestamp: time.Now().UTC()}
 	if err := mesh.Handle(ctx, edit); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := syncStore.ObserveSyncSetActor(ctx, "mesh", "u_bcdefghijk"); err != nil {
 		t.Fatal(err)
 	}
 	reaction := transport.Incoming{Endpoint: "wa", RemoteID: "reaction-1", Kind: "reaction", Text: "👍", Sender: transport.Sender{OpaqueID: "u_bcdefghijk"}, ReplyTo: &transport.MessageRef{Endpoint: "wa", RemoteMessageID: "wa-message-1"}, Timestamp: time.Now().UTC()}
@@ -257,6 +261,7 @@ func TestThreeTransportHarnessDoesNotBlindlyRetryAmbiguousCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), reliabilityConfig())
 	mesh, err := router.New(reliabilityConfig(), syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -325,7 +330,6 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 			"wa-c": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-2", RemoteID: "333@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa-a", "dc-b", "wa-c"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 
 	registry, err := router.NewAdapterRegistry(cfg, map[string]router.OutboundAdapter{
@@ -336,6 +340,7 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -353,7 +358,7 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 		RemoteID:  "wa-orig-100",
 		Kind:      "text",
 		Text:      "Initial message in WhatsApp Group A",
-		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_alice_123"},
+		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_lsmsvzahu5"},
 		Timestamp: origTimestamp,
 		Checkpoint: transport.Checkpoint{
 			StreamKey:      "wa-a",
@@ -390,7 +395,7 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 		RemoteID:  "wa-edit-notif-200",
 		Kind:      "edit",
 		Text:      "Edited message in WhatsApp Group A",
-		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_alice_123"},
+		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_lsmsvzahu5"},
 		ReplyTo:   &transport.MessageRef{Endpoint: "wa-a", RemoteMessageID: "wa-orig-100"},
 		Timestamp: origTimestamp,
 	}
@@ -456,7 +461,7 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 		Kind:      "edit",
 		FromSelf:  true,
 		Text:      "Self-edited message in WhatsApp Group A",
-		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_alice_123"},
+		Sender:    transport.Sender{DisplayName: "Alice", OpaqueID: "u_lsmsvzahu5"},
 		ReplyTo:   &transport.MessageRef{Endpoint: "wa-a", RemoteMessageID: "wa-orig-100"},
 		Timestamp: origTimestamp,
 	}
@@ -473,12 +478,15 @@ func TestWhatsAppOriginatedEditPropagation(t *testing.T) {
 	}
 
 	// 8. Discord -> WhatsApp edit propagation still works.
+	if _, err := syncStore.ObserveSyncSetActor(ctx, "mesh", "u_qrg3iemzpx"); err != nil {
+		t.Fatal(err)
+	}
 	dcEditMsg := transport.Incoming{
 		Endpoint:  "dc-b",
 		RemoteID:  "dc-edit-400",
 		Kind:      "edit",
 		Text:      "Edit originated from Discord",
-		Sender:    transport.Sender{DisplayName: "Bob", OpaqueID: "u_bob_456"},
+		Sender:    transport.Sender{DisplayName: "Bob", OpaqueID: "u_qrg3iemzpx"},
 		ReplyTo:   &transport.MessageRef{Endpoint: "dc-b", RemoteMessageID: "dc-b-copy"},
 		Timestamp: time.Now().UTC(),
 	}

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 	"go.mau.fi/whatsmeow"
@@ -160,8 +159,8 @@ func TestPrivateWhatsAppCreatesRepliesAndStrictLocalCleanup(t *testing.T) {
 
 func TestGroupWhatsAppDMCommandKeepsGroupSemantics(t *testing.T) {
 	hasher, _ := identity.New([]byte("01234567890123456789012345678901"))
-	normalizer, _ := NewNormalizer(map[string]string{"group": "111@g.us"}, hasher, config.UsernameModeHash)
-	text := "/dm @{other/P1} group message"
+	normalizer, _ := NewNormalizer(map[string]string{"group": "111@g.us"}, hasher)
+	text := "/dm @{Amber Badger} group message"
 	event := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: types.NewJID("111", types.GroupServer), Sender: types.NewJID("42", types.HiddenUserServer), IsGroup: true}, ID: "group-command", Timestamp: time.Now()}, Message: &waE2E.Message{Conversation: &text}}
 	in, ok := normalizer.NormalizeMessage(event, true, 1024, nil, nil, nil, nil)
 	if !ok || in.Endpoint != "group" || in.Kind != "text" || in.Text != text {

@@ -656,8 +656,8 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 	api := &fakeDiscordAPI{}
 	adapter := newOutboundTestAdapter(webhook, api)
 
-	senderPseudonym := "Silent Falcon Q7M4PK"
-	mentionPseudonym := "Brave Badger X8K2P"
+	senderAlias := "Amber Badger"
+	mentionAlias := "Azure Bear"
 	rawRemoteID := "15559876543@s.whatsapp.net"
 	rawPhone := "+15551234567"
 	realSenderName := "Alice Real"
@@ -666,19 +666,19 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 		Endpoint:       "discord",
 		OriginEndpoint: "wa1",
 		Sender: transport.Sender{
-			DisplayName: senderPseudonym,
+			DisplayName: senderAlias,
 			PhoneNumber: "", // Anonymized route clears phone
 			OpaqueID:    "u_abcdefghij",
 		},
-		SenderLabel:   "wa1/thread/" + senderPseudonym,
-		RenderedText:  "*_wa1/thread/" + senderPseudonym + "_*: Hello @" + rawRemoteID + ", see my quote",
+		SenderLabel:   "wa1/thread/" + senderAlias,
+		RenderedText:  "*_wa1/thread/" + senderAlias + "_*: Hello @" + rawRemoteID + ", see my quote",
 		Text:          "Hello @" + rawRemoteID + ", see my quote",
 		Kind:          "text",
 		ReplyFallback: true,
 		QuotedText:    "legitimate quote content from previous message",
 		Mentions: []transport.Mention{{
 			RemoteID: rawRemoteID,
-			Name:     mentionPseudonym,
+			Name:     mentionAlias,
 		}},
 	}
 
@@ -693,8 +693,8 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 	exec := webhook.executed[len(webhook.executed)-1]
 
 	// 1. Sender: anonymized Sender.DisplayName becomes webhook username; real name/phone cannot appear
-	if !strings.Contains(exec.Username, senderPseudonym) {
-		t.Errorf("webhook username must contain pseudonym %q, got: %q", senderPseudonym, exec.Username)
+	if !strings.Contains(exec.Username, senderAlias) {
+		t.Errorf("webhook username must contain pseudonym %q, got: %q", senderAlias, exec.Username)
 	}
 	if strings.Contains(exec.Username, realSenderName) || strings.Contains(exec.Username, rawPhone) {
 		t.Errorf("webhook username leaked real sender info: %q", exec.Username)
@@ -704,8 +704,8 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 	}
 
 	// 2. Mentions: pseudonymous Mention.Name is rendered; raw Mention.RemoteID is not visible
-	if !strings.Contains(exec.Content, "@"+mentionPseudonym) {
-		t.Errorf("webhook content must contain pseudonymous mention @%s, got: %q", mentionPseudonym, exec.Content)
+	if !strings.Contains(exec.Content, "@"+mentionAlias) {
+		t.Errorf("webhook content must contain pseudonymous mention @%s, got: %q", mentionAlias, exec.Content)
 	}
 	if strings.Contains(exec.Content, rawRemoteID) || strings.Contains(exec.Content, "15559876543") {
 		t.Errorf("webhook content leaked raw mention remote ID: %q", exec.Content)
@@ -726,15 +726,15 @@ func TestDiscordAnonymizedOutboundBoundary(t *testing.T) {
 		Endpoint:       "discord",
 		OriginEndpoint: "wa1",
 		Sender: transport.Sender{
-			DisplayName: senderPseudonym,
+			DisplayName: senderAlias,
 			OpaqueID:    "u_abcdefghij",
 		},
-		SenderLabel:         "wa1/" + senderPseudonym,
+		SenderLabel:         "wa1/" + senderAlias,
 		SourceText:          "Poll with @everyone attempt",
 		Kind:                "poll",
 		PollOptions:         []string{"Option 1", "Option 2"},
 		PollSelectableCount: 1,
-		PollAttribution:     "*_wa1/" + senderPseudonym + "_*: Poll with @everyone attempt",
+		PollAttribution:     "*_wa1/" + senderAlias + "_*: Poll with @everyone attempt",
 	}
 	_, err = adapter.Send(context.Background(), nativePollOutgoing)
 	if err != nil {
@@ -755,8 +755,8 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{name: "anonymized", anonymized: true, want: "Hi @{g1/P1}"},
-		{name: "non-anonymized", anonymized: false, want: "Hi @{g1/P1}"},
+		{name: "anonymized", anonymized: true, want: "Hi @{Amber Badger}"},
+		{name: "non-anonymized", anonymized: false, want: "Hi @{Amber Badger}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			webhook := &fakeChannelWebhook{}
@@ -764,8 +764,8 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 			_, err := adapter.Send(context.Background(), transport.Outgoing{
 				Endpoint: "discord", OriginEndpoint: "other", Kind: "text",
 				Sender:     transport.Sender{DisplayName: "Sender"},
-				SourceText: "Hi @{g1/P1}", Text: "*_other/Sender_*: Hi @{g1/P1}",
-				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice", Pseudonym: "Rust Ocean Q7M5K"}},
+				SourceText: "Hi @{Amber Badger}", Text: "*_other/Sender_*: Hi @{Amber Badger}",
+				References:          []transport.CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij", Name: "Alice", Alias: "Amber Badger"}},
 				ReferenceAnonymized: tc.anonymized,
 			})
 			if err != nil {
@@ -778,24 +778,36 @@ func TestDiscordReferencesRenderWithoutNativeMembership(t *testing.T) {
 	}
 }
 
-func TestWebhookNamePreservesDiscriminatorOnLongAttribution(t *testing.T) {
+func TestWebhookNamePreservesAliasOnLongAttribution(t *testing.T) {
 	for _, name := range []string{strings.Repeat("x", 100), strings.Repeat("界", 100)} {
-		got := sanitizeWebhookUsernameWithDiscriminator("group/"+name, "7WCUX")
-		if len([]rune(got)) != maxWebhookUsernameRunes || !strings.HasSuffix(got, " 7WCUX") || !strings.HasPrefix(got, "group/") {
+		got := sanitizeWebhookUsernameWithAlias("group/"+name, transport.Sender{Alias: "Amber Badger"})
+		if len([]rune(got)) != maxWebhookUsernameRunes || !strings.HasSuffix(got, " (Amber Badger)") || !strings.HasPrefix(got, "group/") {
 			t.Fatalf("truncated attribution = %q", got)
 		}
 	}
 }
 
-func TestPollAttributionKeepsDiscriminatorAndFallbackName(t *testing.T) {
+func TestWebhookAssignedAliasKeepsPhoneFallbackWhenNoDisplayName(t *testing.T) {
+	webhook := &fakeChannelWebhook{managed: make(map[string]string)}
+	adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
+	_, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "discord", OriginEndpoint: "source", Sender: transport.Sender{PhoneNumber: "15551234567", OpaqueID: "u_abcdefghij", Alias: "Amber Badger"}, Kind: "text", SourceText: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := webhook.executed[0].Username; got != "source/15551234567 (Amber Badger)" {
+		t.Fatalf("phone fallback lost its alias: %q", got)
+	}
+}
+
+func TestPollAttributionKeepsAliasAndFallbackName(t *testing.T) {
 	for _, name := range []string{"Alice", strings.Repeat("界", 100), ""} {
-		sender := transport.Sender{DisplayName: name, OpaqueID: "u_abcdefghij", Discriminator: "7WCUX"}
+		sender := transport.Sender{DisplayName: name, OpaqueID: "u_abcdefghij", Alias: "Amber Badger"}
 		label := "group/" + name
 		if name == "" {
 			label = "group/" + sender.OpaqueID
 		}
-		got := discordPollAttribution(transport.Outgoing{OriginEndpoint: "group", Endpoint: "destination", Sender: sender, SenderLabel: label + " 7WCUX"})
-		if !strings.HasSuffix(got, " 7WCUX:") || strings.Count(got, "7WCUX") != 1 || len([]rune(got)) > maxWebhookUsernameRunes+1 {
+		got := discordPollAttribution(transport.Outgoing{OriginEndpoint: "group", Endpoint: "destination", Sender: sender, SenderLabel: label + " (Amber Badger)"})
+		if !strings.HasSuffix(got, " (Amber Badger):") || strings.Count(got, "Amber Badger") != 1 || len([]rune(got)) > maxWebhookUsernameRunes+1 {
 			t.Fatalf("poll attribution = %q", got)
 		}
 		if name == "" && !strings.Contains(got, sender.OpaqueID) {
@@ -804,17 +816,17 @@ func TestPollAttributionKeepsDiscriminatorAndFallbackName(t *testing.T) {
 	}
 }
 
-func TestDiscriminatorPreservesWebhookNameFallback(t *testing.T) {
-	for _, code := range []string{"", "7WCUX"} {
+func TestAliasPreservesWebhookNameFallback(t *testing.T) {
+	for _, alias := range []string{"", "Amber Badger"} {
 		webhook := &fakeChannelWebhook{managed: make(map[string]string)}
 		adapter := newOutboundTestAdapter(webhook, &fakeDiscordAPI{})
-		_, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "discord", OriginEndpoint: "source", Sender: transport.Sender{DisplayName: "\x00", OpaqueID: "u_abcdefghij", Discriminator: code}, Kind: "text", SourceText: "hello"})
+		_, err := adapter.Send(context.Background(), transport.Outgoing{Endpoint: "discord", OriginEndpoint: "source", Sender: transport.Sender{DisplayName: "\x00", OpaqueID: "u_abcdefghij", Alias: alias}, Kind: "text", SourceText: "hello"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := "source/u_abcdefghij"
-		if code != "" {
-			want += " " + code
+		if alias != "" {
+			want += " (" + alias + ")"
 		}
 		if got := webhook.executed[0].Username; got != want {
 			t.Fatalf("fallback name = %q, want %q", got, want)

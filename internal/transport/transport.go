@@ -61,21 +61,31 @@ type ChildScope struct {
 type ChildScopeLabelObserver func(context.Context, EndpointID, ChildScope)
 
 type Sender struct {
-	Discriminator string // derived presentation suffix; empty when hidden
-	DisplayName   string // transient only; never persist
-	PhoneNumber   string // transient only; never persist
-	OpaqueID      string // HMAC-derived application identity
+	Alias               string // permanent alias assigned within the owning sync set
+	Anonymized          bool   // route-specific presentation; alias only when true
+	IdentityUnavailable bool   // adapter could not establish a stable canonical author
+	DisplayName         string // transient only; never persist
+	PhoneNumber         string // transient only; never persist
+	OpaqueID            string // HMAC-derived application identity
 }
 
-// NameWithDiscriminator formats a presentation name without changing identity.
-func (s Sender) NameWithDiscriminator(name string) string {
-	if name == "" || s.Discriminator == "" {
+// NameWithAlias preserves the assigned address in every rendered author label.
+func (s Sender) NameWithAlias(name string) string {
+	if s.Anonymized {
+		return s.Alias
+	}
+	if s.Alias == "" {
 		return name
 	}
-	return name + " " + s.Discriminator
+	if name == "" {
+		return s.Alias
+	}
+	return name + " (" + s.Alias + ")"
 }
 
 type Mention struct {
+	Alias    string // router-resolved assignment; empty for unassigned mentions
+	ActorID  string // authoritative normalized actor, if different from the transient text token
 	RemoteID string
 	Name     string
 }
@@ -84,19 +94,10 @@ type Mention struct {
 // identity; no native provider ID is persisted or passed through the router.
 // Each destination independently verifies membership before notifying.
 type CrossReference struct {
-	Token     string
-	Endpoint  EndpointID
-	ActorID   string
-	Handle    string // stable endpoint-local handle, e.g. P1
-	Name      string // transient observed display name; never persist
-	Pseudonym string // derived from the HMAC actor ID; no provider identity
-}
-
-// ParticipantResolver resolves a name in one configured source group against
-// already registered HMAC actors. Provider IDs and names remain adapter-owned
-// transient data; the returned identity must be one of the supplied actors.
-type ParticipantResolver interface {
-	ResolveParticipant(context.Context, EndpointID, string, []string) (string, bool)
+	Token   string // exact authored token, preserved whenever native rendering is unavailable
+	ActorID string
+	Alias   string
+	Name    string // optional transient display name
 }
 
 type Incoming struct {
@@ -110,6 +111,7 @@ type Incoming struct {
 	Mentions              []Mention
 	ReplyTo               *MessageRef
 	ChildScope            *ChildScope
+	QuotedMentions        []Mention // transient metadata for identities occurring only in a reply quote
 	QuotedText            string
 	Timestamp             time.Time
 	MediaLoader           func(context.Context) ([]byte, error)

@@ -131,18 +131,6 @@ func (r *AdapterRegistry) Send(ctx context.Context, outgoing transport.Outgoing)
 	return adapter.Send(ctx, outgoing)
 }
 
-func (r *AdapterRegistry) ResolveParticipant(ctx context.Context, endpoint transport.EndpointID, label string, actors []string) (string, bool) {
-	adapter, err := r.adapterFor(endpoint)
-	if err != nil {
-		return "", false
-	}
-	resolver, ok := adapter.(transport.ParticipantResolver)
-	if !ok {
-		return "", false
-	}
-	return resolver.ResolveParticipant(ctx, endpoint, label, actors)
-}
-
 func (r *AdapterRegistry) privateMessengerForEndpoint(endpoint transport.EndpointID) (transport.PrivateMessenger, error) {
 	adapter, err := r.adapterFor(endpoint)
 	if err != nil {

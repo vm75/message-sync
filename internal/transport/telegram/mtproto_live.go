@@ -105,9 +105,9 @@ type mtprotoLiveState struct {
 	endpointSettings map[string]config.SyncSetSettings
 	mu               sync.RWMutex
 
-	connectionID  string
-	hasher        *identity.Hasher
-	usernameMode  config.UsernameMode
+	connectionID string
+	hasher       *identity.Hasher
+
 	normalizer    *Normalizer
 	mediaEnabled  bool
 	mediaMaxBytes uint64
@@ -128,7 +128,7 @@ func newMTProtoLiveState(opts Options) (*mtprotoLiveState, error) {
 		connectionID:     strings.TrimSpace(opts.ConnectionID),
 		endpointSettings: opts.EndpointSettings,
 		hasher:           opts.Hasher,
-		usernameMode:     opts.UsernameMode,
+
 		mediaEnabled:     opts.MediaEnabled,
 		mediaMaxBytes:    opts.MediaMaxBytes,
 		peers:            make(map[string]mtprotoPeerState),
@@ -142,10 +142,8 @@ func newMTProtoLiveState(opts Options) (*mtprotoLiveState, error) {
 		if opts.Hasher == nil {
 			return nil, errors.New("identity hasher is required for Telegram MTProto endpoints")
 		}
-		if !opts.UsernameMode.IsValid() {
-			return nil, errors.New("username mode must be push_name or hash")
-		}
-		normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID, opts.EndpointSettings)
+
+		normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.ConnectionID, opts.EndpointSettings)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +171,7 @@ func (l *mtprotoLiveState) updateConfig(cfg *config.Config, connectionID string)
 	var normalizer *Normalizer
 	var err error
 	if l.hasher != nil {
-		normalizer, err = NewNormalizerWithConnection(chatIDs, l.hasher, cfg.LegacySettings().UsernameMode, connectionID, cfg.EndpointSettings(connectionID))
+		normalizer, err = NewNormalizerWithConnection(chatIDs, l.hasher, connectionID, cfg.EndpointSettings(connectionID))
 		if err != nil {
 			return err
 		}
@@ -181,7 +179,7 @@ func (l *mtprotoLiveState) updateConfig(cfg *config.Config, connectionID string)
 	l.mu.Lock()
 	l.normalizer = normalizer
 	l.endpointSettings = cfg.EndpointSettings(connectionID)
-	l.usernameMode = cfg.Identity.UsernameMode
+
 	l.mediaEnabled = cfg.Media.Enabled
 	l.mediaMaxBytes = uint64(cfg.Media.MaxSizeMB) * 1024 * 1024
 	l.mu.Unlock()
@@ -949,15 +947,9 @@ func (a *MTProtoAdapter) handleMTProtoReactionUpdate(ctx context.Context, update
 			child = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: strconv.Itoa(topicID), Label: a.live.topicLabel(strconv.FormatInt(remote, 10), topicID)}
 		}
 		displayName := ""
-		a.live.mu.RLock()
-		mode := a.live.usernameMode
-		if policy, ok := a.live.endpointSettings[string(endpoint)]; ok {
-			mode = policy.UsernameMode
-		}
-		a.live.mu.RUnlock()
-		if mode == config.UsernameModePushName {
-			displayName = event.DisplayName
-		}
+
+		displayName = event.DisplayName
+
 		a.emitMTProto(transport.Incoming{
 			Endpoint:   endpoint,
 			RemoteID:   strconv.Itoa(update.MsgID),

@@ -193,7 +193,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						DatabasePath:     dbPath,
 						GroupJIDs:        connGroupJIDs,
 						Hasher:           hasher,
-						UsernameMode:     cfg.Identity.UsernameMode,
+
 						Logger:           logger,
 						QROut:            os.Stdout,
 						EnableTerminalQR: false,
@@ -252,10 +252,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						ExplicitWebhookURL:       discordCredential.WebhookURL,
 						ExplicitWebhookChannelID: discordCredential.ChannelID,
 						Hasher:                   hasher,
-						UsernameMode:             cfg.Identity.UsernameMode,
-						Logger:                   logger,
-						MediaEnabled:             cfg.Media.Enabled,
-						MediaMaxBytes:            uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+
+						Logger:        logger,
+						MediaEnabled:  cfg.Media.Enabled,
+						MediaMaxBytes: uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
 					})
 					if err != nil {
 						safelog.Error(logger, "start Discord transport failed", "discord_start", err)
@@ -314,11 +314,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 						MTProtoStateStore: mtState,
 						ChatIDs:           connChatIDs,
 						Hasher:            hasher,
-						UsernameMode:      cfg.Identity.UsernameMode,
-						Logger:            logger,
-						MediaEnabled:      cfg.Media.Enabled,
-						MediaMaxBytes:     uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
-						InitialUpdateID:   initialUpdateID,
+
+						Logger:          logger,
+						MediaEnabled:    cfg.Media.Enabled,
+						MediaMaxBytes:   uint64(cfg.Media.MaxSizeMB) * 1024 * 1024,
+						InitialUpdateID: initialUpdateID,
 						MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 							return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), connID, oldRemoteID, newRemoteID)
 						},
@@ -465,7 +465,7 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							DatabasePath:     dbPath,
 							GroupJIDs:        connGroupJIDs,
 							Hasher:           hasher,
-							UsernameMode:     updatedCfg.Identity.UsernameMode,
+
 							Logger:           logger,
 							QROut:            os.Stdout,
 							EnableTerminalQR: false,
@@ -525,10 +525,10 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							ExplicitWebhookURL:       discordCredential.WebhookURL,
 							ExplicitWebhookChannelID: discordCredential.ChannelID,
 							Hasher:                   hasher,
-							UsernameMode:             updatedCfg.Identity.UsernameMode,
-							Logger:                   logger,
-							MediaEnabled:             updatedCfg.Media.Enabled,
-							MediaMaxBytes:            uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+
+							Logger:        logger,
+							MediaEnabled:  updatedCfg.Media.Enabled,
+							MediaMaxBytes: uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
 						})
 						if err != nil {
 							safelog.Error(logger, "start Discord transport failed", "discord_start", err)
@@ -605,11 +605,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 							MTProtoStateStore: mtState,
 							ChatIDs:           connChatIDs,
 							Hasher:            hasher,
-							UsernameMode:      updatedCfg.Identity.UsernameMode,
-							Logger:            logger,
-							MediaEnabled:      updatedCfg.Media.Enabled,
-							MediaMaxBytes:     uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
-							InitialUpdateID:   initialUpdateID,
+
+							Logger:          logger,
+							MediaEnabled:    updatedCfg.Media.Enabled,
+							MediaMaxBytes:   uint64(updatedCfg.Media.MaxSizeMB) * 1024 * 1024,
+							InitialUpdateID: initialUpdateID,
 							MigrateEndpoint: func(migrationCtx context.Context, endpoint transport.EndpointID, oldRemoteID, newRemoteID string) error {
 								return config.MigrateTelegramEndpoint(migrationCtx, syncStore.DB(), string(endpoint), cid, oldRemoteID, newRemoteID)
 							},
@@ -661,7 +661,6 @@ func Run(ctx context.Context, cfg *config.Config, logger *slog.Logger) error {
 		logger.Info("configuration reloaded",
 			"endpoints", len(updatedCfg.Endpoints),
 			"sync_sets", len(updatedCfg.SyncSets),
-			"username_mode", string(updatedCfg.Identity.UsernameMode),
 		)
 		return nil
 	}

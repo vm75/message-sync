@@ -10,7 +10,6 @@ import (
 
 	gotdsession "github.com/gotd/td/session"
 	"github.com/gotd/td/tg"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -140,9 +139,9 @@ func newMTProtoLiveAdapter(t *testing.T, connectionID string, remoteID string, l
 		MTProtoStateStore: store,
 		ChatIDs:           map[string]string{"tg": remoteID},
 		Hasher:            hasher,
-		UsernameMode:      config.UsernameModePushName,
-		MediaEnabled:      true,
-		MediaMaxBytes:     1024 * 1024,
+
+		MediaEnabled:  true,
+		MediaMaxBytes: 1024 * 1024,
 		mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime {
 			return fakeMTLiveRuntime{auth: live}
 		},
@@ -319,7 +318,7 @@ func TestMTProtoLiveOutboundReplyMediaMutationsAndPeerPersistence(t *testing.T) 
 	hasher, _ := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	restarted, err := OpenMTProto(context.Background(), Options{
 		ConnectionID: "mt-persist", Logger: testLogger(), MTProtoStateStore: store,
-		ChatIDs: map[string]string{"tg": "-1000000000042"}, Hasher: hasher, UsernameMode: config.UsernameModePushName,
+		ChatIDs: map[string]string{"tg": "-1000000000042"}, Hasher: hasher,
 		MediaEnabled: true, MediaMaxBytes: 1024 * 1024,
 		mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime {
 			live2.authorized = true

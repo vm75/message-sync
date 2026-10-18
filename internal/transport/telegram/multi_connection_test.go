@@ -25,11 +25,11 @@ func TestMultiTelegramConcurrentPollingAndRecoveryCursors(t *testing.T) {
 
 	norm1, _ := NewNormalizerWithConnection(map[string]string{
 		"tg1": "-1001111111111",
-	}, hasher, config.UsernameModeHash, "conn-tg-1")
+	}, hasher, "conn-tg-1")
 
 	norm2, _ := NewNormalizerWithConnection(map[string]string{
 		"tg2": "-1002222222222",
-	}, hasher, config.UsernameModeHash, "conn-tg-2")
+	}, hasher, "conn-tg-2")
 
 	api1 := &fakeTelegramAPI{botID: 1001}
 	api2 := &fakeTelegramAPI{botID: 1002}
@@ -135,8 +135,8 @@ func TestMultiTelegramPollProviderReferenceIsolation(t *testing.T) {
 	ctx := context.Background()
 
 	hasher, _ := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, config.UsernameModeHash, "conn-tg-1")
-	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, config.UsernameModeHash, "conn-tg-2")
+	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, "conn-tg-1")
+	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, "conn-tg-2")
 
 	api1 := &fakeTelegramAPI{botID: 1001}
 	api2 := &fakeTelegramAPI{botID: 1002}
@@ -240,8 +240,8 @@ func TestMultiTelegramTopicLifecycleAcrossConnections(t *testing.T) {
 	ctx := context.Background()
 
 	hasher, _ := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, config.UsernameModeHash, "conn-tg-1")
-	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, config.UsernameModeHash, "conn-tg-2")
+	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, "conn-tg-1")
+	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, "conn-tg-2")
 
 	api1 := &fakeTelegramAPI{botID: 1001}
 	api2 := &fakeTelegramAPI{botID: 1002}
@@ -372,8 +372,8 @@ func TestMultiTelegramDistinctDiscoveryAndStatus(t *testing.T) {
 	ctx := context.Background()
 
 	hasher, _ := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, config.UsernameModeHash, "conn-tg-1")
-	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, config.UsernameModeHash, "conn-tg-2")
+	norm1, _ := NewNormalizerWithConnection(map[string]string{"tg1": "-1001111111111"}, hasher, "conn-tg-1")
+	norm2, _ := NewNormalizerWithConnection(map[string]string{"tg2": "-1002222222222"}, hasher, "conn-tg-2")
 
 	api1 := &fakeTelegramAPI{botID: 1001}
 	api2 := &fakeTelegramAPI{botID: 1002}
@@ -495,7 +495,7 @@ func TestTelegramTokenPrivacyNonDisclosure(t *testing.T) {
 	hasher, _ := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	token := "123456:secret-token-value-never-leak"
 
-	norm, _ := NewNormalizerWithConnection(map[string]string{"tg": "-1001111111111"}, hasher, config.UsernameModeHash, "conn-tg-1")
+	norm, _ := NewNormalizerWithConnection(map[string]string{"tg": "-1001111111111"}, hasher, "conn-tg-1")
 	ad := &Adapter{
 		connectionID: "conn-tg-1",
 		token:        token,

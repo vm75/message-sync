@@ -30,11 +30,11 @@ func TestTelegramTokenInjectionFromOptions(t *testing.T) {
 
 	t.Run("missing token returns error", func(t *testing.T) {
 		_, err := Open(context.Background(), Options{
-			ChatIDs:      map[string]string{"tg": "-1001234567890"},
-			Hasher:       hasher,
-			UsernameMode: config.UsernameModeHash,
-			Logger:       slog.Default(),
-			Token:        "",
+			ChatIDs: map[string]string{"tg": "-1001234567890"},
+			Hasher:  hasher,
+
+			Logger: slog.Default(),
+			Token:  "",
 		})
 		if err == nil || !strings.Contains(err.Error(), "Telegram bot token is required") {
 			t.Fatalf("expected token required error, got: %v", err)
@@ -51,11 +51,11 @@ func TestTelegramTokenInjectionFromOptions(t *testing.T) {
 		defer cancel()
 
 		adapter, err := Open(ctx, Options{
-			ConnectionID:  "conn-tg-1",
-			Token:         "12345:injected-secret-token",
-			ChatIDs:       map[string]string{"tg": "-1001234567890"},
-			Hasher:        hasher,
-			UsernameMode:  config.UsernameModeHash,
+			ConnectionID: "conn-tg-1",
+			Token:        "12345:injected-secret-token",
+			ChatIDs:      map[string]string{"tg": "-1001234567890"},
+			Hasher:       hasher,
+
 			Logger:        slog.Default(),
 			clientFactory: factory,
 		})
@@ -97,7 +97,6 @@ func TestTelegramAdapterEndpointOwnership(t *testing.T) {
 				RemoteID:     "-1009876543210",
 			},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := adapter.UpdateConfig(cfg); err != nil {
@@ -192,7 +191,6 @@ func TestAdapterUpdateConfigUsesOnlyTelegramEndpoints(t *testing.T) {
 			"discord":  {Transport: config.TransportDiscord, RemoteID: "123456789012345678"},
 			"telegram": {Transport: config.TransportTelegram, RemoteID: strconv.FormatInt(testGroupID, 10)},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := adapter.UpdateConfig(cfg); err != nil {
@@ -208,7 +206,7 @@ func TestAdapterUpdateConfigUsesOnlyTelegramEndpoints(t *testing.T) {
 }
 
 func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	adapter := &Adapter{
 		connectionID: "conn-tg-test",
 		normalizer:   normalizer,
@@ -253,7 +251,7 @@ func TestHandleUpdateRejectsDuplicateAndOlderOffsets(t *testing.T) {
 }
 
 func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	adapter := &Adapter{
 		connectionID: "conn-tg-test",
 		normalizer:   normalizer,
@@ -296,7 +294,7 @@ func TestHandleUpdateEmitsTelegramReactionLifecycle(t *testing.T) {
 }
 
 func TestHandleUpdateObservesTelegramForumTopicLabelsWithoutRoutingServiceMessages(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	type observedLabel struct {
 		endpoint transport.EndpointID
 		scope    transport.ChildScope
@@ -462,7 +460,7 @@ func TestNewBotClientStartsAtAcceptedUpdatePlusOne(t *testing.T) {
 }
 
 func TestHandleUpdateDropsBridgeBotWithoutLoggingProtocolData(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	var logBuf bytes.Buffer
 	adapter := &Adapter{
 		normalizer: normalizer,
@@ -550,8 +548,8 @@ func TestOpenStartsAndStopsLongPollingWithContext(t *testing.T) {
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
-		Hasher:          hasher,
-		UsernameMode:    config.UsernameModePushName,
+		Hasher: hasher,
+
 		InitialUpdateID: 12,
 		Logger:          slog.New(slog.NewJSONHandler(&logBuf, nil)),
 		clientFactory:   factory,
@@ -645,9 +643,9 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 		ChatIDs: map[string]string{
 			"team-telegram": strconv.FormatInt(testGroupID, 10),
 		},
-		Hasher:       hasher,
-		UsernameMode: config.UsernameModeHash,
-		Logger:       logger,
+		Hasher: hasher,
+
+		Logger: logger,
 		clientFactory: func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error) {
 			return nil, errors.New("raw api failure user-id=999 private-body")
 		},
@@ -665,7 +663,7 @@ func TestOpenSanitizesClientInitializationError(t *testing.T) {
 }
 
 func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	const newChatID int64 = -1009876543210
 	var logBuf bytes.Buffer
 	var (
@@ -762,7 +760,7 @@ func TestHandleTelegramGroupMigrationPreservesAliasAndRoutesNewChat(t *testing.T
 }
 
 func TestHandleUpdateLogsOnlySafeUnsupportedEventClass(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModePushName)
+	normalizer := testNormalizer(t)
 	var logBuf bytes.Buffer
 	adapter := &Adapter{
 		normalizer: normalizer,

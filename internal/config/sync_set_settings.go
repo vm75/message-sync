@@ -7,11 +7,9 @@ import (
 
 // SyncSetSettings owns the message and lifecycle policy for one routing mesh.
 type SyncSetSettings struct {
-	MembershipReviewEnabled bool                    `json:"membershipReviewEnabled"`
-	PrivateDMRelayEnabled   bool                    `json:"privateDMRelayEnabled"`
-	UsernameMode            UsernameMode            `json:"usernameMode"`
-	ShowDiscriminator       bool                    `json:"showDiscriminator"`
-	CodeLength              int                     `json:"codeLength"`
+	MembershipReviewEnabled bool `json:"membershipReviewEnabled"`
+	PrivateDMRelayEnabled   bool `json:"privateDMRelayEnabled"`
+
 	ChildContextDisplayMode ChildContextDisplayMode `json:"childContextDisplayMode"`
 	Media                   Media                   `json:"media"`
 	Recovery                Recovery                `json:"recovery"`
@@ -23,8 +21,7 @@ type SyncSetSettings struct {
 
 func DefaultSyncSetSettings() SyncSetSettings {
 	return SyncSetSettings{
-		UsernameMode:            UsernameModePushName,
-		CodeLength:              8,
+
 		ChildContextDisplayMode: ChildContextDisplayOpaque,
 		Media:                   Media{Enabled: true, MaxSizeMB: 100},
 		Recovery:                Recovery{Enabled: true, MaxAgeHours: 24, MaxMessagesPerGroup: 200},
@@ -39,9 +36,7 @@ func (c *Config) LegacySettings() SyncSetSettings {
 	copy := *c
 	applyDefaults(&copy)
 	return SyncSetSettings{
-		UsernameMode:            copy.Identity.UsernameMode,
-		ShowDiscriminator:       copy.ShowDiscriminator,
-		CodeLength:              5,
+
 		ChildContextDisplayMode: copy.ChildContextDisplayMode,
 		Media:                   copy.Media,
 		Recovery:                copy.Recovery,
@@ -93,12 +88,7 @@ func (c *Config) PrivateDMConnectionEnabled(connectionID string) bool {
 }
 
 func (s SyncSetSettings) Validate() error {
-	if !s.UsernameMode.IsValid() {
-		return errors.New("usernameMode must be push_name or hash")
-	}
-	if s.CodeLength < 5 || s.CodeLength > 10 {
-		return errors.New("codeLength must be between 5 and 10")
-	}
+
 	if !s.ChildContextDisplayMode.IsValid() {
 		return errors.New("childContextDisplayMode must be opaque or friendly")
 	}

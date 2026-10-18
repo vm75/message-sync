@@ -80,13 +80,12 @@ func TestMultiDiscordConnectionsConcurrentOutboundAndIngress(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "mesh", Endpoints: []string{"d1", "d2", "d3"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	norm1, _ := NewNormalizer(map[string]string{
 		"d1": "100000000000000001",
 		"d2": "100000000000000002",
-	}, hasher, config.UsernameModeHash)
+	}, hasher)
 	wh1 := &threadedFakeWebhook{fakeChannelWebhook: fakeChannelWebhook{managed: make(map[string]string)}}
 	ad1 := &Adapter{
 		connectionID:      "conn-dc-1",
@@ -102,7 +101,7 @@ func TestMultiDiscordConnectionsConcurrentOutboundAndIngress(t *testing.T) {
 
 	norm2, _ := NewNormalizer(map[string]string{
 		"d3": "100000000000000003",
-	}, hasher, config.UsernameModeHash)
+	}, hasher)
 	wh2 := &threadedFakeWebhook{fakeChannelWebhook: fakeChannelWebhook{managed: make(map[string]string)}}
 	ad2 := &Adapter{
 		connectionID:      "conn-dc-2",
@@ -514,7 +513,6 @@ func TestMultiDiscordEndpointReassignment(t *testing.T) {
 			"d1": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-2", RemoteID: "100000000000000001"},
 			"d2": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-2", RemoteID: "100000000000000002"},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := ad1.UpdateConfig(newCfg); err != nil {

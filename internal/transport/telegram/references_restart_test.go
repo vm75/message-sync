@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-telegram/bot/models"
 	"github.com/vm75/message-sync/internal/config"
-	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -39,89 +39,91 @@ func (s *telegramReferenceSender) Send(ctx context.Context, outgoing transport.O
 	return ref, err
 }
 
-func TestTelegramDiscriminatorAddressAfterRouterRestart(t *testing.T) {
-	for _, show := range []bool{false, true} {
-		for _, observed := range []bool{false, true} {
-			t.Run(fmt.Sprintf("show=%t/native-observed=%t", show, observed), func(t *testing.T) {
-				ctx := context.Background()
-				db, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
-				cfg := &config.Config{ShowDiscriminator: show,
-					Endpoints: map[string]config.Endpoint{"tg": {Transport: config.TransportTelegram, ConnectionID: "tg", RemoteID: "-1001234567890"}, "source": {Transport: config.TransportWhatsApp, ConnectionID: "wa", RemoteID: "111@g.us"}},
-					SyncSets:  []config.SyncSet{{ID: "mesh", Endpoints: []string{"tg", "source"}}}, Identity: config.Identity{UsernameMode: config.UsernameModePushName}}
-				if err := config.Save(ctx, db.DB(), cfg); err != nil {
-					t.Fatal(err)
-				}
-				newSender := func() *telegramReferenceSender {
-					api := &crossMentionAPI{fakeTelegramAPI: &fakeTelegramAPI{}}
-					adapter := newOutboundTestAdapter(t, api.fakeTelegramAPI)
-					adapter.client = api
-					return &telegramReferenceSender{Adapter: adapter, api: api, delivered: make(chan telegramReferenceDelivery, 2)}
-				}
-				receive := func(sender *telegramReferenceSender) telegramReferenceDelivery {
-					select {
-					case sent := <-sender.delivered:
-						return sent
-					case <-time.After(3 * time.Second):
-						t.Fatal("timed out waiting for delivery")
-						return telegramReferenceDelivery{}
-					}
-				}
-				sender := newSender()
-				mesh, err := router.NewWithHasher(cfg, db, sender, sender.hasher)
-				if err != nil {
-					t.Fatal(err)
-				}
-				incoming, ok := sender.normalizer.NormalizeMessage(&models.Message{ID: 101, Date: 1700000000, Chat: models.Chat{ID: -1001234567890, Type: models.ChatTypeSupergroup}, From: &models.User{ID: 123, FirstName: "Alice"}, Text: "hello"}, 999)
-				if !ok {
-					t.Fatal("Telegram event rejected")
-				}
-				if err := mesh.Handle(ctx, incoming); err != nil {
-					t.Fatal(err)
-				}
-				forwarded := receive(sender).text
-				suffix := identity.Discriminator(incoming.Sender.OpaqueID)
-				if strings.Contains(forwarded, suffix) != show {
-					t.Fatalf("forwarded suffix visibility: %q", forwarded)
-				}
-				mesh.Close()
+func TestTelegramAliasAddressAfterRouterRestart(t *testing.T) {
 
-				sender = newSender() // Native IDs and names are deliberately absent after restart.
-				if observed {
-					sender.rememberCrossMentionParticipant("tg", incoming.Sender.OpaqueID, 123)
+	for _, observed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("native-observed=%t", observed), func(t *testing.T) {
+			ctx := context.Background()
+			db, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			cfg := &config.Config{
+				Endpoints: map[string]config.Endpoint{"tg": {Transport: config.TransportTelegram, ConnectionID: "tg", RemoteID: "-1001234567890"}, "source": {Transport: config.TransportWhatsApp, ConnectionID: "wa", RemoteID: "111@g.us"}},
+				SyncSets:  []config.SyncSet{{ID: "mesh", Endpoints: []string{"tg", "source"}}}}
+			if err := config.Save(ctx, db.DB(), cfg); err != nil {
+				t.Fatal(err)
+			}
+			newSender := func() *telegramReferenceSender {
+				api := &crossMentionAPI{fakeTelegramAPI: &fakeTelegramAPI{}}
+				adapter := newOutboundTestAdapter(t, api.fakeTelegramAPI)
+				adapter.client = api
+				return &telegramReferenceSender{Adapter: adapter, api: api, delivered: make(chan telegramReferenceDelivery, 2)}
+			}
+			receive := func(sender *telegramReferenceSender) telegramReferenceDelivery {
+				select {
+				case sent := <-sender.delivered:
+					return sent
+				case <-time.After(3 * time.Second):
+					t.Fatal("timed out waiting for delivery")
+					return telegramReferenceDelivery{}
 				}
-				mesh, err = router.NewWithHasher(cfg, db, sender, sender.hasher)
-				if err != nil {
-					t.Fatal(err)
+			}
+			sender := newSender()
+			testutil.SeedRouting(t, db.DB(), cfg)
+			mesh, err := router.NewWithHasher(cfg, db, sender, sender.hasher)
+			if err != nil {
+				t.Fatal(err)
+			}
+			incoming, ok := sender.normalizer.NormalizeMessage(&models.Message{ID: 101, Date: 1700000000, Chat: models.Chat{ID: -1001234567890, Type: models.ChatTypeSupergroup}, From: &models.User{ID: 123, FirstName: "Alice"}, Text: "hello"}, 999)
+			if !ok {
+				t.Fatal("Telegram event rejected")
+			}
+			if err := mesh.Handle(ctx, incoming); err != nil {
+				t.Fatal(err)
+			}
+			forwarded := receive(sender).text
+			alias, err := db.AliasByActor(ctx, "mesh", incoming.Sender.OpaqueID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(forwarded, "Alice ("+alias+")") {
+				t.Fatalf("forwarded suffix visibility: %q", forwarded)
+			}
+			mesh.Close()
+
+			sender = newSender() // Native IDs and names are deliberately absent after restart.
+			if observed {
+				sender.rememberCrossMentionParticipant("tg", incoming.Sender.OpaqueID, 123)
+			}
+			testutil.SeedRouting(t, db.DB(), cfg)
+			mesh, err = router.NewWithHasher(cfg, db, sender, sender.hasher)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer mesh.Close()
+			token := "@{" + alias + "}"
+			sourceActor := sender.hasher.UserID("999@lid")
+			if err := mesh.Handle(ctx, transport.Incoming{Endpoint: "source", RemoteID: "reference", Kind: "text", Sender: transport.Sender{OpaqueID: sourceActor, DisplayName: "Bob"}, Text: "Hi " + token, Timestamp: time.Now().UTC()}); err != nil {
+				t.Fatal(err)
+			}
+			sent := receive(sender)
+			if len(sent.outgoing.References) != 1 || sent.outgoing.References[0].ActorID != incoming.Sender.OpaqueID {
+				t.Fatalf("code failed to resolve after restart: %+v", sent.outgoing.References)
+			}
+			author := "source/Bob (Amber Bear)"
+			if !strings.Contains(sent.text, author) {
+				t.Fatalf("Telegram sender attribution = %q, want %q", sent.text, author)
+			}
+			if observed {
+				if !strings.Contains(sent.text, `<a href="tg://user?id=123">@Amber Badger</a>`) || strings.Contains(sent.text, token) {
+					t.Fatalf("native Telegram mention missing: %q", sent.text)
 				}
-				defer mesh.Close()
-				token := "@{tg/" + suffix + "}"
-				sourceActor := sender.hasher.UserID("999@lid")
-				if err := mesh.Handle(ctx, transport.Incoming{Endpoint: "source", RemoteID: "reference", Kind: "text", Sender: transport.Sender{OpaqueID: sourceActor, DisplayName: "Bob"}, Text: "Hi " + token, Timestamp: time.Now().UTC()}); err != nil {
-					t.Fatal(err)
-				}
-				sent := receive(sender)
-				if len(sent.outgoing.References) != 1 || sent.outgoing.References[0].ActorID != incoming.Sender.OpaqueID {
-					t.Fatalf("code failed to resolve after restart: %+v", sent.outgoing.References)
-				}
-				author := "source/Bob"
-				if show {
-					author += " " + identity.Discriminator(sourceActor)
-				}
-				if !strings.Contains(sent.text, author) {
-					t.Fatalf("Telegram sender attribution = %q, want %q", sent.text, author)
-				}
-				if observed {
-					if !strings.Contains(sent.text, `<a href="tg://user?id=123">@P1</a>`) || strings.Contains(sent.text, token) {
-						t.Fatalf("native Telegram mention missing: %q", sent.text)
-					}
-				} else if !strings.Contains(sent.text, token) {
-					t.Fatalf("cold native cache changed literal token: %q", sent.text)
-				}
-			})
-		}
+			} else if !strings.Contains(sent.text, token) {
+				t.Fatalf("cold native cache changed literal token: %q", sent.text)
+			}
+		})
 	}
+
 }

@@ -32,6 +32,7 @@ func TestAdapterRegistryMixedTransportFanout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +89,7 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	firstRouter, err := New(cfg, syncStore, firstRegistry)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +124,7 @@ func TestAdapterRegistryPartialFanoutRestartRetriesOnlyMissingTransport(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	restarted, err := New(cfg, syncStore, secondRegistry)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +174,6 @@ func mixedTransportConfig() *config.Config {
 			ID:        "mesh",
 			Endpoints: []string{"wa1", "discord", "wa2"},
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 }
 
@@ -220,6 +222,7 @@ func TestAdapterRegistryThreeTransportFanout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -293,6 +296,7 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 		_ = firstStore.Close()
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, firstStore, cfg)
 	firstRouter, err := New(cfg, firstStore, firstRegistry)
 	if err != nil {
 		_ = firstStore.Close()
@@ -343,6 +347,7 @@ func TestAdapterRegistryThreeTransportPartialFailureRetriesOnlyMissingCopy(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, secondStore, cfg)
 	restarted, err := New(cfg, secondStore, secondRegistry)
 	if err != nil {
 		t.Fatal(err)
@@ -379,6 +384,7 @@ func TestAdapterRegistryTelegramMessageIDIsOnlyRemoteCopyIdentity(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)
@@ -516,6 +522,5 @@ func threeTransportConfig() *config.Config {
 			ID:        "mesh",
 			Endpoints: []string{"wa", "discord", "telegram"},
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 }

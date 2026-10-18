@@ -78,7 +78,6 @@ func TestDiscordAdapterEndpointOwnership(t *testing.T) {
 			"d3": {Transport: config.TransportDiscord, ConnectionID: "conn-dc-2", RemoteID: "123456789012345673"},
 			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := ad.UpdateConfig(cfg); err != nil {
@@ -163,7 +162,6 @@ func TestAdapterUpdateConfigUsesOnlyDiscordEndpoints(t *testing.T) {
 			"wa":      {Transport: config.TransportWhatsApp, RemoteID: "123456789@g.us"},
 			"discord": {Transport: config.TransportDiscord, RemoteID: testChannelID},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	if err := adapter.UpdateConfig(cfg); err != nil {
@@ -194,7 +192,7 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"team-discord": testChannelID}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"team-discord": testChannelID}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +219,7 @@ func TestHandleMessageCreateDropsBridgeBotWithoutLoggingProtocolData(t *testing.
 }
 
 func TestConfiguredIngressChannelFlattensThreadsToParentAlias(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	state := discordgo.NewState()
 	if err := state.GuildAdd(&discordgo.Guild{ID: testGuildID}); err != nil {
 		t.Fatal(err)
@@ -269,7 +267,7 @@ func TestConfiguredIngressChannelFlattensThreadsToParentAlias(t *testing.T) {
 }
 
 func TestConfiguredIngressChannelRejectsUnconfiguredThreadParent(t *testing.T) {
-	normalizer := testNormalizer(t, config.UsernameModeHash)
+	normalizer := testNormalizer(t)
 	state := discordgo.NewState()
 	if err := state.GuildAdd(&discordgo.Guild{ID: testGuildID}); err != nil {
 		t.Fatal(err)

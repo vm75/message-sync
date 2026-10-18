@@ -101,7 +101,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 			"telegram": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: telegramRemoteID},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "discord", "telegram"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{Enabled: true, MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -136,6 +136,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
+	seedRoutingConfig(t, dataDir, cfg)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 
 	select {
@@ -147,7 +148,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 			cancel()
 			t.Fatalf("Telegram chat filter was not initialized correctly: %+v", opts.ChatIDs)
 		}
-		if opts.Hasher == nil || opts.UsernameMode != config.UsernameModeHash {
+		if opts.Hasher == nil {
 			cancel()
 			t.Fatal("Telegram privacy options were not initialized")
 		}
@@ -192,7 +193,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	wa.events <- transport.Incoming{
 		Endpoint:  "wa",
 		RemoteID:  "wa-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_goinphpotc"},
 		Kind:      "text",
 		Text:      "from whatsapp",
 		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
@@ -211,7 +212,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	tg.events <- transport.Incoming{
 		Endpoint:  "telegram",
 		RemoteID:  "telegram-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_tgactor0001", DisplayName: "private Telegram display sentinel"},
+		Sender:    transport.Sender{OpaqueID: "u_j6zw7fxg75", DisplayName: "private Telegram display sentinel"},
 		Kind:      "text",
 		Text:      "from telegram",
 		Timestamp: time.Unix(1_700_000_001, 0).UTC(),
@@ -230,14 +231,14 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	dc.mu.Lock()
 	telegramToDiscord := dc.sent[1]
 	dc.mu.Unlock()
-	if telegramToDiscord.Sender.DisplayName != "private Telegram display sentinel" || telegramToDiscord.Sender.OpaqueID != "u_tgactor0001" {
+	if telegramToDiscord.Sender.DisplayName != "private Telegram display sentinel" || telegramToDiscord.Sender.OpaqueID != "u_j6zw7fxg75" {
 		cancel()
 		t.Fatalf("Telegram sender attribution was not preserved transiently for Discord rendering: %+v", telegramToDiscord.Sender)
 	}
 	wa.mu.Lock()
 	telegramToWhatsApp := wa.sent[0]
 	wa.mu.Unlock()
-	if telegramToWhatsApp.Sender.DisplayName != "private Telegram display sentinel" || telegramToWhatsApp.Sender.OpaqueID != "u_tgactor0001" {
+	if telegramToWhatsApp.Sender.DisplayName != "private Telegram display sentinel" || telegramToWhatsApp.Sender.OpaqueID != "u_j6zw7fxg75" {
 		cancel()
 		t.Fatalf("Telegram sender attribution was not preserved transiently for WhatsApp rendering: %+v", telegramToWhatsApp.Sender)
 	}
@@ -245,7 +246,7 @@ func TestRunRoutesAllThreeTransportIngressThroughOneRouter(t *testing.T) {
 	dc.events <- transport.Incoming{
 		Endpoint:  "discord",
 		RemoteID:  "discord-source-message",
-		Sender:    transport.Sender{OpaqueID: "u_dcactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_s627456bip"},
 		Kind:      "text",
 		Text:      "from discord",
 		Timestamp: time.Unix(1_700_000_002, 0).UTC(),
@@ -304,7 +305,7 @@ func TestRunRequiresTelegramCredentialOnlyWhenRuntimeIsConfigured(t *testing.T) 
 			"telegram": {Transport: config.TransportTelegram, ConnectionID: "conn-tg-1", RemoteID: "-1001234567890"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa", "telegram"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -358,7 +359,7 @@ func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
 		Endpoints: map[string]config.Endpoint{
 			"wa": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "123456789@g.us"},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -367,6 +368,7 @@ func TestRunDoesNotStartTelegramWhenDisabled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	logger := slog.New(slog.NewTextHandler(&safeBuffer{}, nil))
 	errCh := make(chan error, 1)
+	seedRoutingConfig(t, dataDir, cfg)
 	go func() { errCh <- Run(ctx, cfg, logger) }()
 	select {
 	case <-openedWhatsApp:
@@ -408,7 +410,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 			"wa2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa1", "wa2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -546,7 +548,7 @@ func TestRunRuntimeReloadAddsFirstTelegramEndpoint(t *testing.T) {
 	wa.events <- transport.Incoming{
 		Endpoint:  "wa1",
 		RemoteID:  "wa-after-reload",
-		Sender:    transport.Sender{OpaqueID: "u_waactor0001"},
+		Sender:    transport.Sender{OpaqueID: "u_goinphpotc"},
 		Kind:      "text",
 		Text:      "after reload",
 		Timestamp: time.Unix(1_700_000_100, 0).UTC(),

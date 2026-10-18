@@ -12,16 +12,16 @@
 
 - **Multi-Transport Synchronization**: Seamless bidirectional synchronization across WhatsApp groups and communities (including community subgroups and hosted LIDs), Discord channels (including thread/forum-post lineage and webhook sender attribution), and Telegram groups/supergroups (including forum topic lineage and group-to-supergroup migration handling).
 - **Comprehensive Message Lifecycle**:
-  - Text forwarding with bold-italic provenance attribution (`*_<alias>/<username>_*: <text>`).
+  - Text forwarding with bold-italic provenance attribution (`*_<group>/<name> (<participant-alias>)_*: <text>`).
   - Transient in-memory media forwarding (images, videos, audio/voice notes, documents, and stickers) within configurable size limits and zero on-disk retention.
   - Best-effort native replies across transports with deterministic fallback attribution and clickable quote links on Discord.
   - Native emoji reaction propagation (add, change, remove) normalized across platforms with actor identity mapping.
   - Message edit and deletion/revocation propagation, including plain text WhatsApp edits from the linked account's phone, with canonical tombstones to prevent replay resurrection.
 - **Native & Aggregate Polls**: Native polls across WhatsApp, Discord, and Telegram where destination semantics are representable; cross-endpoint Discord and Telegram polls include the source label in the visible poll presentation, while unsupported poll shapes use deterministic text fallback. Includes aggregate-only live-result companion messages, plus live on-demand aggregate responses that continue updating as votes/snapshots change, via configurable reply triggers (supports multiple triggers, e.g. `aggregate-response`, `/poll-results`). Encrypted poll questions and options survive server restarts without entering the PII-free routing database.
 - **Source-Local Message Suppression**: Configurable prefix filtering (supports multiple prefixes, e.g. `!local`, `#local`, `//`, `[local]`) to suppress private or internal messages before canonicalization, transmission, or media loading; edits, reactions, and deletes for suppressed messages also remain local.
-- **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints. Forwarded child messages use `<group-alias>/<thread-or-topic>/<username>`; opaque provider child IDs never appear in message text. `opaque` (default) keeps names transient, while `friendly` may persist bounded labels for restart/replay presentation.
+- **Thread & Topic Context (Child Scopes)**: Preserves Discord thread/forum and Telegram topic lineage without requiring dynamic child endpoints. Forwarded child messages use `<group-alias>/<thread-or-topic>/<name> (<participant-alias>)`; opaque provider child IDs never appear in message text. `opaque` (default) keeps names transient, while `friendly` may persist bounded labels for restart/replay presentation.
 - **Reliable Ordered Delivery & Health Monitoring**: Single ordered ingress worker, independent per-destination FIFO lanes with exponential backoff retry, ambiguity-safe create handling (`awaiting_replay`), and real-time delivery health monitoring via the management console.
-- **Zero-PII Privacy & Route-Aware Anonymization**: Routing database (`sync.db`) and application logs contain no message bodies, media, phone numbers, or user IDs. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into deterministic pseudonyms (e.g., `Silent Falcon`) exclusively for Discord destinations while WhatsApp and Telegram retain standard push names.
+- **Zero-PII Privacy & Route-Aware Anonymization**: Routing database (`sync.db`) and application logs contain no message bodies, media, phone numbers, or user IDs. Optional per-sync-set one-way Discord anonymization (`anonymizeToDiscord`) transforms sender names, phone numbers, and structured mentions into assigned aliases (e.g., `Amber Badger`) exclusively for Discord destinations while WhatsApp and Telegram retain ordinary names with aliases.
 - **Embedded Web Management Console & REST API**: Zero-dependency embedded Web UI and authenticated REST API for dynamic connection lifecycle, serialized WhatsApp QR pairing, atomic endpoint alias renaming (with automatic copy/reaction reference migration), sync set mesh configuration with Discord anonymization controls, and live runtime configuration reload without process restarts.
 - **Sensitive Control Plane & Multi-User RBAC**: Isolated mode-`0600` `control.db` supporting Admin and Operator roles, bcrypt passwords, HMAC session tokens/cookies, session revocation, one-time invite tokens, fixed-field audit logging, and AES-256-GCM encrypted bot credentials derived from `IDENTITY_SECRET`.
 - **Membership Intake & Verification Pipeline (Experimental)**: Sync-set bound public intake forms (`/api/verification/join/{token}`), automated email verification challenges (Resend-compatible), private mode-`0600` evidence storage with automatic purge upon approval/rejection decisions, optional advisory AI image verification (strict zero-training requirement), and human-in-the-loop review with automated fulfillment (e.g. WhatsApp join invite links).
@@ -36,7 +36,7 @@ The core routing boundary is deliberately content-free at rest:
 
 - `/data/sync.db` and application logs contain no message bodies, media, participant identities, human-readable provider names, credentials, or raw provider objects/errors.
 - User identity crossing a transport boundary is HMAC-derived from `IDENTITY_SECRET`; display names used for attribution remain transient.
-- One-way Discord anonymization derives stable pseudonyms from HMAC actor IDs purely on the fly; no PII-to-pseudonym map or plaintext participant names are ever stored in `sync.db`.
+- Each sync-set actor has a permanent assigned alias. `sync.db` stores only its HMAC actor ID, safe alias and ordinal; real participant names remain transient. One-way Discord anonymization uses that assigned alias without the real name.
 - Message media is held only long enough to forward and is not persisted by the router.
 - `/data/whatsapp/<connection-id>.db` is isolated sensitive whatsmeow protocol state and is never queried for application features.
 - `/data/control.db` is the explicit sensitive exception for accounts, sessions, audit records, encrypted Discord bot/webhook credentials, encrypted Telegram Bot API credentials, encrypted Telegram MTProto API/session/peer state, and experimental membership verification. Discord webhook URLs and bot tokens are never returned through read APIs; Telegram OTPs and 2FA passwords are never persisted.
@@ -171,9 +171,6 @@ Routing and feature settings belong to each sync set. Open a sync set and choose
 |---|---|---|
 | `membershipReviewEnabled` | `false` | Enable the experimental membership review UI for this set, shared across browsers. |
 | `privateDMRelayEnabled` | `false` | Permit private relays within this set only when the global administrator switch is also enabled. |
-| `showDiscriminator` | `false` | Append the stable discriminator to forwarded names across this sync set. Addressing works even when hidden or anonymization is disabled. |
-| `codeLength` | `8` | Discriminator length, from 5 to 10 characters. Existing sets retain 5 on upgrade; historical supported-length codes remain valid addresses. |
-| `usernameMode` | `push_name` | Use transient provider names or HMAC actor IDs (`hash`). |
 | `media.enabled`, `media.maxSizeMB` | `true`, `100` | Forward media with an in-memory size limit in MB; provider limits still apply. |
 | `recovery.enabled`, `recovery.maxAgeHours`, `recovery.maxMessagesPerGroup` | `true`, `24`, `200` | Automatic recovery bounds for conversations in this set; provider availability and limits still apply. |
 | `storage.messageRetentionDays` | `90` | Retain content-free routing metadata for the configured days. |
@@ -182,13 +179,13 @@ Routing and feature settings belong to each sync set. Open a sync set and choose
 | `whatsappCleanup.enabled`, `whatsappCleanup.retentionDays` | `false`, `30` | Scheduled WhatsApp AppState cleanup for this set's chats. |
 | `childContextDisplayMode` | `opaque` | `opaque` uses transient child labels; `friendly` also persists observed thread/topic labels for restart/replay. |
 
-For example, `{"settings":{"codeLength":8,"showDiscriminator":true}}` updates one set's display while preserving its other settings. Upgrade initialization copies existing routing policies into each existing sync set once. Subsequent changes are independent. Retention follows the original sync set of each canonical message, even after an endpoint moves; orphan history and suppression markers expire after 90 days.
+For example, `{"settings":{"media":{"maxSizeMB":50}}}` updates one set while preserving its other settings. Upgrade initialization copies existing routing policies into each existing sync set once. Subsequent changes are independent. Retention follows the original sync set of each canonical message, even after an endpoint moves; orphan history and suppression markers expire after 90 days.
 
 The WhatsApp linked-device name belongs to its connection, shared by every set using that connection. Set `whatsappDeviceName` when creating a WhatsApp connection, or edit **Connections → Device name** (`PUT /api/connections/{id}`). It defaults to `message-sync` for new connections and applies when linking the device. Existing connections import their former global name once. User accounts and admin security stay global. `/api/config` exposes only the administrator's default-off `privateDMRelayEnabled` safety switch; other runtime settings belong to sync sets.
 
 Private messaging requires **Settings → Allow private DM relays** and the
 matching switch in each sync set's **Edit settings** modal. In a private chat
-with the owning sync account/bot, `/dm @{group/P1} message` addresses one observed,
+with the owning sync account/bot, `/dm @{Amber Badger} message` addresses one observed,
 currently verified member of the same set. Continue only with native **Reply**
 on the bot's relayed message. `/help` and Telegram `/start` explain usage.
 Text only, 1600 UTF-8 bytes per relayed body. Reply mappings expire after 24
@@ -239,55 +236,42 @@ This independent project is not affiliated with WhatsApp, Meta, Discord, or Tele
 
 ### Cross-group participant references
 
-Messages may refer to an observed member of another endpoint in the same sync
-set using `@{group2/Rust Ocean Q7M5K}`, `@{group2/Alice Smith}`,
-the discriminator alone as `@{group2/Q7M5K}`,
-or the stable fallback `@{group2/P1}`. Group aliases are the configured
-endpoint aliases. In anonymized Discord destinations, observed authors retain
-their deterministic word-based pseudonyms, such as `group2/Rust Ocean`, rather
-than being replaced by P-numbers. Discriminators are hidden by default. Enable
-**Sync Sets → select set → Edit settings → Show participant discriminator in this sync set**
-(`showDiscriminator=true`) to display `group2/Alice Smith Q7M5K` or
-`group2/Rust Ocean Q7M5K`. The code is computed independently of anonymization;
-it is the same for the same provider actor and identity secret. An unambiguous
-two-word pseudonym stem,
-such as `Rust Ocean`, is also accepted. Plain `@name` provider mentions
-remain unchanged.
+Each accepted group-message author receives a persistent alias, such as
+`Amber Badger`, scoped to that actor and sync set. Aliases are unique across
+this installation: the same platform account in another set receives a different
+alias. There are 65,536 frozen two-word names; subsequent allocations add a
+numeric tier, such as `Amber Badger 2`. Deletion never makes an alias reusable.
 
-Each destination independently attempts a native mention when the adapter can
-verify the addressed person's membership there, including groups other than
-the group named in the reference. WhatsApp text and image/video/document
-captions use a live LID-only roster; Discord checks current guild membership, channel access and private-thread
-membership with an explicit allowed-user list; Telegram Bot API checks chat
-membership. References stay exactly as posted, including braces and the
-chosen name or alias, wherever a native mention is unavailable. Explicit
-braced references may tag verified local Discord members even with
-`anonymizeToDiscord` enabled; the native chip identifies that Discord account.
-Sender and ordinary provider-native mention anonymization remain unchanged;
-user-authored braced references are not automatically redacted.
+Ordinary attribution is `group/Alice (Amber Badger)`; anonymized Discord
+attribution is `group/Amber Badger`. Child messages retain `group/child/name`
+context. There is no username-mode selector or configurable discriminator.
+The alias is always shown and retained when a long webhook name is truncated.
 
-Discriminators, pseudonyms and handles resolve after restart from HMAC-only participant records;
-full pseudonyms stay stable while `IDENTITY_SECRET` and the provider identity
-stay unchanged. Real names are kept only in memory. After restart, WhatsApp
-and Discord can rebuild a missing name lookup through the referenced group's
-adapter, limited to that group's registered HMAC actors and unique matching
-provider metadata. This allows references copied from older forwarded
-messages to work without another post when that metadata is available.
-Addresses are learned from accepted messages, rather than a member picker or
-roster autocomplete. Discriminator matching is case-insensitive and requires a
-unique participant in the referenced group. Collisions with another code,
-observed name or handle remain literal. Existing full pseudonyms and `Pn`
-handles provide fallback addresses. Showing the same code alongside real and
-anonymized names makes those presentations linkable to someone who sees both.
-The setting changes new bridge-generated attribution, not existing messages,
-provider account names, native mention-chip labels, or authored reference text.
-Name-plus-code references are not an additional supported addressing form.
-Discord and Telegram need an observed native identity in the destination
-adapter's memory. Discord learns IDs from live messages, accepted history
-recovery, or a bounded on-demand guild-roster lookup matched by HMAC when
-**Server Members Intent** is available. Failed lookups retain literal text.
-Identities are never linked across providers by name.
-Telegram MTProto and message edits retain literal references without creating
-native mentions.
-Use `\@{group2/P1}` to send a literal reference without requesting a mention.
+After observing an author's alias, send `Hi @{Amber Badger}` from another
+configured group in the same sync set. `@{amber badger}` also works. Each
+actual destination independently verifies current membership and permissions
+before rendering a native mention. WhatsApp requires a verified LID; Discord
+checks guild/channel access and private-thread membership and allowlists only
+verified users; Telegram Bot API checks membership in the destination chat.
+A verified explicit reference may tag a local Discord account even on an
+anonymized route. Other sender and ordinary mention anonymization remains active.
 
+Unknown, out-of-set, escaped or unverifiable references retain the exact authored
+token, including braces and case. Use `\@{Amber Badger}` to avoid requesting a
+notification. Telegram MTProto and edits retain literal braced reference text.
+Plain provider-native mentions remain a separate namespace. Structured mentions
+reuse an existing author alias; they do not enroll a new actor. Names and native
+user IDs are not stored in the alias registry, and names never link providers.
+
+Alias assignments survive restarts. Discord/Telegram native-ID caches remain
+transient; Discord restores observations from accepted history and can match a
+cold cache against guild identities with optional **Server Members Intent**.
+Denied or unavailable lookups preserve literal text. WhatsApp author allocation
+requires a verified canonical LID, including for PN-form messages. If the LID
+cannot be established, forwarding fails safely before delivery or checkpoint
+advancement; provider recovery windows limit whether it can be recovered later.
+
+Private `/dm @{Amber Badger} message` uses the same unique alias. Both participants
+must already have assigned group-author aliases, and the sender must currently
+belong to the recipient alias's owning set. Knowing an alias does not authorize
+DM delivery. See [private messaging](docs/PRIVATE_MESSAGING.md).

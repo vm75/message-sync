@@ -114,7 +114,7 @@ type Options struct {
 	DatabasePath     string
 	GroupJIDs        map[string]string
 	Hasher           *identity.Hasher
-	UsernameMode     config.UsernameMode
+
 	Logger           *slog.Logger
 	QROut            io.Writer
 	EnableTerminalQR bool
@@ -187,7 +187,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 		opts.QROut = io.Discard
 	}
 
-	normalizer, err := NewNormalizer(opts.GroupJIDs, opts.Hasher, opts.UsernameMode, opts.EndpointSettings)
+	normalizer, err := NewNormalizer(opts.GroupJIDs, opts.Hasher, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -1286,7 +1286,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 	}
 	a.mu.Unlock()
 
-	normalizer, err := NewNormalizer(groupJIDs, hasher, cfg.LegacySettings().UsernameMode, cfg.EndpointSettings(a.connectionID))
+	normalizer, err := NewNormalizer(groupJIDs, hasher, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return fmt.Errorf("create normalizer for updated config: %w", err)
 	}

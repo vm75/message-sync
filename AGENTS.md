@@ -80,8 +80,8 @@ podman compose -f compose.yml config
 - Native replies and reactions are best effort when forbidden identity storage prevents reconstruction; use safe textual fallback.
 - WhatsApp lifecycle echo suppression stays bounded and content-free, and must not suppress unmatched linked-device `FromSelf` mutations.
 - Store configuration in `sync.db`; store Discord and Telegram credentials only as AES-256-GCM ciphertext in `control.db` using a domain key derived from `IDENTITY_SECRET`.
-- Treat synchronized message presentation as a compatibility contract. In default `push_name` mode, ordinary attribution is `<group-alias>/<name>` and child-context attribution is `<group-alias>/<thread-or-topic-label>/<name>`. When `anonymizeToDiscord` is enabled on a sync set, Discord destinations use deterministic pseudonyms (e.g. `Silent Falcon`) derived from HMAC actor IDs, strip phone numbers, and pseudonymize mentions and quotes, while non-Discord destinations retain normal push names. Opaque ChildScope IDs and `[contexts ...]` preambles are routing metadata and must never appear in forwarded messages. Display name wins over phone number; phone is only a fallback when no display name exists. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
-- Discriminators are derived for every actor independently of anonymization. Per-sync-set `showDiscriminator` defaults to false. `codeLength` accepts 5–10 characters (8 for new sets; upgrades preserve 5). Enabling display appends the selected code across that set’s forwarded sender presentation. Keep full historical pseudonyms valid for addressing, preserve actor IDs, and reserve suffix space in Discord webhook truncation.
+- Treat synchronized message presentation as a compatibility contract. Ordinary attribution is `<group>/<name> (<assigned-alias>)`; child attribution is `<group>/<child>/<name> (<assigned-alias>)`. Discord destinations on `anonymizeToDiscord` routes use only the assigned alias and strip phone numbers; other destinations retain ordinary names with aliases. Display name wins over phone; phone is a fallback only. There is no username-mode selector or configurable discriminator. Opaque child IDs and `[contexts ...]` never appear in forwarded text. See [`docs/MESSAGE_PRESENTATION.md`](docs/MESSAGE_PRESENTATION.md).
+- Assign aliases only to accepted group-message authors, using `(sync_set_id, HMAC actor_id)` and a permanent instance-wide ordinal. Freeze the 256×256 vocabulary and ordering; numeric tiers begin at ordinal 65,537. Never reuse aliases/ordinals after deletion, change actor IDs, enroll from mentions/private traffic, or lose assignments during a settings save. Retain full aliases when truncating Discord names. WhatsApp assignment requires a verified canonical LID; unresolved PN-only authors fail safely before canonical/create state and checkpoint advancement.
 - Sync-set settings use a shared create/edit modal. `membershipReviewEnabled` is a persisted per-set UI flag, not a browser preference or authorization boundary. Save tracks actual draft differences; preserve existing membership processing and private control-store data.
 - Do not confuse child-context syntax with child-label persistence: `childContextDisplayMode=opaque` does not persist labels, while `friendly` may persist them for restart/replay presentation. Both modes use the same human-facing `group/child/name` syntax.
 
@@ -138,36 +138,30 @@ per-message Delete for Me AppState operation on feature-owned private copies.
 Never substitute group deletion, REVOKE, whole-chat cleanup, Discord deletion
 or Telegram Bot API deleteMessage. MTProto personal inboxes remain unmanaged.
 
-Cross-group participant syntax is an explicit `@{endpoint/name-or-alias}`
-namespace, separate from provider-native `@user`. Accept unambiguous observed
-names, deterministic pseudonyms and unique pseudonym stems, case-insensitive
-discriminator-only labels, plus durable `Pn`
-fallback handles. Code/name/handle collisions must remain literal; never let
-display settings gate addressing. Do not persist discriminator lookup tables.
-The Pn ordinal belongs to one endpoint, not a global person
-identity or display name. Resolve only inside the sender's configured sync set.
-Use `participant_addresses` for endpoint aliases and HMAC actor IDs; never
-persist names, phone numbers, raw provider identities or message content.
-Each destination independently verifies membership before rendering a native
-mention, including destinations other than the one named in the reference.
-Preserve the original authored token whenever native rendering is unavailable;
-this includes literal references on anonymized routes. Native identity lookup
-belongs to destination adapters, without cross-provider identity guessing.
-When a real-name cache is empty, the registry may ask the referenced group's
-adapter to resolve the label against registered HMAC actors and provider-owned
-metadata. Require an exact unique name/alias match within that group and
-source-membership verification. Keep names transient, do not query protocol
-SQLite directly, and reject any returned actor outside the supplied registry.
-WhatsApp requires matching LID token text and metadata and must not expose a
-PN. Discord and Telegram Bot API keep observed IDs in volatile memory only.
-Discord must verify channel access and private-thread membership and use an
-explicit user allowlist. Explicit braced references may tag verified local
-Discord members on anonymized routes; sender and ordinary provider-mention
-anonymization remain unchanged. Live ingress and accepted history recovery
-both restore Discord native-ID observations without persistence. On a cache
-miss, Discord may compare the authorized HMAC actor against paginated current
-guild identities with a bounded timeout; never select by display name.
-Roster lookup requires Server Members Intent and falls back to literal text
-when unavailable. Do not add a privileged gateway intent as a side effect.
-Edits and MTProto use literal text until native support is deliberately
-implemented and tested. Autocomplete and participant pickers are out of scope.
+Cross-group participant syntax is only `@{Amber Badger}` (with optional numeric
+tier), separate from provider-native `@user`. Aliases are globally unique but
+identify actors within one sync set. Users learn addresses from forwarded author
+attribution; read tracking, directories and mention-only enrollment are out of
+scope. Case-insensitive lookup must still enforce source-set ownership. Public
+`Pn`, real-name, discriminator and endpoint-qualified lookup are removed.
+Use `sync_set_actors` for assigned HMAC actor/alias/ordinal state and
+`participant_addresses` for endpoint observations. Never persist names, phones,
+raw user identities or content. Each actual destination verifies current
+membership before native rendering. Preserve the exact authored token whenever
+native rendering is unavailable, including on anonymized routes. Destination
+adapters own native identity lookup without cross-provider guessing.
+WhatsApp requires matching verified LID text and metadata and must not expose a
+PN. Discord and Telegram Bot API retain native user bindings only in memory.
+Discord verifies channel access/private-thread membership and uses an explicit
+user allowlist. Verified explicit references may tag Discord members on
+anonymized routes; author and ordinary mention anonymization remain active.
+Live ingress and accepted history restore Discord observations. A cold-cache
+lookup may compare the authorized HMAC actor with paginated current guild
+identities under a bounded timeout, never by display name. It requires optional
+Server Members Intent and stays literal when unavailable; do not add a privileged
+gateway intent. Telegram MTProto and edits stay literal and non-notifying.
+Private lookup selects the alias's owning set globally, then requires current
+sender membership and existing author assignments for both sides. Deduplicate
+only equivalent routes to the same verified inbox; fail on distinct inboxes.
+Native reply mapping, current membership and exact account/inbox bindings remain
+mandatory on every hop. No private content or inbox identity enters `sync.db`.

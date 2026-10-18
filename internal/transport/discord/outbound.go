@@ -90,6 +90,9 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 
 	username := sanitizeWebhookUsername(outgoing.Sender.DisplayName)
 	if username == "" {
+		username = sanitizeWebhookUsername(outgoing.Sender.PhoneNumber)
+	}
+	if username == "" {
 		username = sanitizeWebhookUsername(outgoing.Sender.OpaqueID)
 	}
 	if username == "" {
@@ -99,7 +102,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		// Friendly mode carries the complete source/group/sender attribution in
 		// the body. Keep its source/sender portion on the webhook APP username
 		// too; this is presentation-only and remains transient.
-		if label := sanitizeWebhookUsername(strings.TrimSuffix(outgoing.SenderLabel, " "+outgoing.Sender.Discriminator)); label != "" {
+		if label := strings.TrimSpace(outgoing.SenderLabel); label != "" {
 			username = label
 		} else if outgoing.OriginEndpoint != "" {
 			username = string(outgoing.OriginEndpoint) + "/" + username
@@ -109,7 +112,7 @@ func (a *Adapter) Send(ctx context.Context, outgoing transport.Outgoing) (transp
 		username = string(outgoing.OriginEndpoint) + "/" + username
 	}
 
-	username = sanitizeWebhookUsernameWithDiscriminator(username, outgoing.Sender.Discriminator)
+	username = sanitizeWebhookUsernameWithAlias(username, outgoing.Sender)
 
 	content := outgoing.SourceText
 	if outgoing.RenderedText != "" {
@@ -226,11 +229,11 @@ func discordPollAttribution(outgoing transport.Outgoing) string {
 	if outgoing.OriginEndpoint == "" || outgoing.OriginEndpoint == outgoing.Endpoint || strings.TrimSpace(outgoing.SenderLabel) == "" {
 		return ""
 	}
-	label := strings.TrimSuffix(outgoing.SenderLabel, " "+outgoing.Sender.Discriminator)
+	label := outgoing.SenderLabel
 	if displayName := sanitizeWebhookUsername(outgoing.Sender.DisplayName); displayName != "" {
 		label = string(outgoing.OriginEndpoint) + "/" + displayName
 	}
-	return sanitizeWebhookUsernameWithDiscriminator(label, outgoing.Sender.Discriminator) + ":"
+	return sanitizeWebhookUsernameWithAlias(label, outgoing.Sender) + ":"
 }
 
 func (a *Adapter) replyLink(channelID, messageID string) string {
@@ -535,19 +538,22 @@ func sendNativeReplyMarker(ctx context.Context, api discordAPI, channelID, messa
 	return nil
 }
 
-// Preserve the bridge-derived suffix even when a long source/name is truncated.
-func sanitizeWebhookUsernameWithDiscriminator(value, discriminator string) string {
+// Reserve the full assigned alias before truncating a source prefix or real name.
+func sanitizeWebhookUsernameWithAlias(value string, sender transport.Sender) string {
+	if sender.Alias == "" {
+		return sanitizeWebhookUsername(value)
+	}
+	suffix := " (" + sender.Alias + ")"
+	if sender.Anonymized {
+		suffix = sender.Alias
+	}
+	value = strings.TrimSuffix(value, suffix)
 	value = sanitizeWebhookUsername(value)
-	if discriminator == "" || value == "" {
-		return value
-	}
-	suffix := " " + discriminator
-	runes := []rune(value)
 	limit := maxWebhookUsernameRunes - len([]rune(suffix))
-	if limit < 1 {
-		return value
+	if limit < 0 {
+		return ""
 	}
-	if len(runes) > limit {
+	if runes := []rune(value); len(runes) > limit {
 		value = strings.TrimSpace(string(runes[:limit]))
 	}
 	return value + suffix

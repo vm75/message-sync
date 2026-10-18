@@ -22,7 +22,7 @@ import (
 
 const MaxBodyBytes = 1600
 
-const Help = "message-sync private messaging\n/dm @{group/person} <message> — send a private message\n/help — show this help\nTo continue a conversation, use Reply on the bot's relayed message.\nOrdinary messages without a valid reply do not get forwarded. Text only, at most 1600 UTF-8 bytes.\nDM edits and deletes are not synchronized; the recipient keeps the original relayed message.\nReplies expire after 24 hours. The relay may remove only its own local chat copies, never the recipient's messages. Discord and Telegram Bot API cannot remove bot-local copies separately, so their messages remain. Delivery requires the recipient to be reachable via this sync account; Telegram recipients must first /start this bot."
+const Help = "message-sync private messaging\n/dm @{Amber Badger} <message> — send a private message\n/help — show this help\nTo continue a conversation, use Reply on the bot's relayed message.\nOrdinary messages without a valid reply do not get forwarded. Text only, at most 1600 UTF-8 bytes.\nDM edits and deletes are not synchronized; the recipient keeps the original relayed message.\nReplies expire after 24 hours. The relay may remove only its own local chat copies, never the recipient's messages. Discord and Telegram Bot API cannot remove bot-local copies separately, so their messages remain. Delivery requires the recipient to be reachable via this sync account; Telegram recipients must first /start this bot."
 
 type Runtime interface {
 	VerifyPrivateMember(context.Context, transport.EndpointID, string) bool
@@ -33,7 +33,7 @@ type Runtime interface {
 }
 
 type Resolver interface {
-	ResolveParticipantReference(context.Context, string) (transport.CrossReference, bool)
+	ResolveParticipantReference(context.Context, string) (store.AliasRecord, error)
 }
 
 type window struct {
@@ -54,7 +54,7 @@ type Relay struct {
 	limits     map[string]window
 }
 
-var command = regexp.MustCompile(`(?s)^/dm[ \t]+(@\{[A-Za-z0-9][A-Za-z0-9_-]{0,63}/[^{}\r\n]{1,96}\})[ \t\r\n]+(.+)$`)
+var command = regexp.MustCompile(`(?s)^/dm[ \t]+(` + identity.AliasTokenPattern + `)[ \t\r\n]+(.+)$`)
 var references = regexp.MustCompile(`@\{[^{}]*\}`)
 var nativeMentions = regexp.MustCompile(`<[@#][^>]*>|@[A-Za-z0-9_+.-]+`)
 var identityAddresses = regexp.MustCompile(`(?i)\b[0-9]+@(lid|s\.whatsapp\.net|hosted\.lid)\b`)
@@ -181,14 +181,14 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 	var mapping controlstore.PrivateDMMapping
 	if text == "/dm" || strings.HasPrefix(text, "/dm ") || strings.HasPrefix(text, "/dm\t") || strings.HasPrefix(text, "/dm\n") {
 		parts := command.FindStringSubmatch(text)
-		if len(parts) != 3 || strings.TrimSpace(parts[2]) == "" || references.MatchString(parts[2]) {
+		if len(parts) != 4 || strings.TrimSpace(parts[3]) == "" || references.MatchString(parts[3]) {
 			return r.help(ctx, in.Inbox, "Invalid /dm command.")
 		}
-		ref, ok := r.Resolver.ResolveParticipantReference(ctx, parts[1])
-		if !ok {
-			return r.help(ctx, in.Inbox, "Delivery unavailable. Check the address and your shared sync set.")
+		ref, lookupErr := r.Resolver.ResolveParticipantReference(ctx, parts[1])
+		if lookupErr != nil {
+			return r.aliasFailure(ctx, in.Inbox, lookupErr)
 		}
-		set, ok := findSet(cfg, string(ref.Endpoint))
+		set, ok := findSetByID(cfg, ref.SyncSetID)
 		if !ok || !cfg.SettingsForSet(set).PrivateDMRelayEnabled {
 			return r.help(ctx, in.Inbox, "Delivery unavailable. Check the address and your shared sync set.")
 		}
@@ -207,31 +207,28 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 				break
 			}
 		}
-		if source == "" || (cfg.Endpoints[string(ref.Endpoint)].ConnectionID == in.ConnectionID && incomingActor(in, ref.ActorID)) {
+		if source == "" || incomingActor(in, ref.ActorID) {
 			return r.help(ctx, in.Inbox, "Delivery unavailable. Check the address and your shared sync set.")
 		}
-		inbox, ok := r.Runtime.ResolvePrivateInbox(ctx, ref.Endpoint, ref.ActorID)
-		if !ok && cfg.Endpoints[string(ref.Endpoint)].Transport == config.TransportTelegram {
-			ep := cfg.Endpoints[string(ref.Endpoint)]
-			inbox, ok, err = r.State.Inbox(ctx, ep.ConnectionID, string(ep.Transport), ref.ActorID, now)
-			if err != nil {
-				return err
-			}
-			if ok {
-				ok = r.Runtime.VerifyPrivateInboxMember(ctx, ref.Endpoint, ref.ActorID, inbox)
-			}
+		if _, err := r.Sync.AliasByActor(ctx, set.ID, sourceActor); err != nil {
+			return r.aliasFailure(ctx, in.Inbox, err)
 		}
-		if !ok {
-			return r.help(ctx, in.Inbox, "Private delivery unavailable. The recipient must be reachable via this account and allow DMs. Telegram recipients must first /start this bot.")
+		recipientEndpoint, inbox, ok, err := r.recipientRoute(ctx, cfg, ref, now)
+		if err != nil {
+			return err
 		}
+		if !ok || sameInbox(inbox, in.Inbox) {
+			return r.help(ctx, in.Inbox, "Delivery unavailable. Check the address and your shared sync set.")
+		}
+
 		id := make([]byte, 16)
 		if _, err := rand.Read(id); err != nil {
 			return errors.New("generate private conversation ID")
 		}
-		mapping = controlstore.PrivateDMMapping{ConversationID: hex.EncodeToString(id), SyncSetID: set.ID, Author: controlstore.PrivateDMSide{Endpoint: source, ActorID: sourceActor, Inbox: in.Inbox}, Recipient: controlstore.PrivateDMSide{Endpoint: string(ref.Endpoint), ActorID: ref.ActorID, Inbox: inbox}}
+		mapping = controlstore.PrivateDMMapping{ConversationID: hex.EncodeToString(id), SyncSetID: set.ID, Author: controlstore.PrivateDMSide{Endpoint: source, ActorID: sourceActor, Inbox: in.Inbox}, Recipient: controlstore.PrivateDMSide{Endpoint: recipientEndpoint, ActorID: ref.ActorID, Inbox: inbox}}
 		mapping.Author.Binding = r.endpointBinding(cfg.Endpoints[source])
-		mapping.Recipient.Binding = r.endpointBinding(cfg.Endpoints[string(ref.Endpoint)])
-		text = parts[2]
+		mapping.Recipient.Binding = r.endpointBinding(cfg.Endpoints[recipientEndpoint])
+		text = parts[3]
 	} else {
 		if strings.HasPrefix(text, "/") || text == "" || in.ReplyToMessageID == "" {
 			return r.help(ctx, in.Inbox, "")
@@ -261,8 +258,11 @@ func (r *Relay) Handle(ctx context.Context, in transport.PrivateIncoming) (handl
 	if strings.TrimSpace(body) == "" {
 		return r.help(ctx, in.Inbox, "")
 	}
-	pseudonym := identity.Pseudonym(r.Hasher.ActorID("private-dm-presentation", mapping.Author.Endpoint+"\x00"+mapping.Author.ActorID))
-	header := "DM from " + mapping.Author.Endpoint + "/" + pseudonym + "\n"
+	alias, err := r.Sync.AliasByActor(ctx, mapping.SyncSetID, mapping.Author.ActorID)
+	if err != nil {
+		return r.aliasFailure(ctx, in.Inbox, err)
+	}
+	header := "DM from " + alias + "\n"
 	result, err := r.Runtime.SendPrivate(ctx, mapping.Recipient.Inbox, header+body+"\nReply to this message to respond privately.")
 	if err != nil {
 		message := "Private delivery unavailable. The recipient must allow DMs and Telegram recipients must first /start this bot."

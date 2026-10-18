@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -187,7 +188,7 @@ func (f *fakeWhatsAppTransport) ClearSyncSetChats(ctx context.Context, groupJIDs
 	return len(groupJIDs), nil
 }
 
-func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *testing.T) {
+func TestRunRoutesWithoutPersistingProtocolPIIContentOrNativeIdentity(t *testing.T) {
 	dataDir := t.TempDir()
 	t.Setenv("DATA_DIR", dataDir)
 	t.Setenv("API_ADDR", "127.0.0.1:0")
@@ -201,12 +202,13 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
 	}
 
+	seedRoutingConfig(t, dataDir, cfg)
 	originalOpen := openWhatsApp
 	defer func() { openWhatsApp = originalOpen }()
 	fake := &fakeWhatsAppTransport{}
@@ -264,9 +266,35 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	}
 	forwarded := fake.sent[0]
 	fake.mu.Unlock()
-	if forwarded.Endpoint != "c1g2" || forwarded.Text != "*_c1g1/Alice Example_*: private body" {
+	if forwarded.Endpoint != "c1g2" || forwarded.Text != "*_c1g1/Alice Example (Amber Badger)_*: private body" {
 		cancel()
 		t.Fatalf("unexpected forwarded message: %+v", forwarded)
+	}
+
+	// Provider acceptance precedes copy persistence. Wait for the durable boundary
+	// before cancelling the application and inspecting its on-disk routing state.
+	reader, err := sql.Open("sqlite", syncPath)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var count int
+		err = reader.QueryRow(`SELECT COUNT(*) FROM message_copies WHERE endpoint_id='c1g2' AND remote_message_id='sent-c1g2-1'`).Scan(&count)
+		if err == nil && count == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			reader.Close()
+			cancel()
+			t.Fatalf("copy was not persisted: %v", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := reader.Close(); err != nil {
+		cancel()
+		t.Fatal(err)
 	}
 
 	cancel()
@@ -297,7 +325,12 @@ func TestRunRoutesWithoutPersistingProtocolPIIContentOrParticipantIdentity(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Configured operational targets and irreversible actor IDs are allowed routing state.
+	allowedRouting := map[string]bool{"123456789@g.us": true, "987654321@g.us": true, "u_abcdefghij": true}
 	for _, forbidden := range forbiddenValues {
+		if allowedRouting[forbidden] {
+			continue
+		}
 		if strings.Contains(string(databaseBytes), forbidden) {
 			t.Fatalf("sync.db leaked forbidden value %q", forbidden)
 		}
@@ -323,7 +356,7 @@ func TestRunStartupRetentionPruneAndMetricsLogging(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -425,7 +458,7 @@ func TestRunLoadsConfigFromSyncDB(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -489,7 +522,7 @@ func TestRunWhatsAppAPIIntegration(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -633,7 +666,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -721,7 +754,7 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 		Sender: transport.Sender{
 			DisplayName: "Alice",
 			PhoneNumber: "15551234567",
-			OpaqueID:    "u_alice1234",
+			OpaqueID:    "u_g6q3qnygmb",
 		},
 		Kind:      "text",
 		Text:      "Initial message",
@@ -763,8 +796,8 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 4. Update sync-set config via PUT /api/sync-sets/mesh to set usernameMode to "hash"
-	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"settings":{"usernameMode":"hash"}}`))
+	// 4. Update sync-set config via PUT /api/sync-sets/mesh to set a local-only message prefix
+	req, _ = http.NewRequest(http.MethodPut, fmt.Sprintf("http://%s/api/sync-sets/mesh", apiAddr), strings.NewReader(`{"settings":{"localPrefix":"!local"}}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	resp, err = client.Do(req)
 	if err != nil || resp.StatusCode != http.StatusOK {
@@ -772,14 +805,14 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	// 5. Send message on c1g1 -> should now route to BOTH c1g2 and c1g3 with hash format
+	// 5. Send message on c1g1 -> should now route to BOTH c1g2 and c1g3 with stable name and alias attribution
 	fake.events <- transport.Incoming{
 		Endpoint: "c1g1",
 		RemoteID: "msg-2",
 		Sender: transport.Sender{
 			DisplayName: "Alice",
 			PhoneNumber: "15551234567",
-			OpaqueID:    "u_alice1234",
+			OpaqueID:    "u_g6q3qnygmb",
 		},
 		Kind:      "text",
 		Text:      "Updated dynamic routing message",
@@ -798,8 +831,8 @@ func TestRunDynamicConfigUpdateViaAPI(t *testing.T) {
 	if !endpoints["c1g2"] || !endpoints["c1g3"] {
 		t.Fatalf("expected messages to c1g2 and c1g3, got %+v", fake.sent)
 	}
-	if strings.Contains(fake.sent[0].Text, "Alice") {
-		t.Fatalf("expected hash mode without push name Alice, got %q", fake.sent[0].Text)
+	if !strings.Contains(fake.sent[0].Text, "Alice (Amber Badger)") {
+		t.Fatalf("expected stable alias attribution after reload, got %q", fake.sent[0].Text)
 	}
 
 	if len(fake.updatedConfigs) == 0 {
@@ -831,7 +864,7 @@ func TestApp_WebUIServing(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "987654321@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:  config.Storage{MessageRetentionDays: 90},
@@ -976,7 +1009,7 @@ func TestWhatsAppChatCleanupRunner(t *testing.T) {
 		SyncSets: []config.SyncSet{
 			{ID: "set1", Endpoints: []string{"g1", "g2"}},
 		},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
+
 		Media:    config.Media{MaxSizeMB: 100},
 		Recovery: config.Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 100},
 		Storage:  config.Storage{MessageRetentionDays: 90},

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	gotdsession "github.com/gotd/td/session"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 )
 
@@ -39,7 +38,7 @@ func newMTProtoDiscoveryAdapter(t *testing.T, connectionID string, auth *fakeMTD
 	}
 	adapter, err := OpenMTProto(context.Background(), Options{
 		ConnectionID: connectionID, Logger: testLogger(), MTProtoStateStore: store,
-		Hasher: hasher, UsernameMode: config.UsernameModePushName,
+		Hasher:                hasher,
 		mtprotoRuntimeFactory: func(int, string, gotdsession.Storage) mtprotoRuntime { return fakeMTLiveRuntime{auth: auth} },
 	})
 	if err != nil {

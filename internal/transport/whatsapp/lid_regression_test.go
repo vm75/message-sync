@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 	waCommon "go.mau.fi/whatsmeow/proto/waCommon"
@@ -47,7 +46,7 @@ func TestNormalizeMessageHostedLIDAndLIDProduceSameOpaqueID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +122,7 @@ func TestRecoveredMessageUsesSameCanonicalIdentityAsLiveMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +162,7 @@ func TestLIDReplyAndReactionNormalizeWithCanonicalActorIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"c1g1": "123456789@g.us"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

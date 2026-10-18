@@ -101,6 +101,17 @@ CREATE TABLE IF NOT EXISTS poll_options (
 );
 CREATE INDEX IF NOT EXISTS idx_poll_options_canonical ON poll_options(canonical_id);
 
+-- Original source labels can differ from alias-projected forwarded labels.
+-- Persist hashes only, so WhatsApp votes still resolve to the same option index.
+CREATE TABLE IF NOT EXISTS poll_source_option_hashes (
+    canonical_id TEXT NOT NULL,
+    endpoint_id TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
+    option_hash TEXT NOT NULL,
+    PRIMARY KEY (canonical_id, endpoint_id, option_index),
+    FOREIGN KEY (canonical_id, option_index) REFERENCES poll_options(canonical_id, option_index) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS poll_endpoint_sources (
     canonical_id TEXT NOT NULL REFERENCES canonical_messages(canonical_id) ON DELETE CASCADE,
     endpoint_id TEXT NOT NULL,

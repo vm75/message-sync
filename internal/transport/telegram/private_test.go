@@ -8,7 +8,6 @@ import (
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
 	"github.com/gotd/td/tg"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -25,7 +24,7 @@ func (f *privateTelegramAPI) SendMessage(ctx context.Context, p *telegrambot.Sen
 
 func TestPrivateTelegramStartReachabilityReplyAndNoDelete(t *testing.T) {
 	hasher, _ := identity.New([]byte("01234567890123456789012345678901"))
-	normalizer, _ := NewNormalizerWithConnection(map[string]string{"group": "-123"}, hasher, config.UsernameModePushName, "owner")
+	normalizer, _ := NewNormalizerWithConnection(map[string]string{"group": "-123"}, hasher, "owner")
 	api := &privateTelegramAPI{crossMentionAPI: &crossMentionAPI{fakeTelegramAPI: &fakeTelegramAPI{}}}
 	a := &Adapter{connectionID: "owner", privateDMEnabled: true, privateEvents: make(chan transport.PrivateIncoming, 5), events: make(chan transport.Incoming, 10), hasher: hasher, normalizer: normalizer, client: api}
 	actor := telegramActorID(hasher, 123)
@@ -86,8 +85,8 @@ func TestPrivateTelegramStartReachabilityReplyAndNoDelete(t *testing.T) {
 
 func TestGroupTelegramDMCommandKeepsGroupSemantics(t *testing.T) {
 	hasher, _ := identity.New([]byte("01234567890123456789012345678901"))
-	normalizer, _ := NewNormalizerWithConnection(map[string]string{"group": "-123"}, hasher, config.UsernameModeHash, "owner")
-	text := "/dm @{other/P1} group message"
+	normalizer, _ := NewNormalizerWithConnection(map[string]string{"group": "-123"}, hasher, "owner")
+	text := "/dm @{Amber Badger} group message"
 	in, ok := normalizer.NormalizeMessage(&models.Message{ID: 1, Date: int(time.Now().Unix()), Chat: models.Chat{ID: -123, Type: models.ChatTypeGroup}, From: &models.User{ID: 123}, Text: text}, 999)
 	if !ok || in.Endpoint != "group" || in.Kind != "text" || in.Text != text {
 		t.Fatal("group /dm was intercepted or changed")
@@ -98,7 +97,7 @@ func TestUnmanagedMTProtoPersonalChatsRemainUntouched(t *testing.T) {
 	live := &fakeMTLiveAuth{groups: []mtprotoGroup{{Peer: mtprotoPeerState{RemoteID: "-77", Kind: "chat", ID: 77}, Title: "Group"}}}
 	adapter, _ := newMTProtoLiveAdapter(t, "mt-private", "-77", live)
 	defer adapter.Close()
-	for i, text := range []string{"personal hello", "/help", "/dm @{tg/P1} text"} {
+	for i, text := range []string{"personal hello", "/help", "/dm @{Amber Badger} text"} {
 		adapter.normalizeMTProtoMessage(context.Background(), tg.Entities{Users: map[int64]*tg.User{7: {ID: 7, FirstName: "Private"}}}, &tg.Message{ID: i + 1, PeerID: &tg.PeerUser{UserID: 7}, FromID: &tg.PeerUser{UserID: 7}, Date: int(time.Now().Unix()), Message: text}, false)
 	}
 	select {

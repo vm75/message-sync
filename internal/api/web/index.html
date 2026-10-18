@@ -413,38 +413,6 @@
           <form id="form-settings" novalidate class="settings-section">
             <div id="settings-alert" class="alert alert-danger hidden" role="alert"></div>
 
-            <!-- Identity & Privacy -->
-            <div class="settings-card">
-              <div class="settings-card-header">
-                <div class="settings-card-icon primary"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
-                <div class="settings-card-meta">
-                  <div class="settings-card-title">Identity &amp; Privacy</div>
-                </div>
-              </div>
-              <div class="settings-card-body">
-                <div class="form-group">
-                  <label for="settings-code-length" class="form-label">Discriminator code length</label>
-                  <input type="number" id="settings-code-length" class="form-input" min="5" max="10" step="1" value="8" required>
-                  <div class="form-hint">5–10 characters. Eight is recommended for groups with 5,000–10,000 members. Previously used codes remain usable when unambiguous.</div>
-                </div>
-                <div class="form-group">
-                  <label for="settings-username-mode" class="form-label">Username Attribution Mode</label>
-                  <select id="settings-username-mode" class="form-select">
-                    <option value="push_name">Push Name (plain display name)</option>
-                    <option value="hash">Hash (pseudonymous HMAC-derived token)</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label class="toggle-control" for="settings-show-discriminator">
-                    <input type="checkbox" id="settings-show-discriminator" class="toggle-checkbox">
-                    <span class="toggle-slider"></span>
-                    <span class="toggle-label">Show participant discriminator in this sync set</span>
-                  </label>
-                  <p class="form-hint">Append a stable code to forwarded names, including anonymized names. Hidden by default; addressing with @{group/code} works in either state.</p>
-                </div>
-              </div>
-            </div>
-
             <div class="settings-card">
               <div class="settings-card-header">
                 <div class="settings-card-icon accent"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M4 7h16M4 12h16M4 17h16"></path></svg></div>

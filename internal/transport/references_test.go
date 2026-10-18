@@ -2,23 +2,41 @@ package transport
 
 import "testing"
 
+func TestSenderAliasFormattingDoesNotConfuseARealNameWithItsAlias(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		anonymous bool
+		want      string
+	}{
+		{"Alice", false, "Alice (Amber Badger)"},
+		{"Amber Badger", false, "Amber Badger (Amber Badger)"},
+		{"Alice", true, "Amber Badger"},
+		{"", false, "Amber Badger"},
+	} {
+		got := (Sender{Alias: "Amber Badger", Anonymized: tc.anonymous}).NameWithAlias(tc.name)
+		if got != tc.want {
+			t.Fatalf("name=%q anonymous=%t got=%q want=%q", tc.name, tc.anonymous, got, tc.want)
+		}
+	}
+}
+
 func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
-	refs := []CrossReference{{Token: "@{g2/P1}", Endpoint: "g2", ActorID: "u_abcdefghij"}}
+	refs := []CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij"}}
 	render := func(ref CrossReference) (string, bool) {
-		if ref.Endpoint != "g2" {
+		if ref.ActorID != "u_abcdefghij" {
 			return "", false
 		}
 		return "@native", true
 	}
 	cases := []struct{ source, want string }{
-		{"Hi @{g2/P1}", "Hi @native"},
-		{"Hi \\@{g2/P1}", "Hi \\@{g2/P1}"},
-		{"Hi @{g2/P2}", "Hi @{g2/P2}"},
-		{"Hi @{g2/P1} and @{g2/P1}", "Hi @native and @native"},
-		{`\@{g2/P1} @{g2/P1}`, `\@{g2/P1} @native`},
-		{`\\@{g2/P1}`, `\\@native`},
-		{"Hi @{g1/P1}", "Hi @{g1/P1}"},
-		{"@{unfinished Hi @{g2/P1}", "@{unfinished Hi @native"},
+		{"Hi @{Amber Badger}", "Hi @native"},
+		{"Hi \\@{Amber Badger}", "Hi \\@{Amber Badger}"},
+		{"Hi @{Azure Bear}", "Hi @{Azure Bear}"},
+		{"Hi @{Amber Badger} and @{Amber Badger}", "Hi @native and @native"},
+		{`\@{Amber Badger} @{Amber Badger}`, `\@{Amber Badger} @native`},
+		{`\\@{Amber Badger}`, `\\@native`},
+		{"Hi @{Amber Bear}", "Hi @{Amber Bear}"},
+		{"@{unfinished Hi @{Amber Badger}", "@{unfinished Hi @{Amber Badger}"},
 	}
 	for _, tc := range cases {
 		if got := RewriteCrossReferences(tc.source, refs, render); got != tc.want {
@@ -28,21 +46,21 @@ func TestRewriteCrossReferencesEscapingAndAuthorization(t *testing.T) {
 }
 
 func TestCrossReferencesPreservePostedTextUnlessNative(t *testing.T) {
-	refs := []CrossReference{{Token: "@{g1/Alice Smith}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice Smith", Pseudonym: "Rust Ocean Q7M5K"}}
+	refs := []CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij", Name: "Alice Smith", Alias: "Amber Badger"}}
 	cases := []struct {
 		name   string
 		input  string
 		native bool
 		want   string
 	}{
-		{"known reference fallback", "Hi @{g1/Alice Smith}", false, "Hi @{g1/Alice Smith}"},
-		{"native addressed group", "Hi @{g1/Alice Smith}", true, "Hi @native"},
-		{"unknown stable handle", "Hi @{g1/P7}", false, "Hi @{g1/P7}"},
-		{"unknown name", "Hi @{g1/Bob Private}", false, "Hi @{g1/Bob Private}"},
-		{"escaped reference", "Hi \\@{g1/Alice Smith}", false, "Hi \\@{g1/Alice Smith}"},
+		{"known reference fallback", "Hi @{Amber Badger}", false, "Hi @{Amber Badger}"},
+		{"native addressed group", "Hi @{Amber Badger}", true, "Hi @native"},
+		{"unknown stable handle", "Hi @{Azure Fox}", false, "Hi @{Azure Fox}"},
+		{"unknown name", "Hi @{Azure Falcon}", false, "Hi @{Azure Falcon}"},
+		{"escaped reference", "Hi \\@{Amber Badger}", false, "Hi \\@{Amber Badger}"},
 		{"unrelated native name", "Hi @Alice", false, "Hi @Alice"},
-		{"literal reference does not tag", "Hi @g1/Alice Smith", true, "Hi @g1/Alice Smith"},
-		{"repeated references", "@{g1/Alice Smith}, @{g1/Alice Smith}", false, "@{g1/Alice Smith}, @{g1/Alice Smith}"},
+		{"literal reference does not tag", "Hi @Amber Badger", true, "Hi @Amber Badger"},
+		{"repeated references", "@{Amber Badger}, @{Amber Badger}", false, "@{Amber Badger}, @{Amber Badger}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,27 +86,27 @@ func TestCrossReferencesPreservePostedTextUnlessNative(t *testing.T) {
 	}
 }
 
-func TestReferenceDisplayLabelUsesPseudonymBeforeHandle(t *testing.T) {
+func TestReferenceDisplayLabelAlwaysIncludesAlias(t *testing.T) {
 	ref := CrossReference{
-		Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij",
-		Handle: "P1", Name: "Alice Smith", Pseudonym: "Rust Ocean Q7M5K",
+		Token: "@{Amber Bear}", ActorID: "u_abcdefghij",
+		Name: "Alice Smith", Alias: "Amber Badger",
 	}
 	for _, tc := range []struct {
 		anon bool
 		want string
 	}{
-		{true, "Rust Ocean Q7M5K"},
-		{false, "Alice Smith"},
+		{true, "Amber Badger"},
+		{false, "Alice Smith (Amber Badger)"},
 	} {
 		if got := ReferenceDisplayLabel(ref, tc.anon); got != tc.want {
 			t.Fatalf("alias with anonymized=%t: got %q want %q", tc.anon, got, tc.want)
 		}
-		if got := RewriteCrossReferences("Hi @{g1/P1}", []CrossReference{ref}, nil); got != "Hi @{g1/P1}" {
+		if got := RewriteCrossReferences("Hi @{Amber Bear}", []CrossReference{ref}, nil); got != "Hi @{Amber Bear}" {
 			t.Fatalf("formatted alias with anonymized=%t: %q", tc.anon, got)
 		}
 	}
-	ref.Pseudonym = ""
-	if got := ReferenceDisplayLabel(ref, true); got != "P1" {
-		t.Fatalf("missing pseudonym should fall back to stable handle, got %q", got)
+	ref.Name = ""
+	if got := ReferenceDisplayLabel(ref, true); got != "Amber Badger" {
+		t.Fatalf("missing display name should retain alias, got %q", got)
 	}
 }

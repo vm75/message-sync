@@ -82,7 +82,7 @@ func TestPrivateDMEnablementRequiresAdministrator(t *testing.T) {
 	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]bool{"privateDMRelayEnabled": false}}, operator); rec.Code != http.StatusForbidden {
 		t.Fatalf("operator changed set gate=%d", rec.Code)
 	}
-	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]int{"codeLength": 7}}, operator); rec.Code != http.StatusOK {
+	if rec := request(t, srv, http.MethodPut, "/api/sync-sets/private-set", map[string]any{"settings": map[string]bool{"membershipReviewEnabled": true}}, operator); rec.Code != http.StatusOK {
 		t.Fatalf("unrelated operator settings behavior changed=%d", rec.Code)
 	}
 }
@@ -115,23 +115,23 @@ func TestSyncSetSettingsIsolationAndPartialUpdates(t *testing.T) {
 	if !reflect.DeepEqual(*first.Settings, config.DefaultSyncSetSettings()) {
 		t.Fatalf("defaults: %+v", first.Settings)
 	}
-	family := send("POST", "/api/sync-sets", `{"id":"family","settings":{"codeLength":10,"storage":{"messageRetentionDays":50}}}`, 201)
-	changed := send("PUT", "/api/sync-sets/work", `{"settings":{"codeLength":7,"membershipReviewEnabled":true,"showDiscriminator":true,"usernameMode":"hash","media":{"enabled":false},"childContextDisplayMode":"friendly","recovery":{"enabled":false},"storage":{"messageRetentionDays":12},"polls":{"aggregationTrigger":"/votes"},"whatsappCleanup":{"enabled":true,"retentionDays":8},"localPrefix":"!local"}}`, 200)
-	if !changed.AnonymizeToDiscord || changed.Settings.CodeLength != 7 || changed.Settings.Media.Enabled || changed.Settings.Media.MaxSizeMB != 100 {
+	family := send("POST", "/api/sync-sets", `{"id":"family","settings":{"storage":{"messageRetentionDays":50}}}`, 201)
+	changed := send("PUT", "/api/sync-sets/work", `{"settings":{"membershipReviewEnabled":true,"media":{"enabled":false},"childContextDisplayMode":"friendly","recovery":{"enabled":false},"storage":{"messageRetentionDays":12},"polls":{"aggregationTrigger":"/votes"},"whatsappCleanup":{"enabled":true,"retentionDays":8},"localPrefix":"!local"}}`, 200)
+	if !changed.AnonymizeToDiscord || changed.Settings.Media.Enabled || changed.Settings.Media.MaxSizeMB != 100 {
 		t.Fatalf("partial merge lost fields: %+v", changed)
 	}
-	send("PUT", "/api/sync-sets/work", `{"settings":{"showDiscriminator":false}}`, 200)
+	send("PUT", "/api/sync-sets/work", `{"settings":{"membershipReviewEnabled":false}}`, 200)
 	loaded := send("GET", "/api/sync-sets/family", "", 200)
 	if !reflect.DeepEqual(family, loaded) {
 		t.Fatalf("another set changed: %+v != %+v", family, loaded)
 	}
 	loaded = send("GET", "/api/sync-sets/work", "", 200)
 	expected := *changed.Settings
-	expected.ShowDiscriminator = false
+	expected.MembershipReviewEnabled = false
 	if !reflect.DeepEqual(expected, *loaded.Settings) {
 		t.Fatalf("settings not preserved: %+v", loaded.Settings)
 	}
-	for _, body := range []string{`{"settings":{"codeLength":4}}`, `{"settings":{"codeLength":11}}`, `{"settings":{"codeLength":6.5}}`, `{"settings":null}`, `{"settings":{"unknown":true}}`, `{"settings":{"usernameMode":"invalid"}}`, `{"settings":{"media":{"maxSizeMB":0}}}`} {
+	for _, body := range []string{`{"settings":{"codeLength":4}}`, `{"settings":{"codeLength":11}}`, `{"settings":{"codeLength":6.5}}`, `{"settings":null}`, `{"settings":{"unknown":true}}`, `{"settings":{"usernameMode":"hash"}}`, `{"settings":{"usernameMode":"push_name"}}`, `{"settings":{"showDiscriminator":false}}`, `{"settings":{"media":{"maxSizeMB":0}}}`} {
 		send("PUT", "/api/sync-sets/work", body, 400)
 	}
 	loaded = send("GET", "/api/sync-sets/work", "", 200)

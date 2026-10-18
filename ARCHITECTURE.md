@@ -68,9 +68,12 @@ The relay reuses the router's participant-reference resolver, durable observed
 HMAC actors and fresh provider membership checks. Every hop binds both actors
 to their original sync set, endpoint target and owning connection. A keyed
 lookup over connection/private-inbox/outbound-message identity selects the
-recorded peer; rendered text and pseudonyms never authorize routing. Source
-attribution uses the sorted eligible source endpoint and an endpoint-scoped
-pseudonym derived with a private-presentation HMAC domain.
+recorded peer; rendered text and aliases never authorize routing. Global alias
+lookup identifies the owning set, then current source membership and a unique
+verified recipient inbox authorize delivery. Equivalent endpoint routes to that
+inbox are deduplicated; distinct inboxes fail closed. Source attribution is
+`DM from <assigned set alias>`, with no endpoint or real-name prefix. Both
+parties require prior group-author assignments; private traffic never allocates.
 
 `control.db.private_dm_reply_mappings` stores encrypted, content-free paired
 inboxes for 24 hours after each send. `private_dm_seen_messages` stores only
@@ -100,15 +103,20 @@ The application preserves four distinct concepts:
 - **ChildScope** carries an opaque Discord thread/forum-post or Telegram topic context for a message.
 - **Sync Set** groups endpoint aliases for all-to-all fan-out, with optional route-aware one-way Discord anonymization (`anonymizeToDiscord`).
 
-Endpoint aliases are the only routing identifiers safe for display and logging. They match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and must not encode a person, phone number, JID, group subject, guild, or channel name. Provider target IDs are retained only for operational addressing and are never canonical IDs.
+Endpoint aliases are operational routing identifiers safe for display and logging. They match `[A-Za-z0-9][A-Za-z0-9_-]{0,63}` and must not encode a person, phone number, JID, group subject, guild, or channel name. Provider target IDs are retained only for operational addressing and are never canonical IDs.
 
 Child scopes are not endpoint rows and do not create independent routes. Opaque scope metadata follows canonical reply/lifecycle lineage so a reply can return to the correct thread or topic. Presentation headers have no routing authority. If the scoped destination cannot be reconstructed, delivery fails safely instead of falling back to the parent conversation.
 
-Flattened child messages use one human-facing attribution header: `<group-alias>/<thread-or-topic-label>/<username>`. Opaque child IDs never enter forwarded message text. The default `opaque` child-context mode keeps thread/topic names transient and falls back to the generic `thread`/`topic` label when a live name is unavailable. The explicit `friendly` mode may retain bounded normalized labels in the presentation-only `child_scope_labels` table so names survive restart/replay; switching back to `opaque` clears them. Labels never participate in routing, identity, or copy lookup.
+Flattened child messages use one human-facing attribution header: `<group-alias>/<thread-or-topic-label>/<name> (<assigned-alias>)`. Opaque child IDs never enter forwarded message text. The default `opaque` child-context mode keeps thread/topic names transient and falls back to the generic `thread`/`topic` label when a live name is unavailable. The explicit `friendly` mode may retain bounded normalized labels in the presentation-only `child_scope_labels` table so names survive restart/replay; switching back to `opaque` clears them. Labels never participate in routing, identity, or copy lookup.
 
 Telegram basic-group to supergroup migrations are handled as addressing maintenance: the adapter recognizes the migration service message and transactionally updates only the matching endpoint's `remote_id` in `sync.db`, preserving the alias, sync set, and canonical lineage. Telegram mentions are sanitized at the adapter boundary: `text_mention` entities are reduced to HMAC actor IDs plus transient display labels, and `@username` entities are rewritten to the generic `@mention` fallback to keep raw usernames out of canonical state.
 
-Route-aware Discord anonymization: When a sync set configures `anonymizeToDiscord = true`, outbound deliveries to Discord endpoints replace sender presentation names, structured mentions, reply quotes, and reaction fallback attributions with deterministic pseudonyms (e.g., `Silent Falcon`) derived purely from HMAC actor IDs. No PII-to-pseudonym mapping table is stored. WhatsApp and Telegram endpoints in the same sync set retain normal push name attribution in `push_name` mode.
+Route-aware Discord anonymization: `anonymizeToDiscord=true` uses the assigned
+sync-set actor alias for Discord author, structured-mention and reaction
+presentation and strips phone numbers and quoted bridge headers. Other
+transports retain ordinary names with their assigned aliases. There is no
+selectable username mode or computed HMAC pseudonym; HMAC actor identity remains
+unchanged and real names stay transient.
 
 ## Persistence and trust boundaries
 
@@ -123,7 +131,7 @@ All persistent files live below `DATA_DIR` (`/data` by default).
 - sync set definitions (including the boolean `anonymize_to_discord` flag) and endpoint memberships;
 - random canonical message IDs and opaque per-endpoint message-copy IDs;
 - opaque child-scope IDs and optional friendly display labels;
-- HMAC actor IDs, reaction emoji, poll option indexes/hashes and aggregate counts;
+- HMAC actor IDs and permanent sync-set alias/ordinal assignments, reaction emoji, poll option indexes/hashes and aggregate counts;
 - content-free delivery operation state, create sub-step state, timestamps, and recovery cursors.
 
 It must not contain message or quoted text, captions, poll questions/options, media, participant identity, provider display names, raw updates, credentials, external file URLs, or arbitrary error strings. `message_copies` maps `(endpoint, remote message ID)` to a random canonical ID and enforces one copy per canonical message and endpoint.
@@ -276,87 +284,83 @@ Package and integration tests cover configuration validation, HMAC stability, sc
 
 ## Cross-group participant addressing
 
-The `participant_addresses` table stores exactly an endpoint alias, a HMAC
-actor ID, and a monotonically allocated endpoint-local ordinal. Its stable
-`Pn` handles survive restarts and are deleted with endpoints. No raw provider
-identities, display names, usernames, message bodies, or phone numbers are stored.
-The table is created idempotently on startup for existing databases.
+`sync_set_actors` stores `(sync_set_id, actor_id, ordinal, alias)`, keyed by
+`(sync_set_id, actor_id)` with global unique ordinal and `alias COLLATE NOCASE`.
+An actor receives a distinct address in each set. The unrelated platform accounts
+of one real person are never linked. The frozen 256×256 vocabulary maps 65,536
+ordinals to unsuffixed two-word names, then appends a numeric tier from `2`.
+Persisted alias strings are validated against the frozen ordinal mapping.
 
-The discriminator extends the existing pseudonym derivation for every actor;
-it needs no participant column or persistent lookup table. Each sync set owns
-`showDiscriminator` (false by default) and `codeLength` (5–10; new sets use 8).
-Initialization imports the former global policies into `sync_sets.settings_json`
-for existing sets, preserving five-character codes and explicit settings on reopen.
-The legacy routing fields of `global_config` are initialization data. Only its
-new global DM safety gate is writable through `/api/config`. Sync-set saves
-reload router and adapter endpoint policies.
-The UI uses a shared settings modal for creating/editing sync sets, including
-privacy and membership fields. Save is disabled for an unchanged draft, including
-a reverted edit. Only saving and error messages are shown. A runtime reload failure
-returns an error even when the database commit has succeeded, permitting retry.
-Canonical messages retain their original `sync_set_id` for retention, inferred
-only from unambiguous existing copy membership during upgrade. Periodic pruning
-loads current saved policies. Orphan history and suppression markers expire
-after 90 days. Friendly-label persistence is scoped to each endpoint's set.
-WhatsApp device names live in `control.db.transport_connections.whatsapp_device_name`;
-startup imports the old global name only for unnamed existing connections. New
-connections receive an explicit default, and the UI/API can edit existing names.
-User accounts and admin security remain global.
-The router keeps the full pseudonym for historical reference lookup and formats
-its word stem separately. Displaying codes never changes canonical actor IDs.
-Suffix visibility applies across transports, including sender headers, polls,
-media companions and reaction fallbacks. Discord reserves suffix space when
-truncating webhook usernames. Colliding code/name/handle candidates remain
-literal; display settings never enable or disable address resolution.
+`alias_sequence` has one row with positive `next_ordinal` and an `exhausted` flag.
+It has no routing foreign key and survives set deletion. Allocation obtains a
+SQLite `BEGIN IMMEDIATE` writer lock, rechecks the actor, inserts its assignment,
+and advances the counter in one transaction. Busy/uniqueness contention retries
+the whole transaction within a bounded context. The last positive int64 ordinal
+sets `exhausted` without overflowing. No deleted alias or ordinal is reused.
 
-The canonical router observes sender IDs from accepted events and resolves
-only explicit `@{endpoint/label}` tokens within the source sync set,
-including stable handles, deterministic pseudonyms, unique observed names,
-and case-insensitive discriminator-only labels.
-It passes
-transient, resolved `CrossReference` values to outbound creates; they never
-enter a persistent delivery ledger or recovery cursor. Adapters verify
-destination membership and attempt native user mentions without exposing native
-provider IDs to the router. Each destination independently checks the addressed
-actor's membership, including destinations other than the referenced endpoint.
-When no safe native mention is available, the original token is forwarded
-unchanged, including its braces and authored label, even on anonymized routes.
-The router holds an optional in-memory per-endpoint real-name index for
-unambiguous display-name resolution. On a missing name, `ParticipantResolver`
-on the adapter registry dispatches to the referenced endpoint's owning
-adapter, passing only its registered HMAC actors. Discord checks exact
-username/nickname/display-name matches from guild member search and verifies
-source-channel access; WhatsApp checks its source-group roster and existing
-provider-owned contact metadata through the adapter API. Only a unique
-registered HMAC actor can be returned. Names and native IDs never enter the
-routing database, and no direct protocol-database query is added. This lookup
-precedes destination rendering, so old real-name references can resolve after
-a restart. Unavailable or ambiguous metadata preserves literal text. Full pseudonyms (and unambiguous two-word
-stems) derive from persisted endpoint-scoped HMAC actors and survive restarts
-without storing real names. Only stable handle/actor bindings are persisted.
-WhatsApp emits matching LID address text and mention metadata for text,
-image/video/document captions and audio/sticker text companions, never a PN.
-Discord verifies fresh guild membership and destination channel permissions,
-plus membership for private threads, and allowlists only verified native IDs.
-Explicit braced references may tag verified local Discord accounts even on
-anonymized routes. Sender and ordinary provider-native mention anonymization
-remain unchanged.
-Bridge syntax is not parsed from forwarded attribution headers. Cross-group
-addresses identify endpoint memberships, not user identities across platforms.
+`participant_addresses` retains endpoint-local internal `Pn` ordinals and HMAC
+actors. Endpoint deletion cascades only those observations; set aliases survive
+while the set exists. `Pn` is not a public reference format. Configuration saves
+upsert existing rows and delete only deliberate removals or changed provider
+bindings. Settings-only saves cannot cascade-delete assignments. Changed bindings
+retire stale observations; friendly labels follow their existing ownership rules.
+Initialization creates the registry idempotently and removes retired
+`usernameMode`, `showDiscriminator` and `codeLength` JSON keys without clearing
+other settings. Legacy global columns remain inert for installation upgrades.
 
-Discord and Telegram Bot API keep observed native user IDs only in process
-memory; after restart, those adapters fall back to textual references until
-users are re-observed. Discord restores these observations from live ingress
-and accepted channel/thread history recovery. On a missing binding, it also
-compares the authorized HMAC actor with paginated current guild members,
-under a five-second lookup timeout, and caches only the matched binding.
-This REST lookup requires Server Members Intent in the Developer Portal;
-it does not change gateway intents. Missing permission, cancellation and
-unmatched identities retain literal text. WhatsApp can resolve LID identities
-from live group membership after restart. No native cross-group mention support is currently
-provided on Telegram MTProto. Edit propagation uses existing text-only adapter
-semantics and does not produce new native mention notifications.
+Only accepted group-message authors allocate aliases, after source validity,
+echo and local-only checks and before canonical/create delivery state. Names,
+raw provider identities, media and content never enter the registry. WhatsApp
+requires verified canonical LIDs through adapter/provider APIs; PN-only authors
+fail before assignment or delivery, keeping checkpoints replayable within the
+provider's recovery limits. Structured mentions use the same canonical actor
+and existing set assignment, without enrollment or a separate hash domain.
+Quote-only native mention metadata remains transient until route projection.
+Native poll question/option mentions are rendered as aliases or non-identifying
+text before encrypted poll presentation is retained, keeping result companions
+safe after restart. When option projection changes a label,
+`poll_source_option_hashes` stores the original source endpoint's SHA-256 option
+hashes against canonical option indexes. It contains no labels and cascades with
+`poll_options`. Source votes use that mapping; forwarded WhatsApp votes use the
+projected hashes in `poll_options`, preserving one aggregate across restart.
+Other unassigned/unverifiable mentions retain safe normal
+text or non-identifying anonymized text. Edits and other presentation paths require an existing alias.
 
+The router recognizes only `@{Amber Badger}` or `@{Amber Badger 2}`, resolves the
+indexed alias globally, then requires the owning set to match the source set.
+Resolution never allocates. Unknown/out-of-set tokens remain exact authored
+literals; infrastructure failures propagate as errors. Escapes and bounded token
+counts are preserved. `CrossReference` carries only exact `Token`, HMAC `ActorID`,
+canonical `Alias` and optional transient `Name`; it is never persisted in a
+ledger or recovery cursor. No real-name index, member search or provider identity
+guessing is used for address selection.
+
+Each route snapshot retains its owning set for all author/mention/reference
+resolution. Queued creates recheck source and destination set ownership before
+provider operations, failing safely if an endpoint has been reassigned. Each
+adapter independently verifies the **actual outgoing endpoint and child scope**. WhatsApp requires a live destination-roster LID and matching wire text
+and mention metadata, including captions and media companions. Discord checks
+current guild/channel access and private-thread membership and allowlists only
+verified users. Explicit references can mention verified Discord members on
+anonymized routes; other author/ordinary-mention anonymization stays active.
+Telegram Bot API checks destination chat membership and HTML-escapes inline
+mention labels. Unavailable native rendering preserves the exact authored token,
+including on anonymized routes. MTProto and edits remain non-notifying literals.
+
+Discord and Telegram native bindings remain volatile. Discord restores them from
+live ingress and accepted history and can match an authorized actor against
+paginated guild identities under a five-second timeout with optional Server
+Members Intent. It does not add a privileged gateway intent. Permission failures,
+missing bindings and unavailable membership checks retain literal references.
+WhatsApp resolves from provider-owned target rosters without querying protocol
+SQLite. Aliases identify a platform actor within a set, not a global person.
+
+Runtime policies remain per-set. Their shared create/edit modal saves actual
+draft differences and reports reload failures after database commit. Canonical
+messages retain original set ownership for retention; orphan history and
+suppression markers expire after 90 days. Friendly-label persistence remains
+per-endpoint/set. WhatsApp device names are connection-owned sensitive control
+state; accounts and admin security remain global.
 
 The per-set `settings.membershipReviewEnabled` flag defaults false and controls
 review UI visibility across browsers, replacing the browser-local preference.

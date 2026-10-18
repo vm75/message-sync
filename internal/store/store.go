@@ -238,7 +238,6 @@ func initialize(ctx context.Context, db *sql.DB) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE sync_sets SET settings_json=(SELECT json_object(
-  'usernameMode', username_mode, 'showDiscriminator', json(CASE WHEN show_discriminator THEN 'true' ELSE 'false' END), 'codeLength', 5,
   'childContextDisplayMode', child_context_display_mode,
   'media', json_object('enabled',json(CASE WHEN media_enabled THEN 'true' ELSE 'false' END),'maxSizeMB',media_max_size_mb),
   'recovery',json_object('enabled',json(CASE WHEN recovery_enabled THEN 'true' ELSE 'false' END),'maxAgeHours',recovery_max_age_hours,'maxMessagesPerGroup',recovery_max_messages_per_group),
@@ -248,6 +247,10 @@ func initialize(ctx context.Context, db *sql.DB) error {
   'localPrefix',local_message_prefix
  ) FROM global_config WHERE id=1) WHERE settings_json IS NULL`); err != nil {
 		return fmt.Errorf("import legacy sync-set settings: %w", err)
+	}
+	// Retired display settings are not imported or exposed. Preserve all other policy.
+	if _, err := tx.ExecContext(ctx, `UPDATE sync_sets SET settings_json=json_remove(settings_json,'$.usernameMode','$.showDiscriminator','$.codeLength') WHERE json_valid(settings_json) AND (json_type(settings_json,'$.usernameMode') IS NOT NULL OR json_type(settings_json,'$.showDiscriminator') IS NOT NULL OR json_type(settings_json,'$.codeLength') IS NOT NULL)`); err != nil {
+		return fmt.Errorf("retire legacy display settings: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `ALTER TABLE canonical_messages ADD COLUMN sync_set_id TEXT`); err != nil {
 		if !strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
@@ -1140,7 +1143,7 @@ func (s *Store) RecordPollVote(ctx context.Context, canonicalID, endpointID, act
 
 	indexes := make([]int, 0, len(optionHashes))
 	for _, optionHash := range optionHashes {
-		index, err := s.PollOptionIndexForWhatsAppHash(ctx, canonicalID, optionHash)
+		index, err := s.pollVoteOptionIndex(ctx, canonicalID, endpointID, optionHash)
 		if err != nil {
 			return err
 		}

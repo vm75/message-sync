@@ -12,16 +12,26 @@
 - Ignore private edits/deletes. Use only WhatsApp per-message Delete for Me;
   never delete Discord/Bot API participant-visible messages or MTProto personal chats.
 
-- Hide discriminator suffixes by default, including anonymized Discord names.
-  Add per-sync-set `showDiscriminator`, default false,
-  to show the stable suffix across forwarded attribution.
-  Preserve full historical pseudonyms and actor identities.
+- Replace unreleased pseudonym/discriminator addressing with persistent,
+  globally unique aliases scoped to each sync-set actor. Freeze a 256×256
+  vocabulary with numeric overflow tiers; never reuse deleted aliases/ordinals.
+- Show `group/Alice (Amber Badger)` normally and `group/Amber Badger` on
+  anonymized Discord routes. Preserve aliases in truncated webhook names.
+- Project native poll mentions to safe aliases while preserving original source
+  vote hashes and common option indexes, including after restart.
+- Use only `@{Amber Badger}` and `/dm @{Amber Badger} text` addresses. Require
+  preexisting author assignments, set-local authorization and actual destination
+  membership. Reject ambiguous distinct DM inboxes; deduplicate equivalent routes.
+- Remove username modes and discriminator API/UI/settings controls while
+  preserving unrelated persisted policies and HMAC actor identities.
+- Require verified canonical LIDs before WhatsApp author alias allocation;
+  unresolved PN-only messages fail before delivery/checkpoint advancement.
+- Save configuration with differential upserts, preserving retained alias,
+  participant and child-label state instead of cascading whole-table rewrites.
 - Move routing/runtime policies into sync-set settings, with live reload and
   independent media, recovery, retention, polls, local-prefix and child-label
   policies. Preserve existing settings during initialization; retire the global
   runtime fields from `/api/config`, which now exposes only the DM safety gate.
-- Add per-sync-set discriminator `codeLength` (5–10; 8 for new sets, preserve 5
-  on upgrade). Keep historical supported-length addresses working.
 - Move WhatsApp linked-device names to connections, with one-time import and
   editing for existing connections. Keep accounts and admin security global.
 - Move runtime, privacy and membership settings into an **Edit settings** modal
@@ -30,33 +40,13 @@
 - Make membership review visibility a saved per-sync-set setting; replace the
   browser-only switch and scope review requests/pipelines to the selected set.
 - Preserve chip removal/paste tracking and report runtime reload failures.
-- Enable case-insensitive `@{group/discriminator}` addressing independently of
-  anonymization and display, using existing HMAC participant records after
-  restart. Reject ambiguous code/name/handle matches without guessing.
-- Upgrade the display setting idempotently without storing new participant
-  identity data; cover API persistence, reload, native payloads and collisions.
-
-- Add persistent per-endpoint HMAC-backed `Pn` handles and explicit
-  `@{endpoint/name-or-alias}` references, including observed display names,
-  deterministic pseudonyms and unique alias stems, with sync-set isolation.
-- Fix native mentions in every verified member destination, including shared
-  groups beyond the group named in the reference. WhatsApp uses matching LID
-  token text and metadata in text and captions; Discord verifies channel/private-thread access and
-  allowlists users; Telegram Bot API verifies current membership.
-- Preserve references exactly as posted when native rendering is unavailable.
-  MTProto and edits retain literal reference text. Explicit braced references
-  can tag verified native Discord members even on anonymized routes, preserving
-  sender and ordinary provider-mention anonymization.
-- Restore Discord native-ID observations from accepted channel/thread history
-  recovery so recovered members can be mentioned without a new live post.
-  Add bounded HMAC-based guild-roster resolution on a cold native-ID cache
-  when Server Members Intent permits it; denied lookups stay literal.
-- Fix old real-name references after restart: resolve a missing name through
-  the referenced WhatsApp/Discord adapter against registered HMAC actors and
-  verified provider metadata, before native destination rendering. Keep names
-  transient and preserve literal fallback for unavailable or ambiguous data.
-- Add successful native payload, membership rejection, escaping, name/alias
-  routing and privacy regression tests. No release version change.
+- Retain exact authored reference text when native membership cannot be verified;
+  Discord still checks guild/channel/private-thread permissions and allowlists
+  users, while WhatsApp uses LID-only metadata and Bot API checks membership.
+- Restore Discord native observations from live ingress, accepted history and
+  optional bounded HMAC-based guild-roster lookup; denied lookups stay literal.
+- Add vocabulary, concurrent allocation, rollback, restart, configuration-save,
+  inbox ambiguity, native payload and privacy regression coverage. No version bump.
 
 All notable changes to this project will be documented in this file.
 

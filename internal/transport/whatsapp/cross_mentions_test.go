@@ -19,13 +19,13 @@ func TestWhatsAppReferencesFallbackWithoutConnectedClient(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{anonymized: true, want: "*_other/Sender_*: Hi @{g1/P1}"},
-		{anonymized: false, want: "*_other/Sender_*: Hi @{g1/P1}"},
+		{anonymized: true, want: "*_other/Sender_*: Hi @{Amber Badger}"},
+		{anonymized: false, want: "*_other/Sender_*: Hi @{Amber Badger}"},
 	} {
 		outgoing := transport.Outgoing{
 			Endpoint: "g2", OriginEndpoint: "other", Kind: "text",
-			Text:                "*_other/Sender_*: Hi @{g1/P1}",
-			References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice", Pseudonym: "Rust Ocean Q7M5K"}},
+			Text:                "*_other/Sender_*: Hi @{Amber Badger}",
+			References:          []transport.CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij", Name: "Alice", Alias: "Amber Badger"}},
 			ReferenceAnonymized: tc.anonymized,
 		}
 		rendered, info := adapter.nativeCrossReferences(context.Background(), types.NewJID("98765", types.GroupServer), outgoing, nil, nil)
@@ -44,7 +44,7 @@ func TestWhatsAppCrossReferenceMediaCaption(t *testing.T) {
 	lid := types.NewJID("987654321012345", types.HiddenUserServer)
 	for _, kind := range []string{"image", "video", "document"} {
 		t.Run(kind, func(t *testing.T) {
-			outgoing := transport.Outgoing{Endpoint: "g2", Kind: kind, Text: "Hi @{g1/Alice}", References: []transport.CrossReference{{Token: "@{g1/Alice}", Endpoint: "g1", ActorID: hasher.UserID(lid.String())}}}
+			outgoing := transport.Outgoing{Endpoint: "g2", Kind: kind, Text: "Hi @{Amber Badger}", References: []transport.CrossReference{{Token: "@{Amber Badger}", ActorID: hasher.UserID(lid.String())}}}
 			rendered, info := adapter.nativeCrossReferences(context.Background(), types.NewJID("222", types.GroupServer), outgoing, nil, func(context.Context, types.JID) (*types.GroupInfo, error) {
 				return &types.GroupInfo{Participants: []types.GroupParticipant{{JID: lid}}}, nil
 			})
@@ -94,14 +94,14 @@ func TestWhatsAppNativeCrossReferences(t *testing.T) {
 		{name: "PN only cannot tag", destination: "g1", actor: pn, participants: []types.GroupParticipant{{JID: pn}}},
 		{name: "lookup unavailable", destination: "g1", actor: lid, lookupErr: errors.New("unavailable")},
 	} {
-		for _, label := range []string{"Alice Smith", identity.Pseudonym(hasher.UserID(tc.actor.String())), "P1"} {
+		for _, label := range []string{"Amber Badger", "amber badger", "Amber Badger 2"} {
 			t.Run(tc.name+"/"+label, func(t *testing.T) {
-				token := "@{g1/" + label + "}"
+				token := "@{" + label + "}"
 				body := "*_source/Sender_*: Hi " + token + ", " + token + ` and \` + token
 				stanza := "reply-marker"
 				info := &waE2E.ContextInfo{StanzaID: &stanza}
 				outgoing := transport.Outgoing{Endpoint: tc.destination, Kind: "text", Text: body,
-					References: []transport.CrossReference{{Token: token, Endpoint: "g1", ActorID: hasher.UserID(tc.actor.String()), Name: "Alice Smith", Handle: "P1"}}}
+					References: []transport.CrossReference{{Token: token, ActorID: hasher.UserID(tc.actor.String()), Name: "Alice Smith"}}}
 				got, gotInfo := adapter.nativeCrossReferences(context.Background(), target, outgoing, info, func(_ context.Context, jid types.JID) (*types.GroupInfo, error) {
 					if jid != target {
 						t.Fatalf("looked up a group other than the destination: %v", jid)
@@ -122,44 +122,5 @@ func TestWhatsAppNativeCrossReferences(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestResolveWhatsAppParticipantNameAfterRestart(t *testing.T) {
-	hasher, err := identity.New([]byte("01234567890123456789012345678901"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := types.NewJID("111111111111111", types.HiddenUserServer)
-	second := types.NewJID("222222222222222", types.HiddenUserServer)
-	actor := hasher.UserID(first.String())
-	otherActor := hasher.UserID(second.String())
-	adapter := &Adapter{normalizer: &Normalizer{hasher: hasher}}
-	for _, tc := range []struct {
-		name      string
-		label     string
-		actors    []string
-		members   []types.GroupParticipant
-		lookupErr error
-		want      bool
-	}{
-		{name: "push name", label: "Alice", actors: []string{actor}, members: []types.GroupParticipant{{JID: first}}, want: true},
-		{name: "contact alias", label: "Alice Smith", actors: []string{actor}, members: []types.GroupParticipant{{JID: first}}, want: true},
-		{name: "normalized alias", label: " ALICE   SMITH ", actors: []string{actor}, members: []types.GroupParticipant{{JID: first}}, want: true},
-		{name: "unregistered user", label: "Alice", actors: []string{otherActor}, members: []types.GroupParticipant{{JID: first}}},
-		{name: "ambiguous name", label: "Alice", actors: []string{actor, otherActor}, members: []types.GroupParticipant{{JID: first}, {JID: second}}},
-		{name: "absent member", label: "Alice", actors: []string{actor}},
-		{name: "lookup failure", label: "Alice", actors: []string{actor}, lookupErr: errors.New("unavailable")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, found := adapter.resolveParticipantName(context.Background(), types.NewJID("333", types.GroupServer), tc.label, tc.actors, func(context.Context, types.JID) (*types.GroupInfo, error) {
-				return &types.GroupInfo{Participants: tc.members}, tc.lookupErr
-			}, func(types.JID) types.ContactInfo {
-				return types.ContactInfo{Found: true, PushName: "Alice", FullName: "Alice Smith"}
-			})
-			if found != tc.want || tc.want && got != actor || !tc.want && got != "" {
-				t.Fatalf("resolved %q = %q, %t; want found=%t", tc.label, got, found, tc.want)
-			}
-		})
 	}
 }

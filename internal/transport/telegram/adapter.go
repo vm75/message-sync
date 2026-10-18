@@ -29,13 +29,13 @@ type botClient interface {
 type botClientFactory func(string, telegrambot.HandlerFunc, telegrambot.ErrorsHandler) (botClient, error)
 
 type Options struct {
-	PrivateDMEnabled       bool
-	EndpointSettings       map[string]config.SyncSetSettings
-	ConnectionID           string
-	Token                  string
-	ChatIDs                map[string]string
-	Hasher                 *identity.Hasher
-	UsernameMode           config.UsernameMode
+	PrivateDMEnabled bool
+	EndpointSettings map[string]config.SyncSetSettings
+	ConnectionID     string
+	Token            string
+	ChatIDs          map[string]string
+	Hasher           *identity.Hasher
+
 	Logger                 *slog.Logger
 	MediaEnabled           bool
 	MediaMaxBytes          uint64
@@ -111,7 +111,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	if err := config.ValidateConnectionID(opts.ConnectionID); err != nil {
 		return nil, err
 	}
-	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.UsernameMode, opts.ConnectionID, opts.EndpointSettings)
+	normalizer, err := NewNormalizerWithConnection(opts.ChatIDs, opts.Hasher, opts.ConnectionID, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			chatIDs[alias] = endpoint.RemoteID
 		}
 	}
-	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, cfg.LegacySettings().UsernameMode, a.connectionID, cfg.EndpointSettings(a.connectionID))
+	normalizer, err := NewNormalizerWithConnection(chatIDs, a.hasher, a.connectionID, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}

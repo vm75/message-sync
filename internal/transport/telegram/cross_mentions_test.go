@@ -45,7 +45,7 @@ func TestTelegramCrossMentionMembershipAndLabels(t *testing.T) {
 		{name: "wrong member", member: &models.ChatMember{Member: &models.ChatMemberMember{User: &models.User{ID: 456}}}},
 		{name: "lookup error", err: errors.New("unavailable")},
 	} {
-		for _, label := range []string{"Alice Smith", "Rust Ocean Q7M5K", "Rust Ocean", "P1", "7WCUX", strings.Repeat("&", 96)} {
+		for _, label := range []string{"Alice Smith", "", strings.Repeat("&", 96)} {
 			t.Run(tc.name+"/"+label, func(t *testing.T) {
 				api := &crossMentionAPI{fakeTelegramAPI: &fakeTelegramAPI{}, lookup: func(params *telegrambot.GetChatMemberParams) (*models.ChatMember, error) {
 					if params.ChatID != int64(-1001234567890) || params.UserID != 123 {
@@ -56,16 +56,16 @@ func TestTelegramCrossMentionMembershipAndLabels(t *testing.T) {
 				adapter := newOutboundTestAdapter(t, api.fakeTelegramAPI)
 				adapter.client = api
 				adapter.rememberCrossMentionParticipant("addressed", "u_abcdefghij", 123)
-				token := "@{addressed/" + label + "}"
+				token := "@{Amber Badger}"
 				body := "Hi " + token + ` and \` + token
 				outgoing := transport.Outgoing{Endpoint: "tg", Kind: "text", SourceText: body,
-					References: []transport.CrossReference{{Token: token, Endpoint: "addressed", ActorID: "u_abcdefghij", Name: label, Handle: "P1", Pseudonym: "Rust Ocean Q7M5K"}}}
+					References: []transport.CrossReference{{Token: token, ActorID: "u_abcdefghij", Name: label, Alias: "Amber Badger"}}}
 				if _, err := adapter.Send(context.Background(), outgoing); err != nil {
 					t.Fatal(err)
 				}
 				want := body
 				if tc.native {
-					want = `Hi <a href="tg://user?id=123">@` + html.EscapeString(label) + `</a> and \` + html.EscapeString(token)
+					want = `Hi <a href="tg://user?id=123">@` + html.EscapeString((transport.Sender{Alias: "Amber Badger"}).NameWithAlias(label)) + `</a> and \` + html.EscapeString(token)
 				}
 				if len(api.texts) != 1 || api.texts[0] != want {
 					t.Fatalf("Telegram text = %#v, want %q", api.texts, want)
@@ -85,13 +85,13 @@ func TestCrossMentionInAnotherDestinationGroup(t *testing.T) {
 	adapter.rememberCrossMentionParticipant("addressed", "u_abcdefghij", 123)
 	_, err := adapter.Send(context.Background(), transport.Outgoing{
 		Endpoint: "tg", OriginEndpoint: "source", Kind: "text",
-		SourceText: "Hi @{addressed/Alice}",
-		References: []transport.CrossReference{{Token: "@{addressed/Alice}", Endpoint: "addressed", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice"}},
+		SourceText: "Hi @{Amber Badger}",
+		References: []transport.CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij", Name: "Alice", Alias: "Amber Badger"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(api.texts) != 1 || !strings.Contains(api.texts[0], `<a href="tg://user?id=123">@Alice</a>`) {
+	if len(api.texts) != 1 || !strings.Contains(api.texts[0], `<a href="tg://user?id=123">@Alice (Amber Badger)</a>`) {
 		t.Fatalf("missing native mention for a verified shared member: %#v", api.texts)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -14,7 +13,7 @@ func TestNormalizeDiscordLifecycleEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +115,7 @@ func TestBridgeInitiatedDiscordDeleteGatewayEchoIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +143,7 @@ func TestDiscordLiveReactionAndDeleteDoNotReuseTargetAsCheckpoint(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher, config.UsernameModeHash)
+	normalizer, err := NewNormalizer(map[string]string{"discord": testChannelID}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}

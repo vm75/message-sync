@@ -12,18 +12,21 @@ In a private chat with the owning WhatsApp sync account, Discord bot, or
 Telegram Bot API bot, send:
 
 ```text
-/dm @{other-group/P1} Can you help with this?
+/dm @{Amber Badger} Can you help with this?
 ```
 
-Existing participant references work: `Pn`, full pseudonym, unique pseudonym
-stem, discriminator, and unambiguous observed names. Their existing case,
-whitespace, escaping and ambiguity rules apply. The requester must already be
-an observed member of an endpoint in the target's same enabled sync set.
-Current provider membership is verified on every hop. If several source aliases
-qualify in that set, the sorted first matching alias supplies attribution.
+Use the alias already seen in forwarded author attribution. It resolves globally
+to exactly one `(sync set, actor)` assignment; case-insensitive spelling and
+numeric tiers are supported. No endpoint or sync-set prefix is needed. Both
+parties must already have group-author alias assignments in the owning set;
+private commands and structured mentions do not enroll participants. Discovery
+is a workflow assumption, not a read-receipt database or proof of authorization.
+The sender's private inbox must match the owning transport/connection and a
+currently verified member of an endpoint in that set. All membership/inbox
+checks run again on every hop.
 
 Only the addressed person's private inbox receives the message. It has an
-endpoint-scoped pseudonym, body, and native-Reply instruction. It never adds
+assigned set alias (`DM from Amber Badger`), body, and native-Reply instruction. It never adds
 the sender's display name, phone, provider user ID, or username. To answer,
 use the platform's native **Reply** on the bot's relayed message. Plain text
 after a conversation does not imply a current conversation. Multiple
@@ -51,12 +54,18 @@ The recipient may retain that original indefinitely.
 
 ## Reachability and failure
 
-Delivery uses the exact owning connection, never an alternate account.
+Delivery uses a verified owning connection. Candidate recipient endpoints must
+belong to the alias's own set. Equivalent routes to the same verified inbox are
+deduplicated, using a stable sorted endpoint. Multiple distinct eligible inboxes
+fail generically rather than selecting an account. Missing assignments, unknown
+aliases and unauthorized/unreachable recipients receive the same initial failure.
 WhatsApp new destinations require a verified PN from the current group roster;
 a group-observed LID alone cannot initiate a relay. Native private replies can
 use an already proven private inbox with matching current group membership.
-Provider-proven PN/LID aliases share one canonical private chat identity while
-retaining the distinct operational send address and observed endpoint actor.
+Provider-proven operational PN/LID forms bind to the existing canonical LID
+actor and private chat identity. A PN fallback never creates a new participant
+alias. The roster PN needed to initiate delivery remains an adapter-owned send
+address, separate from the assigned alias.
 Discord sends use the bot account, with explicit empty allowed mentions, never
 a channel webhook. Discord DM gateway intent is requested only on connections
 with an enabled relay set; changing that gate reconnects the Discord adapter.

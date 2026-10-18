@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -75,8 +74,8 @@ func TestPrivateDiscordBotSendAndNativeReplyWithoutDeletion(t *testing.T) {
 
 func TestGroupDiscordDMCommandKeepsGroupSemantics(t *testing.T) {
 	hasher, _ := identity.New([]byte("01234567890123456789012345678901"))
-	normalizer, _ := NewNormalizer(map[string]string{"group": "123"}, hasher, config.UsernameModeHash)
-	text := "/dm @{other/P1} group message"
+	normalizer, _ := NewNormalizer(map[string]string{"group": "123"}, hasher)
+	text := "/dm @{Amber Badger} group message"
 	in, ok := normalizer.NormalizeMessage(&discordgo.MessageCreate{Message: &discordgo.Message{ID: "12345", ChannelID: "123", GuildID: "456", Author: &discordgo.User{ID: "42"}, Content: text, Timestamp: time.Now()}}, "999", nil)
 	if !ok || in.Endpoint != "group" || in.Kind != "text" || in.Text != text {
 		t.Fatal("group /dm was intercepted or changed")

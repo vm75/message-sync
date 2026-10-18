@@ -98,5 +98,15 @@ Automatic recovery uses the endpoint’s sync-set `recovery.enabled`,
 `recovery.maxAgeHours`, and `recovery.maxMessagesPerGroup` settings. Bot API
 availability remains limited by Telegram's retained update queue. MTProto
 history is capped at 5,000 messages per request; manual backfill uses its
-explicit request bounds. Media and username presentation policies also belong
+explicit request bounds. Media and alias presentation policies also belong
 to the endpoint's sync set, even when one connection serves several sets.
+
+
+Cross-group references use assigned `@{Amber Badger}` aliases within the source
+sync set. Bot API native rendering requires current destination-chat membership
+and an available transient native identity binding; otherwise the exact authored
+token stays literal. MTProto and edits do not add native reference notifications.
+Private Bot API `/dm @{Amber Badger} text` requires existing author aliases,
+current set membership and prior private contact with the owning bot (`/start`).
+The DM header shows only the sender's assigned set alias. MTProto personal
+inboxes remain unmanaged. See [private messaging](PRIVATE_MESSAGING.md).

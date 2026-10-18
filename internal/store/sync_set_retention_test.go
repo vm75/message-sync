@@ -49,11 +49,7 @@ func TestScopedSettingsUpgradePreservesPoliciesAndOwnership(t *testing.T) {
 			if err := json.Unmarshal([]byte(raw), &got); err != nil {
 				t.Fatal(err)
 			}
-			code := float64(5)
-			if attempt == 1 && set == "work" {
-				code = 9
-			}
-			if got["codeLength"] != code || got["usernameMode"] != "hash" || got["childContextDisplayMode"] != "friendly" || got["showDiscriminator"] != false || got["localPrefix"] != "!local" {
+			if got["codeLength"] != nil || got["usernameMode"] != nil || got["childContextDisplayMode"] != "friendly" || got["showDiscriminator"] != nil || got["localPrefix"] != "!local" {
 				t.Fatalf("upgrade/reopen settings: %s", raw)
 			}
 			for key, want := range map[string]map[string]any{

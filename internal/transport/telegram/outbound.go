@@ -208,7 +208,7 @@ func telegramPollAttribution(outgoing transport.Outgoing) string {
 		return ""
 	}
 	label := outgoing.SenderLabel
-	if displayName := sanitizeTelegramAttribution(outgoing.Sender.NameWithDiscriminator(outgoing.Sender.DisplayName)); displayName != "" {
+	if displayName := sanitizeTelegramAttribution(outgoing.Sender.NameWithAlias(outgoing.Sender.DisplayName)); displayName != "" {
 		label = string(outgoing.OriginEndpoint) + "/" + displayName
 	}
 	return "<b><i>" + html.EscapeString(sanitizeTelegramAttribution(label)) + "</i></b>:"
@@ -750,7 +750,7 @@ func telegramSenderLabel(sender transport.Sender) string {
 	if label == "" {
 		label = sanitizeTelegramAttribution(sender.OpaqueID)
 	}
-	return sender.NameWithDiscriminator(label)
+	return sender.NameWithAlias(label)
 }
 
 func sanitizeTelegramAttribution(value string) string {

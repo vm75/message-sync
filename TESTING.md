@@ -41,7 +41,7 @@ GitHub Actions also runs `.github/workflows/ci.yml` for every pull request targe
 
 The actual publication workflow is tag-only and enforces tag == `VERSION` before registry authentication or publishing. See [RELEASING.md](RELEASING.md) for stable, pre-release, mismatch, and immutability scenarios.
 
-`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, route-aware Discord anonymization and pseudonym canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.
+`internal/integration` uses in-memory fake WhatsApp, Discord, and Telegram adapters to verify multi-connection mixed-transport fan-out, destination isolation, ambiguity-safe retry, cross-connection thread/topic reply lineage, connection reassignment, restart/replay state, and lifecycle ordering. The focused package tests cover dynamic connection management, bounded queues, checkpoints, provider reconnect/history behavior, webhook repair, configuration reload, route-aware Discord anonymization and alias canaries, WhatsApp lifecycle markers, and privacy-safe API/logging.
 
 For a runtime/container smoke test, use a fresh data directory and no provider credentials:
 
@@ -57,7 +57,7 @@ podman build -f Containerfile -t message-sync:dev .
 timeout 4s podman run --rm --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m -v "$tmpdir:/data:Z" -e DATA_DIR=/data -e API_ADDR=127.0.0.1:0 -e IDENTITY_SECRET=0123456789abcdef0123456789abcdef message-sync:dev run
 ```
 
-Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover the discriminator-display setting and Discord anonymization flag. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
+Use a disposable data directory for these smoke tests. Narrow idempotent initialization migrations preserve documented schema additions; upgrade tests cover removal of retired display settings, preservation of unrelated policies, and the Discord anonymization flag. `sync.db` stores operational metadata only, and test canaries assert that message content, media, identities, credentials, and raw provider errors do not cross the persistence, API, or logging boundary.
 
 The control-plane retention test verifies bounded deletion of expired auth
 artifacts and terminal membership requests while returning only opaque evidence
@@ -79,50 +79,49 @@ The integration gate combines the three transports with deterministic fake outco
 ## Cross-group references regression gate
 
 `go test ./internal/store ./internal/router ./internal/transport/...`
-includes participant handle stability/isolation, name and pseudonym resolution,
-post-restart pseudonym lookup, alias ambiguity rejection, and exact literal
-fallback. Positive adapter tests assert WhatsApp LID token/mention metadata in
-text and media captions, reference propagation to audio/sticker text companions,
-Discord mention text and explicit user allowlisting, and Telegram HTML inline
-mentions for members shared across groups. Rejection tests cover absent or
-unknown members, failed lookups, PN-only WhatsApp identities, revoked Discord
-channel access/private-thread membership, and departed/restricted Telegram
-members. Discord tests cover native mention payloads on anonymized routes,
-including pseudonym input, and IDs restored by channel/thread history recovery.
-Full-path restart tests observe a Discord `dg1/vm` or WhatsApp sender, verify
-the forwarded attribution, recreate the router/adapter, then address the name
-from that older message. They check real names, full pseudonyms, short aliases
-and `Pn` with anonymization both on and off, final native payloads, and literal
-text in nonmember destinations. Provider-lookup tests reject ambiguous names
-and actors outside the referenced group's registry.
-Cold-cache tests cover HMAC-only guild-roster matching, pagination, missing
-roster permission, nonadvancing pages, channel-access rejection and rejection
-of identities from another provider.
-HTML-escaped names, duplicate tokens and escaped literals are covered.
+includes global alias uniqueness, exhaustive 65,536-pair vocabulary bijection,
+checksums, tier/int64 boundaries, restart stability, SQL contention across store
+connections, rollback and permanent nonreuse after set deletion. Settings-only
+saves preserve assignments, counters, observations and friendly labels; changed
+bindings invalidate stale endpoint state. Upgrade tests strip retired display
+settings while preserving all unrelated policies.
 
-For client rendering and notifications, perform real-provider checks:
-WhatsApp LID-only mention chips without phone exposure; Discord channel and
-private-thread membership with explicit allowed-user allowlisting; Telegram
-Bot API clickable inline mentions. References must stay exactly as posted in
-groups without verified membership. Test edit/delete propagation, reconnection,
-restart (Discord/Telegram native-ID caches are transient), and escaped
-`\@{group/P1}` literals. MTProto and edits keep literal references. Explicit
-Discord references may tag verified local members on anonymized routes while
-sender and ordinary provider-mention anonymization remain unchanged.
+Router tests check source-set isolation, case-insensitive assigned-alias lookup,
+exact literal fallback, escaping and reference count bounds. Only accepted group
+authors allocate; structured mentions and private commands reuse assignments.
+Unknown mentions stay safe without inventing aliases. Quote-only mention entities
+retain metadata through ingress; native poll question/option entities render
+restart-safe alias labels before result presentation is retained. Allocation and identity
+failures create no canonical/outbound state. WhatsApp PN-only authors consume no
+ordinal until a canonical LID is verified; author/mention identities agree.
 
-Discriminator regressions cover hidden defaults, enabled display across sender,
-child, hash, poll and reaction attribution, live display reload, and immutable
-legacy aliases. Upgrade tests open the previous schema, check the false default
-and preservation of existing settings, enable the setting and reopen the DB.
-API tests preserve explicit false and omitted partial-update fields. Router
-collision fixtures reject duplicate five-character codes and name/handle
-conflicts, retaining exact authored tokens. Full-path WhatsApp/Discord restart
-tests exercise discriminator-only labels with anonymization and display on/off;
-Telegram Bot API tests verify cold router lookup plus native and unavailable
-native-cache payloads. Long Discord webhook names retain their full suffix.
+Adapter tests assert actual-destination WhatsApp LID wire tokens/metadata in text,
+captions and companions; Discord guild/channel/private-thread checks and explicit
+allowed users; and Telegram membership-gated, HTML-escaped inline mentions.
+Restart tests reuse persisted aliases while recreating volatile native caches.
+Cold-cache Discord tests cover HMAC guild-roster pagination, permissions,
+nonadvancing pages and rejection of identities from other providers. Edits and
+MTProto retain non-notifying literal braced references. Long Discord webhook
+names retain the entire assigned alias.
 
-Scoped-policy tests cover independent settings/partial updates, code-length
-validation and historical-length addressing, transport username isolation,
+Poll mention tests verify alias-projected question/options and equivalent source
+and forwarded vote counts. Store tests verify the source option-hash mapping
+survives restart, rejects unrecognized hashes and cascades on poll deletion.
+
+Private tests cover nine provider pairings, preexisting assignments, global
+lookup with set-local authorization, equivalent inbox deduplication, distinct
+inbox rejection, exact native reply identity/TTL, restart, membership revocation,
+no enrollment and unchanged provider cleanup restrictions. No native private
+content or inbox identity may enter canonical routing state or admin output.
+
+For real client rendering, follow [the manual guide](docs/TESTING_GUIDE.md):
+check alias-only Discord anonymity, name-plus-alias attribution elsewhere,
+LID-only WhatsApp chips, Telegram links, revoked permissions, cold caches and
+escaped `\@{Amber Badger}` literals. Legacy username-mode/discriminator API fields
+must be rejected; their inert schema columns are only upgrade compatibility data.
+
+Scoped-policy tests cover independent settings/partial updates, policy
+validation and retired-setting rejection, transport policy isolation,
 WhatsApp media isolation, scoped friendly-label preservation, live retention
 reload, original retention ownership and orphan suppression cleanup. Upgrade
 fixtures remove the new sync-set settings/retention and connection-name columns,

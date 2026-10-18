@@ -269,7 +269,7 @@ You should see logs indicating that the HTTP API is listening on port 8080. Prov
 1. Navigate to the **Sync Sets** view.
 2. Click **Create Sync Set**.
 3. Name the sync set (e.g., `test_sync_set`).
-4. (Optional) Check **Anonymize sender presentation when forwarding to Discord** to pseudonymize sender identities, phone numbers, and mentions forwarded to Discord.
+4. (Optional) Check **Anonymize sender presentation when forwarding to Discord** to use assigned aliases and hide sender names/phone numbers in mentions forwarded to Discord.
 5. Select the configured endpoints:
    - `wa_test` (WhatsApp)
    - `dc_test` (Discord)
@@ -425,13 +425,13 @@ If a WhatsApp edit does not arrive, inspect fixed safe events `whatsapp_edit_dro
 ### Scenario 14: Route-Aware Discord Anonymization (`anonymizeToDiscord`)
 - [ ] In the **Sync Sets** view, edit your sync set to enable **Anonymize sender presentation when forwarding to Discord** and save.
 - [ ] Send a message from WhatsApp: `Hello from WhatsApp!`.
-  - **Verify Discord**: The message attribution uses a deterministic pseudonym (e.g., `*_wa_test/Silent Falcon_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
-  - **Verify Telegram**: The message attribution retains the real WhatsApp push name (e.g., `*_wa_test/Alice_*: Hello from WhatsApp!`).
+  - **Verify Discord**: The message attribution uses the assigned alias (e.g., `*_wa_test/Amber Badger_*: Hello from WhatsApp!`) with no real WhatsApp display name or phone number.
+  - **Verify Telegram**: The message attribution retains the real WhatsApp push name with its assigned alias (e.g., `*_wa_test/Alice (Amber Badger)_*: Hello from WhatsApp!`).
 - [ ] Send a message from WhatsApp containing a mention and reply quote.
-  - **Verify Discord**: Mentions are pseudonymized, and quoted text has real sender names stripped.
-  - **Verify Telegram**: Mentions and quote headers retain normal names.
+  - **Verify Discord**: Assigned structured mentions use their aliases, unassigned mentions use non-identifying text, and quoted text has real sender names stripped.
+  - **Verify Telegram**: Assigned structured mentions retain normal names with their aliases; quote attribution follows the ordinary name-plus-alias contract.
 - [ ] Add a reaction to a bridged message in WhatsApp.
-  - **Verify Discord**: The fallback attribution or reaction uses the pseudonym without leaking the WhatsApp user's name or phone number.
+  - **Verify Discord**: The fallback attribution or reaction uses the assigned alias without leaking the WhatsApp user's name or phone number.
 
 ---
 
@@ -579,58 +579,48 @@ You can safely inspect event types, endpoint aliases (`wa_test`, `dc_test`, `tg_
 
 ### Cross-group address manual test
 
-Have participant A post an ordinary message in WhatsApp group2; in an
-anonymized Discord destination note the word-based author pseudonym,
-such as `group2/Rust Ocean`. Verify the discriminator is hidden by default.
-Enable **Sync Sets → select set → Edit settings → Show participant discriminator in this sync set**
-and have A post again: normal destinations should show `group2/Alice Q7M5K`
-and anonymized Discord should show `group2/Rust Ocean Q7M5K` (use the actual
-names/code). The toggle also accepts `PUT /api/sync-sets/{id}` with
-`{"settings":{"showDiscriminator":true}}` or `{"settings":{"showDiscriminator":false}}`. It must persist
-through restart. With display enabled, check media captions/companions,
-thread/topic attribution, polls, edits and reaction fallback names as well.
-Long Discord webhook names must retain the complete discriminator.
-From another configured group in the same sync set send
-`Hi @{group2/Rust Ocean Q7M5K}, I can help` and then `Hi @{group2/P1}`.
-Check WhatsApp group2 and another bridged WhatsApp group containing A: both
-should show native mention chips when A has a resolvable LID, without exposing
-a phone number. In a bridged group without A, the reference must remain exactly
-as posted, including its braces and the chosen alias or handle. Also send
-`@{group2/Rust Ocean}` (resolves only if unambiguous) and
-`@{group2/<observed name>}`. Also address `@{group2/Q7M5K}` and its lowercase
-form using the observed code. Turn display off and repeat the code reference;
-addressing must work in either state with anonymization both on and off. The
-setting affects new bridge attribution, not provider nicknames, native mention
-labels or literal reference text. Confirm repeated references all render, while a
-backslash-escaped occurrence stays literal and does not ping.
+Have participant A post an ordinary group message and note the assigned alias,
+such as `Amber Badger`. Normal destinations show `group/Alice (Amber Badger)`;
+anonymized Discord destinations show `group/Amber Badger`. Confirm that username
+mode, discriminator visibility and code-length controls are absent from the shared
+settings modal. Media captions/companions, child-context headers, polls, edits and
+reaction fallbacks retain the same alias. Long Discord webhook names preserve it.
 
-Restart the server and verify that discriminators, full pseudonyms and stable handles still
-resolve without storing real names. Repeat with a Discord or Telegram Bot API
-member who has posted since process start; check both the addressed group and
-another destination containing that same provider account. Revoke Discord
-channel access or private-thread membership, or remove the Telegram member:
-subsequent references must stay literal and unpinged. With Discord
-anonymization enabled, explicit braced references should still produce chips
-for verified local Discord members, including when addressed by pseudonym.
-Sender and ordinary provider mentions must retain their anonymization. Restart
-and recover channel/thread history, then verify that recovered members can be
-tagged without posting another live message. With an empty native-ID cache
-and Server Members Intent enabled, verify pseudonym/handle references resolve
-from the guild roster. Also address a real Discord name from an older
-forwarded message, such as `@{dg1/vm}`, without a new live post: member search
-should restore the unique registered participant and the destination should
-render a chip. Repeat for a WhatsApp name whose contact metadata is available
-to the source adapter. Repeat both with anonymization on and off. Disable
-provider lookup permission or make the name ambiguous and verify exact literal
-fallback. Full pseudonyms should remain unchanged across restarts while the
-identity secret and provider identity remain unchanged. Unknown, ambiguous, escaped
-and out-of-sync-set references cannot trigger notifications. Verify that no
-phone number, native user ID or authored message content appears in logs or
-sync.db. MTProto and edits keep literal reference text.
+From another configured group in the same set send `Hi @{Amber Badger}` and
+`Hi @{amber badger}`. Every actual destination containing A may render a native
+mention only after its own membership check. Other destinations preserve the
+exact token. WhatsApp chips must use matching verified LID text/metadata without
+a phone number; Discord requires channel/private-thread access and an explicit
+user allowlist; Telegram Bot API checks chat membership. Repeat with anonymization
+on/off and check repeated tokens and escaped `\@{Amber Badger}`.
+
+Restart and repeat using the same alias. Reset Discord/Telegram native caches:
+unavailable native identities stay literal. With Discord Server Members Intent,
+verify cold HMAC-based guild-roster lookup, then revoke permission and verify
+literal fallback. Accepted history should restore Discord observations. No
+real-name/member-search addressing remains. Remove a target member or revoke
+channel/private-thread access and verify that another group's membership cannot
+authorize a tag there. An alias from another set must never resolve in this set.
+An account appearing in two sets has two distinct aliases. Unknown names, old
+endpoint/handle syntax and malformed tokens remain literal. MTProto and edits
+must not emit new native braced-reference notifications.
+
+For WhatsApp, test a PN-only sender with no verified LID mapping: there must be
+no forwarding, alias allocation or recovery checkpoint advance. Make a trusted
+provider LID mapping available and replay within the supported recovery window;
+verify one stable assignment, including after restart. Unassigned structured
+mentions do not enroll users or invent pseudonyms. Once their author message
+has been forwarded, verified mentions reuse the same assigned alias.
+
+Save settings, rename an endpoint, delete/recreate an endpoint and restart:
+retained set assignments remain stable. Delete a complete set and create another:
+previous aliases must never be reassigned. Check logs and routing tables for no
+names, phones, native user identities or message content; configured operational
+endpoint targets and HMAC actor IDs are the documented routing exceptions.
 
 ### Scoped settings and save feedback
 
-- Create two sync sets sharing one connection, with different code lengths,
+- Create two sync sets sharing one connection, with different
   media/recovery/retention policies, poll triggers and local prefixes. Save,
   reload the page and restart the bridge; verify each set retains its policies.
 - New sets default to code length 8 and hidden codes. Existing sets preserve
@@ -674,10 +664,12 @@ outside the test participants. No live provider secrets are required by tests.
    Turn either off and confirm new commands and existing reply mappings stop
    relaying. Discord should reconnect when its DM intent requirement changes.
 2. Have both participants post in their configured groups so their HMAC actors
-   are observed. For Telegram Bot API, privately `/start` the exact owning bot;
+   and their assigned aliases are observed. DMs and braced mentions assume the
+   address was learned from forwarded author attribution; they do not enroll a
+   missing participant. For Telegram Bot API, privately `/start` the exact owning bot;
    verify the response is help. Do not switch Telegram accounts as a fallback.
-3. From a Discord bot DM, send `/dm @{wa-group/P1} hello`. Only the addressed
-   WhatsApp private chat should receive `DM from dc-group/<pseudonym>` and the
+3. From a Discord bot DM, send `/dm @{Amber Badger} hello`. Only the addressed
+   WhatsApp private chat should receive `DM from <sender-assigned-alias>` and the
    Reply instruction. Check every synced group/channel/topic for zero copies.
    Reply natively from WhatsApp, then natively from Discord. Repeat WA↔WA,
    Discord↔Discord, Bot API↔Bot API and the remaining mixed directions, including
@@ -686,11 +678,11 @@ outside the test participants. No live provider secrets are required by tests.
    Reply to older messages in a different order. Check the recorded peer and
    conversation remain correct; plain new text must only receive private help.
    A new `/dm` while replying must start a new conversation.
-5. Try plain `hello`, bare `@{group/P1}`, unknown commands, escaped/malformed
+5. Try plain `hello`, bare `@{Amber Badger}`, unknown commands, escaped/malformed
    commands, empty/oversized bodies, media, copied display references, help
    replies and unknown/foreign-chat reply IDs. Expect private help and no third
-   party delivery. Test full pseudonyms, unique stems, codes, Pn, whitespace,
-   case rules and ambiguous names. Native @mentions should not ping or leak a
+   party delivery. Test assigned aliases, case-insensitive spelling, numeric
+   tiers, missing assignments, malformed whitespace and out-of-set aliases. Native @mentions should not ping or leak a
    native identity, and URLs should not generate Discord/Telegram previews.
 6. Block Discord DMs, omit Telegram `/start`, and test a WhatsApp participant
    whose roster exposes only an unverified LID. Expect a safe private failure,

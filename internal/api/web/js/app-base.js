@@ -199,7 +199,6 @@
   const syncsetCountBadge   = document.getElementById('syncset-count-badge');
   const syncsetList         = document.getElementById('syncset-list');
   const syncsetSettingsPanel = document.getElementById('syncset-settings-panel');
-  const settingsCodeLength = document.getElementById('settings-code-length');
   const syncsetEditorForm   = document.getElementById('syncset-editor-form');
   const syncsetEditorPlaceholder = document.getElementById('syncset-editor-placeholder');
   const syncsetEditorTitle  = document.getElementById('syncset-editor-title');
@@ -237,8 +236,6 @@
 
   // ── DOM – Settings ──────────────────────────────────────────
   const formSettings                 = document.getElementById('form-settings');
-  const settingsShowDiscriminator    = document.getElementById('settings-show-discriminator');
-  const settingsUsernameMode         = document.getElementById('settings-username-mode');
   const settingsChildContextMode     = document.getElementById('settings-child-context-mode');
   const settingsMediaEnabled         = document.getElementById('settings-media-enabled');
   const settingsMediaMaxSize         = document.getElementById('settings-media-max-size');
@@ -2908,7 +2905,6 @@
     return {
       membershipReviewEnabled: false,
       privateDMRelayEnabled: false,
-      usernameMode: 'push_name', showDiscriminator: false, codeLength: 8,
       childContextDisplayMode: 'opaque',
       media: {enabled: true, maxSizeMB: 100},
       recovery: {enabled: true, maxAgeHours: 24, maxMessagesPerGroup: 200},
@@ -3093,9 +3089,6 @@
     if (!cfg) return;
     membershipReviewEnabled.checked = cfg.membershipReviewEnabled === true;
     if (privateDMSetEnabled) privateDMSetEnabled.checked = cfg.privateDMRelayEnabled === true;
-    if (settingsShowDiscriminator) settingsShowDiscriminator.checked = cfg.showDiscriminator === true;
-    if (settingsCodeLength) settingsCodeLength.value = cfg.codeLength || 8;
-    if (settingsUsernameMode)  settingsUsernameMode.value  = cfg.usernameMode || 'push_name';
     if (settingsChildContextMode) settingsChildContextMode.value = cfg.childContextDisplayMode || 'opaque';
     if (settingsMediaEnabled)  settingsMediaEnabled.checked = cfg.media ? cfg.media.enabled : false;
     if (settingsMediaMaxSize)  settingsMediaMaxSize.value  = cfg.media ? cfg.media.maxSizeMB : 100;
@@ -3130,9 +3123,6 @@
     return {
       membershipReviewEnabled: membershipReviewEnabled.checked,
       privateDMRelayEnabled: privateDMSetEnabled?.checked === true,
-      usernameMode:settingsUsernameMode.value,
-      showDiscriminator:settingsShowDiscriminator.checked,
-      codeLength:integer('settings-code-length',5,10,'Code length'),
       childContextDisplayMode:settingsChildContextMode.value,
       media:{enabled:settingsMediaEnabled.checked,maxSizeMB:integer('settings-media-max-size',1,Infinity,'Media size')},
       recovery:{enabled:settingsRecoveryEnabled.checked,maxAgeHours:integer('settings-recovery-max-age',1,Infinity,'Recovery age'),maxMessagesPerGroup:integer('settings-recovery-max-msgs',1,Infinity,'Recovery count')},

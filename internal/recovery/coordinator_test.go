@@ -11,6 +11,7 @@ import (
 	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -21,7 +22,6 @@ func recoveryConfig() *config.Config {
 			"two": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "set", Endpoints: []string{"one", "two"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 }
 
@@ -62,6 +62,7 @@ func TestCoordinatorKeepsCursorReplayableWhilePayloadDeliveryIsPending(t *testin
 	defer syncStore.Close()
 	block := make(chan struct{})
 	sender := &recoverySender{block: block, started: make(chan struct{}, 1)}
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, sender)
 	if err != nil {
 		t.Fatal(err)
@@ -119,6 +120,7 @@ func TestCoordinatorAdvancesAcceptedCheckpointAndDeduplicatesReplay(t *testing.T
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, &recoverySender{})
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +157,7 @@ func TestCoordinatorDeduplicatesOrderedEditCheckpoint(t *testing.T) {
 	}
 	defer syncStore.Close()
 	sender := &recoverySender{}
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, sender)
 	if err != nil {
 		t.Fatal(err)
@@ -219,6 +222,7 @@ func TestCoordinatorDoesNotAdvanceCheckpointForIgnoredEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, &recoverySender{})
 	if err != nil {
 		t.Fatal(err)
@@ -253,6 +257,7 @@ func TestCoordinatorGapStaysBlockedUntilFailedPositionIsAccepted(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, &recoverySender{})
 	if err != nil {
 		t.Fatal(err)
@@ -332,6 +337,7 @@ func TestCoordinatorRecoveryIsSingleFlightAndCancellable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
+	testutil.SeedRouting(t, syncStore.DB(), recoveryConfig())
 	canonicalRouter, err := router.New(recoveryConfig(), syncStore, &recoverySender{})
 	if err != nil {
 		t.Fatal(err)
@@ -386,6 +392,7 @@ func TestCoordinatorHonorsPerStreamRecoveryPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
+	testutil.SeedRouting(t, st.DB(), recoveryConfig())
 	r, err := router.New(recoveryConfig(), st, &recoverySender{})
 	if err != nil {
 		t.Fatal(err)

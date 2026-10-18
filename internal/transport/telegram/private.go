@@ -8,7 +8,6 @@ import (
 
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -56,7 +55,7 @@ func (a *Adapter) handlePrivateMessage(message *models.Message) {
 		a.privateInboxes[actor] = privateInboxObservation{ChatID: message.Chat.ID, ObservedAt: now}
 	}
 	a.mu.Unlock()
-	text, _ := normalizeTelegramMentions(message.Text, message.Entities, a.hasher, config.UsernameModeHash)
+	text, _ := normalizeTelegramMentions(message.Text, message.Entities, a.hasher)
 	in := transport.PrivateIncoming{ConnectionID: a.connectionID, Transport: "telegram", Inbox: transport.PrivateInbox{ConnectionID: a.connectionID, Transport: "telegram", OwnerID: a.privateOwnerID(), ChatID: strconv.FormatInt(message.Chat.ID, 10), Token: []byte(strconv.FormatInt(message.Chat.ID, 10))}, ActorID: actor, RemoteMessageID: strconv.Itoa(message.ID), Kind: "text", Text: text, Timestamp: time.Unix(int64(message.Date), 0)}
 	if message.Text == "" || message.Photo != nil || message.Document != nil || message.Video != nil || message.Audio != nil || message.Voice != nil || message.Sticker != nil || message.Poll != nil {
 		in.Kind = "unsupported"

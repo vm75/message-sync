@@ -69,7 +69,7 @@ func (f *fakeSender) Send(_ context.Context, outgoing transport.Outgoing) (trans
 }
 
 func TestAmbiguousCreateIsNotBlindlyRetried(t *testing.T) {
-	r, syncStore, fake := newTestRouter(t, config.UsernameModeHash)
+	r, syncStore, fake := newTestRouter(t)
 	fake.sendErrors = map[transport.EndpointID][]error{
 		"c1g2": {transport.NewFailureWithCertainty(transport.FailureTransient, 0, transport.SendUnknown, errors.New("provider accepted but response was lost"))},
 	}
@@ -104,8 +104,9 @@ func TestLocalPrefixSuppressesBeforeCanonicalizationAndMedia(t *testing.T) {
 	}
 	defer syncStore.Close()
 	fake := &fakeSender{}
-	cfg := testConfig(config.UsernameModeHash)
+	cfg := testConfig()
 	cfg.LocalPrefix = "!local"
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -156,8 +157,9 @@ func TestMultipleLocalPrefixesSuppression(t *testing.T) {
 	}
 	defer syncStore.Close()
 	fake := &fakeSender{}
-	cfg := testConfig(config.UsernameModeHash)
+	cfg := testConfig()
 	cfg.LocalPrefix = "!local #local [local] //"
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +221,8 @@ func TestReplyLineageRetainsMultipleChildScopesAndOmitsNativeScopeHeader(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := NewWithHasher(testConfig(config.UsernameModeHash), syncStore, fake, hasher)
+	persistRouterConfig(t, syncStore, testConfig())
+	r, err := NewWithHasher(testConfig(), syncStore, fake, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +257,7 @@ func TestReplyLineageRetainsMultipleChildScopesAndOmitsNativeScopeHeader(t *test
 			sawNative = sent.outgoing.ChildScope != nil && sent.outgoing.ChildScope.Kind == transport.ScopeKindDiscordThread && sent.outgoing.ChildScope.RemoteID == "123456789012345678"
 		}
 		if sent.outgoing.Endpoint == "c1g3" {
-			sawFlat = sent.outgoing.Text == "*_c1g2/topic/u_abcdefghij_*: reply from topic" && !strings.Contains(sent.outgoing.Text, "[contexts")
+			sawFlat = sent.outgoing.Text == "*_c1g2/topic/Alice (Amber Badger)_*: reply from topic" && !strings.Contains(sent.outgoing.Text, "[contexts")
 		}
 	}
 	if !sawNative || !sawFlat {
@@ -263,7 +266,7 @@ func TestReplyLineageRetainsMultipleChildScopesAndOmitsNativeScopeHeader(t *test
 }
 
 func TestMediaCompanionIsNotRepeatedWhenPrimaryRetries(t *testing.T) {
-	r, _, fake := newTestRouter(t, config.UsernameModeHash)
+	r, _, fake := newTestRouter(t)
 	failed := false
 	fake.sendError = func(outgoing transport.Outgoing) error {
 		if outgoing.Endpoint == "c1g2" && !outgoing.AttributionOnly && !failed {
@@ -361,7 +364,7 @@ func (f *fakeSender) Delete(_ context.Context, ref transport.MessageRef) error {
 
 func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 
 	incoming := testIncoming("c1g2", "source-1")
 	incoming.Sender.DisplayName = "  Alice   Example  "
@@ -380,7 +383,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 		t.Fatalf("destinations = %v, want set %v", gotEndpoints, wantEndpoints)
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "*_c1g2/Alice Example_*: hello" {
+		if sent.outgoing.Text != "*_c1g2/Alice Example (Amber Badger)_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 		if sent.outgoing.SourceText != "hello" || sent.outgoing.Sender.DisplayName != "  Alice   Example  " {
@@ -394,7 +397,7 @@ func TestTextFanoutUsesAliasAndPushName(t *testing.T) {
 
 func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 
 	incoming := testIncoming("c1g2", "source-1")
 	incoming.Sender.DisplayName = "   " // Empty after trim
@@ -407,23 +410,7 @@ func TestTextFanoutFallsBackToPhoneNumberWhenPushNameEmpty(t *testing.T) {
 		t.Fatalf("sent %d messages, want 2", len(fake.sent))
 	}
 	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "*_c1g2/15551234567_*: hello" {
-			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
-		}
-	}
-}
-
-func TestHashAttributionNeverUsesPushName(t *testing.T) {
-	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModeHash)
-	incoming := testIncoming("c1g1", "source-1")
-	incoming.Sender.DisplayName = "Alice Example"
-
-	if err := r.Handle(ctx, incoming); err != nil {
-		t.Fatal(err)
-	}
-	for _, sent := range fake.sent {
-		if sent.outgoing.Text != "*_c1g1/u_abcdefghij_*: hello" {
+		if sent.outgoing.Text != "*_c1g2/15551234567 (Amber Badger)_*: hello" {
 			t.Fatalf("forwarded text = %q", sent.outgoing.Text)
 		}
 	}
@@ -436,7 +423,7 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		t.Fatal(err)
 	}
 	defer syncStore.Close()
-	cfg := testConfig(config.UsernameModeHash)
+	cfg := testConfig()
 	cfg.ChildContextDisplayMode = config.ChildContextDisplayFriendly
 	for alias, endpoint := range cfg.Endpoints {
 		endpoint.ConnectionID = "conn-1"
@@ -449,26 +436,30 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		t.Fatal(err)
 	}
 	fake := &fakeSender{}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
 
+	if _, err := syncStore.ObserveSyncSetActor(ctx, "mesh", "u_abcdefghij"); err != nil {
+		t.Fatal(err)
+	}
 	root, err := r.forwardedText(ctx, testIncoming("c1g1", "root"))
-	if err != nil || root != "*_c1g1/u_abcdefghij_*: hello" {
+	if err != nil || root != "*_c1g1/Alice (Amber Badger)_*: hello" {
 		t.Fatalf("friendly root = %q, err=%v", root, err)
 	}
 	known := testIncoming("c1g1", "known")
 	known.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindDiscordThread, RemoteID: "thread-1"}
 	knownText, err := r.forwardedText(ctx, known)
-	if err != nil || knownText != "*_c1g1/Dinner \\* Plans/u_abcdefghij_*: hello" {
+	if err != nil || knownText != "*_c1g1/Dinner \\* Plans/Alice (Amber Badger)_*: hello" {
 		t.Fatalf("friendly persisted child = %q, err=%v", knownText, err)
 	}
 	unknown := testIncoming("c1g1", "unknown")
 	unknown.ChildScope = &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1"}
 	unknownText, err := r.forwardedText(ctx, unknown)
-	if err != nil || unknownText != "*_c1g1/topic/u_abcdefghij_*: hello" {
+	if err != nil || unknownText != "*_c1g1/topic/Alice (Amber Badger)_*: hello" {
 		t.Fatalf("friendly unknown child = %q, err=%v", unknownText, err)
 	}
 	if err := r.Handle(ctx, known); err != nil {
@@ -481,31 +472,31 @@ func TestFriendlyAttributionUsesSourceChildLabelAndGenericFallback(t *testing.T)
 		if sent.outgoing.RenderedText != knownText || strings.Contains(sent.outgoing.RenderedText, "[contexts") {
 			t.Fatalf("router did not propagate friendly rendered text: %#v", sent.outgoing)
 		}
-		if sent.outgoing.PollAttribution != "*_c1g1/Dinner \\* Plans/u_abcdefghij_*:" {
+		if sent.outgoing.PollAttribution != "*_c1g1/Dinner \\* Plans/Alice (Amber Badger)_*:" {
 			t.Fatalf("router did not propagate structured poll attribution: %#v", sent.outgoing)
 		}
 	}
 }
 
 func TestFriendlyPollAttributionPrefersDisplayNameOverPhone(t *testing.T) {
-	r, syncStore, _ := newTestRouter(t, config.UsernameModePushName)
+	r, syncStore, _ := newTestRouter(t)
 	defer r.Close()
 	defer syncStore.Close()
 
 	incoming := transport.Incoming{
 		Endpoint:   "wg2",
-		Sender:     transport.Sender{DisplayName: "Display Name", PhoneNumber: "test-phone", OpaqueID: "u_hash"},
+		Sender:     transport.Sender{DisplayName: "Display Name", PhoneNumber: "test-phone", OpaqueID: "u_l44hwrj53h", Alias: "Amber Badger"},
 		ChildScope: &transport.ChildScope{Kind: transport.ScopeKindTelegramTopic, RemoteID: "topic-1", Label: "Plans"},
 	}
 	got := r.childAwarePollAttribution(context.Background(), config.ChildContextDisplayFriendly, incoming, incoming.ChildScope)
-	if got != "*_wg2/Plans/Display Name_*:" {
+	if got != "*_wg2/Plans/Display Name (Amber Badger)_*:" {
 		t.Fatalf("poll attribution = %q, want display name without phone", got)
 	}
 }
 
 func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModeHash)
+	r, _, fake := newTestRouter(t)
 	incoming := testIncoming("c1g1", "manual-self-message")
 	incoming.FromSelf = true
 
@@ -520,7 +511,7 @@ func TestNewMessageFromBridgeAccountStillFansOut(t *testing.T) {
 
 func TestDuplicateAndBridgeEchoDoNotCreateCopies(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 	incoming := testIncoming("c1g1", "source-1")
 
 	if err := r.Handle(ctx, incoming); err != nil {
@@ -547,7 +538,7 @@ func TestDuplicateAndBridgeEchoDoNotCreateCopies(t *testing.T) {
 
 func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, first := newTestRouter(t, config.UsernameModePushName)
+	r, syncStore, first := newTestRouter(t)
 	incoming := testIncoming("c1g1", "source-1")
 	crash := errors.New("simulated crash")
 	r.afterPersist = func(endpoint transport.EndpointID) error {
@@ -567,7 +558,8 @@ func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	}
 
 	second := &fakeSender{}
-	restarted, err := New(testConfig("push_name"), syncStore, second)
+	persistRouterConfig(t, syncStore, testConfig())
+	restarted, err := New(testConfig(), syncStore, second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -580,7 +572,7 @@ func TestCrashAfterPersistResumesOnlyMissingCopies(t *testing.T) {
 	}
 }
 
-func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *testing.T) {
+func TestRestartUsesCanonicalMappingWithoutPersistingContentOrNativeIdentity(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "sync.db")
 	syncStore, err := store.Open(ctx, path)
@@ -588,7 +580,8 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 		t.Fatal(err)
 	}
 	first := &fakeSender{}
-	r, err := New(testConfig("push_name"), syncStore, first)
+	persistRouterConfig(t, syncStore, testConfig())
+	r, err := New(testConfig(), syncStore, first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +621,6 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 		"discord-transient-member-id",
 		"PRIVACY_SENTINEL_BODY",
 		"TELEGRAM_MEDIA_SENTINEL",
-		"u_abcdefghij",
 	} {
 		if strings.Contains(string(dbBytes), forbidden) {
 			t.Fatalf("sync.db persisted participant/content value %q", forbidden)
@@ -641,7 +633,8 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 	}
 	defer reopened.Close()
 	second := &fakeSender{}
-	restarted, err := New(testConfig("push_name"), reopened, second)
+	persistRouterConfig(t, reopened, testConfig())
+	restarted, err := New(testConfig(), reopened, second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +648,7 @@ func TestRestartUsesCanonicalMappingWithoutPersistingContentOrParticipant(t *tes
 
 func TestEditPropagationToDestinationCopies(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 
 	// 1. Send original text message
 	orig := testIncoming("c1g1", "orig-msg-1")
@@ -728,7 +721,8 @@ func TestEditOutcomeUsesOriginalMessageDeliveryState(t *testing.T) {
 	defer db.Close()
 	release := make(chan struct{})
 	sender := &blockedEditSender{fakeSender: &fakeSender{}, release: release}
-	mesh, err := New(testConfig(config.UsernameModePushName), db, sender)
+	persistRouterConfig(t, db, testConfig())
+	mesh, err := New(testConfig(), db, sender)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -737,6 +731,9 @@ func TestEditOutcomeUsesOriginalMessageDeliveryState(t *testing.T) {
 	original := testIncoming("c1g1", "original")
 	// This regression exercises edit acknowledgement, not create delivery.
 	// Seed the already-delivered copies so setup has no scheduling deadline.
+	if _, err := db.ObserveSyncSetActor(ctx, "mesh", original.Sender.OpaqueID); err != nil {
+		t.Fatal(err)
+	}
 	const canonicalID = "canonical-edit"
 	if err := db.CreateCanonical(ctx, canonicalID, original.Timestamp); err != nil {
 		t.Fatal(err)
@@ -764,7 +761,7 @@ func TestEditOutcomeUsesOriginalMessageDeliveryState(t *testing.T) {
 
 func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 	ctx := context.Background()
-	r, syncStore, fake := newTestRouter(t, config.UsernameModePushName)
+	r, syncStore, fake := newTestRouter(t)
 
 	// 1. Send original text message
 	orig := testIncoming("c1g1", "orig-msg-2")
@@ -846,7 +843,10 @@ func TestDeletePropagationAndTombstonePreventsResurrection(t *testing.T) {
 
 func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, db, fake := newTestRouter(t)
+	if _, err := db.ObserveSyncSetActor(ctx, "mesh", "u_bcdefghijk"); err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. Ingest original message in c1g1
 	orig := testIncoming("c1g1", "orig-msg-reaction")
@@ -910,6 +910,9 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 		Timestamp: time.Unix(1_700_000_200, 0).UTC(),
 	}
 	fake.reacted = nil
+	if _, err := db.ObserveSyncSetActor(ctx, "mesh", userReaction.Sender.OpaqueID); err != nil {
+		t.Fatal(err)
+	}
 	if err := r.Handle(ctx, userReaction); err != nil {
 		t.Fatal(err)
 	}
@@ -944,7 +947,7 @@ func TestReactionPropagationAndEchoSuppression(t *testing.T) {
 
 func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 
 	// 1. Send original text message in c1g1
 	orig := testIncoming("c1g1", "orig-msg-reply")
@@ -999,7 +1002,7 @@ func TestNativeReplyDestinationTargetResolution(t *testing.T) {
 
 func TestReplyFallbackFlagWhenDestinationCopyMissing(t *testing.T) {
 	ctx := context.Background()
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 
 	reply := testIncoming("c1g1", "reply-with-missing-target")
 	reply.Sender.DisplayName = "Alice"
@@ -1030,7 +1033,7 @@ func TestReplyFallbackFlagWhenDestinationCopyMissing(t *testing.T) {
 	}
 }
 
-func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *store.Store, *fakeSender) {
+func newTestRouter(t *testing.T) (*Router, *store.Store, *fakeSender) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "sync.db")
 	syncStore, err := store.Open(context.Background(), path)
@@ -1039,7 +1042,8 @@ func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *st
 	}
 	t.Cleanup(func() { _ = syncStore.Close() })
 	fake := &fakeSender{}
-	r, err := New(testConfig(usernameMode), syncStore, fake)
+	persistRouterConfig(t, syncStore, testConfig())
+	r, err := New(testConfig(), syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1047,7 +1051,7 @@ func newTestRouter(t *testing.T, usernameMode config.UsernameMode) (*Router, *st
 	return r, syncStore, fake
 }
 
-func testConfig(usernameMode config.UsernameMode) *config.Config {
+func testConfig() *config.Config {
 	return &config.Config{
 		Endpoints: map[string]config.Endpoint{
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
@@ -1055,7 +1059,6 @@ func testConfig(usernameMode config.UsernameMode) *config.Config {
 			"c1g3": {Transport: config.TransportWhatsApp, RemoteID: "333@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2", "c1g3"}}},
-		Identity: config.Identity{UsernameMode: usernameMode},
 	}
 }
 
@@ -1075,7 +1078,7 @@ func testIncoming(endpoint transport.EndpointID, remoteID string) transport.Inco
 }
 
 func TestRouterUpdateConfig(t *testing.T) {
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 	ctx := context.Background()
 
 	// Initial route: c1g1 forwards to c1g2, c1g3
@@ -1091,14 +1094,13 @@ func TestRouterUpdateConfig(t *testing.T) {
 		t.Fatalf("expected push name in forwarded text, got %q", fake.sent[0].outgoing.Text)
 	}
 
-	// Update config to switch to hash mode and remove c1g3 from sync set
+	// Update the mesh while preserving the assigned alias.
 	newCfg := &config.Config{
 		Endpoints: map[string]config.Endpoint{
 			"c1g1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 	if err := r.UpdateConfig(newCfg); err != nil {
 		t.Fatalf("UpdateConfig error = %v", err)
@@ -1117,14 +1119,13 @@ func TestRouterUpdateConfig(t *testing.T) {
 	if fake.sent[0].outgoing.Endpoint != "c1g2" {
 		t.Fatalf("expected forwarded to c1g2, got %s", fake.sent[0].outgoing.Endpoint)
 	}
-	// Username mode is hash, so no "Alice"
-	if strings.Contains(fake.sent[0].outgoing.Text, "Alice") {
-		t.Fatalf("expected hash mode without push name, got %q", fake.sent[0].outgoing.Text)
+	if !strings.Contains(fake.sent[0].outgoing.Text, "Alice (Amber Badger)") {
+		t.Fatalf("alias changed after configuration reload: %q", fake.sent[0].outgoing.Text)
 	}
 }
 
 func TestDeliveryStatusTreatsTerminalFailuresAsHistory(t *testing.T) {
-	r, syncStore, _ := newTestRouter(t, config.UsernameModeHash)
+	r, syncStore, _ := newTestRouter(t)
 	defer r.Close()
 	now := time.Now().UTC().UnixMilli()
 	if _, err := syncStore.DB().Exec(`
@@ -1150,7 +1151,7 @@ func TestDeliveryStatusTreatsTerminalFailuresAsHistory(t *testing.T) {
 }
 
 func TestRouterPollCreationFanOut(t *testing.T) {
-	r, store, fake := newTestRouter(t, config.UsernameModePushName)
+	r, store, fake := newTestRouter(t)
 	ctx := context.Background()
 
 	inc := transport.Incoming{
@@ -1246,7 +1247,7 @@ func TestRouterPollCreationFanOut(t *testing.T) {
 }
 
 func TestRouterPollVoteTrackingAndAggregation(t *testing.T) {
-	r, _, fake := newTestRouter(t, config.UsernameModePushName)
+	r, _, fake := newTestRouter(t)
 	ctx := context.Background()
 
 	// 1. Create a poll in c1g1
@@ -1424,7 +1425,6 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 	path := filepath.Join(t.TempDir(), "sync.db")
 	syncStore, err := store.Open(context.Background(), path)
@@ -1451,7 +1451,7 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 	}
 	fake := &fakeSender{}
 	ctx := context.Background()
-
+	persistRouterConfig(t, syncStore, cfg)
 	r1, err := NewWithHasherAndPollPresentationStore(cfg, syncStore, fake, hasher, presentationStore)
 	if err != nil {
 		t.Fatal(err)
@@ -1496,6 +1496,7 @@ func TestRouterPollAggregationAfterRestart(t *testing.T) {
 
 	// Simulate restart by instantiating a new Router instance with empty memory cache
 	fake.sent = nil
+	persistRouterConfig(t, syncStore, cfg)
 	r2, err := NewWithHasherAndPollPresentationStore(cfg, syncStore, fake, hasher, presentationStore)
 	if err != nil {
 		t.Fatal(err)
@@ -1539,7 +1540,6 @@ func TestRouterSelfPollReplayRestoresPresentationAfterRestart(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 	syncStore, err := store.Open(context.Background(), filepath.Join(t.TempDir(), "sync.db"))
 	if err != nil {
@@ -1554,6 +1554,7 @@ func TestRouterSelfPollReplayRestoresPresentationAfterRestart(t *testing.T) {
 		FromSelf: true, Text: "Where should we eat?", PollOptions: []string{"Pizza", "Sushi"},
 		PollSelectableCount: 1, Timestamp: time.Unix(1_700_000_000, 0).UTC(),
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r1, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -1563,7 +1564,7 @@ func TestRouterSelfPollReplayRestoresPresentationAfterRestart(t *testing.T) {
 	}
 	r1.Close()
 	fake.sent = nil
-
+	persistRouterConfig(t, syncStore, cfg)
 	r2, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -1592,7 +1593,7 @@ func TestRouterSelfPollReplayRestoresPresentationAfterRestart(t *testing.T) {
 }
 
 func TestRouterTelegramPollSnapshotUsesCanonicalAggregate(t *testing.T) {
-	r, syncStore, fake := newTestRouter(t, config.UsernameModeHash)
+	r, syncStore, fake := newTestRouter(t)
 	ctx := context.Background()
 	if err := r.Handle(ctx, transport.Incoming{Endpoint: "c1g1", RemoteID: "poll-snapshot-source", Sender: transport.Sender{OpaqueID: "u_abcdefghij"}, Kind: "poll", Text: "Question", PollOptions: []string{"A", "B"}, PollSelectableCount: 1, Timestamp: time.Now()}); err != nil {
 		t.Fatal(err)
@@ -1624,8 +1625,8 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 			"c1g2": {Transport: config.TransportWhatsApp, RemoteID: "222@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"c1g1", "c1g2"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
-		Polls:    config.Polls{AggregationTrigger: "aggregate-response /poll-results #agg"},
+
+		Polls: config.Polls{AggregationTrigger: "aggregate-response /poll-results #agg"},
 	}
 	path := filepath.Join(t.TempDir(), "sync.db")
 	syncStore, err := store.Open(context.Background(), path)
@@ -1635,7 +1636,7 @@ func TestRouterPollAggregationMultipleTriggers(t *testing.T) {
 	t.Cleanup(func() { _ = syncStore.Close() })
 	fake := &fakeSender{}
 	ctx := context.Background()
-
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := New(cfg, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -1709,18 +1710,18 @@ func TestSenderPresentationUsernamePrefersDisplayNameAndFallsBackSafely(t *testi
 		OpaqueID:    "u_abcdefghij",
 	}
 
-	if got := senderPresentationUsername(sender, config.UsernameModePushName); got != "Alice Example" {
+	if got := senderPresentationUsername(sender); got != "Alice Example" {
 		t.Fatalf("push-name presentation = %q, want display name without phone number", got)
 	}
 
 	sender.DisplayName = ""
-	if got := senderPresentationUsername(sender, config.UsernameModePushName); got != "15551234567" {
+	if got := senderPresentationUsername(sender); got != "15551234567" {
 		t.Fatalf("push-name presentation without display name = %q, want phone fallback", got)
 	}
 
-	sender.DisplayName = "Alice Example"
-	if got := senderPresentationUsername(sender, config.UsernameModeHash); got != "u_abcdefghij" {
-		t.Fatalf("hash presentation = %q, want opaque ID", got)
+	sender.PhoneNumber = ""
+	if got := senderPresentationUsername(sender); got != "u_abcdefghij" {
+		t.Fatalf("missing-name fallback = %q, want opaque ID", got)
 	}
 }
 
@@ -1744,13 +1745,13 @@ func TestRouterAnonymizeToDiscordCreates(t *testing.T) {
 			Endpoints:          []string{"wa1", "tg1", "dc1"},
 			AnonymizeToDiscord: true,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 
 	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := NewWithHasher(cfg, syncStore, fake, h)
 	if err != nil {
 		t.Fatal(err)
@@ -1806,7 +1807,7 @@ func TestRouterAnonymizeToDiscordCreates(t *testing.T) {
 	}
 
 	// Verify Discord copy uses pseudonym and contains NO real names or phone numbers
-	expectedPseudonym := identity.PseudonymName("u_abcdefghij")
+	expectedPseudonym := "Amber Badger"
 	if !strings.Contains(dcOut.Text, expectedPseudonym) {
 		t.Errorf("dc1 text should contain pseudonym %q, got: %s", expectedPseudonym, dcOut.Text)
 	}
@@ -1835,206 +1836,140 @@ func TestRouterAnonymizeToDiscordCreates(t *testing.T) {
 }
 
 func TestRouterAnonymizeToDiscordEditAndReaction(t *testing.T) {
-	for _, show := range []bool{false, true} {
-		t.Run(fmt.Sprintf("show=%t", show), func(t *testing.T) {
-			ctx := context.Background()
-			syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer syncStore.Close()
 
-			fake := &fakeSender{}
-			cfg := &config.Config{
-				ShowDiscriminator: show,
-				Endpoints: map[string]config.Endpoint{
-					"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-					"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
-					"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
-				},
-				SyncSets: []config.SyncSet{{
-					ID:                 "mesh",
-					Endpoints:          []string{"wa1", "tg1", "dc1"},
-					AnonymizeToDiscord: true,
-				}},
-				Identity: config.Identity{UsernameMode: config.UsernameModePushName},
-			}
+	t.Run("assigned-alias", func(t *testing.T) {
+		ctx := context.Background()
+		syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer syncStore.Close()
 
-			h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			r, err := NewWithHasher(cfg, syncStore, fake, h)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer r.Close()
+		fake := &fakeSender{}
+		cfg := &config.Config{
 
-			// Initial message
-			orig := transport.Incoming{
-				Endpoint: "wa1",
-				RemoteID: "orig-msg",
-				Sender: transport.Sender{
-					DisplayName: "Alice Real",
-					PhoneNumber: "+15551234567",
-					OpaqueID:    "u_abcdefghij",
-				},
-				Kind:      "text",
-				Text:      "Initial text",
-				Timestamp: time.Unix(1_700_000_000, 0).UTC(),
-			}
-			if err := r.Handle(ctx, orig); err != nil {
-				t.Fatal(err)
-			}
-			waitForSent(t, fake, 2)
+			Endpoints: map[string]config.Endpoint{
+				"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
+				"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
+				"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
+			},
+			SyncSets: []config.SyncSet{{
+				ID:                 "mesh",
+				Endpoints:          []string{"wa1", "tg1", "dc1"},
+				AnonymizeToDiscord: true,
+			}},
+		}
 
-			// Edit
-			editEvt := transport.Incoming{
-				Endpoint: "wa1",
-				RemoteID: "edit-1",
-				Sender: transport.Sender{
-					DisplayName: "Alice Real",
-					PhoneNumber: "+15551234567",
-					OpaqueID:    "u_abcdefghij",
-				},
-				Kind: "edit",
-				Text: "Edited content",
-				ReplyTo: &transport.MessageRef{
-					Endpoint:        "wa1",
-					RemoteMessageID: "orig-msg",
-				},
-				Timestamp: time.Unix(1_700_000_010, 0).UTC(),
-			}
-			if err := r.Handle(ctx, editEvt); err != nil {
-				t.Fatal(err)
-			}
-			waitForMutations(t, fake, 2, 0, 0)
+		h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		persistRouterConfig(t, syncStore, cfg)
+		r, err := NewWithHasher(cfg, syncStore, fake, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer r.Close()
 
-			expectedPseudonym := identity.PseudonymName("u_abcdefghij")
-			if show {
-				expectedPseudonym = identity.Pseudonym("u_abcdefghij")
-			}
-			for _, ed := range fake.edited {
-				if strings.Contains(ed.text, identity.Discriminator(orig.Sender.OpaqueID)) != show {
-					t.Errorf("edit discriminator visibility mismatch: %q", ed.text)
+		// Initial message
+		orig := transport.Incoming{
+			Endpoint: "wa1",
+			RemoteID: "orig-msg",
+			Sender: transport.Sender{
+				DisplayName: "Alice Real",
+				PhoneNumber: "+15551234567",
+				OpaqueID:    "u_abcdefghij",
+			},
+			Kind:      "text",
+			Text:      "Initial text",
+			Timestamp: time.Unix(1_700_000_000, 0).UTC(),
+		}
+		if err := r.Handle(ctx, orig); err != nil {
+			t.Fatal(err)
+		}
+		waitForSent(t, fake, 2)
+
+		// Edit
+		editEvt := transport.Incoming{
+			Endpoint: "wa1",
+			RemoteID: "edit-1",
+			Sender: transport.Sender{
+				DisplayName: "Alice Real",
+				PhoneNumber: "+15551234567",
+				OpaqueID:    "u_abcdefghij",
+			},
+			Kind: "edit",
+			Text: "Edited content",
+			ReplyTo: &transport.MessageRef{
+				Endpoint:        "wa1",
+				RemoteMessageID: "orig-msg",
+			},
+			Timestamp: time.Unix(1_700_000_010, 0).UTC(),
+		}
+		if err := r.Handle(ctx, editEvt); err != nil {
+			t.Fatal(err)
+		}
+		waitForMutations(t, fake, 2, 0, 0)
+
+		expectedPseudonym := "Amber Badger"
+
+		for _, ed := range fake.edited {
+			if ed.ref.Endpoint == "dc1" {
+				if !strings.Contains(ed.text, expectedPseudonym) {
+					t.Errorf("dc1 edit text should contain pseudonym %q, got: %s", expectedPseudonym, ed.text)
 				}
-				if ed.ref.Endpoint == "dc1" {
-					if !strings.Contains(ed.text, expectedPseudonym) {
-						t.Errorf("dc1 edit text should contain pseudonym %q, got: %s", expectedPseudonym, ed.text)
-					}
-					if strings.Contains(ed.text, "Alice Real") || strings.Contains(ed.text, "+15551234567") {
-						t.Errorf("dc1 edit text leaked PII: %s", ed.text)
-					}
-				} else if ed.ref.Endpoint == "tg1" {
-					if !strings.Contains(ed.text, "Alice Real") {
-						t.Errorf("tg1 edit text should contain real name, got: %s", ed.text)
-					}
+				if strings.Contains(ed.text, "Alice Real") || strings.Contains(ed.text, "+15551234567") {
+					t.Errorf("dc1 edit text leaked PII: %s", ed.text)
+				}
+			} else if ed.ref.Endpoint == "tg1" {
+				if !strings.Contains(ed.text, "Alice Real") {
+					t.Errorf("tg1 edit text should contain real name, got: %s", ed.text)
 				}
 			}
+		}
 
-			// Reaction
-			reactionEvt := transport.Incoming{
-				Endpoint: "wa1",
-				RemoteID: "react-1",
-				Sender: transport.Sender{
-					DisplayName: "Alice Real",
-					PhoneNumber: "+15551234567",
-					OpaqueID:    "u_abcdefghij",
-				},
-				Kind: "reaction",
-				Text: "👍",
-				ReplyTo: &transport.MessageRef{
-					Endpoint:        "wa1",
-					RemoteMessageID: "orig-msg",
-				},
-				Timestamp: time.Unix(1_700_000_020, 0).UTC(),
-			}
-			if err := r.Handle(ctx, reactionEvt); err != nil {
-				t.Fatal(err)
-			}
-			waitForMutations(t, fake, 0, 2, 0)
+		// Reaction
+		reactionEvt := transport.Incoming{
+			Endpoint: "wa1",
+			RemoteID: "react-1",
+			Sender: transport.Sender{
+				DisplayName: "Alice Real",
+				PhoneNumber: "+15551234567",
+				OpaqueID:    "u_abcdefghij",
+			},
+			Kind: "reaction",
+			Text: "👍",
+			ReplyTo: &transport.MessageRef{
+				Endpoint:        "wa1",
+				RemoteMessageID: "orig-msg",
+			},
+			Timestamp: time.Unix(1_700_000_020, 0).UTC(),
+		}
+		if err := r.Handle(ctx, reactionEvt); err != nil {
+			t.Fatal(err)
+		}
+		waitForMutations(t, fake, 0, 2, 0)
 
-			for _, rx := range fake.reacted {
-				if strings.Contains(rx.FallbackText, identity.Discriminator(orig.Sender.OpaqueID)) != show {
-					t.Errorf("reaction discriminator visibility mismatch: %q", rx.FallbackText)
+		for _, rx := range fake.reacted {
+			if rx.Endpoint == "dc1" {
+				if !strings.Contains(rx.FallbackText, expectedPseudonym) {
+					t.Errorf("dc1 reaction fallback should contain pseudonym, got: %s", rx.FallbackText)
 				}
-				if rx.Endpoint == "dc1" {
-					if !strings.Contains(rx.FallbackText, expectedPseudonym) {
-						t.Errorf("dc1 reaction fallback should contain pseudonym, got: %s", rx.FallbackText)
-					}
-					if strings.Contains(rx.FallbackText, "Alice Real") || strings.Contains(rx.FallbackText, "+15551234567") {
-						t.Errorf("dc1 reaction fallback leaked PII: %s", rx.FallbackText)
-					}
-				} else if rx.Endpoint == "tg1" {
-					if !strings.Contains(rx.FallbackText, "Alice Real") {
-						t.Errorf("tg1 reaction fallback should contain real name, got: %s", rx.FallbackText)
-					}
+				if strings.Contains(rx.FallbackText, "Alice Real") || strings.Contains(rx.FallbackText, "+15551234567") {
+					t.Errorf("dc1 reaction fallback leaked PII: %s", rx.FallbackText)
+				}
+			} else if rx.Endpoint == "tg1" {
+				if !strings.Contains(rx.FallbackText, "Alice Real") {
+					t.Errorf("tg1 reaction fallback should contain real name, got: %s", rx.FallbackText)
 				}
 			}
+		}
 
-		})
-	}
+	})
+
 }
 
-func TestRouterAnonymizeToDiscordPreservesHashMode(t *testing.T) {
-	ctx := context.Background()
-	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer syncStore.Close()
-
-	fake := &fakeSender{}
-	cfg := &config.Config{
-		Endpoints: map[string]config.Endpoint{
-			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
-		},
-		SyncSets: []config.SyncSet{{
-			ID:                 "mesh",
-			Endpoints:          []string{"wa1", "dc1"},
-			AnonymizeToDiscord: true,
-		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
-	}
-
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := NewWithHasher(cfg, syncStore, fake, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	incoming := transport.Incoming{
-		Endpoint: "wa1",
-		RemoteID: "msg-hash-1",
-		Sender: transport.Sender{
-			DisplayName: "Alice Real",
-			PhoneNumber: "+15551234567",
-			OpaqueID:    "u_abcdefghij",
-		},
-		Kind:      "text",
-		Text:      "Testing hash mode",
-		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
-	}
-
-	if err := r.Handle(ctx, incoming); err != nil {
-		t.Fatal(err)
-	}
-	waitForSent(t, fake, 1)
-
-	dcOut := fake.sent[0].outgoing
-	// In hash mode, the presentation username is the raw OpaqueID "u_abcdefghij"
-	if !strings.Contains(dcOut.Text, "u_abcdefghij") {
-		t.Errorf("dc1 text in hash mode must preserve hash representation %q, got: %s", "u_abcdefghij", dcOut.Text)
-	}
-	if strings.Contains(dcOut.Text, "Alice Real") {
-		t.Errorf("dc1 text leaked PII: %s", dcOut.Text)
-	}
-}
+// In hash mode, the presentation username is the raw OpaqueID "u_abcdefghij"
 
 func TestRouterAnonymizeToDiscordUpdateConfig(t *testing.T) {
 	ctx := context.Background()
@@ -2055,13 +1990,13 @@ func TestRouterAnonymizeToDiscordUpdateConfig(t *testing.T) {
 			Endpoints:          []string{"wa1", "dc1"},
 			AnonymizeToDiscord: false,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 
 	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := NewWithHasher(cfg, syncStore, fake, h)
 	if err != nil {
 		t.Fatal(err)
@@ -2101,7 +2036,6 @@ func TestRouterAnonymizeToDiscordUpdateConfig(t *testing.T) {
 			Endpoints:          []string{"wa1", "dc1"},
 			AnonymizeToDiscord: true,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 	if err := r.UpdateConfig(cfgUpdated); err != nil {
 		t.Fatal(err)
@@ -2129,7 +2063,7 @@ func TestRouterAnonymizeToDiscordUpdateConfig(t *testing.T) {
 	waitForSent(t, fake, 1)
 
 	// Now AnonymizeToDiscord is true: must have pseudonym and no real name
-	expectedPseudonym := identity.PseudonymName("u_abcdefghij")
+	expectedPseudonym := "Amber Badger"
 	if !strings.Contains(fake.sent[0].outgoing.Text, expectedPseudonym) {
 		t.Fatalf("expected pseudonym %q after update, got: %s", expectedPseudonym, fake.sent[0].outgoing.Text)
 	}
@@ -2161,13 +2095,13 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 			Endpoints:          []string{"wa1", "tg1", "dc1"},
 			AnonymizeToDiscord: true,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
 
 	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistRouterConfig(t, syncStore, cfg)
 	r, err := NewWithHasher(cfg, syncStore, fake, h)
 	if err != nil {
 		t.Fatal(err)
@@ -2181,7 +2115,7 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 		Sender: transport.Sender{
 			DisplayName: "Alice Real",
 			PhoneNumber: "+15551234567",
-			OpaqueID:    "u_alice00001",
+			OpaqueID:    "u_bp5rmddwut",
 		},
 		Kind:      "text",
 		Text:      "Hello @15559998888",
@@ -2202,7 +2136,7 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 		Sender: transport.Sender{
 			DisplayName: "Alice Real",
 			PhoneNumber: "+15551234567",
-			OpaqueID:    "u_alice00001",
+			OpaqueID:    "u_bp5rmddwut",
 		},
 		Kind: "edit",
 		Text: "Edited with mention @15559998888",
@@ -2220,9 +2154,8 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 	}
 	waitForMutations(t, fake, 2, 0, 0)
 
-	expectedPseudonym := identity.PseudonymName("u_alice00001")
-	expectedMentionActorID := h.ActorID("mention:whatsapp", "15559998888@s.whatsapp.net")
-	expectedMentionPseudo := identity.PseudonymName(expectedMentionActorID)
+	expectedPseudonym := "Amber Badger"
+	expectedMentionPseudo := "participant"
 
 	for _, ed := range fake.edited {
 		if ed.ref.Endpoint == "dc1" {
@@ -2248,8 +2181,8 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 				t.Errorf("tg1 edit must contain real sender name, got: %s", ed.text)
 			}
 			// Non-Discord destination must keep real mention representation
-			if !strings.Contains(ed.text, "15559998888") {
-				t.Errorf("tg1 edit must keep original mention text, got: %s", ed.text)
+			if !strings.Contains(ed.text, "Bob Realname") {
+				t.Errorf("tg1 edit must keep transient mention display text, got: %s", ed.text)
 			}
 			if strings.Contains(ed.text, expectedMentionPseudo) {
 				t.Errorf("tg1 edit should not receive Discord mention pseudonym: %s", ed.text)
@@ -2261,80 +2194,6 @@ func TestRouterAnonymizeToDiscordEditMentionPseudonymization(t *testing.T) {
 // TestRouterAnonymizeToDiscordHashModeClearsPhone verifies that even in hash
 // (opaque) username mode, PhoneNumber is cleared for Discord-bound messages
 // when AnonymizeToDiscord is set, so the Discord adapter never receives it.
-func TestRouterAnonymizeToDiscordHashModeClearsPhone(t *testing.T) {
-	ctx := context.Background()
-	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer syncStore.Close()
-
-	var mu sync.Mutex
-	var discordSenders []transport.Sender
-
-	recordingFake := &fakeSender{
-		sendError: func(outgoing transport.Outgoing) error {
-			if outgoing.Endpoint == "dc1" {
-				mu.Lock()
-				discordSenders = append(discordSenders, outgoing.Sender)
-				mu.Unlock()
-			}
-			return nil
-		},
-	}
-	cfg := &config.Config{
-		Endpoints: map[string]config.Endpoint{
-			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
-		},
-		SyncSets: []config.SyncSet{{
-			ID:                 "mesh",
-			Endpoints:          []string{"wa1", "dc1"},
-			AnonymizeToDiscord: true,
-		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
-	}
-
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := NewWithHasher(cfg, syncStore, recordingFake, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	if err := r.Handle(ctx, transport.Incoming{
-		Endpoint: "wa1",
-		RemoteID: "msg-hash-phone",
-		Sender: transport.Sender{
-			DisplayName: "Alice Real",
-			PhoneNumber: "+15551234567",
-			OpaqueID:    "u_abcdefghij",
-		},
-		Kind:      "text",
-		Text:      "hash mode phone test",
-		Timestamp: time.Unix(1_700_000_000, 0).UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitForSent(t, recordingFake, 1)
-
-	mu.Lock()
-	defer mu.Unlock()
-	if len(discordSenders) == 0 {
-		t.Fatal("no Discord sends recorded")
-	}
-	for _, s := range discordSenders {
-		if s.PhoneNumber != "" {
-			t.Errorf("Discord-bound Sender.PhoneNumber must be empty in hash+anonymize mode, got %q", s.PhoneNumber)
-		}
-		if s.DisplayName == "Alice Real" {
-			t.Errorf("Discord-bound Sender.DisplayName must not leak real name in hash mode, got %q", s.DisplayName)
-		}
-	}
-}
 
 // TestSanitizeQuotedAttributionOnlyStripsKnownBridgeFormat verifies that
 // sanitizeQuotedAttribution only removes the exact bridge-generated *_..._*:
@@ -2428,10 +2287,11 @@ func TestRouterAnonymizeToDiscordRequiresHasher(t *testing.T) {
 			Endpoints:          []string{"wa1", "dc1"},
 			AnonymizeToDiscord: true,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
+	persistRouterConfig(
 
-	// 1. New() without hasher must fail
+		// 1. New() without hasher must fail
+		t, syncStore, cfgWithAnonymize)
 	_, err = New(cfgWithAnonymize, syncStore, fake)
 	if err == nil {
 		t.Fatal("expected error when constructing anonymize router without hasher, got nil")
@@ -2451,8 +2311,8 @@ func TestRouterAnonymizeToDiscordRequiresHasher(t *testing.T) {
 			Endpoints:          []string{"wa1", "dc1"},
 			AnonymizeToDiscord: false,
 		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
 	}
+	persistRouterConfig(t, syncStore, cfgWithout)
 	r, err := New(cfgWithout, syncStore, fake)
 	if err != nil {
 		t.Fatal(err)
@@ -2461,153 +2321,6 @@ func TestRouterAnonymizeToDiscordRequiresHasher(t *testing.T) {
 
 	if err := r.UpdateConfig(cfgWithAnonymize); err == nil {
 		t.Fatal("expected error on UpdateConfig enabling anonymization without hasher, got nil")
-	}
-}
-
-// TestRouterMentionPseudonymsDomainSeparation verifies that mention pseudonym
-// derivation is keyed, deterministic, and properly namespaced by provider.
-func TestRouterMentionPseudonymsDomainSeparation(t *testing.T) {
-	ctx := context.Background()
-	syncStore, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer syncStore.Close()
-
-	fake := &fakeSender{}
-	cfg := &config.Config{
-		Endpoints: map[string]config.Endpoint{
-			"wa1": {Transport: config.TransportWhatsApp, RemoteID: "111@g.us"},
-			"tg1": {Transport: config.TransportTelegram, RemoteID: "-100111"},
-			"dc1": {Transport: config.TransportDiscord, RemoteID: "channel-1"},
-		},
-		SyncSets: []config.SyncSet{{
-			ID:                 "mesh",
-			Endpoints:          []string{"wa1", "tg1", "dc1"},
-			AnonymizeToDiscord: true,
-		}},
-		Identity: config.Identity{UsernameMode: config.UsernameModePushName},
-	}
-
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	r, err := NewWithHasher(cfg, syncStore, fake, h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-
-	// 1. Same provider + same remote ID => same pseudonym
-	p1 := r.mentionPseudonym("wa1", "123456")
-	p2 := r.mentionPseudonym("wa1", "123456")
-	if p1 != p2 {
-		t.Fatalf("expected identical pseudonyms for same provider and remote ID, got %q vs %q", p1, p2)
-	}
-
-	// 2. Same provider + different ID => different pseudonym
-	p3 := r.mentionPseudonym("wa1", "987654")
-	if p1 == p3 {
-		t.Fatalf("expected different pseudonyms for different remote IDs, got collision: %q", p1)
-	}
-
-	// 3. Different providers + same raw ID => different pseudonyms (namespaced)
-	pWA := r.mentionPseudonym("wa1", "user-common-id")
-	pTG := r.mentionPseudonym("tg1", "user-common-id")
-	pDC := r.mentionPseudonym("dc1", "user-common-id")
-	if pWA == pTG || pWA == pDC || pTG == pDC {
-		t.Fatalf("cross-provider collision for raw ID 'user-common-id': WA=%q, TG=%q, DC=%q", pWA, pTG, pDC)
-	}
-
-	// 4. Fallback when remoteID is empty
-	if got := r.mentionPseudonym("wa1", ""); got != "Member" {
-		t.Fatalf("expected 'Member' fallback for empty remoteID, got %q", got)
-	}
-}
-
-func TestPresentationForTargetAnonymizesCanonicalTelegramMention(t *testing.T) {
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mentionedOpaque := h.UserID("telegram:523456789")
-	r := &Router{
-		scopeHasher: h,
-		endpointTransports: map[transport.EndpointID]config.Transport{
-			"tg1": config.TransportTelegram,
-			"dc1": config.TransportDiscord,
-		},
-	}
-	incoming := transport.Incoming{
-		Endpoint: "tg1",
-		Sender: transport.Sender{
-			DisplayName: "Alice Telegram",
-			OpaqueID:    h.UserID("telegram:123456789"),
-		},
-		Text: "Hello @" + mentionedOpaque,
-		Mentions: []transport.Mention{{
-			RemoteID: mentionedOpaque,
-			Name:     "Bob Telegram",
-		}},
-	}
-
-	_, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc1", AnonymizeToDiscord: true})
-	wantMention := identity.PseudonymName(mentionedOpaque)
-	if len(mentions) != 1 || mentions[0].Name != wantMention {
-		t.Fatalf("Telegram mention pseudonym = %#v, want %q", mentions, wantMention)
-	}
-	if !strings.Contains(text, "@"+wantMention) {
-		t.Fatalf("Discord-bound Telegram text missing pseudonymous mention: %q", text)
-	}
-	for _, forbidden := range []string{"Bob Telegram", mentionedOpaque} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("Discord-bound Telegram text leaked %q: %q", forbidden, text)
-		}
-	}
-}
-
-func TestPresentationForTargetAnonymizesCanonicalDiscordMention(t *testing.T) {
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	mentionedOpaque := h.UserID("discord:523456789012345678")
-	r := &Router{
-		scopeHasher: h,
-		endpointTransports: map[transport.EndpointID]config.Transport{
-			"dc1": config.TransportDiscord,
-			"dc2": config.TransportDiscord,
-		},
-	}
-	incoming := transport.Incoming{
-		Endpoint: "dc1",
-		Sender: transport.Sender{
-			DisplayName: "Alice Discord",
-			OpaqueID:    h.UserID("discord:323456789012345678"),
-		},
-		Text: "Hello @" + mentionedOpaque,
-		Mentions: []transport.Mention{{
-			RemoteID: mentionedOpaque,
-			Name:     "Bob Discord",
-		}},
-	}
-
-	sender, mentions, text, _ := r.presentationForTarget(incoming, routeTarget{Endpoint: "dc2", AnonymizeToDiscord: true})
-	if sender.DisplayName == "Alice Discord" {
-		t.Fatalf("Discord-to-Discord sender was not anonymized: %#v", sender)
-	}
-	wantMention := identity.PseudonymName(mentionedOpaque)
-	if len(mentions) != 1 || mentions[0].Name != wantMention {
-		t.Fatalf("Discord-to-Discord mention pseudonym = %#v, want %q", mentions, wantMention)
-	}
-	if !strings.Contains(text, "@"+wantMention) {
-		t.Fatalf("Discord-to-Discord text missing pseudonymous mention: %q", text)
-	}
-	for _, forbidden := range []string{"Bob Discord", mentionedOpaque} {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("Discord-to-Discord text leaked %q: %q", forbidden, text)
-		}
 	}
 }
 
@@ -2627,22 +2340,5 @@ func TestRouterSanitizeQuotedAttributionRecognizesConfiguredTelegramPlainHeader(
 	}
 	if got := r.sanitizeQuotedAttribution("AC/DC: Thunderstruck"); got != "AC/DC: Thunderstruck" {
 		t.Fatalf("legitimate slash content was modified: %q", got)
-	}
-}
-
-func TestMentionPseudonymUsesExistingOpaqueActorIdentity(t *testing.T) {
-	h, err := identity.New([]byte("0123456789abcdef0123456789abcdef"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	opaqueID := h.UserID("telegram:523456789")
-	r := &Router{
-		scopeHasher: h,
-		endpointTransports: map[transport.EndpointID]config.Transport{
-			"tg1": config.TransportTelegram,
-		},
-	}
-	if got, want := r.mentionPseudonym("tg1", opaqueID), identity.PseudonymName(opaqueID); got != want {
-		t.Fatalf("mention pseudonym %q != sender-compatible pseudonym %q", got, want)
 	}
 }

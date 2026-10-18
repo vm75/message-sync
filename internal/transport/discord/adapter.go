@@ -17,13 +17,13 @@ import (
 const eventBufferSize = 128
 
 type Options struct {
-	PrivateDMEnabled         bool
-	EndpointSettings         map[string]config.SyncSetSettings
-	ConnectionID             string
-	Token                    string
-	ChannelIDs               map[string]string
-	Hasher                   *identity.Hasher
-	UsernameMode             config.UsernameMode
+	PrivateDMEnabled bool
+	EndpointSettings map[string]config.SyncSetSettings
+	ConnectionID     string
+	Token            string
+	ChannelIDs       map[string]string
+	Hasher           *identity.Hasher
+
 	Logger                   *slog.Logger
 	Webhook                  ChannelWebhook
 	ExplicitWebhookURL       string
@@ -97,7 +97,7 @@ func Open(ctx context.Context, opts Options) (*Adapter, error) {
 	default:
 	}
 
-	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.UsernameMode, opts.EndpointSettings)
+	normalizer, err := NewNormalizer(opts.ChannelIDs, opts.Hasher, opts.EndpointSettings)
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +330,7 @@ func (a *Adapter) UpdateConfig(cfg *config.Config) error {
 			}
 		}
 	}
-	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.LegacySettings().UsernameMode, cfg.EndpointSettings(a.connectionID))
+	normalizer, err := NewNormalizer(channelIDs, a.hasher, cfg.EndpointSettings(a.connectionID))
 	if err != nil {
 		return err
 	}

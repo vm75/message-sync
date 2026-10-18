@@ -15,8 +15,8 @@ func validConfig() Config {
 			"a": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "1@g.us"},
 			"b": {Transport: TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "2@g.us"},
 		},
-		SyncSets:           []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
-		Identity:           Identity{UsernameMode: UsernameModeHash},
+		SyncSets: []SyncSet{{ID: "mesh", Endpoints: []string{"a", "b"}}},
+
 		Media:              Media{MaxSizeMB: 100},
 		Recovery:           Recovery{MaxAgeHours: 24, MaxMessagesPerGroup: 200},
 		Storage:            Storage{MessageRetentionDays: 90},
@@ -101,29 +101,6 @@ func TestValidateWhatsAppDeviceName(t *testing.T) {
 		if err := ValidateWhatsAppDeviceName(name); err == nil {
 			t.Fatalf("ValidateWhatsAppDeviceName(%q) accepted invalid name", name)
 		}
-	}
-}
-
-func TestValidateUsernameModeEnum(t *testing.T) {
-	cfg := validConfig()
-	cfg.Identity.UsernameMode = UsernameModePushName
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() with push_name failed: %v", err)
-	}
-
-	cfg.Identity.UsernameMode = UsernameModeHash
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() with hash failed: %v", err)
-	}
-
-	cfg.Identity.UsernameMode = "invalid_mode"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() expected error for invalid usernameMode")
-	}
-
-	cfg.Identity.UsernameMode = ""
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("Validate() expected error for empty usernameMode")
 	}
 }
 
@@ -237,7 +214,7 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 	ctx := context.Background()
 
 	cfg := validConfig()
-	cfg.Identity.UsernameMode = UsernameModePushName
+
 	cfg.LocalPrefix = "!local"
 	cfg.WhatsAppDeviceName = "CustomBridge"
 	if err := Save(ctx, st.DB(), &cfg); err != nil {
@@ -249,9 +226,6 @@ func TestSaveAndLoadFromSQLite(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if loaded.Identity.UsernameMode != UsernameModePushName {
-		t.Errorf("got usernameMode %q, want %q", loaded.Identity.UsernameMode, UsernameModePushName)
-	}
 	if loaded.LocalPrefix != "!local" {
 		t.Errorf("got localPrefix %q, want %q", loaded.LocalPrefix, "!local")
 	}
@@ -323,9 +297,6 @@ func TestLoadDefaultsWhenEmpty(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 
-	if loaded.Identity.UsernameMode != UsernameModePushName {
-		t.Errorf("default usernameMode = %q, want push_name", loaded.Identity.UsernameMode)
-	}
 	if loaded.Media.MaxSizeMB != 100 {
 		t.Errorf("default media MaxSizeMB = %d, want 100", loaded.Media.MaxSizeMB)
 	}
@@ -531,37 +502,6 @@ func TestSyncSetAnonymizeToDiscordPersistenceAndDefaults(t *testing.T) {
 	}
 	if loaded.SyncSets[0].AnonymizeToDiscord {
 		t.Fatal("expected loaded AnonymizeToDiscord to be false")
-	}
-}
-
-func TestSaveDiscriminatorSetting(t *testing.T) {
-	ctx := context.Background()
-	db, err := store.Open(ctx, filepath.Join(t.TempDir(), "sync.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	cfg, err := LoadRaw(ctx, db.DB())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.ShowDiscriminator {
-		t.Fatal("discriminator must default to hidden")
-	}
-	valid := validConfig()
-	cfg = &valid
-	for _, show := range []bool{true, false} {
-		cfg.ShowDiscriminator = show
-		if err := Save(ctx, db.DB(), cfg); err != nil {
-			t.Fatal(err)
-		}
-		cfg, err = LoadRaw(ctx, db.DB())
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.ShowDiscriminator != show {
-			t.Fatalf("round-trip show=%t, want %t", cfg.ShowDiscriminator, show)
-		}
 	}
 }
 

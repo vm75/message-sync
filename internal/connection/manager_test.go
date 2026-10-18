@@ -12,6 +12,7 @@ import (
 	"github.com/vm75/message-sync/internal/recovery"
 	"github.com/vm75/message-sync/internal/router"
 	"github.com/vm75/message-sync/internal/store"
+	"github.com/vm75/message-sync/internal/testutil"
 	"github.com/vm75/message-sync/internal/transport"
 )
 
@@ -292,13 +293,13 @@ func TestManagerDynamicRecoveryRegistration(t *testing.T) {
 			"wa-1": {Transport: config.TransportWhatsApp, ConnectionID: "conn-wa-1", RemoteID: "111@g.us"},
 		},
 		SyncSets: []config.SyncSet{{ID: "mesh", Endpoints: []string{"wa-1"}}},
-		Identity: config.Identity{UsernameMode: config.UsernameModeHash},
 	}
 
 	registry, err := router.NewAdapterRegistry(cfg, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	testutil.SeedRouting(t, syncStore.DB(), cfg)
 	mesh, err := router.New(cfg, syncStore, registry)
 	if err != nil {
 		t.Fatal(err)

@@ -20,19 +20,15 @@ type Normalizer struct {
 	endpointSettings map[string]config.SyncSetSettings
 	endpoints        map[string]transport.EndpointID
 	hasher           *identity.Hasher
-	usernameMode     config.UsernameMode
 }
 
 type MediaDownloader func(context.Context, whatsmeow.DownloadableMessage) ([]byte, error)
 type VoteDecryptor func(context.Context, *events.Message) (*waE2E.PollVoteMessage, error)
 type ContactGetter func(types.JID) types.ContactInfo
 
-func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernameMode config.UsernameMode, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
+func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, policies ...map[string]config.SyncSetSettings) (*Normalizer, error) {
 	if hasher == nil {
 		return nil, errors.New("identity hasher is required")
-	}
-	if !usernameMode.IsValid() {
-		return nil, errors.New("username mode must be push_name or hash")
 	}
 
 	endpoints := make(map[string]transport.EndpointID, len(groupJIDs))
@@ -47,7 +43,7 @@ func NewNormalizer(groupJIDs map[string]string, hasher *identity.Hasher, usernam
 		}
 		endpoints[key] = transport.EndpointID(alias)
 	}
-	return &Normalizer{endpoints: endpoints, hasher: hasher, endpointSettings: normalizerPolicies(policies), usernameMode: usernameMode}, nil
+	return &Normalizer{endpoints: endpoints, hasher: hasher, endpointSettings: normalizerPolicies(policies)}, nil
 }
 
 func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, mediaMaxBytes uint64, downloader MediaDownloader, decryptor VoteDecryptor, contactGetter ContactGetter, resolver JIDResolver) (transport.Incoming, bool) {
@@ -64,9 +60,9 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		mediaMaxBytes = uint64(policy.Media.MaxSizeMB) * 1024 * 1024
 	}
 	displayName := ""
-	if n.mode(endpoint) == config.UsernameModePushName {
-		displayName = strings.TrimSpace(evt.Info.PushName)
-	}
+
+	displayName = strings.TrimSpace(evt.Info.PushName)
+
 	kind, text, downloadable, fileLength := normalizedPayload(evt.Message)
 	if kind == "other" && evt.RawMessage != nil {
 		if k, t, d, l := normalizedPayload(evt.RawMessage); k != "other" {
@@ -106,13 +102,14 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 	var pollSelectableCount int
 	var pollOptionHashes []string
 	var extractedMentions []transport.Mention
+	var quotedMentions []transport.Mention
 
 	contextInfo := getContextInfo(evt.Message)
 	if contextInfo == nil && evt.RawMessage != nil {
 		contextInfo = getContextInfo(evt.RawMessage)
 	}
 	if contextInfo != nil && len(contextInfo.GetMentionedJID()) > 0 {
-		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter, resolver)
+		extractedMentions = extractMentions(contextInfo.GetMentionedJID(), contactGetter, resolver, n.hasher)
 	}
 
 	if kind == "poll" {
@@ -201,7 +198,11 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 			if qm := contextInfo.GetQuotedMessage(); qm != nil {
 				_, qText, _, _ := normalizedPayload(qm)
 				quotedText = qText
-				for _, m := range extractedMentions {
+				quotedMentions = append(quotedMentions, extractedMentions...)
+				if quoteInfo := getContextInfo(qm); quoteInfo != nil {
+					quotedMentions = append(quotedMentions, extractMentions(quoteInfo.GetMentionedJID(), contactGetter, resolver, n.hasher)...)
+				}
+				for _, m := range quotedMentions {
 					if rawJID, err := types.ParseJID(m.RemoteID); err == nil && !rawJID.IsEmpty() {
 						quotedText = strings.ReplaceAll(quotedText, "@"+rawJID.User, "@"+m.RemoteID)
 					}
@@ -222,9 +223,10 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		Endpoint: endpoint,
 		RemoteID: string(evt.Info.ID),
 		Sender: transport.Sender{
-			DisplayName: displayName,
-			PhoneNumber: phone,
-			OpaqueID:    n.hasher.UserID(canonical.String()),
+			DisplayName:         displayName,
+			PhoneNumber:         phone,
+			OpaqueID:            n.hasher.UserID(canonical.String()),
+			IdentityUnavailable: !isLIDJID(canonical),
 		},
 		FromSelf:            evt.Info.IsFromMe,
 		Kind:                kind,
@@ -232,6 +234,7 @@ func (n *Normalizer) NormalizeMessage(evt *events.Message, mediaEnabled bool, me
 		Mentions:            extractedMentions,
 		ReplyTo:             replyTo,
 		QuotedText:          quotedText,
+		QuotedMentions:      quotedMentions,
 		Timestamp:           evt.Info.Timestamp,
 		MediaLoader:         loader,
 		PollOptions:         pollOptions,
@@ -296,7 +299,7 @@ func whatsappEditTargetID(evt *events.Message) string {
 	return string(evt.Info.ID)
 }
 
-func extractMentions(mentions []string, contactGetter ContactGetter, resolver JIDResolver) []transport.Mention {
+func extractMentions(mentions []string, contactGetter ContactGetter, resolver JIDResolver, hasher *identity.Hasher) []transport.Mention {
 	if len(mentions) == 0 {
 		return nil
 	}
@@ -328,7 +331,13 @@ func extractMentions(mentions []string, contactGetter ContactGetter, resolver JI
 		if name == "" {
 			name = nonAD.User
 		}
+		actor := ""
+		canonical, _ := CanonicalSenderIdentity(context.Background(), nonAD, types.EmptyJID, resolver)
+		if hasher != nil && isLIDJID(canonical) {
+			actor = hasher.UserID(canonical.String())
+		}
 		result = append(result, transport.Mention{
+			ActorID:  actor,
 			RemoteID: nonAD.String(),
 			Name:     name,
 		})
@@ -458,10 +467,4 @@ func normalizerPolicies(policies []map[string]config.SyncSetSettings) map[string
 		return policies[0]
 	}
 	return nil
-}
-func (n *Normalizer) mode(endpoint transport.EndpointID) config.UsernameMode {
-	if policy, ok := n.endpointSettings[string(endpoint)]; ok {
-		return policy.UsernameMode
-	}
-	return n.usernameMode
 }

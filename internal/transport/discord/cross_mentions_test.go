@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -71,14 +70,14 @@ func TestDiscordCrossMentionsVerifyEachDestination(t *testing.T) {
 		{name: "private thread member", member: true, view: true, private: true, threadMember: true, observedAt: "addressed", native: true},
 		{name: "private thread outsider", member: true, view: true, private: true, observedAt: "addressed"},
 		{name: "anonymized route", member: true, view: true, anonymized: true, observedAt: "addressed", native: true},
-		{name: "pseudonym on anonymized route", member: true, view: true, anonymized: true, label: identity.Pseudonym(actorID), observedAt: "addressed", native: true},
+		{name: "pseudonym on anonymized route", member: true, view: true, anonymized: true, label: "Amber Badger", observedAt: "addressed", native: true},
 		{name: "departed member on anonymized route", view: true, anonymized: true, observedAt: "addressed"},
 		{name: "revoked access on anonymized route", member: true, anonymized: true, observedAt: "addressed"},
 		{name: "unobserved user", member: true, view: true},
 		{name: "recovered member", member: true, view: true, recovered: true, native: true},
 		{name: "recovered thread member", member: true, view: true, recovered: true, historyThread: true, native: true},
 		{name: "cold lookup by HMAC", member: true, view: true, roster: true, native: true},
-		{name: "cold lookup on anonymized route", member: true, view: true, roster: true, anonymized: true, label: identity.Pseudonym(actorID), native: true},
+		{name: "cold lookup on anonymized route", member: true, view: true, roster: true, anonymized: true, label: "Amber Badger", native: true},
 		{name: "paginated cold lookup", member: true, view: true, roster: true, rosterPages: true, native: true},
 		{name: "roster permission unavailable", member: true, view: true, roster: true, rosterDenied: true},
 		{name: "nonadvancing roster", member: true, view: true, rosterPages: true, rosterStalled: true},
@@ -145,7 +144,7 @@ func TestDiscordCrossMentionsVerifyEachDestination(t *testing.T) {
 				adapter.rememberCrossMentionParticipant(tc.observedAt, actorID, "9001")
 			}
 			if tc.recovered {
-				adapter.normalizer, err = NewNormalizer(map[string]string{"discord": testChannelID}, hasher, config.UsernameModePushName)
+				adapter.normalizer, err = NewNormalizer(map[string]string{"discord": testChannelID}, hasher)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -165,21 +164,17 @@ func TestDiscordCrossMentionsVerifyEachDestination(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			refEndpoint := transport.EndpointID("addressed")
-			if tc.name == "addressed group" || tc.recovered {
-				refEndpoint = "discord"
-			}
 			label := tc.label
 			if label == "" {
-				label = "Alice"
+				label = "Amber Badger"
 			}
-			token := "@{" + string(refEndpoint) + "/" + label + "}"
+			token := "@{" + label + "}"
 			refActor := actorID
 			if tc.foreignActor {
 				refActor = hasher.UserID("987654321@lid")
 			}
 			outgoing := transport.Outgoing{Endpoint: "discord", Kind: "text", SourceText: "Hi " + token + ", " + token,
-				References: []transport.CrossReference{{Token: token, Endpoint: refEndpoint, ActorID: refActor, Name: "Alice"}}, ReferenceAnonymized: tc.anonymized}
+				References: []transport.CrossReference{{Token: token, ActorID: refActor, Name: "Alice"}}, ReferenceAnonymized: tc.anonymized}
 			if tc.private {
 				outgoing.ChildScope = &transport.ChildScope{RemoteID: "thread"}
 			}
@@ -195,75 +190,6 @@ func TestDiscordCrossMentionsVerifyEachDestination(t *testing.T) {
 			}
 			if got.Content != want || !reflect.DeepEqual(append([]string(nil), got.AllowedUserIDs...), allowed) {
 				t.Fatalf("webhook = %+v, want %q with allowed users %v", got, want, allowed)
-			}
-		})
-	}
-}
-
-func TestResolveDiscordParticipantNameAfterRestart(t *testing.T) {
-	hasher, err := identity.New([]byte("01234567890123456789012345678901"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := &discordgo.Member{Nick: "vm", User: &discordgo.User{ID: "111", Username: "vm", GlobalName: "Victor"}}
-	second := &discordgo.Member{User: &discordgo.User{ID: "222", Username: "vm"}}
-	actor := hasher.UserID("discord:111")
-	otherActor := hasher.UserID("discord:222")
-	for _, tc := range []struct {
-		name         string
-		label        string
-		members      []*discordgo.Member
-		actors       []string
-		denied       bool
-		searchDenied bool
-		want         bool
-	}{
-		{name: "username alias", label: "vm", members: []*discordgo.Member{first}, actors: []string{actor}, want: true},
-		{name: "display name", label: "Victor", members: []*discordgo.Member{first}, actors: []string{actor}, want: true},
-		{name: "case normalized", label: " VM ", members: []*discordgo.Member{first}, actors: []string{actor}, want: true},
-		{name: "ambiguous name", label: "vm", members: []*discordgo.Member{first, second}, actors: []string{actor, otherActor}},
-		{name: "unregistered identity", label: "vm", members: []*discordgo.Member{first}, actors: []string{otherActor}},
-		{name: "source access revoked", label: "vm", members: []*discordgo.Member{first}, actors: []string{actor}, denied: true},
-		{name: "search unavailable", label: "vm", actors: []string{actor}, searchDenied: true},
-		{name: "unknown name", label: "Missing", members: []*discordgo.Member{first}, actors: []string{actor}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			session, err := discordgo.New("Bot test-token")
-			if err != nil {
-				t.Fatal(err)
-			}
-			session.Client = &http.Client{Transport: mentionRoundTripper(func(req *http.Request) (*http.Response, error) {
-				status := http.StatusOK
-				var value any
-				switch {
-				case req.URL.Path == "/api/v9/channels/"+testChannelID:
-					channel := &discordgo.Channel{ID: testChannelID, GuildID: "guild"}
-					if tc.denied {
-						channel.PermissionOverwrites = []*discordgo.PermissionOverwrite{{ID: "111", Type: discordgo.PermissionOverwriteTypeMember, Deny: discordgo.PermissionViewChannel}}
-					}
-					value = channel
-				case req.URL.Path == "/api/v9/guilds/guild/members/search":
-					value = tc.members
-					if tc.searchDenied {
-						status = http.StatusForbidden
-					}
-				case strings.HasPrefix(req.URL.Path, "/api/v9/guilds/guild/members/"):
-					value = &discordgo.Member{User: &discordgo.User{ID: strings.TrimPrefix(req.URL.Path, "/api/v9/guilds/guild/members/")}}
-				case req.URL.Path == "/api/v9/guilds/guild":
-					value = &discordgo.Guild{ID: "guild", Roles: []*discordgo.Role{{ID: "guild", Permissions: discordgo.PermissionViewChannel}}}
-				default:
-					t.Fatalf("unexpected provider operation: %s", req.URL.Path)
-				}
-				body, err := json.Marshal(value)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(body)))}, nil
-			})}
-			adapter := &Adapter{session: session, hasher: hasher, targets: map[transport.EndpointID]string{"dg1": testChannelID}}
-			got, found := adapter.ResolveParticipant(context.Background(), "dg1", tc.label, tc.actors)
-			if found != tc.want || tc.want && got != actor || !tc.want && got != "" {
-				t.Fatalf("resolved identity = %q, found=%t; want found=%t", got, found, tc.want)
 			}
 		})
 	}

@@ -12,7 +12,6 @@ import (
 
 	telegrambot "github.com/go-telegram/bot"
 	"github.com/go-telegram/bot/models"
-	"github.com/vm75/message-sync/internal/config"
 	"github.com/vm75/message-sync/internal/identity"
 	"github.com/vm75/message-sync/internal/transport"
 )
@@ -171,7 +170,7 @@ func newOutboundTestAdapter(t *testing.T, api *fakeTelegramAPI) *Adapter {
 	if err != nil {
 		t.Fatal(err)
 	}
-	normalizer, err := NewNormalizer(map[string]string{"tg": "-1001234567890"}, hasher, config.UsernameModePushName)
+	normalizer, err := NewNormalizer(map[string]string{"tg": "-1001234567890"}, hasher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,8 +670,8 @@ func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 		anonymized bool
 		want       string
 	}{
-		{anonymized: true, want: "other/Sender: Hi @{g1/P1}"},
-		{anonymized: false, want: "other/Sender: Hi @{g1/P1}"},
+		{anonymized: true, want: "other/Sender: Hi @{Amber Badger}"},
+		{anonymized: false, want: "other/Sender: Hi @{Amber Badger}"},
 	} {
 		t.Run(tc.want, func(t *testing.T) {
 			api := &fakeTelegramAPI{}
@@ -680,8 +679,8 @@ func TestTelegramReferencesRenderWithoutNativeMembership(t *testing.T) {
 			_, err := adapter.Send(context.Background(), transport.Outgoing{
 				Endpoint: "tg", OriginEndpoint: "other", Kind: "text",
 				Sender:              transport.Sender{DisplayName: "Sender"},
-				SourceText:          "Hi @{g1/P1}",
-				References:          []transport.CrossReference{{Token: "@{g1/P1}", Endpoint: "g1", ActorID: "u_abcdefghij", Handle: "P1", Name: "Alice", Pseudonym: "Rust Ocean Q7M5K"}},
+				SourceText:          "Hi @{Amber Badger}",
+				References:          []transport.CrossReference{{Token: "@{Amber Badger}", ActorID: "u_abcdefghij", Name: "Alice", Alias: "Amber Badger"}},
 				ReferenceAnonymized: tc.anonymized,
 			})
 			if err != nil {
