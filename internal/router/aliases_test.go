@@ -109,12 +109,27 @@ func TestUnavailableWhatsAppIdentityConsumesNoAlias(t *testing.T) {
 func TestBridgeEchoDoesNotAllocateOrRequireAnotherAuthorIdentity(t *testing.T) {
 	r, db, fake := newTestRouter(t)
 	ctx := context.Background()
+	persisted := make(chan struct{}, 2)
+	r.afterPersist = func(transport.EndpointID) error {
+		persisted <- struct{}{}
+		return nil
+	}
 	original := testIncoming("c1g1", "original")
 	if err := r.Handle(ctx, original); err != nil {
 		t.Fatal(err)
 	}
-	waitForSent(t, fake, 2)
-	r.Close() // ensure provider acceptance and copy persistence precede this known echo
+	// Fake sends precede durable copy mappings. Closing the router at that
+	// boundary can cancel persistence, leaving this event without a known copy.
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for range 2 {
+		select {
+		case <-persisted:
+		case <-deadline.C:
+			t.Fatal("destination copy mappings were not persisted")
+		}
+	}
+	r.Close()
 	fake.mu.Lock()
 	copy := fake.sent[0].ref
 	fake.mu.Unlock()

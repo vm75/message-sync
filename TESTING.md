@@ -96,8 +96,10 @@ bindings invalidate stale endpoint state. Upgrade tests strip retired display
 settings while preserving all unrelated policies.
 
 Router tests check source-set isolation, case-insensitive assigned-alias lookup,
-exact literal fallback, escaping and reference count bounds. Only accepted group
-authors allocate; structured mentions and private commands reuse assignments.
+exact literal fallback, escaping and reference count bounds. Known-echo tests
+wait for durable destination copy mappings before stopping delivery lanes; fake
+send completion alone does not prove persistence. Only accepted group authors
+allocate; structured mentions and private commands reuse assignments.
 Unknown mentions stay safe without inventing aliases. Quote-only mention entities
 retain metadata through ingress; native poll question/option entities render
 restart-safe alias labels before result presentation is retained. Allocation and identity
